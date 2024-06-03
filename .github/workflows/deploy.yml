@@ -30,6 +30,11 @@ jobs:
           cd docs
           make html
 
+      - name: List build output
+        run: |
+          set -e
+          ls -la docs/_build/html
+          
       - name: Deploy to GitHub Pages
         run: |
           set -e
