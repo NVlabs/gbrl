@@ -39,7 +39,9 @@ jobs:
         run: |
           set -e
           echo "Current path before cd ..: $(pwd)"
+          ls -la
           cd ..
+          ls -la
           echo "Current path after cd ..: $(pwd)"
           mkdir gh-pages
           cp -r docs/_build/html/* gh-pages/
