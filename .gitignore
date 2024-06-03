@@ -1,0 +1,14 @@
+scripts/
+build/
+builds/
+*egg*/
+*.png
+*.tsv
+*.pyc
+*.so
+*.db
+*.tfevents
+*.json
+*.gbrl_model
+clean_repo.sh
+docs/_build/

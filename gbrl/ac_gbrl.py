@@ -106,8 +106,9 @@ class ActorCritic(GradientBoostingTrees):
         return self._model.predict(observations)
     
     def get_num_trees(self) -> Union[int, Tuple[int, int]]:
-        """ Returns number of trees in the ensemble.
-            If separate actor and critic return number of trees per ensemble.
+        """ 
+        Returns number of trees in the ensemble.
+        If separate actor and critic return number of trees per ensemble.
         Returns:
             Union[int, Tuple[int, int]]
         """

@@ -109,7 +109,8 @@ class GradientBoostingTrees:
         return self._model.get_total_iterations()
 
     def get_schedule_learning_rates(self) -> Tuple[float, float]:
-        """Gets learning rate values for optimizers according to schedule of ensemble.
+        """
+        Gets learning rate values for optimizers according to schedule of ensemble.
            Constant schedule - no change in values.
            Linear schedule - learning rate value accordign to number of trees in the ensemble.
         Returns:
