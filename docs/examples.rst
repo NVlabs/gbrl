@@ -72,7 +72,7 @@ Setting up GBRL model
     gbt_model.set_bias_from_targets(y)
 
 Incremental learning - training for 10 Epochs
-~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 .. code-block:: python
 
     # training for 10 epochs
@@ -90,8 +90,11 @@ Incremental learning - training for 10 Epochs
 
 GBT work with per-sample gradients but pytorch typically calculates the expected loss. GBRL internally multiplies the gradients with the number of samples when calling the step function. Therefore, when working with pytorch losses and multi-output targets one should take this into consideration.  
 For example:
-1. When using a summation reduction
+
+When using a summation reduction
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 .. code-block:: python
+
     gbt_model = GradientBoostingTrees(
                         output_dim=out_dim,
                         tree_struct=tree_struct,
@@ -100,19 +103,21 @@ For example:
                         verbose=0,
                         device=device)
     gbt_model.set_bias_from_targets(y)
-    # continuing training 10  epochs using a sum reduction
+    # continuing training 10 epochs using a sum reduction
     n_epochs = 10
     for _ in range(n_epochs):
         y_pred = gbt_model(X, requires_grad=True)
         # we divide the loss by the number of samples to compensate for GBRL's built-in multiplication by the same value   
-        loss = 0.5*mse_loss(y_pred, y, reduction='sum') / len(y_pred) 
+        loss = 0.5 * mse_loss(y_pred, y, reduction='sum') / len(y_pred) 
         loss.backward()
         # perform a boosting step
         gbt_model.step(X)
         print(f"Boosting iteration: {gbt_model.get_iteration()} RMSE loss: {loss.sqrt()}")
 
-2. When working with multi-dimensional outputs
+When working with multi-dimensional outputs
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 .. code-block:: python
+
     y_multi = th.concat([y, y], dim=1)
     out_dim = y_multi.shape[1]
     gbt_model = GradientBoostingTrees(
@@ -123,13 +128,13 @@ For example:
                         verbose=0,
                         device=device)
     gbt_model.set_bias_from_targets(y_multi)
-    # continuing training 10  epochs using a sum reduction
+    # continuing training 10 epochs using a sum reduction
     n_epochs = 10
     for _ in range(n_epochs):
         y_pred = gbt_model(X, requires_grad=True)
         # we multiply the loss by the output dimension to compensate for pytorch's mean reduction for MSE loss that averages across all dimensions.
         # this step is necessary to get the correct loss gradient - however the loss value itself is correct
-        loss = 0.5*mse_loss(y_pred, y_multi) * out_dim
+        loss = 0.5 * mse_loss(y_pred, y_multi) * out_dim
         loss.backward()
         # perform a boosting step
         gbt_model.step(X)
@@ -139,6 +144,7 @@ Saving and Loading a GBRL Model
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Saving and loading in GBRL is straightforward.
 .. code-block:: python
+
     # Call the save_model method of a GBRL class
     # GBRL will automatically save the file with the .gbrl_model ending
     # The file will be saved in the current working directory
@@ -150,27 +156,26 @@ Saving and loading in GBRL is straightforward.
     y_save = gbt_model(X)
     y_load = loaded_gbt_model(X)
 
-
 Using Manually Calculated Gradients
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Alternatively GBRL can use manually calculated gradients.  Calling the `predict` method instead of the `__call__` method, returns a numpy array instead of a PyTorch tensor. Autograd libraries or manual calculations can be used to calculate gradients.  
+Alternatively, GBRL can use manually calculated gradients. Calling the `predict` method instead of the `__call__` method, returns a numpy array instead of a PyTorch tensor. Autograd libraries or manual calculations can be used to calculate gradients.  
 Fitting manually calculated gradients is done using the `_model.step` method that receives numpy arrays. 
 .. code-block:: python
+
     # initializing model parameters
     tree_struct = {'max_depth': 4, 
                 'n_bins': 256,
                 'min_data_in_leaf': 0,
                 'par_th': 2,
-                'grow_policy': 'oblivious'
-            }
+                'grow_policy': 'oblivious'}
 
     optimizer = { 'algo': 'SGD',
-                'lr': 1.0,
-                }
+                'lr': 1.0}
+
     gbrl_params = {
                 "split_score_func": "Cosine",
-                "generator_type": "Quantile"
-                    }
+                "generator_type": "Quantile"}
+
     # setting up model
     gbt_model = GradientBoostingTrees(
                         output_dim=1,
@@ -181,26 +186,26 @@ Fitting manually calculated gradients is done using the `_model.step` method tha
                         device=device)
     # works with numpy arrays as well as PyTorch tensors
     gbt_model.set_bias_from_targets(y_numpy)
-
     # training for 10 epochs
     n_epochs = 10
     for _ in range(n_epochs):
         # y_pred is a numpy array
         y_pred = gbt_model.predict(X_numpy)
-        loss = np.sqrt(0.5*((y_pred - y_numpy)**2).mean()) 
+        loss = np.sqrt(0.5 * ((y_pred - y_numpy)**2).mean())
         grads = y_pred - y_numpy
         # perform a boosting step
         gbt_model._model.step(X_numpy, grads)
         print(f"Boosting iteration: {gbt_model.get_iteration()} RMSE loss: {loss}")
 
 Multiple iterations at once (standard supervised learning)
--------------------
+----------------------------------------------------------
 GBRL supports training multiple boosting iterations with targets similar to other GBT libraries. This is done using the `fit` method.  
 .. important::
 
     Only the RMSE loss function is supported for the `fit` method
 
 .. code-block:: python
+
     gbt_model = GradientBoostingTrees(
                         output_dim=1,
                         tree_struct=tree_struct,
@@ -212,10 +217,12 @@ GBRL supports training multiple boosting iterations with targets similar to othe
 
 RL using GBRL
 -------------
-Now that we have seen how GBRL is trained using incremental learning and PyTorch we can use it within an RL training loop
+Now that we have seen how GBRL is trained using incremental learning and PyTorch, we can use it within an RL training loop.
 
 Let's start by training a simple Reinforce algorithm.
+
 .. code-block:: python
+
     def calculate_returns(rewards, gamma):
         returns = []
         running_g = 0.0
@@ -229,8 +236,7 @@ Let's start by training a simple Reinforce algorithm.
     num_episodes = 1000
     gamma = 0.99
     optimizer = { 'algo': 'SGD',
-                'lr': 0.05,
-                }
+                'lr': 0.05}
 
     bias = np.zeros(env.action_space.n, dtype=np.single)
     agent = ParametricActor(
@@ -265,7 +271,6 @@ Let's start by training a simple Reinforce algorithm.
         
         rollout_buffer['returns'].extend(calculate_returns(rollout_buffer['rewards'], gamma))
 
-
         if episode % update_every == 0 and episode > 0:
             returns = th.tensor(rollout_buffer['returns'])
             actions = th.cat(rollout_buffer['actions'])
@@ -276,11 +281,10 @@ Let's start by training a simple Reinforce algorithm.
             dist = Categorical(logits=action_logits)
             log_probs = dist.log_prob(actions)
             # calculate reinforce loss with subtracted baseline
-            loss = -(log_probs*(returns - returns.mean())).mean()
+            loss = -(log_probs * (returns - returns.mean())).mean()
             loss.backward()
             grads = agent.step(observations)
             rollout_buffer = {'actions': [], 'obs': [], 'returns': []}
 
         if episode % 100 == 0:
             print(f"Episode {episode} - boosting iteration: {agent.get_iteration()} episodic return: {np.mean(wrapped_env.return_queue)}")
-            
