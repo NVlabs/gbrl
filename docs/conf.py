@@ -11,6 +11,9 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__))) 
 
+with open('gbrl/__init__.py') as file_handler:
+    __version__ = __version__ = file_handler.readlines()[0].split('"')[1]
+
 from unittest.mock import MagicMock
 class Mock(MagicMock):
     __all__ = []
@@ -26,7 +29,8 @@ sys.modules.update((mod_name, Mock()) for mod_name in MOCK_MODULES)
 project = 'GBRL'
 copyright = '2024, NVIDIA Corporation'
 author = 'Benjamin Fuhrer, Chen Tessler, Gal Dalal'
-release = '1.0.0'
+release = __version__
+version = "master (" + __version__ + " )"
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
