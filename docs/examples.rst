@@ -30,11 +30,15 @@ Basic imports and preprocessing
 
 Pre-process data
 ~~~~~~~~~~~~~~~~
+.. important::
+    
+    GBRL works with 2D arrays/Tensors. Hence, we need to reshape 1D arrays as in the example below. 
 
 .. code-block:: python
 
     # incremental learning dataset
     X_numpy, y_numpy = datasets.load_diabetes(return_X_y=True, as_frame=False, scaled=False)
+    # Reshape target as GBRL works with 2D arrays
     out_dim = 1 if len(y_numpy.shape) == 1 else y_numpy.shape[1]
     if out_dim == 1:
         y_numpy = y_numpy[:, np.newaxis]
@@ -42,7 +46,7 @@ Pre-process data
     X, y = th.tensor(X_numpy, dtype=th.float32), th.tensor(y_numpy, dtype=th.float32)
 
 Setting up a GBRL model
-~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
@@ -224,6 +228,9 @@ RL using GBRL
 -------------
 Now that we have seen how GBRL is trained using incremental learning and PyTorch, we can use it within an RL training loop.
 
+.. important::
+    When collecting a rollout, often the observations are flattened. As GBRL works with 2D arrays, GBRL automatically assumes that the flattened inputs are a single sample and reshapes accordingly. In case of a flattened array that represents multiple samples and a single input dimension, the user must reshape the array manually.  
+
 Let's start by training a simple Reinforce algorithm.
 
 .. code-block:: python
@@ -293,3 +300,4 @@ Let's start by training a simple Reinforce algorithm.
 
         if episode % 100 == 0:
             print(f"Episode {episode} - boosting iteration: {agent.get_iteration()} episodic return: {np.mean(wrapped_env.return_queue)}")
+

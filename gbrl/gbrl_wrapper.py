@@ -58,16 +58,16 @@ def preprocess_features(arr: Union[np.array, th.Tensor]) -> Tuple[np.array, np.a
     num_arr, cat_arr = to_numpy(arr)
     if num_arr is not None and len(num_arr.shape) == 1:
         if input_dim == 1:
-            num_arr = num_arr[:, np.newaxis]
-        else:
             num_arr = num_arr[np.newaxis, :]
+        else:
+            num_arr = num_arr[:, np.newaxis]
     if num_arr is not None and len(num_arr.shape) > 2:
         num_arr = num_arr.squeeze()
     if cat_arr is not None and len(cat_arr.shape) == 1:
         if input_dim == 1:
-            cat_arr = cat_arr[:, np.newaxis]
-        else:
             cat_arr = cat_arr[np.newaxis, :]
+        else:
+            cat_arr = cat_arr[:, np.newaxis]
     if cat_arr is not None and len(cat_arr.shape) > 2:
         cat_arr = cat_arr.squeeze()
     return num_arr, cat_arr
