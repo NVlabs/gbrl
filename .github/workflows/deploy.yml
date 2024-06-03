@@ -47,7 +47,7 @@ jobs:
           git add .
           git commit -m "Deploy documentation to GitHub Pages"
           git branch -M gh-pages
-          git remote add origin https://github.com/USERNAME/REPOSITORY.git
+          git remote add origin https://github.com/NVlabs/gbrl.git
           git push --force origin gh-pages
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
