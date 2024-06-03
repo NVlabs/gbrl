@@ -22,7 +22,7 @@ Install GBRL via pip:
    :caption: User Guide:
 
    quickstart
-   examples/index
+   examples
 
 .. toctree::
    :maxdepth: 2

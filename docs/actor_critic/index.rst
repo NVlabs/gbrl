@@ -1,4 +1,4 @@
-Actor Critic Methods
+Actor Critic Module
 ====================
 
 This module handles Actor-Critic methods within the GBRL library. It provides various classes and functions to implement and train GBT-based Actor-Critic algorithm.
