@@ -1,0 +1,4 @@
+include gbrl/src/cuda/*.cu
+include gbrl/src/cuda/*.h
+include gbrl/src/cpp/*.cpp
+include gbrl/src/cpp/*.h
