@@ -24,8 +24,8 @@ class Mock(MagicMock):
 
 sys.modules['gbrl.gbrl_cpp'] = Mock()
 # List of modules to mock
-MOCK_MODULES = ['numpy', 'torch', 'gymnasium', 'sklearn']
-sys.modules.update((mod_name, Mock()) for mod_name in MOCK_MODULES)
+# MOCK_MODULES = ['numpy', 'torch', 'gymnasium', 'sklearn']
+# sys.modules.update((mod_name, Mock()) for mod_name in MOCK_MODULES)
 project = 'GBRL'
 copyright = '2024, NVIDIA Corporation'
 author = 'Benjamin Fuhrer, Chen Tessler, Gal Dalal'

@@ -23,6 +23,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install sphinx
           pip install sphinx-rtd-theme
+          pip install numpy
+          pip install torch
 
       - name: Build documentation
         run: |

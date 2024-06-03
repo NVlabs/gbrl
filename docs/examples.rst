@@ -41,7 +41,7 @@ Pre-process data
 
     X, y = th.tensor(X_numpy, dtype=th.float32), th.tensor(y_numpy, dtype=th.float32)
 
-Setting up GBRL model
+Setting up a GBRL model
 ~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
@@ -74,8 +74,8 @@ Setting up GBRL model
                         device=device)
     gbt_model.set_bias_from_targets(y)
 
-Incremental learning - training for 10 Epochs
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Incremental learning
+~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
@@ -93,10 +93,7 @@ Incremental learning - training for 10 Epochs
         print(f"Boosting iteration: {gbt_model.get_iteration()} RMSE loss: {loss.sqrt()}")
 
 GBT work with per-sample gradients but pytorch typically calculates the expected loss. GBRL internally multiplies the gradients with the number of samples when calling the step function. Therefore, when working with pytorch losses and multi-output targets one should take this into consideration.  
-For example:
-
-When using a summation reduction
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+For example: when using a summation reduction
 
 .. code-block:: python
 
@@ -119,8 +116,7 @@ When using a summation reduction
         gbt_model.step(X)
         print(f"Boosting iteration: {gbt_model.get_iteration()} RMSE loss: {loss.sqrt()}")
 
-When working with multi-dimensional outputs
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+or when working with multi-dimensional outputs
 
 .. code-block:: python
 
@@ -163,7 +159,7 @@ Saving and loading in GBRL is straightforward.
     y_save = gbt_model(X)
     y_load = loaded_gbt_model(X)
 
-Using Manually Calculated Gradients
+Manually Calculated Gradients
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Alternatively, GBRL can use manually calculated gradients. Calling the `predict` method instead of the `__call__` method, returns a numpy array instead of a PyTorch tensor. Autograd libraries or manual calculations can be used to calculate gradients.  
 Fitting manually calculated gradients is done using the `_model.step` method that receives numpy arrays. 
@@ -205,8 +201,8 @@ Fitting manually calculated gradients is done using the `_model.step` method tha
         gbt_model._model.step(X_numpy, grads)
         print(f"Boosting iteration: {gbt_model.get_iteration()} RMSE loss: {loss}")
 
-Multiple iterations at once (standard supervised learning)
-----------------------------------------------------------
+Multiple boosting iterations
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 GBRL supports training multiple boosting iterations with targets similar to other GBT libraries. This is done using the `fit` method.  
 
 .. important::
