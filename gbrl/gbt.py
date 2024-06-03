@@ -77,13 +77,33 @@ class GradientBoostingTrees:
             self._model.reset()
 
     def reset_params(self):
+        """Resets param attributes
+        """
         self.params = None
 
-    def set_bias(self, y: Union[np.array, th.Tensor]):
-        if isinstance(y, th.Tensor):
-            arr = y.clone().detach().cpu().numpy()
+    def set_bias(self, bias: Union[np.array, th.Tensor]):
+        """Sets GBRL bias
+
+        Args:
+            y (Union[np.array, th.Tensor]): _description_
+        """
+        if isinstance(bias, th.Tensor):
+            bias = bias.clone().detach().cpu().numpy()
+        # GBRL works with 2D numpy arrays.
+        if len(bias.shape) == 1:
+            bias = bias[:, np.newaxis]
+        self._model.set_bias(bias.astype(np.single))
+    
+    def set_bias_from_targets(self, targets: Union[np.array, th.Tensor]):
+        """Sets bias as mean of targets
+
+        Args:
+            targets (Union[np.array, th.Tensor]): Targets
+        """
+        if isinstance(targets, th.Tensor):
+            arr = targets.clone().detach().cpu().numpy()
         else:
-            arr = y.copy()
+            arr = targets.copy()
         # GBRL works with 2D numpy arrays.
         if len(arr.shape) == 1:
             arr = arr[:, np.newaxis]
@@ -111,8 +131,8 @@ class GradientBoostingTrees:
     def get_schedule_learning_rates(self) -> Tuple[float, float]:
         """
         Gets learning rate values for optimizers according to schedule of ensemble.
-           Constant schedule - no change in values.
-           Linear schedule - learning rate value accordign to number of trees in the ensemble.
+        Constant schedule - no change in values.
+        Linear schedule - learning rate value accordign to number of trees in the ensemble.
         Returns:
             Tuple[float, float]: learning rate schedule per optimizer.
         """
@@ -193,7 +213,15 @@ class GradientBoostingTrees:
         self._model.export(filename, modelname) 
 
     @classmethod
-    def load_model(cls, load_name: str):
+    def load_model(cls, load_name: str) -> "GradientBoostingTrees":
+        """Loads GBRL model from a file
+
+        Args:
+            load_name (str): full path to file name
+
+        Returns:
+            GradientBoostingTrees: _description_
+        """
         instance = cls.__new__(cls)
         instance._model = GBTWrapper.load(load_name)
         instance.optimizer =  instance._model.optimizer
@@ -205,14 +233,34 @@ class GradientBoostingTrees:
         return instance
 
     def set_device(self, device: str):
+        """Sets GBRL device (either cpu or cuda)
+
+        Args:
+            device (str): choices are ['cpu', 'cuda']
+        """
         assert device in ['cpu', 'cuda'], "device must be in ['cpu', 'cuda']"
         self._model.set_device(device)
         self.device = device
 
     def get_device(self) -> Union[str, Tuple[str, str]]:
+        """Returns GBRL device/devices (if multiple GBRL models)
+
+        Returns:
+            Union[str, Tuple[str, str]]: GBRL device per model
+        """
         return self._model.get_device()
 
     def __call__(self, X: np.array, requires_grad: bool = False) -> th.Tensor:
+        """Returns GBRL's output as Tensor. if `requires_grad=True` then stores 
+           differentiable parameters in self.params 
+
+        Args:
+            X (np.array): Input
+            requires_grad (bool, optional). Defaults to False.
+
+        Returns:
+            th.Tensor: _description_
+        """
         y_pred = self.predict(X)
         params = th.tensor(y_pred, requires_grad=requires_grad)
         if requires_grad:
@@ -220,6 +268,12 @@ class GradientBoostingTrees:
         return params
     
     def copy(self) -> "GradientBoostingTrees":
+        """Copy class instance 
+
+        Returns:
+            GradientBoostingTrees: copy of current instance. The actual type will be the type
+            of the subclass that calls this method.
+        """
         return self.__copy__()
     
     def __copy__(self) -> "GradientBoostingTrees":

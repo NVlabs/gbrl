@@ -8,7 +8,18 @@
 
 import sys
 import os 
-sys.path.insert(0, os.path.abspath('../..'))  # Adjust path as needed
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__))) 
+
+from unittest.mock import MagicMock
+class Mock(MagicMock):
+    __all__ = []
+
+    @classmethod
+    def __getattr__(cls, name):
+        return MagicMock()
+
+sys.modules['gbrl.gbrl_cpp'] = Mock()
 
 project = 'GBRL'
 copyright = '2024, NVIDIA Corporation'
@@ -37,5 +48,5 @@ exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
-html_theme = 'alabaster'
+html_theme = 'sphinx_rtd_theme'
 html_static_path = ['_static']

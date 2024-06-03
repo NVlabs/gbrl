@@ -23,6 +23,7 @@ class ActorCritic(GradientBoostingTrees):
                  bias: np.array = None,
                  verbose: int=0,
                  device: str='cpu'):
+        
         """ GBRL model for a shared Actor and Critic ensemble.
 
         Args:
@@ -70,19 +71,24 @@ class ActorCritic(GradientBoostingTrees):
         self._model.set_bias(self.bias)
         
     @classmethod
-    def load_model(cls, load_name: str):
+    def load_model(cls, load_name: str) -> "ActorCritic":
+        """Loads GBRL model from a file
 
+        Args:
+            load_name (str): full path to file name
+
+        Returns:
+            ActorCritic: loaded ActorCriticModel
+        """
         policy_file = load_name + '_policy.gbrl_model'
         value_file = load_name + '_value.gbrl_model'
 
         instance = cls.__new__(cls)
-        print("loading model")
         if os.path.isfile(policy_file) and os.path.isfile(value_file):
             instance._model = SeparateActorCriticWrapper.load(load_name)
             instance.shared_tree_struct = False
             instance.bias = instance._model.policy_model.get_bias() 
         else:
-            print("is shared model")
             instance._model = SharedActorCriticWrapper.load(load_name)
             instance.shared_tree_struct = True 
             instance.bias = instance._model.get_bias()
@@ -106,8 +112,7 @@ class ActorCritic(GradientBoostingTrees):
         return self._model.predict(observations)
     
     def get_num_trees(self) -> Union[int, Tuple[int, int]]:
-        """ 
-        Returns number of trees in the ensemble.
+        """ Returns number of trees in the ensemble.
         If separate actor and critic return number of trees per ensemble.
         Returns:
             Union[int, Tuple[int, int]]
@@ -130,7 +135,8 @@ class ActorCritic(GradientBoostingTrees):
         return self.params
 
     def __call__(self, observations: Union[np.array, th.Tensor], requires_grad: bool = True) -> Tuple[th.Tensor, th.Tensor]:
-        """ Predicts  and returns actor and critic outputs as tensors.
+        """ Predicts  and returns actor and critic outputs as tensors. If `requires_grad=True` then stores 
+           differentiable parameters in self.params 
         Args:
             observations (Union[np.array, th.Tensor])
 
@@ -143,11 +149,21 @@ class ActorCritic(GradientBoostingTrees):
             self.params = params
         return params
     
-    def step(self, observations: Union[np.array, th.Tensor], policy_grad_clip: float = None, value_grad_clip : float = None) -> None:
+    def step(self, observations: Union[np.array, th.Tensor], policy_grad_clip: float = None, value_grad_clip : float = None) -> Tuple[np.array, np.array]:
+        """Performs a boosting step for both actor and critic
+
+        Args:
+            observations (Union[np.array, th.Tensor]):
+            policy_grad_clip (float, optional): . Defaults to None.
+            value_grad_clip (float, optional):. Defaults to None.
+
+        Returns:
+            Tuple[np.array, np.array]: policy and value gradients
+        """
         n_samples = len(observations)
         theta_grad = self.params[0].grad.detach().cpu().numpy() * n_samples
         value_grad = self.params[1].grad.detach().cpu().numpy() * n_samples
-        # print(value_grad)
+
         theta_grad = clip_grad_norm(theta_grad, policy_grad_clip)
         value_grad = clip_grad_norm(value_grad, value_grad_clip)
 
@@ -158,7 +174,17 @@ class ActorCritic(GradientBoostingTrees):
         self._model.step(observations, theta_grad, value_grad)
         return theta_grad, value_grad
     
-    def actor_step(self, observations: Union[np.array, th.Tensor], policy_grad_clip: float = None) -> None:
+    def actor_step(self, observations: Union[np.array, th.Tensor], policy_grad_clip: float = None) -> np.array:
+        """Performs a single boosting step for the actor (should only be used if actor and critic use separate models)
+
+        Args:
+            observations (Union[np.array, th.Tensor]):
+            policy_grad_clip (float, optional): Defaults to None.
+
+        Returns:
+            np.array: policy gradient
+        """
+        assert not self.shared_tree_struct, "Cannot separate boosting steps for actor and critic when using separate tree architectures!"
         n_samples = len(observations)
         theta_grad = self.params[0].grad.detach().cpu().numpy() * n_samples
         theta_grad = clip_grad_norm(theta_grad, policy_grad_clip)
@@ -166,9 +192,19 @@ class ActorCritic(GradientBoostingTrees):
         assert ~np.isinf(theta_grad).any(), "infinity in assigned grads"
 
         self._model.step_policy(observations, theta_grad)
-        return self.params[0].detach().cpu().numpy(), theta_grad
+        return theta_grad
     
-    def critic_step(self, observations: Union[np.array, th.Tensor], value_grad_clip : float = None) -> None:
+    def critic_step(self, observations: Union[np.array, th.Tensor], value_grad_clip : float = None) -> np.array:
+        """Performs a single boosting step for the critic (should only be used if actor and critic use separate models)
+
+        Args:
+            observations (Union[np.array, th.Tensor]):
+            value_grad_clip (float, optional): Defaults to None.
+
+        Returns:
+            np.array: value gradient
+        """
+        assert not self.shared_tree_struct, "Cannot separate boosting steps for actor and critic when using separate tree architectures!"
         n_samples = len(observations)
         value_grad = self.params[1].grad.detach().cpu().numpy() * n_samples
         value_grad = clip_grad_norm(value_grad, value_grad_clip)
@@ -176,7 +212,15 @@ class ActorCritic(GradientBoostingTrees):
         assert ~np.isnan(value_grad).any(), "nan in assigned grads"
         assert ~np.isinf(value_grad).any(), "infinity in assigned grads"
         self._model.step_critic(observations, value_grad)
-        return self.params[1].detach().cpu().numpy(), value_grad
+        return value_grad
+    
+    def copy(self) -> "ActorCritic":
+        """Copy class instance 
+
+        Returns:
+            ActorCritic: copy of current instance
+        """
+        return self.__copy__()
 
     def __copy__(self) -> "ActorCritic":
         value_optimizer = None if self.value_optimizer is None else self.value_optimizer.copy()
@@ -230,7 +274,16 @@ class ParametricActor(GradientBoostingTrees):
         self._model.reset()
         self._model.set_bias(self.bias)
 
-    def step(self, observations: Union[np.array, th.Tensor], policy_grad_clip: float = None) -> None:
+    def step(self, observations: Union[np.array, th.Tensor], policy_grad_clip: float = None) -> np.array:
+        """Performs a single boosting iteration.
+
+        Args:
+            observations (Union[np.array, th.Tensor]):
+            policy_grad_clip (float, optional): . Defaults to None.
+
+        Returns:
+            np.array: gradient w.r.t model outputs.
+        """
         n_samples = len(observations)
         theta_grad = self.params.grad.detach().cpu().numpy() * n_samples
         theta_grad = clip_grad_norm(theta_grad, policy_grad_clip)
@@ -241,9 +294,16 @@ class ParametricActor(GradientBoostingTrees):
         return theta_grad
 
     @classmethod
-    def load_model(cls, load_name: str):
+    def load_model(cls, load_name: str) -> "ParametricActor":
+        """Loads GBRL model from a file
+
+        Args:
+            load_name (str): full path to file name
+
+        Returns:
+            ParametricActor: loaded ActorCriticModel
+        """
         instance = cls.__new__(cls)
-        print("loading model")
         instance._model = GBTWrapper.load(load_name)
         instance.bias = instance._model.get_bias()
         instance.policy_optimizer = instance._model.optimizer
@@ -255,12 +315,12 @@ class ParametricActor(GradientBoostingTrees):
         return GBTWrapper.load(load_name)
     
     def predict(self, observations: Union[np.array, th.Tensor]) -> np.array:
-        """Predict method
+        """Predicts and returns GBRL output as a numpy array.
         Args:
             observations (Union[np.array, th.Tensor])
 
         Returns:
-            np.array: actor predictions.
+            np.array: GBRL outputs - a single parameter per action dimension.
         """
         return self._model.predict(observations)
     
@@ -272,12 +332,13 @@ class ParametricActor(GradientBoostingTrees):
         return self._model.get_num_trees()
      
     def __call__(self, observations: Union[np.array, th.Tensor], requires_grad : bool = False) -> th.Tensor:
-        """ Predicts  and returns actor output as tensor.
+        """ Returns actor output as Tensor. If `requires_grad=True` then stores 
+           differentiable parameters in self.params 
         Args:
             observations (Union[np.array, th.Tensor])
 
         Returns:
-            th.Tensor: actor output
+            th.Tensor: GBRL outputs - a single parameter per action dimension.
         """
         theta = self._model.predict(observations)
         params = th.tensor(theta, requires_grad=requires_grad)
@@ -302,9 +363,10 @@ class GaussianActor(GradientBoostingTrees):
                  bias: np.array = None,
                  verbose: int=0,
                  device: str='cpu'):
-        """ GBRL model for a Actor ensemble used in SAC.
+        """ GBRL model for a Actor ensemble used in algorithms such as: SAC.
         Model outputs mu and log_std of a Gaussian distribution. 
         Actor optimizer can be shared for both parameters or separate. 
+        
         Args:
          tree_struct (Dict): Dictionary containing tree structure information:
                 max_depth (int): maximum tree depth.
@@ -355,7 +417,17 @@ class GaussianActor(GradientBoostingTrees):
         self._model.reset()
         self._model.set_bias(self.bias)
         
-    def step(self, observations: Union[np.array, th.Tensor], mu_grad_clip: float = None, std_grad_clip: float = None) -> None:
+    def step(self, observations: Union[np.array, th.Tensor], mu_grad_clip: float = None, std_grad_clip: float = None) -> Tuple[np.array, np.array]:
+        """Performs a single boosting iteration.
+
+        Args:
+            observations (Union[np.array, th.Tensor])
+            mu_grad_clip (float, optional). Defaults to None.
+            std_grad_clip (float, optional). Defaults to None.
+
+        Returns:
+            Tuple[np.array, np.array]: Gradients w.r.t Gaussian parameters: mu and sigma.
+        """
         n_samples = len(observations)
         mu_grad = self.params[0].grad.detach().cpu().numpy() * n_samples
         mu_grad = clip_grad_norm(mu_grad, mu_grad_clip)
@@ -372,16 +444,39 @@ class GaussianActor(GradientBoostingTrees):
         self._model.step(observations, theta_grad)
         return mu_grad, log_std_grad
         
-    def predict(self, observations: Union[np.array, th.Tensor]) -> np.array:
+    def predict(self, observations: Union[np.array, th.Tensor]) -> Tuple[np.array, np.array]:
+        """Predict the parameters of a Gaussian Distrbution as numpy arrays.
+
+        Args:
+            observations (Union[np.array, th.Tensor]):
+
+        Returns:
+            Tuple[np.array, np.array]: mu and sigma
+        """
         theta = self._model.predict(observations)
         if self.std_optimizer is not None:
             return theta[:, :self.policy_dim], theta[:, self.policy_dim:]
         return theta, np.ones_like(theta) * self.log_std_init
     
     def get_num_trees(self) -> int:
+        """Returns the number of trees in the ensemble
+
+        Returns:
+            int
+        """
         return self._model.get_num_trees()
 
     def __call__(self, observations: Union[np.array, th.Tensor], requires_grad : bool = False) -> th.Tensor:
+        """Returns actor's outputs as tensor. If `requires_grad=True` then stores 
+           differentiable parameters in self.params 
+
+        Args:
+            observations (Union[np.array, th.Tensor]):
+            requires_grad (bool, optional):. Defaults to False.
+
+        Returns:
+            th.Tensor: Gaussian parameters
+        """
         mean_actions, log_std = self.predict(observations)
         params = (th.tensor(mean_actions, requires_grad=requires_grad), th.tensor(log_std, requires_grad=requires_grad if self.std_optimizer is not None else False))
         if requires_grad:
@@ -407,13 +502,15 @@ class ContinuousCritic(GradientBoostingTrees):
                  bias: np.array = None,
                  verbose: int=0,
                  device: str='cpu'):         
-        """ GBRL model for a Continuous Critic ensemble (Q-function) used in GBRL SAC.
+        """ GBRL model for a Continuous Critic ensemble.
+            Usage example Q-function in SAC.
             Model is designed to output parameters of 3 types of Q-functions:
                 - linear Q(theta(s), a) = <w_theta, a> + b_theta, (<> denotes a dot product).
                 - quadratic Q(theta(s), a) = -(<w_theta, a> - b_theta)**2 + c_theta  
                 - tanh Q(theta(s), a) = b_theta*tanh(<w_theta, a>)
             This allows to pass derivatives w.r.t to action a while the Q parameters are a function of a GBT model theta. 
             The target model is approximated as the ensemble without the last <target_update_interval> trees.
+        
         Args:
          tree_struct (Dict): Dictionary containing tree structure information:
                 max_depth (int): maximum tree depth.
@@ -457,7 +554,16 @@ class ContinuousCritic(GradientBoostingTrees):
         self._model.reset()
         self._model.set_bias(self.bias)
         
-    def step(self, observations: Union[np.array, th.Tensor], q_grad_clip: float = None) -> None:
+    def step(self, observations: Union[np.array, th.Tensor], q_grad_clip: float = None) -> Tuple[np.array, np.array]:
+        """Performs a single boosting step
+
+        Args:
+            observations (Union[np.array, th.Tensor]):
+            q_grad_clip (float, optional):. Defaults to None.
+
+        Returns:
+            Tuple[np.array, np.array]: gradients w.r.t GBRL outputs: weight, bias vectors.
+        """
         n_samples = len(observations)
         weight_grad = self.params[0].grad.detach().cpu().numpy() * n_samples
         bias_grad = self.params[1].grad.detach().cpu().numpy() * n_samples
@@ -472,27 +578,58 @@ class ContinuousCritic(GradientBoostingTrees):
         self._model.step(observations, theta_grad)
         return weight_grad, bias_grad
         
-    def predict(self, observations: Union[np.array, th.Tensor]) -> np.array:
-        return self._model.predict(observations)
+    def predict(self, observations: Union[np.array, th.Tensor]) -> Tuple[np.array, np.array]:
+        """Predict the parameters of a Continuous Critic as numpy arrays.
 
-    def predict_target(self, observations: Union[np.array, th.Tensor]) -> np.array:
+        Args:
+            observations (Union[np.array, th.Tensor]):
+
+        Returns:
+            np.array: _description_
+        """
+        theta = self._model.predict(observations)
+        weights, bias = theta[:, :self.policy_dim], theta[:, self.policy_dim:]
+        return weights, bias
+
+    def predict_target(self, observations: Union[np.array, th.Tensor]) -> Tuple[th.Tensor, th.Tensor]:
+        """Predict the parameters of a Target Continuous Critic as Tensors.
+        Prediction is made by summing the outputs the trees from Continuous Critic model up to `n_trees - target_update_interval`.
+
+        Args:
+            observations (Union[np.array, th.Tensor]):
+
+        Returns:
+            Tuple[th.Tensor, th.Tensor]: weights and bias vectors
+        """
         n_trees = self._model.get_num_trees()
         theta = self._model.predict(observations, stop_idx=max(n_trees - self.target_update_interval, 1))
-        return th.tensor(theta[:, :self.policy_dim]), th.tensor(theta[:, self.policy_dim:])
+        weights, bias = theta[:, :self.policy_dim], theta[:, self.policy_dim:]
+        return th.tensor(weights), th.tensor(bias)
 
     def get_num_trees(self) -> int:
+        """Get number of  trees in model.
+
+        Returns:
+            int
+        """
         return self._model.get_num_trees()
 
     def __call__(self, observations: Union[np.array, th.Tensor], requires_grad: bool =  False) -> Tuple[th.Tensor, th.Tensor]:
-        theta = self.predict(observations)
-        weights, bias = theta[:, :self.policy_dim], theta[:, self.policy_dim:]
+        """Predict the parameters of a Continuous Critic as Tensors. if `requires_grad=True` then stores 
+           differentiable parameters in self.params 
+
+        Args:
+            observations (Union[np.array, th.Tensor])
+            requires_grad (bool, optional): Defaults to False.
+
+        Returns:
+            Tuple[th.Tensor, th.Tensor]: weights, bias
+        """
+        weights, bias = self.predict(observations)
         params = (th.tensor(weights, requires_grad=requires_grad), th.tensor(bias, requires_grad=requires_grad))
         if requires_grad:
             self.params = params
         return params
-
-    def copy(self) -> "ContinuousCritic":
-        return self.__copy__()
     
     def __copy__(self) -> "ContinuousCritic":
         copy_ = ContinuousCritic(self.tree_struct.copy(), self.output_dim, self.weights_optimizer.copy(), self.bias_optimizer.copy() if isinstance(self.critic_optimizer, dict) else {'weights_optimizer': self.critic_optimizer[0], 'bias_optimizer': self.critic_optimizer[1]}, self.gbrl_params, self.target_update_interval, self.bias, self.verbose, self.device)
@@ -511,7 +648,8 @@ class DiscreteCritic(GradientBoostingTrees):
                  bias: np.array = None,
                  verbose: int=0,
                  device: str='cpu'):  
-        """ GBRL model for a Discrete Critic ensemble (Q-function) used in GBRL DQN.
+        """ GBRL model for a Discrete Critic ensemble.
+            Usage example: Q-function in GBRL.
             The target model is approximated as the ensemble without the last <target_update_interval> trees.
         Args:
          tree_struct (Dict): Dictionary containing tree structure information:
@@ -546,7 +684,16 @@ class DiscreteCritic(GradientBoostingTrees):
         self._model.reset()
         self._model.set_bias(self.bias)
 
-    def step(self, observations: Union[np.array, th.Tensor], max_q_grad_norm: np.array = None) -> None:
+    def step(self, observations: Union[np.array, th.Tensor], max_q_grad_norm: np.array = None) -> np.array:
+        """Performs a single boosting iterations.
+
+        Args:
+            observations (Union[np.array, th.Tensor]):
+            max_q_grad_norm (np.array, optional). Defaults to None.
+
+        Returns:
+            np.array: gradient w.r.t Critic's output.
+        """
         n_samples = len(observations)
         q_grad = self.params.grad.detach().cpu().numpy() * n_samples
         q_grad = clip_grad_norm(q_grad, max_q_grad_norm)
@@ -556,9 +703,27 @@ class DiscreteCritic(GradientBoostingTrees):
 
 
     def predict(self, observations: Union[np.array, th.Tensor]) -> np.array:
+        """Predict and return Critic's outputs as numpy array.
+
+        Args:
+            observations (Union[np.array, th.Tensor])
+
+        Returns:
+            np.array: Critic outputs
+        """
         return self._model.predict(observations)
 
     def __call__(self, observations: Union[np.array, th.Tensor], requires_grad: bool=False) -> th.Tensor:
+        """Predict and return Critic's outputs as Tensors. If `requires_grad=True` then stores 
+           differentiable parameters in self.params 
+
+        Args:
+            observations (Union[np.array, th.Tensor])
+            requires_grad (bool, optional). Defaults to False.
+
+        Returns:
+            th.Tensor: Critic's outputs.
+        """
         q_values = self.predict(observations)
         params = th.tensor(q_values, requires_grad=requires_grad)
         if requires_grad:
@@ -566,13 +731,18 @@ class DiscreteCritic(GradientBoostingTrees):
         return params
 
     def predict_target(self, observations: Union[np.array, th.Tensor]) -> th.Tensor:
+        """Predict and return Target Critic's outputs as Tensors.
+         Prediction is made by summing the outputs the trees from Continuous Critic model up to `n_trees - target_update_interval`.
+        Args:
+            observations (Union[np.array, th.Tensor])
+
+        Returns:
+            th.Tensor: Target Critic's outputs.
+        """
         n_trees = self._model.get_num_trees()
         q_values = self._model.predict(observations, stop_idx=max(n_trees - self.target_update_interval, 1))
         return th.tensor(q_values)
 
-    def copy(self) -> "DiscreteCritic":
-        return self.__copy__()
-    
     def __copy__(self) -> "DiscreteCritic":
         copy_ = DiscreteCritic(self.tree_struct.copy(), self.output_dim, self.critic_optimizer.copy(), self.gbrl_params, self.target_update_interval, self.bias, self.verbose, self.device)
         if self._model is not None:
