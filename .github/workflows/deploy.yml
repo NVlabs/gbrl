@@ -30,19 +30,14 @@ jobs:
           cd docs
           make html
 
-      - name: List build output
-        run: |
-          set -e
-          ls -la docs/_build/html
+      # - name: List build output
+      #   run: |
+      #     set -e
+      #     ls -la docs/_build/html
           
       - name: Deploy to GitHub Pages
         run: |
           set -e
-          echo "Current path before cd ..: $(pwd)"
-          ls -la
-          cd ..
-          ls -la
-          echo "Current path after cd ..: $(pwd)"
           mkdir gh-pages
           cp -r docs/_build/html/* gh-pages/
           cd gh-pages
