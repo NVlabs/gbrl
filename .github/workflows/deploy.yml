@@ -35,6 +35,7 @@ jobs:
           set -e
           mkdir gh-pages
           cp -r docs/_build/html/* gh-pages/
+          touch gh-pages/.nojekyll
           cd gh-pages
           git init
           git config --global user.name 'github-actions[bot]'

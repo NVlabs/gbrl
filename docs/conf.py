@@ -11,7 +11,7 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__))) 
 
-with open('gbrl/__init__.py') as file_handler:
+with open('../gbrl/__init__.py') as file_handler:
     __version__ = __version__ = file_handler.readlines()[0].split('"')[1]
 
 from unittest.mock import MagicMock
