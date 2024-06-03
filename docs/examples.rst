@@ -15,6 +15,7 @@ We will train a GBRL model as in supervised learning on the `Diabetes dataset fr
 
 Basic imports and preprocessing
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 .. code-block:: python
 
     import numpy as np
@@ -29,6 +30,7 @@ Basic imports and preprocessing
 
 Pre-process data
 ~~~~~~~~~~~~~~~~
+
 .. code-block:: python
 
     # incremental learning dataset
@@ -41,6 +43,7 @@ Pre-process data
 
 Setting up GBRL model
 ~~~~~~~~~~~~~~~~~~~~~
+
 .. code-block:: python
 
     # CUDA is not deterministic
@@ -73,6 +76,7 @@ Setting up GBRL model
 
 Incremental learning - training for 10 Epochs
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 .. code-block:: python
 
     # training for 10 epochs
@@ -93,6 +97,7 @@ For example:
 
 When using a summation reduction
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 .. code-block:: python
 
     gbt_model = GradientBoostingTrees(
@@ -116,6 +121,7 @@ When using a summation reduction
 
 When working with multi-dimensional outputs
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 .. code-block:: python
 
     y_multi = th.concat([y, y], dim=1)
@@ -143,6 +149,7 @@ When working with multi-dimensional outputs
 Saving and Loading a GBRL Model
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Saving and loading in GBRL is straightforward.
+
 .. code-block:: python
 
     # Call the save_model method of a GBRL class
@@ -160,15 +167,16 @@ Using Manually Calculated Gradients
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Alternatively, GBRL can use manually calculated gradients. Calling the `predict` method instead of the `__call__` method, returns a numpy array instead of a PyTorch tensor. Autograd libraries or manual calculations can be used to calculate gradients.  
 Fitting manually calculated gradients is done using the `_model.step` method that receives numpy arrays. 
-.. code-block:: python
 
+.. code-block:: python
+    
     # initializing model parameters
     tree_struct = {'max_depth': 4, 
                 'n_bins': 256,
                 'min_data_in_leaf': 0,
                 'par_th': 2,
                 'grow_policy': 'oblivious'}
-
+                
     optimizer = { 'algo': 'SGD',
                 'lr': 1.0}
 
@@ -200,6 +208,7 @@ Fitting manually calculated gradients is done using the `_model.step` method tha
 Multiple iterations at once (standard supervised learning)
 ----------------------------------------------------------
 GBRL supports training multiple boosting iterations with targets similar to other GBT libraries. This is done using the `fit` method.  
+
 .. important::
 
     Only the RMSE loss function is supported for the `fit` method
@@ -222,7 +231,7 @@ Now that we have seen how GBRL is trained using incremental learning and PyTorch
 Let's start by training a simple Reinforce algorithm.
 
 .. code-block:: python
-
+    
     def calculate_returns(rewards, gamma):
         returns = []
         running_g = 0.0
