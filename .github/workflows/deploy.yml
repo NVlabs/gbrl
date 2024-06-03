@@ -27,3 +27,7 @@ jobs:
         run: |
           cd docs
           make html
+
+      - name: Copy HTML to docs folder
+        run: |
+          cp -r docs/_build/html/* docs/
