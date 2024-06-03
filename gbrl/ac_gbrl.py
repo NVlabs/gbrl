@@ -750,7 +750,8 @@ class DiscreteCritic(GradientBoostingTrees):
             copy_._model = self._model.copy()
         return copy_
 
-
+if __name__ == '__main__':
+    pass
         
 
 
