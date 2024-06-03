@@ -3,11 +3,11 @@ name: Deploy Documentation to GitHub Pages
 on:
   push:
     branches:
-      - master 
+      - master  # Or the branch you want to deploy from
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest 
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
@@ -26,9 +26,24 @@ jobs:
 
       - name: Build documentation
         run: |
+          set -e
           cd docs
           make html
 
-      - name: Copy HTML to docs folder
+      - name: Deploy to GitHub Pages
         run: |
-          cp -r docs/_build/html/* docs/
+          set -e
+          cd ..
+          mkdir gh-pages
+          cp -r docs/_build/html/* gh-pages/
+          cd gh-pages
+          git init
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          git add .
+          git commit -m "Deploy documentation to GitHub Pages"
+          git branch -M gh-pages
+          git remote add origin https://github.com/USERNAME/REPOSITORY.git
+          git push --force origin gh-pages
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
