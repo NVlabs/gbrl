@@ -732,7 +732,7 @@ class DiscreteCritic(GradientBoostingTrees):
 
     def predict_target(self, observations: Union[np.array, th.Tensor]) -> th.Tensor:
         """Predict and return Target Critic's outputs as Tensors.
-         Prediction is made by summing the outputs the trees from Continuous Critic model up to `n_trees - target_update_interval`.
+           Prediction is made by summing the outputs the trees from Continuous Critic model up to `n_trees - target_update_interval`.
         Args:
             observations (Union[np.array, th.Tensor])
 
