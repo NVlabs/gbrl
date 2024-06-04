@@ -1,3 +1,12 @@
+//////////////////////////////////////////////////////////////////////////////
+// NVIDIA CORPORATION, its affiliates and licensors retain all intellectual
+//  property and proprietary rights in and to this material, related
+//  documentation and any modifications thereto. Any use, reproduction,
+//  disclosure or distribution of this material and related documentation
+//  without an express license agreement from NVIDIA CORPORATION or
+//  its affiliates is strictly prohibited.
+//
+//////////////////////////////////////////////////////////////////////////////
 #ifndef GBRL_H
 #define GBRL_H
 
@@ -53,9 +62,7 @@ class GBRL {
                            float beta_1, float beta_2, float eps, float shrinkage);
 
         void print_tree(int tree_idx);
-        #ifdef USE_GRAPHVIZ
         void plot_tree(int tree_idx, const std::string &filename);
-        #endif
 
         ensembleData *edata;
         ensembleMetaData *metadata;

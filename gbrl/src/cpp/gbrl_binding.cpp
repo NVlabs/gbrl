@@ -1,3 +1,12 @@
+//////////////////////////////////////////////////////////////////////////////
+// NVIDIA CORPORATION, its affiliates and licensors retain all intellectual
+//  property and proprietary rights in and to this material, related
+//  documentation and any modifications thereto. Any use, reproduction,
+//  disclosure or distribution of this material and related documentation
+//  without an express license agreement from NVIDIA CORPORATION or
+//  its affiliates is strictly prohibited.
+//
+//////////////////////////////////////////////////////////////////////////////
 #define PYBIND11_DETAILED_ERROR_MESSAGES
 #include <pybind11/pybind11.h>
 #include <pybind11/numpy.h> 
@@ -300,10 +309,8 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         self.print_tree(tree_idx); 
     }, "Print specified tree index");
     gbrl.def_static("cuda_available", &GBRL::cuda_available, "Return if CUDA is available"); 
-    #ifdef USE_GRAPHVIZ 
     gbrl.def("plot_tree", [](GBRL &self, int tree_idx, const std::string &filename) {
         py::gil_scoped_release release; 
         self.plot_tree(tree_idx, filename); 
     }, "Plot specified tree index to png file"); 
-    #endif 
 }

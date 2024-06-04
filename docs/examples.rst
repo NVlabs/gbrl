@@ -7,8 +7,8 @@ Examples
 
 The full tutorial is also available as a `jupyter notebook <https://github.com/NVlabs/gbrl/blob/master/tutorial.ipynb>`_
 
-Basic Usage: Training, Saving, Loading
---------------------------------------
+Basic Usage: Training, Saving, Loading, Copying
+-----------------------------------------------
 In the following example, we will train, save, and load a GBRL model incrementally.
 We will use the base `GradientBoostingTrees` class and get familiarized with the basic usage of the GBRL library.
 We will train a GBRL model as in supervised learning on the `Diabetes dataset from sklearn <https://scikit-learn.org/stable/modules/generated/sklearn.datasets.load_diabetes.html#sklearn.datasets.load_diabetes>`_.
@@ -146,9 +146,8 @@ or when working with multi-dimensional outputs
         gbt_model.step(X)
         print(f"Boosting iteration: {gbt_model.get_iteration()} RMSE loss: {(loss / out_dim).sqrt()}")
 
-Saving and Loading a GBRL Model
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Saving and loading in GBRL is straightforward.
+Saving, loading, and copying a GBRL Model
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
@@ -159,9 +158,8 @@ Saving and loading in GBRL is straightforward.
     gbt_model.save_model('gbt_model_tutorial')
     # Loading a saved model is similar and is done by calling the specific class instance.
     loaded_gbt_model = GradientBoostingTrees.load_model('gbt_model_tutorial')
-
-    y_save = gbt_model(X)
-    y_load = loaded_gbt_model(X)
+    # Copying a model is straighforward
+    copied_model = gbt_model.copy()
 
 Manually Calculated Gradients
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -270,6 +268,8 @@ Let's start by training a simple Reinforce algorithm.
 
         done = False
         while not done:
+            # obs is a flattened array representing a single sample and multiple input dimensions
+            # hence GBRL reshapes obs automatically to a 2D-array.
             action_logits = agent(obs)
             action = Categorical(logits=action_logits).sample()
             action_numpy = action.cpu().numpy()

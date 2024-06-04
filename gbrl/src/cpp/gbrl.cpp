@@ -1,4 +1,13 @@
 
+//////////////////////////////////////////////////////////////////////////////
+// NVIDIA CORPORATION, its affiliates and licensors retain all intellectual
+//  property and proprietary rights in and to this material, related
+//  documentation and any modifications thereto. Any use, reproduction,
+//  disclosure or distribution of this material and related documentation
+//  without an express license agreement from NVIDIA CORPORATION or
+//  its affiliates is strictly prohibited.
+//
+//////////////////////////////////////////////////////////////////////////////
 #include <omp.h>
 #include <string>
 #include <fstream>
@@ -870,8 +879,8 @@ bool valid_device(){
 }
 #endif
 
-#ifdef USE_GRAPHVIZ
 void GBRL::plot_tree(int tree_idx, const std::string &filename){
+#ifdef USE_GRAPHVIZ
     ensembleData *edata_cpu = this->edata; 
 #ifdef USE_CUDA
     if (this->device == gpu){
@@ -989,6 +998,8 @@ void GBRL::plot_tree(int tree_idx, const std::string &filename){
     if (this->device == gpu){
         ensemble_data_dealloc(edata_cpu);
     }
+#else
+throw std::runtime_error("GBRL compiled without Graphviz! Cannot plot model");
 #endif 
 }
 #endif

@@ -2,8 +2,10 @@
 requires = [
     "setuptools>=42",
     "wheel",
-    "pybind11==2.11.1"
+    "cmake>=3.18",
+    "pybind11[global]==2.11.1"
 ]
+
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -17,7 +19,7 @@ authors = [
     {name = "Gal Dalal", email = "galal@nvidia.com"}
 ]
 dependencies = [
-    "pybind11==2.11.1",
+    "pybind11[global]==2.11.1",
     "numpy",
     "torch"
 ]

@@ -1,6 +1,12 @@
-"""
-General module for a GBT class 
-"""
+##############################################################################
+# NVIDIA CORPORATION, its affiliates and licensors retain all intellectual
+#  property and proprietary rights in and to this material, related
+#  documentation and any modifications thereto. Any use, reproduction,
+#  disclosure or distribution of this material and related documentation
+#  without an express license agreement from NVIDIA CORPORATION or
+#  its affiliates is strictly prohibited.
+#
+##############################################################################
 from typing import Dict, List, Union, Tuple
 
 import numpy as np
@@ -266,6 +272,23 @@ class GradientBoostingTrees:
         if requires_grad:
             self.params = params
         return params
+
+    def print_tree(self, tree_idx: int) -> None:
+        """Prints tree information
+
+        Args:
+            tree_idx (int): tree index to print
+        """
+        self._model.print_tree(tree_idx)
+
+    def plot_tree(self, tree_idx: int, filename: str) -> None:
+        """Plots tree using graphviz 
+
+        Args:
+            tree_idx (int): tree index to plot
+            filename (str): .png filename to save
+        """
+        self._model.plot_tree(tree_idx, filename)
     
     def copy(self) -> "GradientBoostingTrees":
         """Copy class instance 

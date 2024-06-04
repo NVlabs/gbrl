@@ -1,7 +1,13 @@
 
-"""
-Internal Wrapper module binding Python and C++ 
-"""
+##############################################################################
+# NVIDIA CORPORATION, its affiliates and licensors retain all intellectual
+#  property and proprietary rights in and to this material, related
+#  documentation and any modifications thereto. Any use, reproduction,
+#  disclosure or distribution of this material and related documentation
+#  without an express license agreement from NVIDIA CORPORATION or
+#  its affiliates is strictly prohibited.
+#
+##############################################################################
 import os
 from typing import Dict, List, Union, Tuple
 
@@ -90,7 +96,7 @@ class GBTWrapper:
         self.optimizer = optimizer if isinstance(optimizer, list) else [optimizer]
         self.optimizer = [opt for opt in self.optimizer if opt is not None]
         self.student_model = None
-        self.model = None
+        self.cpp_model = None
         self.iteration = 0
         self.total_iterations = 0
         self.gbrl_params = gbrl_params
@@ -103,20 +109,23 @@ class GBTWrapper:
         self.feature_weights = feature_weights
 
     def reset(self) -> None:
-        if self.model is not None:
-            policy_lr, value_lr = self.model.get_scheduler_lrs()
+        if self.cpp_model is not None:
+            policy_lr, value_lr = self.cpp_model.get_scheduler_lrs()
             self.optimizer[0]['init_lr'] = policy_lr
             if len(self.optimizer) > 1:
                 self.optimizer[1]['init_lr'] = value_lr
-        self.model = GBRL(**self.params)
+        self.cpp_model = GBRL(**self.params)
         if self.student_model is not None:
             self.optimizer[0]['T'] -= self.total_iterations
             if len(self.optimizer) > 1:
                 self.optimizer[1]['T'] -= self.total_iterations
         else:
             self.total_iterations = 0
-        for opt in self.optimizer:
-            self.model.set_optimizer(**opt)
+        try:
+            for opt in self.optimizer:
+                self.cpp_model.set_optimizer(**opt)
+        except RuntimeError as e:
+            print(f"Caught an exception in GBRL: {e}")
         feature_weights = self.gbrl_params.get('feature_weights', None)
         if feature_weights is not None:
             feature_weights, _ = to_numpy(feature_weights)
@@ -134,8 +143,8 @@ class GBTWrapper:
             self.feature_weights = np.ones(input_dim, dtype=numerical_dtype)
         assert len(self.feature_weights) == input_dim, "feature weights has to have the same number of elements as features"
         assert np.all(self.feature_weights > 0), "feature weights contains non-positive values"
-        self.model.step(num_features, cat_features, grads, self.feature_weights)
-        self.iteration = self.model.get_iteration()
+        self.cpp_model.step(num_features, cat_features, grads, self.feature_weights)
+        self.iteration = self.cpp_model.get_iteration()
         self.total_iterations += 1
 
     def fit(self, features: Union[np.array, th.Tensor], targets: Union[np.array, th.Tensor], iterations: int, shuffle: bool=True, loss_type: str='MultiRMSE') -> float:
@@ -148,25 +157,25 @@ class GBTWrapper:
             self.feature_weights = np.ones(input_dim, dtype=numerical_dtype)
         assert len(self.feature_weights) == input_dim, "feature weights has to have the same number of elements as features"
         assert np.all(self.feature_weights > 0), "feature weights contains non-positive values"
-        loss = self.model.fit(num_features, cat_features, targets, self.feature_weights, iterations, shuffle, loss_type)
-        self.iteration = self.model.get_iteration()
+        loss = self.cpp_model.fit(num_features, cat_features, targets, self.feature_weights, iterations, shuffle, loss_type)
+        self.iteration = self.cpp_model.get_iteration()
         return loss
 
     def save(self, filename: str) -> None:
         filename = filename.rstrip('.')
         filename += '.gbrl_model'
-        assert self.model is not None, "Can't save non-existent model!"
-        status = self.model.save(filename)
+        assert self.cpp_model is not None, "Can't save non-existent model!"
+        status = self.cpp_model.save(filename)
         assert status == 0, "Failed to save model"
 
     def export(self, filename: str, modelname: str = None) -> None:
         # exports model to C
         filename = filename.rstrip('.')
         filename += '.h'
-        assert self.model is not None, "Can't export non-existent model!"
+        assert self.cpp_model is not None, "Can't export non-existent model!"
         if modelname is None:
             modelname = ""
-        status = self.model.export(filename, modelname)
+        status = self.cpp_model.export(filename, modelname)
         assert status == 0, "Failed to export model"
 
     @classmethod
@@ -175,51 +184,54 @@ class GBTWrapper:
         if '.gbrl_model' not in filename:
             filename += '.gbrl_model'
         assert os.path.isfile(filename), "filename doesn't exist!"
-        print("Loading model")
-        instance = cls.__new__(cls)
-        instance.model = GBRL.load(filename)
-        metadata =  instance.model.get_metadata()
-        instance.tree_struct = {'max_depth': metadata['max_depth'], 
-                          'min_data_in_leaf': metadata['min_data_in_leaf'],
-                          'n_bins': metadata['n_bins'], 
-                          'par_th': metadata['par_th'],
-                          'batch_size': metadata['batch_size'], 
-                          'grow_policy': metadata['grow_policy']}
-        instance.params = {'output_dim': metadata['output_dim'],
-                          'policy_dim': metadata['policy_dim'], 
-                          'split_score_func': metadata['split_score_func'], 
-                          'generator_type': metadata['generator_type'], 
-                          'use_control_variates': metadata['use_control_variates'], 
-                          'verbose': metadata['verbose'], 
-                          'device': instance.model.get_device(),
-                          **instance.tree_struct
-                        }
-        instance.output_dim = metadata['output_dim']
-        instance.policy_dim = metadata['policy_dim']
-        instance.verbose = metadata['verbose']
-        instance.gbrl_params = {'split_score_func': metadata['split_score_func'], 
-                                'generator_type': metadata['generator_type'], 
-                                'use_control_variates': metadata['use_control_variates'], 
-                                }
-        instance.optimizer = instance.model.get_optimizers()
-        instance.iteration = metadata['iteration']
-        instance.total_iterations = metadata['iteration']
-        instance.student_model = None
-        return instance
+        try:
+            instance = cls.__new__(cls)
+            instance.cpp_model = GBRL.load(filename)
+            metadata =  instance.cpp_model.get_metadata()
+            instance.tree_struct = {'max_depth': metadata['max_depth'], 
+                            'min_data_in_leaf': metadata['min_data_in_leaf'],
+                            'n_bins': metadata['n_bins'], 
+                            'par_th': metadata['par_th'],
+                            'batch_size': metadata['batch_size'], 
+                            'grow_policy': metadata['grow_policy']}
+            instance.params = {'output_dim': metadata['output_dim'],
+                            'policy_dim': metadata['policy_dim'], 
+                            'split_score_func': metadata['split_score_func'], 
+                            'generator_type': metadata['generator_type'], 
+                            'use_control_variates': metadata['use_control_variates'], 
+                            'verbose': metadata['verbose'], 
+                            'device': instance.cpp_model.get_device(),
+                            **instance.tree_struct
+                            }
+            instance.output_dim = metadata['output_dim']
+            instance.policy_dim = metadata['policy_dim']
+            instance.verbose = metadata['verbose']
+            instance.gbrl_params = {'split_score_func': metadata['split_score_func'], 
+                                    'generator_type': metadata['generator_type'], 
+                                    'use_control_variates': metadata['use_control_variates'], 
+                                    }
+            instance.optimizer = instance.cpp_model.get_optimizers()
+            instance.iteration = metadata['iteration']
+            instance.total_iterations = metadata['iteration']
+            instance.student_model = None
+            return instance
+        except RuntimeError as e:
+            print(f"Caught an exception in GBRL: {e}")
+            return None
 
     def get_schedule_learning_rates(self) -> Union[int, Tuple[int, int]]:
-        return self.model.get_scheduler_lrs()
+        return self.cpp_model.get_scheduler_lrs()
 
     def get_total_iterations(self) -> int:
         return self.total_iterations
 
     def get_iteration(self) -> int:
-        return self.model.get_iteration()
+        return self.cpp_model.get_iteration()
     
     def get_num_trees(self) -> int:
         if self.student_model is not None:
-            return self.model.get_num_trees() + self.student_model.get_num_trees()
-        return self.model.get_num_trees()
+            return self.cpp_model.get_num_trees() + self.student_model.get_num_trees()
+        return self.cpp_model.get_num_trees()
     
     def set_bias(self, bias: Union[np.array, float]) -> None:
         if not isinstance(bias, np.ndarray) and not isinstance(bias, float):
@@ -232,16 +244,28 @@ class GBTWrapper:
             bias = bias.ravel()
         elif bias.ndim == 0:
             bias = np.array([bias.item()])  # Converts 0D arrays to 1D
-        self.model.set_bias(bias)
+        try:
+            self.cpp_model.set_bias(bias)
+        except RuntimeError as e:
+            print(f"Caught an exception in GBRL: {e}")
 
     def get_bias(self) -> np.array:
-        return self.model.get_bias()
+        return self.cpp_model.get_bias()
 
     def get_device(self) -> str:
-        return self.model.get_device()
+        return self.cpp_model.get_device()
+
+    def print_tree(self, tree_idx: int) -> None:
+        self.cpp_model.print_tree(tree_idx)
+    
+    def plot_tree(self, tree_idx: int, filename: str) -> None:
+        try:
+            self.cpp_model.print_tree(tree_idx, filename)
+        except RuntimeError as e:
+            print(f"Caught an exception in GBRL: {e}")
     
     def set_device(self, device: str) -> None:
-        self.model.to_device(device)
+        self.cpp_model.to_device(device)
         self.device = device
     
     def predict(self, features: Union[np.array, th.Tensor], start_idx: int=0, stop_idx: int=None) -> np.array:
@@ -255,9 +279,9 @@ class GBTWrapper:
                 num_features = num_features.copy()
             if cat_features is not None and not cat_features.flags['WRITEABLE']:
                 cat_features = cat_features.copy()
-            self.model.predict(num_features, cat_features, preds, start_idx, stop_idx) # modifies it inplace
+            self.cpp_model.predict(num_features, cat_features, preds, start_idx, stop_idx) # modifies it inplace
         else:
-            preds = self.model.predict(num_features, cat_features, start_idx, stop_idx)
+            preds = self.cpp_model.predict(num_features, cat_features, start_idx, stop_idx)
         return preds
     
     def distil(self, obs: Union[np.array, th.Tensor], targets: np.array, params: Dict, verbose: int=0) -> Tuple[int, Dict]:
@@ -267,7 +291,10 @@ class GBTWrapper:
                         'max_depth': params.get('distil_max_depth', 6), 'verbose': verbose, 'batch_size': self.params.get('distil_batch_size', 2048)}
         self.student_model = GBRL(**distil_params)
         distil_optimizer = {'algo': 'SGD', 'init_lr': params.get('distil_lr', 0.1)}
-        self.student_model.set_optimizer(**distil_optimizer)
+        try:
+            self.student_model.set_optimizer(**distil_optimizer)
+        except RuntimeError as e:
+            print(f"Caught an exception in GBRL: {e}")
 
         bias = np.mean(targets, axis=0)
         if isinstance(bias, float):
@@ -291,8 +318,8 @@ class GBTWrapper:
         copy_ = GBTWrapper(self.output_dim, self.policy_dim, self.tree_struct.copy(), [opt.copy() if opt is not None else opt for opt in self.optimizer], self.gbrl_params, self.verbose, self.device)
         copy_.iteration = self.iteration 
         copy_.total_iterations = self.total_iterations
-        if self.model is not None:
-            copy_.model = GBRL(self.model)
+        if self.cpp_model is not None:
+            copy_.model = GBRL(self.cpp_model)
         if self.student_model is not None:
             copy_.student_model = GBRL(self.student_model)
         return copy_
@@ -359,6 +386,18 @@ class SeparateActorCriticWrapper:
     def export(self, filename: str) -> None:
         self.policy_model.export(filename + '_policy')
         self.value_model.export(filename + '_value')
+    
+    def print_tree(self, tree_idx: int) -> None:
+        print("Policy ensemble")
+        self.policy_model.print_tree(tree_idx)
+        print("Value ensemble")
+        self.value_model.print_tree(tree_idx)
+    
+    def plot_tree(self, tree_idx: int, filename: str) -> None:
+        print("Policy ensemble")
+        self.policy_model.plot_tree(tree_idx, filename.rstrip(".") + "_policy")
+        print("Value ensemble")
+        self.value_model.plot_tree(tree_idx,  filename.rstrip(".") + "_value")
 
     @classmethod
     def load(cls, filename: str) -> "SeparateActorCriticWrapper":
@@ -412,21 +451,27 @@ class SharedActorCriticWrapper(GBTWrapper):
         super().__init__(output_dim, output_dim - 1 if self.value_optimizer else output_dim, tree_struct, policy_optimizer, gbrl_params, verbose, device)
 
     def reset(self) -> None:
-        if self.model is not None:
+        if self.cpp_model is not None:
             policy_lr, value_lr = self.get_schedule_learning_rates()
             self.policy_optimizer['init_lr'] = policy_lr
             if self.value_optimizer:
                 self.value_optimizer['init_lr'] = value_lr
-        self.model = GBRL(**self.params)
+        self.cpp_model = GBRL(**self.params)
         if self.student_model is not None:
             self.policy_optimizer['T'] -= self.total_iterations
         else:
             self.total_iterations = 0
-        self.model.set_optimizer(**self.policy_optimizer)
+        try:
+            self.cpp_model.set_optimizer(**self.policy_optimizer)
+        except RuntimeError as e:
+            print(f"Caught an exception in GBRL: {e}")
         if self.value_optimizer:
             if self.student_model is not None:
                 self.value_optimizer['T'] -= self.total_iterations
-            self.model.set_optimizer(**self.value_optimizer)
+            try:
+                self.cpp_model.set_optimizer(**self.value_optimizer)
+            except RuntimeError as e:
+                print(f"Caught an exception in GBRL: {e}")
         
     def step(self, observations: Union[np.array, th.Tensor], theta_grad: np.array, value_grad: np.array=None) -> None:
         num_observations, cat_observations = preprocess_features(observations)
@@ -442,8 +487,8 @@ class SharedActorCriticWrapper(GBTWrapper):
             self.feature_weights = np.ones(input_dim, dtype=numerical_dtype)
         assert len(self.feature_weights) == input_dim, "feature weights has to have the same number of elements as features"
         assert np.all(self.feature_weights > 0), "feature weights contains non-positive values"
-        self.model.step(num_observations, cat_observations, target_grads, self.feature_weights)
-        self.iteration = self.model.get_iteration()
+        self.cpp_model.step(num_observations, cat_observations, target_grads, self.feature_weights)
+        self.iteration = self.cpp_model.get_iteration()
         self.total_iterations += 1
 
     def distil(self, obs: Union[np.array, th.Tensor], policy_targets: np.array, value_targets: np.array, params: Dict, verbose: int) -> Tuple[float, Dict]:
@@ -462,9 +507,9 @@ class SharedActorCriticWrapper(GBTWrapper):
                 num_observations = num_observations.copy()
             if cat_observations is not None and not cat_observations.flags['WRITEABLE']:
                 cat_observations = cat_observations.copy()
-            self.model.predict(num_observations, cat_observations, preds, start_idx, stop_idx)
+            self.cpp_model.predict(num_observations, cat_observations, preds, start_idx, stop_idx)
         else:
-            preds = self.model.predict(num_observations, cat_observations, start_idx, stop_idx)
+            preds = self.cpp_model.predict(num_observations, cat_observations, start_idx, stop_idx)
         pred_values = np.zeros(len(preds), dtype=np.single)
         if self.value_optimizer:
             pred_values = preds[:, -1]
@@ -485,8 +530,8 @@ class SharedActorCriticWrapper(GBTWrapper):
         copy_ = SharedActorCriticWrapper(self.output_dim, self.tree_struct.copy(), self.policy_optimizer.copy(), None if self.value_optimizer is None else self.value_optimizer.copy(), self.gbrl_params, self.verbose, self.device)
         copy_.iteration = self.iteration 
         copy_.total_iterations = self.total_iterations
-        if self.model is not None:
-            copy_.model = GBRL(self.model)
+        if self.cpp_model is not None:
+            copy_.model = GBRL(self.cpp_model)
         if self.student_model is not None:
             copy_.student_model = GBRL(self.student_model)
         return copy_

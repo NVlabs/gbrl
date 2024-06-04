@@ -1,3 +1,12 @@
+##############################################################################
+# NVIDIA CORPORATION, its affiliates and licensors retain all intellectual
+#  property and proprietary rights in and to this material, related
+#  documentation and any modifications thereto. Any use, reproduction,
+#  disclosure or distribution of this material and related documentation
+#  without an express license agreement from NVIDIA CORPORATION or
+#  its affiliates is strictly prohibited.
+#
+##############################################################################
 import os
 import shutil
 import tempfile
@@ -78,20 +87,20 @@ class TestGBTSingle(unittest.TestCase):
                             gbrl_params=gbrl_params,
                             verbose=0,
                             device='cpu')
-        model.set_bias(y)
+        model.set_bias_from_targets(y)
         loss = rmse_model(model, X, y, self.n_epochs)
         value = 2
         self.assertTrue(loss < value, f'Expected loss = {loss} < {value}')
         model.save_model(os.path.join(self.test_dir, 'test_cosine_cpu'))
 
         model._model.reset()
-        model.set_bias(y)
+        model.set_bias_from_targets(y)
         train_loss = model.fit(X, y, self.n_epochs)
         self.assertTrue(train_loss < value, f'Expected loss = {train_loss} < {value}')
 
         X_categorical, y_categorical = self.cat_data
         model._model.reset()
-        model.set_bias(y)
+        model.set_bias_from_targets(y)
         loss = rmse_model(model, X_categorical, y_categorical, self.n_epochs)
         value = 5000
         self.assertTrue(loss < value, f'Expected Categorical loss = {loss} < {value}')
@@ -114,7 +123,7 @@ class TestGBTSingle(unittest.TestCase):
                             gbrl_params=gbrl_params,
                             verbose=0,
                             device='cpu')
-        model.set_bias(y)
+        model.set_bias_from_targets(y)
         loss = rmse_model(model, X, y, self.n_epochs)
         value = 50
         self.assertTrue(loss < value, f'Expected loss = {loss} < {value}')
@@ -139,21 +148,21 @@ class TestGBTSingle(unittest.TestCase):
                             gbrl_params=gbrl_params,
                             verbose=0,
                             device='cuda')
-        model.set_bias(y)
+        model.set_bias_from_targets(y)
         loss = rmse_model(model, X, y, self.n_epochs)
         value = 2
         self.assertTrue(loss < value, f'Expected loss = {loss} < {value}')
         model.save_model(os.path.join(self.test_dir, 'test_cosine_gpu'))
 
         model._model.reset()
-        model.set_bias(y)
+        model.set_bias_from_targets(y)
         train_loss = model.fit(X, y, self.n_epochs)
         value = 2
         self.assertTrue(train_loss < value, f'Expected loss = {train_loss} < {value}')
 
         X_categorical, y_categorical = self.cat_data
         model._model.reset()
-        model.set_bias(y_categorical)
+        model.set_bias_from_targets(y_categorical)
         loss = rmse_model(model, X_categorical, y_categorical, self.n_epochs)
         value = 5000
         self.assertTrue(loss < value, f'Expected Categorical loss = {loss} < {value}')
@@ -176,18 +185,18 @@ class TestGBTSingle(unittest.TestCase):
                             gbrl_params=gbrl_params,
                             verbose=0,
                             device='cpu')
-        model.set_bias(y)
+        model.set_bias_from_targets(y)
         loss = rmse_model(model, X, y, self.n_epochs)
         value = 10
         self.assertTrue(loss < value, f'Expected loss = {loss} < {value}')
         model.save_model(os.path.join(self.test_dir, 'test_cosine_oblivious_gpu'))
         model._model.reset()
-        model.set_bias(y)
+        model.set_bias_from_targets(y)
         train_loss = model.fit(X, y, self.n_epochs)
         self.assertTrue(train_loss < value, f'Expected loss = {train_loss} < {value}')
         X_categorical, y_categorical = self.cat_data
         model._model.reset()
-        model.set_bias(y_categorical)
+        model.set_bias_from_targets(y_categorical)
         loss = rmse_model(model, X_categorical, y_categorical, self.n_epochs)
         value = 5000
         self.assertTrue(loss < value, f'Expected Categorical loss = {loss} < {value}')
@@ -211,19 +220,19 @@ class TestGBTSingle(unittest.TestCase):
                             gbrl_params=gbrl_params,
                             verbose=0,
                             device='cuda')
-        model.set_bias(y)
+        model.set_bias_from_targets(y)
         loss = rmse_model(model, X, y, self.n_epochs)
         value = 12
         self.assertTrue(loss < value, f'Expected loss = {loss} < {value}')
         model.save_model(os.path.join(self.test_dir, 'test_cosine_oblivious_gpu'))
         model._model.reset()
-        model.set_bias(y)
+        model.set_bias_from_targets(y)
         train_loss = model.fit(X, y, self.n_epochs)
         self.assertTrue(train_loss < value, f'Expected loss = {train_loss} < {value}')
 
         X_categorical, y_categorical = self.cat_data
         model._model.reset()
-        model.set_bias(y_categorical)
+        model.set_bias_from_targets(y_categorical)
         loss = rmse_model(model, X_categorical, y_categorical, self.n_epochs)
         value = 5000
         self.assertTrue(loss < value, f'Expected Categorical loss = {loss} < {value}')
@@ -246,18 +255,18 @@ class TestGBTSingle(unittest.TestCase):
                             gbrl_params=gbrl_params,
                             verbose=0,
                             device='cpu')
-        model.set_bias(y)
+        model.set_bias_from_targets(y)
         loss = rmse_model(model, X, y, self.n_epochs)
         self.assertTrue(loss < 0.5, f'Expected loss = {loss} < 0.5')
         model.save_model(os.path.join(self.test_dir, 'test_l2_cpu'))
         model._model.reset()
-        model.set_bias(y)
+        model.set_bias_from_targets(y)
         train_loss = model.fit(X, y, self.n_epochs)
         value = 0.5
         self.assertTrue(train_loss < value, f'Expected loss = {train_loss} < {value}')
         X_categorical, y_categorical = self.cat_data
         model._model.reset()
-        model.set_bias(y_categorical)
+        model.set_bias_from_targets(y_categorical)
         loss = rmse_model(model, X_categorical, y_categorical, self.n_epochs)
         value = 5000
         self.assertTrue(loss < value, f'Expected Categorical loss = {loss} < {value}')
@@ -281,19 +290,19 @@ class TestGBTSingle(unittest.TestCase):
                             gbrl_params=gbrl_params,
                             verbose=0,
                             device='cuda')
-        model.set_bias(y)
+        model.set_bias_from_targets(y)
         loss = rmse_model(model, X, y, self.n_epochs)
 
         self.assertTrue(loss < 0.5, f'Expected loss = {loss} < 0.5')
         model.save_model(os.path.join(self.test_dir, 'test_l2_gpu'))
         model._model.reset()
-        model.set_bias(y)
+        model.set_bias_from_targets(y)
         train_loss = model.fit(X, y, self.n_epochs)
         value = 0.5
         self.assertTrue(train_loss < value, f'Expected loss = {train_loss} < {value}')
         X_categorical, y_categorical = self.cat_data
         model._model.reset()
-        model.set_bias(y_categorical)
+        model.set_bias_from_targets(y_categorical)
         loss = rmse_model(model, X_categorical, y_categorical, self.n_epochs)
         value = 5000
         self.assertTrue(loss < value, f'Expected Categorical loss = {loss} < {value}')
@@ -316,19 +325,19 @@ class TestGBTSingle(unittest.TestCase):
                             gbrl_params=gbrl_params,
                             verbose=0,
                             device='cuda')
-        model.set_bias(y)
+        model.set_bias_from_targets(y)
         loss = rmse_model(model, X, y, self.n_epochs)
         self.assertTrue(loss < 10.0, f'Expected loss = {loss} < 10.0')
         model.save_model(os.path.join(self.test_dir, 'test_l2_oblivious_cpu'))
         model._model.reset()
-        model.set_bias(y)
+        model.set_bias_from_targets(y)
         train_loss = model.fit(X, y, self.n_epochs)
         value = 10.0
         self.assertTrue(train_loss < value, f'Expected loss = {train_loss} < {value}')
 
         X_categorical, y_categorical = self.cat_data
         model._model.reset()
-        model.set_bias(y_categorical)
+        model.set_bias_from_targets(y_categorical)
         loss = rmse_model(model, X_categorical, y_categorical, self.n_epochs)
         value = 5000
         self.assertTrue(loss < value, f'Expected Categorical loss = {loss} < {value}')
@@ -352,18 +361,18 @@ class TestGBTSingle(unittest.TestCase):
                             gbrl_params=gbrl_params,
                             verbose=0,
                             device='cuda')
-        model.set_bias(y)
+        model.set_bias_from_targets(y)
         loss = rmse_model(model, X, y, self.n_epochs)
         self.assertTrue(loss < 10.0, f'Expected loss = {loss} < 10.0')
         model.save_model(os.path.join(self.test_dir, 'test_l2_oblivious_gpu'))
         model._model.reset()
-        model.set_bias(y)
+        model.set_bias_from_targets(y)
         train_loss = model.fit(X, y, self.n_epochs)
         value = 10.0
         self.assertTrue(train_loss < value, f'Expected loss = {train_loss} < {value}')
         X_categorical, y_categorical = self.cat_data
         model._model.reset()
-        model.set_bias(y_categorical)
+        model.set_bias_from_targets(y_categorical)
         loss = rmse_model(model, X_categorical, y_categorical, self.n_epochs)
         value = 5000
         self.assertTrue(loss < value, f'Expected Categorical loss = {loss} < {value}')

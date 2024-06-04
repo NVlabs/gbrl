@@ -29,6 +29,10 @@ xcode command line tools should be installed installed
 ```
 pip install gbrl
 ```
+To install a cpu only version please run
+```
+CPU_ONLY=1 pip install gbrl
+```
 
 For GPU support GBRL looks for `CUDA_PATH` or `CUDA_HOME` environment variables. Unless found, GBRL will automatically compile only for CPU.
 
