@@ -7,16 +7,6 @@ Welcome to GBRL's documentation!
 ================================
 Gradient Boosting Reinforcement Learning (GBRL) is a Python-based GBT library designed and optimized for reinforcement learning (RL). GBRL is implemented in C++/CUDA aimed to seamlessly integrate within popular RL libraries. 
 
-
-Quickstart
-==========
-
-Install GBRL via pip:
-
-.. code-block:: console
-
-   $ pip install gbrl
-
 .. toctree::
    :maxdepth: 2
    :caption: User Guide:
