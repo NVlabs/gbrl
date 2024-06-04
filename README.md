@@ -68,5 +68,10 @@ For tree visualization make sure graphviz is installed before compilation.
 - Linear and constant learning rate scheduler - (CPU/GPU only constant)
 - Support for up to two different optimizers (e.g, policy/value) - **(CPU/GPU if both are SGD)
 
-## Citing 
+# Citation
+
+# Licenses
+Copyright © 2024, NVIDIA Corporation. All rights reserved.
+
+This work is made available under the NVIDIA Source Code License-NC. Click [here](https://nvlabs.github.io/gbrl/license.htm). to view a copy of this license.
 
