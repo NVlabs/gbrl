@@ -59,7 +59,7 @@ class CMakeBuild(build_ext):
             cmake_args.append('-DCMAKE_VERBOSE_MAKEFILE:BOOL=ON')
             build_args.append('--verbose')
 
-        if ('CPU_ONLY' not in os.environ and platform.system() != 'Darwin') or ('CPU_ONLY' in os.environ and os.environ['CPU_ONLY'] == '1'):
+        if ('CPU_ONLY' not in os.environ and platform.system() != 'Darwin') or ('CPU_ONLY' in os.environ and os.environ['CPU_ONLY'] != '1'):
             cmake_args.append('-DUSE_CUDA=ON')
         
         build_temp = self.build_temp

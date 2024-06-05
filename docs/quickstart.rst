@@ -7,8 +7,4 @@ Install GBRL via pip:
    
    pip install gbrl
 
-CPU only version is installed with the following command:
-
-.. code-block:: console
-
-   CPU_ONLY=1 pip install gbrl
+GBRL can be compiled and installed with a CPU version only even on CUDA capable machines by setting `CPU_ONLY=1` as an environment variable.
