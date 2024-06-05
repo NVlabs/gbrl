@@ -71,6 +71,8 @@ class CMakeBuild(build_ext):
         # Build the extension
         self.run_subprocess(['cmake', '--build', '.'] + build_args, build_temp)
 
+        self.move_built_library(extdir)
+
     def run_subprocess(self, cmd, cwd):
         log.info('Running command: {}'.format(' '.join(cmd)))
         try:
@@ -80,7 +82,7 @@ class CMakeBuild(build_ext):
             log.error(e.output)
             raise
 
-    def move_built_library(self, build_temp, extdir):
+    def move_built_library(self, build_temp):
         built_objects = []
         for root, _, files in os.walk(build_temp):
             for file in files:
@@ -89,10 +91,8 @@ class CMakeBuild(build_ext):
 
         if not built_objects:
             raise RuntimeError(f"Cannot find built library in {build_temp}")
-
         for built_object in built_objects:
-            dest_path = os.path.join(extdir, os.path.basename(built_object))
-            os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+            dest_path = os.path.join(os.path.dirname(__file__), 'gbrl')
             log.info(f'Moving {built_object} to {dest_path}')
             self.copy_file(built_object, dest_path)
 
@@ -100,7 +100,10 @@ setup(
     name="gbrl",
     ext_modules=[CMakeExtension('gbrl/gbrl_cpp', sourcedir='.')],
     cmdclass=dict(build_ext=CMakeBuild),
-    language='c++',
-    # packages=setuptools.find_packages(exclude=["gbrl.src.cpp", "gbrl.src.cuda"]),
-    packages=setuptools.find_packages(),
+    package_dir={'': 'gbrl'},  # Specify the root directory for packages
+    package_data={
+        '': ['src/cpp/*', 'src/cuda/*'],  # Include C++ and CUDA files
+    },
+    include_package_data=True,
+    packages=setuptools.find_packages(where='gbrl'),
 )
