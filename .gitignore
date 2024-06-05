@@ -9,6 +9,4 @@ builds/
 *.db
 *.tfevents
 *.json
-*.gbrl_model
-clean_repo.sh
 docs/_build/
