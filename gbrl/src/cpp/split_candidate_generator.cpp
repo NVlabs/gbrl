@@ -259,7 +259,9 @@ float scoreCosine(const int *indices, const int n_samples, const float *grads, c
     float *mean = new float[n_cols]; 
     float n_samples_f = static_cast<float>(n_samples);
     float n_samples_recip = 1.0f / n_samples_f;
+#ifndef _MSC_VER    
     #pragma omp simd
+#endif
     for (int d = 0; d < n_cols; ++d){
         mean[d] = 0;
     }
@@ -267,14 +269,18 @@ float scoreCosine(const int *indices, const int n_samples, const float *grads, c
     for (int i = 0; i < n_samples; ++i){
         int idx = indices[i];
         int row = idx * n_cols;
-        #pragma omp simd
+#ifndef _MSC_VER
+    #pragma omp simd
+#endif
         for (int d = 0; d < n_cols; ++d){
             mean[d] += grads[row + d];
         }
         squared_norms += grads_norm_raw[idx];
     }
 
+#ifndef _MSC_VER
     #pragma omp simd
+#endif
     for (int d = 0; d < n_cols; ++d){
         mean[d] *= n_samples_recip;
     }
@@ -290,19 +296,24 @@ float scoreL2(const int *indices, const int n_samples, const float *grads, const
     float n_samples_f = static_cast<float>(n_samples);
     float n_samples_recip = 1.0f / n_samples_f;
 
+#ifndef _MSC_VER
     #pragma omp simd
+#endif
     for (int d = 0; d < n_cols; ++d){
         mean[d] = 0.0f;
     }
+#ifndef _MSC_VER
     #pragma omp simd
+#endif
     for (int i = 0; i < n_samples * n_cols; ++i){
         int row = i / n_cols;
         int col = i % n_cols;
         mean[col] += grads[indices[row]*n_cols + col];
     }
     
-    // printf("l2 mean: [");
+#ifndef _MSC_VER
     #pragma omp simd
+#endif
     for (int d = 0; d < n_cols; ++d){
         mean[d] *= n_samples_recip;
     }

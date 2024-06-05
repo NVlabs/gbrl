@@ -105,7 +105,9 @@ SGDOptimizer::SGDOptimizer(schedulerFunc schedule_func, float init_lr, float sto
 void SGDOptimizer::step(float *theta, const float *raw_grad_theta, int t, int sample_idx){
     int start_idx = this->start_idx, end_idx = this->end_idx;
     float lr = this->scheduler->get_lr(t);
+#ifndef _MSC_VER
     #pragma omp simd
+#endif
     for (int i = start_idx; i < end_idx; i++){
         theta[sample_idx + i] -= lr * raw_grad_theta[i];
     }
@@ -259,7 +261,9 @@ void AdamOptimizer::step(float *theta, const float *raw_grad_theta, int t, int s
     float *raw_m = this->m, *raw_v = this->v;
     float alpha = lr*sqrt(1 - pow(this->beta_2, t_float)) / (1 - pow(this->beta_1, t_float));
 
+#ifndef _MSC_VER
     #pragma omp simd
+#endif
     for (int i = start_idx; i < end_idx; ++i){
         int index = sample_idx + i;
         raw_m[index] *= this->beta_1; 
