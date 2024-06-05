@@ -46,9 +46,10 @@ class CMakeBuild(build_ext):
             '-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=' + extdir,
             '-DPYTHON_EXECUTABLE=' + sys.executable,
             '-DPYTHON_INCLUDE_DIR=' + sysconfig.get_path('include'),
-            '-DPYTHON_LIBRARY=' + sysconfig.get_config_var('LIBRARY'),
             '-DCMAKE_BUILD_TYPE=' + cfg
         ]   
+        if sysconfig.get_config_var('LIBRARY') is not None:
+            cmake_args.append('-DPYTHON_LIBRARY=' + sysconfig.get_config_var('LIBRARY'))
         if 'CC' in os.environ:
             cmake_args.append('-DCMAKE_C_COMPILER=' + os.environ['CC'])
         if 'CXX' in os.environ:
@@ -59,7 +60,6 @@ class CMakeBuild(build_ext):
             build_args.append('--verbose')
 
         if ('CPU_ONLY' not in os.environ and platform.system() != 'Darwin') or ('CPU_ONLY' in os.environ and os.environ['CPU_ONLY'] == '1'):
-            print("found cuda_home")
             cmake_args.append('-DUSE_CUDA=ON')
         
         build_temp = self.build_temp

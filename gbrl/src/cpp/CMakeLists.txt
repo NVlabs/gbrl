@@ -33,12 +33,14 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
 elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -std=c++14 ${OpenMP_C_FLAGS} -Wall -Wpedantic -Wextra")
 elseif (WIN32)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /std:c++14 /O2 /W3")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /std:c++14 ${OpenMP_CXX_FLAGS} /O2 /W3 ")
+    message(STATUS ${OpenMP_CXX_FLAGS} )
 endif()
 
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")
 endif()
+
 
 add_library(gbrl_cpp_src OBJECT ${CPP_SOURCES})
 target_compile_definitions(gbrl_cpp_src PRIVATE MODULE_NAME="gbrl_cpp")
