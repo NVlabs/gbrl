@@ -997,10 +997,11 @@ void GBRL::plot_tree(int tree_idx, const std::string &filename){
     if (this->device == gpu){
         ensemble_data_dealloc(edata_cpu);
     }
+#endif
 #else
 throw std::runtime_error("GBRL compiled without Graphviz! Cannot plot model");
 #endif 
 }
-#endif
+
 
 

@@ -8,7 +8,7 @@
 ##############################################################################
 cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 # Set project details
-project(gbrl LANGUAGES CXX VERSION 1.0.0)
+project(gbrl LANGUAGES C CXX VERSION 1.0.0)
 # Set C++14
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -20,6 +20,23 @@ endif()
 if (POLICY CMP0148)
     cmake_policy(SET CMP0148 NEW)
 endif()
+
+# Get Python information from setup.py
+if (NOT DEFINED PYTHON_EXECUTABLE OR NOT DEFINED PYTHON_INCLUDE_DIR OR NOT DEFINED PYTHON_LIBRARY)
+    message(FATAL_ERROR "PYTHON_EXECUTABLE, PYTHON_INCLUDE_DIR, and PYTHON_LIBRARY must be set from setup.py")
+endif()
+
+# Use the provided Python paths
+set(Python3_EXECUTABLE ${PYTHON_EXECUTABLE} CACHE FILEPATH "Path to the Python executable")
+set(Python3_INCLUDE_DIR ${PYTHON_INCLUDE_DIR} CACHE FILEPATH "Path to the Python include directory")
+set(Python3_LIBRARY ${PYTHON_LIBRARY} CACHE FILEPATH "Path to the Python library")
+
+# Find Python 3
+find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
+
+# Include Python and pybind11 directories
+include_directories(${Python3_INCLUDE_DIRS} ${pybind11_INCLUDE_DIRS})
+link_directories(${Python3_LIBRARY_DIRS})
 #-- Options
 include(CMakeDependentOption)
 option(USE_CUDA  "Build with GPU acceleration" OFF)
@@ -67,7 +84,7 @@ endif()
 
 # Find required packages
 find_package(pybind11 CONFIG REQUIRED)
-find_program(GRAPHVIZ_DOT_EXECUTABLE dot)
+find_package(Graphviz)
 
 if(APPLE)
     find_package(OpenMP)
@@ -79,11 +96,11 @@ if(APPLE)
       set(OpenMP_C_FLAGS
         "-Xpreprocessor -fopenmp -I${HOMEBREW_LIBOMP_PREFIX}/include")
       set(OpenMP_CXX_FLAGS
-        "-Xpreprocessor -fopenmp -I${HOMEBREW_LIBOMP_PREFIX}/include")
+        "-Xpreprocessor -fopenmp -I${HOMEBREW_LIBOMP_PREFIX}/include")      
       set(OpenMP_C_LIB_NAMES omp)
       set(OpenMP_CXX_LIB_NAMES omp)
       set(OpenMP_omp_LIBRARY ${HOMEBREW_LIBOMP_PREFIX}/lib/libomp.dylib)
-      find_package(OpenMP REQUIRED)
+      find_package(OpenMP REQUIRED)  
     endif()
 else()
     find_package(OpenMP REQUIRED)
@@ -96,7 +113,7 @@ endif()
 include_directories(${pybind11_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/gbrl/src/cpp)
 
 # Graphviz
-if (GRAPHVIZ_DOT_EXECUTABLE)
+if (GRAPHVIZ_FOUND)
     add_definitions(-DUSE_GRAPHVIZ)
     if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
         include_directories(/usr/include/graphviz)
@@ -148,7 +165,7 @@ elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
     find_package(LLVM REQUIRED)
     include_directories(${LLVM_INCLUDE_DIRS})
     link_directories(${LLVM_LIBRARY_DIRS})
-    target_link_libraries(gbrl_cpp PRIVATE ${LLVM_LIBRARIES})
+    target_link_libraries(gbrl_cpp PRIVATE ${LLVM_LIBRARIES} OpenMP::OpenMP_CXX)
 elseif (WIN32)
     if (USE_CUDA)
         set(cuda_lib_path "${CUDAToolkit_ROOT_DIR}/lib/x64")
@@ -157,7 +174,7 @@ elseif (WIN32)
 endif()
 
 # Link Graphviz libraries if available
-if (GRAPHVIZ_DOT_EXECUTABLE)
+if (GRAPHVIZ_FOUND)
     if (CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Darwin")
         target_link_libraries(gbrl_cpp PRIVATE gvc cgraph)
     elseif (WIN32)

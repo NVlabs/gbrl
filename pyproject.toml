@@ -21,6 +21,7 @@ authors = [
 dependencies = [
     "pybind11[global]==2.11.1",
     "numpy",
+    "cmake>=3.18",
     "torch"
 ]
 classifiers = [

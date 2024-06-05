@@ -2,9 +2,12 @@ import os
 import sys
 import subprocess
 import setuptools
+import platform
 from setuptools import setup, Extension
 from setuptools.command.build_ext import build_ext
 from distutils import log
+import sysconfig
+
 
 class CMakeExtension(Extension):
     """Extension to integrate CMake build"""
@@ -42,15 +45,20 @@ class CMakeBuild(build_ext):
         cmake_args = [
             '-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=' + extdir,
             '-DPYTHON_EXECUTABLE=' + sys.executable,
+            '-DPYTHON_INCLUDE_DIR=' + sysconfig.get_path('include'),
+            '-DPYTHON_LIBRARY=' + sysconfig.get_config_var('LIBRARY'),
             '-DCMAKE_BUILD_TYPE=' + cfg
-        ]
-
+        ]   
+        if 'CC' in os.environ:
+            cmake_args.append('-DCMAKE_C_COMPILER=' + os.environ['CC'])
+        if 'CXX' in os.environ:
+            cmake_args.append('-DCMAKE_CXX_COMPILER=' + os.environ['CXX'])
         build_args = ['--config', cfg]
         if self.cmake_verbose:
             cmake_args.append('-DCMAKE_VERBOSE_MAKEFILE:BOOL=ON')
             build_args.append('--verbose')
 
-        if 'CPU_ONLY' not in os.environ or os.environ('CPU_ONLY', '1'):
+        if ('CPU_ONLY' not in os.environ and platform.system() != 'Darwin') or ('CPU_ONLY' in os.environ and os.environ['CPU_ONLY'] == '1'):
             print("found cuda_home")
             cmake_args.append('-DUSE_CUDA=ON')
         
