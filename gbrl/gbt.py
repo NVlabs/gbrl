@@ -281,7 +281,7 @@ class GradientBoostingTrees:
         self._model.print_tree(tree_idx)
 
     def plot_tree(self, tree_idx: int, filename: str) -> None:
-        """Plots tree using graphviz 
+        """Plots tree using (only works if GBRL was compiled with graphviz)
 
         Args:
             tree_idx (int): tree index to plot
