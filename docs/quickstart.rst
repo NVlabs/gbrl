@@ -1,13 +1,21 @@
 Quickstart
 ==========
 
-Install GBRL via pip:
+Prerequisites
+-----------
+
+python3.9 or higher 
+
+Installation
+------------
+
+To install GBRL via pip, use the following command:
 
 .. code-block:: console
    
    pip install gbrl
 
-CPU only version despite having a valid CUDA installation by setting `CUDA_ONLY=1` as an environment variable:
+To install the CPU-only version, even with a valid CUDA installation, set the CPU_ONLY environment variable:
 
 .. code-block:: console
 
@@ -15,21 +23,19 @@ CPU only version despite having a valid CUDA installation by setting `CUDA_ONLY=
    pip install gbrl
 
 Dependencies 
-============ 
+------------
 
 macOS
 ~~~~~~
 
-GBRL is dependent on LLVM and OpenMP. 
-
-These dependencies can be installed via Homebrew:
+GBRL requires LLVM and OpenMP. These can be installed using Homebrew:
 
 .. code-block:: console
 
    brew install libomp llvm
 
 
-Once installed make sure that the appropriate environment variables are set:
+After installation, set the necessary environment variables:
 
 .. code-block:: bash
 
@@ -43,8 +49,8 @@ Once installed make sure that the appropriate environment variables are set:
 CUDA
 ~~~~ 
 
-Make sure that ``CUDA_HOME`` is set. 
-For integration with Microsoft Visual Studio make sure to copy the following files:
+Ensure that ``CUDA_HOME`` is set. 
+For integration with Microsoft Visual Studio, copy the following files:
 
 .. code-block:: console
 
@@ -57,11 +63,10 @@ For integration with Microsoft Visual Studio make sure to copy the following fil
 
 into ``<visual studio path>\BuildTools\MSBuild\Microsoft\VC\v160\BuildCustomizations``.
 
-Once GBRL is installed, verify that CUDA is enabled by running
+After installing GBRL, verify that CUDA is enabled:
  
 .. code-block:: python
-   
-   # Verify that GPU is visible by running
+
    import gbrl
 
    print(gbrl.cuda_available())
@@ -69,7 +74,8 @@ Once GBRL is installed, verify that CUDA is enabled by running
 
 Graphviz (optional)
 ~~~~~~~~~~~~~~~~~~~
-For tree visualization make sure graphviz is installed before compilation. 
+
+To enable tree visualization, ensure Graphviz is installed before compiling.
 
 
  
