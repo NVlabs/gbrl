@@ -999,7 +999,9 @@ void GBRL::plot_tree(int tree_idx, const std::string &filename){
     }
 #endif
 #else
-throw std::runtime_error("GBRL compiled without Graphviz! Cannot plot model");
+    (void)tree_idx;
+    (void)filename;
+    throw std::runtime_error("GBRL compiled without Graphviz! Cannot plot model");
 #endif 
 }
 

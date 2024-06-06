@@ -9,42 +9,12 @@ GBRL is a Python-based GBT library designed and optimized for reinforcement lear
 
 
 ## Getting started
-
-### Dependencies 
-#### MAC OS 
-```
-llvm
-openmp
-```
-
-Make sure to run:
-```
-brew install libomp
-brew install llvm
- ```
-
-xcode command line tools should be installed installed 
-
-### Installation
+GBRL is installed via
 ```
 pip install gbrl
 ```
-To install a cpu only version please run
-```
-CPU_ONLY=1 pip install gbrl
-```
 
-For GPU support GBRL looks for `CUDA_PATH` or `CUDA_HOME` environment variables. Unless found, GBRL will automatically compile only for CPU.
-
-Verify that GPU is visible by running
-```
-import gbrl
-
-gbrl.cuda_available()
-```
-
-*OPTIONAL*  
-For tree visualization make sure graphviz is installed before compilation. 
+For furthere installation details and dependencies see the documentation. 
 
 ***Usage Example see `tutorial.ipynb`***
 
