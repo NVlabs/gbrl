@@ -16,7 +16,7 @@ CPU only version despite having a valid CUDA installation by setting `CUDA_ONLY=
 Dependencies 
 ============ 
 
-MAC OS
+macOS
 ~~~~~~
 
 GBRL is dependent on LLVM and OpenMP. 
@@ -46,6 +46,7 @@ Make sure that ``CUDA_HOME`` is set.
 For integration with Microsoft Visual Studio make sure to copy the following files:
 
 .. code-block:: console
+   
    CUDA <cuda_version>.props
    CUDA <cuda_version>.targets
    CUDA <cuda_version>.xml
