@@ -25,7 +25,7 @@ float MultiRMSE::get_loss_and_gradients(const float *raw_preds, const float *raw
         int thread_id = omp_get_thread_num();
         int start_idx = thread_id * elements_per_thread;
         int end_idx = (thread_id == n_threads - 1) ? n_elements : start_idx + elements_per_thread;
-#ifndef _MSC_VER
+#if !defined(_MSC_VER) && !defined(__APPLE__)
     #pragma omp simd
 #endif
         for (int i = start_idx; i < end_idx; ++i){
@@ -57,7 +57,7 @@ float MultiRMSE::get_loss(const float *raw_preds, const float *raw_targets, cons
             int end_idx = (thread_id == n_threads - 1) ? n_samples : start_idx + samples_per_thread;
             for (int sample_idx = start_idx; sample_idx < end_idx; ++sample_idx){
                 row = sample_idx * output_dim;
-#ifndef _MSC_VER
+#if !defined(_MSC_VER) && !defined(__APPLE__)
     #pragma omp simd
 #endif 
                 for (int d = 0; d < output_dim; ++d){

@@ -112,23 +112,30 @@ if(APPLE)
     find_package(OpenMP)
     if(NOT OpenMP_FOUND)
       # Try again with extra path info; required for libomp 15+ from Homebrew
-      execute_process(COMMAND brew --prefix libomp
-                      OUTPUT_VARIABLE HOMEBREW_LIBOMP_PREFIX
-                      OUTPUT_STRIP_TRAILING_WHITESPACE)
-      set(OpenMP_C_FLAGS
+        execute_process(COMMAND brew --prefix libomp
+                        OUTPUT_VARIABLE HOMEBREW_LIBOMP_PREFIX
+                        OUTPUT_STRIP_TRAILING_WHITESPACE)
+        set(OpenMP_C_FLAGS
         "-Xpreprocessor -fopenmp -I${HOMEBREW_LIBOMP_PREFIX}/include")
-      set(OpenMP_CXX_FLAGS
+        set(OpenMP_CXX_FLAGS
         "-Xpreprocessor -fopenmp -I${HOMEBREW_LIBOMP_PREFIX}/include")      
-      set(OpenMP_C_LIB_NAMES omp)
-      set(OpenMP_CXX_LIB_NAMES omp)
-      set(OpenMP_omp_LIBRARY ${HOMEBREW_LIBOMP_PREFIX}/lib/libomp.dylib)
-      find_package(OpenMP REQUIRED)  
+        set(OpenMP_C_LIB_NAMES omp)
+        set(OpenMP_CXX_LIB_NAMES omp)
+        set(OpenMP_omp_LIBRARY ${HOMEBREW_LIBOMP_PREFIX}/lib/libomp.dylib)
+        find_package(OpenMP REQUIRED)  
     endif()
 else()
     find_package(OpenMP REQUIRED)
     set(OpenMP_CXX_FLAGS ${OpenMP_CXX_FLAGS})
     set(OpenMP_CXX_LIB_NAMES ${OpenMP_CXX_LIB_NAMES})
     set(OpenMP_omp_LIBRARY ${OpenMP_omp_LIBRARY})
+endif()
+
+# Ensure OpenMP flags and directories are applied
+if (OpenMP_FOUND)
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}")
 endif()
 
 # Include directories
@@ -192,7 +199,6 @@ elseif (WIN32)
     target_link_libraries(gbrl_cpp PRIVATE OpenMP::OpenMP_CXX)
     if (USE_CUDA)
         set(cuda_lib_path "${CUDAToolkit_ROOT_DIR}/lib/x64")
-        # target_link_libraries(gbrl_cpp PRIVATE ${cuda_lib_path}/cudart.lib)
         target_link_libraries(gbrl_cpp PRIVATE CUDA::cudart)
     endif()
 endif()
