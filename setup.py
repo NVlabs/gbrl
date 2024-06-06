@@ -100,10 +100,11 @@ setup(
     name="gbrl",
     ext_modules=[CMakeExtension('gbrl/gbrl_cpp', sourcedir='.')],
     cmdclass=dict(build_ext=CMakeBuild),
-    package_dir={'': 'gbrl'},  # Specify the root directory for packages
+    package_dir={'gbrl': 'gbrl'},  # Specify the root directory for packages
     package_data={
-        '': ['src/cpp/*', 'src/cuda/*'],  # Include C++ and CUDA files
+        'gbrl': ['src/cpp/*', 'src/cuda/*'],  # Include C++ and CUDA files
     },
+    packages=['gbrl'],
     include_package_data=True,
-    packages=setuptools.find_packages(where='gbrl'),
+    # packages=setuptools.find_packages(where='gbrl'),
 )

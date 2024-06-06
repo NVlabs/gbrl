@@ -1,7 +1,7 @@
 # Gradient Boosting Reinforcement Learning (GBRL)
 GBRL is a Python-based GBT library designed and optimized for reinforcement learning (RL). GBRL is implemented in C++/CUDA aimed to seamlessly integrate within popular RL libraries. 
 
-[![Build Status](https://img.shields.io/github/workflow/status/Nvlabs/gbrl/CI)](https://github.com/NVlabs/gbrl/actions)
+<!-- [![Build Status](https://img.shields.io/github/workflow/status/Nvlabs/gbrl/CI)](https://github.com/NVlabs/gbrl/actions) -->
 [![License](https://img.shields.io/badge/license-NVIDIA-green.svg)](https://nvlabs.github.io/gbrl/license.htm)
 [![PyPI version](https://badge.fury.io/py/gbrl.svg)](https://badge.fury.io/py/gbrl)
 
