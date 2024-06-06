@@ -10,6 +10,7 @@ Install GBRL via pip:
 CPU only version despite having a valid CUDA installation by setting `CUDA_ONLY=1` as an environment variable:
 
 .. code-block:: console
+
    export CPU_ONLY=1 
    pip install gbrl
 
@@ -46,7 +47,7 @@ Make sure that ``CUDA_HOME`` is set.
 For integration with Microsoft Visual Studio make sure to copy the following files:
 
 .. code-block:: console
-   
+
    CUDA <cuda_version>.props
    CUDA <cuda_version>.targets
    CUDA <cuda_version>.xml
@@ -59,6 +60,7 @@ into ``<visual studio path>\BuildTools\MSBuild\Microsoft\VC\v160\BuildCustomizat
 Once GBRL is installed, verify that CUDA is enabled by running
  
 .. code-block:: python
+   
    # Verify that GPU is visible by running
    import gbrl
 
