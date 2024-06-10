@@ -293,10 +293,6 @@ void ensemble_data_dealloc(ensembleData *edata){
 
 void export_ensemble_data(std::ofstream& header_file, const std::string& model_name, ensembleData *edata, ensembleMetaData *metadata, deviceType device, std::vector<Optimizer*> opts)
 {
-    if (!header_file.is_open() || header_file.fail()) {
-        std::cerr << "Error file is not open for writing: " << std::endl;
-        throw std::runtime_error("Error opening header_file");
-    }
     ensembleData *edata_cpu = nullptr;
 #ifdef USE_CUDA
     if (device == gpu){
@@ -315,6 +311,8 @@ void export_ensemble_data(std::ofstream& header_file, const std::string& model_n
         optimizerAlgo algo = opts[opt_idx]->getAlgo();
         if (algo != SGD){
             std::cerr << "Error. Can only export SGD optimizers" << std::endl;
+            header_file.close();
+            throw std::runtime_error("Error. Can only export SGD optimizers");
             return;
         }
     }

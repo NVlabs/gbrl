@@ -707,6 +707,7 @@ int GBRL::exportModel(const std::string& filename, const std::string& modelname)
     if (this->metadata->grow_policy != OBLIVIOUS) {
         std::cerr << "Export is supported only for Oblivious trees." << std::endl;
         header_file.close();
+        throw std::runtime_error("Export is supported only for Oblivious trees.");
         return -1;
     }
     export_ensemble_data(header_file, modelname, this->edata, this->metadata, this->device, this->opts);

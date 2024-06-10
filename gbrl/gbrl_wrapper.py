@@ -174,9 +174,11 @@ class GBTWrapper:
         assert self.cpp_model is not None, "Can't export non-existent model!"
         if modelname is None:
             modelname = ""
-        status = self.cpp_model.export(filename, modelname)
-        assert status == 0, "Failed to export model"
-
+        try:
+            status = self.cpp_model.export(filename, modelname)
+            assert status == 0, "Failed to export model"
+        except RuntimeError as e:
+            print(f"Caught an exception in GBRL: {e}")
     @classmethod
     def load(cls, filename: str) -> "GBTWrapper":
         filename = filename.rstrip('.')
