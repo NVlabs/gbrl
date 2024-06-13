@@ -12,6 +12,7 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <iomanip>
 #include <tuple>
 #include <numeric>
 #include <unordered_set> 
@@ -909,7 +910,6 @@ void GBRL::plot_tree(int tree_idx, const std::string &filename){
     int stop_leaf_idx = tree_idx == n_trees - 1 ? this->metadata->n_leaves  : edata_cpu->tree_indices[tree_idx+1];
     
     for (int leaf_idx = edata_cpu->tree_indices[tree_idx]; leaf_idx < stop_leaf_idx; ++leaf_idx){
-        // std::cout << "Working on leaf idx: " << leaf_idx << "/" << stop_leaf_idx << std::endl;
         int nodeIndex = 0, parentIdx = 0; 
         int idx = (this->metadata->grow_policy == OBLIVIOUS) ? tree_idx : leaf_idx;
         int depth = edata_cpu->depths[idx];
@@ -946,20 +946,27 @@ void GBRL::plot_tree(int tree_idx, const std::string &filename){
             if (nodesMap.find(nodeIndex) == nodesMap.end()) {
                 std::strcpy(buffer, std::to_string(nodeIndex).c_str());
                 currentNode = agnode(g, buffer, true);
-                std::string nodeLabel = is_numeric ? std::to_string(feature_idx) + ", value > " + std::to_string(feature_value) : std::to_string(feature_idx + this->metadata->n_num_features) + ", value == " + std::string(categorical_value) ;
-            
-                std::strcpy(buffer, nodeLabel.c_str());
+                std::stringstream nodeLabel;
+                nodeLabel << std::fixed << std::setprecision(3);
+                if (is_numeric) {
+                    nodeLabel << feature_idx << ", value > " << feature_value;
+                } else {
+                    nodeLabel << feature_idx + this->metadata->n_num_features << ", value == " << categorical_value;
+                }
+                std::strcpy(buffer, nodeLabel.str().c_str());
+
                 agsafeset(currentNode, (char*)"label", buffer, (char*)"");
                 nodesMap[nodeIndex] = currentNode;
             } else {
                 currentNode = nodesMap[nodeIndex];
             }
 
-            std::string edgeLabel = (inequality_direction ? "Yes\nweight: " : "No\nweight: ") + std::to_string(edge_weight);
-            std::string edgeKey = std::to_string(parentIdx) + "->" + std::to_string(nodeIndex) + " " + edgeLabel;
+            std::stringstream edgeLabel;
+            edgeLabel << (inequality_direction ? "Yes\nweight: " : "No\nweight: ") << std::fixed << std::setprecision(3) << edge_weight;
+            std::string edgeKey = std::to_string(parentIdx) + "->" + std::to_string(nodeIndex) + " " + edgeLabel.str();
 
             if (edgesSet.find(edgeKey) == edgesSet.end()) {
-                std::strcpy(buffer, edgeLabel.c_str());
+                std::strcpy(buffer, edgeLabel.str().c_str());
                 edge = agedge(g, parentNode, currentNode, buffer, true);
                 agsafeset(edge, (char*)"label", buffer, (char*)"");
                 edgesSet.insert(edgeKey);  
@@ -983,10 +990,10 @@ void GBRL::plot_tree(int tree_idx, const std::string &filename){
         agsafeset(currentNode, (char*)"color", (char*)"red", (char*)"");
         std::strcpy(buffer, leafLabel.c_str());  // Setting the displayed label
         agset(currentNode, (char*)"label", buffer);
-        
-        std::string edgeLabel = edata_cpu->inequality_directions[leaf_idx*this->metadata->max_depth + depth - 1] ? "Yes\nweight: " + std::to_string(edata_cpu->edge_weights[leaf_idx*this->metadata->max_depth + depth - 1]) : "No\nweight: "  + std::to_string(edata_cpu->edge_weights[leaf_idx*this->metadata->max_depth + depth - 1]);
-        // std::string edgeLabel = (inequality_direction ? "Yes\nweight: " : "No\nweight: ") + std::to_string(edge_weight);
-        std::strcpy(buffer, edgeLabel.c_str());
+        std::stringstream edgeLabel;
+        edgeLabel << (edata_cpu->inequality_directions[leaf_idx * this->metadata->max_depth + depth - 1] ? "Yes\nweight: " : "No\nweight: ")
+                  << std::fixed << std::setprecision(3) << edata_cpu->edge_weights[leaf_idx * this->metadata->max_depth + depth - 1];
+        std::strcpy(buffer, edgeLabel.str().c_str());
         agsafeset(edge, (char*)"label", buffer, (char*)"");  // Fixing edge label
     }
 

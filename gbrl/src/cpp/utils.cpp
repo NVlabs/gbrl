@@ -10,6 +10,7 @@
 #include <string>
 #include <fstream>
 #include <sstream>
+#include <iomanip>
 
 #include "utils.h"
 #include "config.h"
@@ -17,6 +18,7 @@
 
 std::string VectoString(const float* vec, const int vec_size){
     std::ostringstream oss;
+    oss << std::fixed << std::setprecision(3);  // Set precision to 3
     if (vec_size > 1)
         oss << "[";
     for (int i = 0; i < vec_size; ++i) {

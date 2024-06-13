@@ -266,8 +266,11 @@ class GBTWrapper:
             print(f"Caught an exception in GBRL: {e}")
     
     def set_device(self, device: str) -> None:
-        self.cpp_model.to_device(device)
-        self.device = device
+        try:
+            self.cpp_model.to_device(device)
+            self.device = device
+        except RuntimeError as e:
+            print(f"Caught an exception in GBRL: {e}")
     
     def predict(self, features: Union[np.array, th.Tensor], start_idx: int=0, stop_idx: int=None) -> np.array:
         num_features, cat_features = preprocess_features(features)
@@ -320,7 +323,7 @@ class GBTWrapper:
         copy_.iteration = self.iteration 
         copy_.total_iterations = self.total_iterations
         if self.cpp_model is not None:
-            copy_.model = GBRL(self.cpp_model)
+            copy_.cpp_model = GBRL(self.cpp_model)
         if self.student_model is not None:
             copy_.student_model = GBRL(self.student_model)
         return copy_
