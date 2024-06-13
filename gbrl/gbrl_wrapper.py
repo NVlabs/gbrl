@@ -261,7 +261,7 @@ class GBTWrapper:
     
     def plot_tree(self, tree_idx: int, filename: str) -> None:
         try:
-            self.cpp_model.print_tree(tree_idx, filename)
+            self.cpp_model.plot_tree(tree_idx, filename)
         except RuntimeError as e:
             print(f"Caught an exception in GBRL: {e}")
     

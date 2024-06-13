@@ -919,6 +919,7 @@ void GBRL::plot_tree(int tree_idx, const std::string &filename){
         float feature_value = edata_cpu->feature_values[cond_idx];
         char *categorical_value = edata_cpu->categorical_values + cond_idx * MAX_CHAR_SIZE;
         bool inequality_direction  = edata_cpu->inequality_directions[leaf_idx*this->metadata->max_depth];
+        float edge_weight  = edata_cpu->edge_weights[leaf_idx*this->metadata->max_depth];
         bool is_numeric  = edata_cpu->is_numerics[cond_idx];
         
         if (nodesMap.find(nodeIndex) == nodesMap.end()) {  // Check if the root node already exists
@@ -954,7 +955,7 @@ void GBRL::plot_tree(int tree_idx, const std::string &filename){
                 currentNode = nodesMap[nodeIndex];
             }
 
-            std::string edgeLabel = inequality_direction ? "Yes" : "No";
+            std::string edgeLabel = (inequality_direction ? "Yes\nweight: " : "No\nweight: ") + std::to_string(edge_weight);
             std::string edgeKey = std::to_string(parentIdx) + "->" + std::to_string(nodeIndex) + " " + edgeLabel;
 
             if (edgesSet.find(edgeKey) == edgesSet.end()) {
@@ -967,6 +968,7 @@ void GBRL::plot_tree(int tree_idx, const std::string &filename){
             parentNode = currentNode;
             parentIdx = nodeIndex;
             inequality_direction = edata_cpu->inequality_directions[leaf_idx*this->metadata->max_depth + i];
+            edge_weight = edata_cpu->edge_weights[leaf_idx*this->metadata->max_depth + i];
 
         }
     
@@ -982,7 +984,8 @@ void GBRL::plot_tree(int tree_idx, const std::string &filename){
         std::strcpy(buffer, leafLabel.c_str());  // Setting the displayed label
         agset(currentNode, (char*)"label", buffer);
         
-        std::string edgeLabel = edata_cpu->inequality_directions[leaf_idx*this->metadata->max_depth + depth - 1] ? "Yes" : "No";
+        std::string edgeLabel = edata_cpu->inequality_directions[leaf_idx*this->metadata->max_depth + depth - 1] ? "Yes\nweight: " + std::to_string(edata_cpu->edge_weights[leaf_idx*this->metadata->max_depth + depth - 1]) : "No\nweight: "  + std::to_string(edata_cpu->edge_weights[leaf_idx*this->metadata->max_depth + depth - 1]);
+        // std::string edgeLabel = (inequality_direction ? "Yes\nweight: " : "No\nweight: ") + std::to_string(edge_weight);
         std::strcpy(buffer, edgeLabel.c_str());
         agsafeset(edge, (char*)"label", buffer, (char*)"");  // Fixing edge label
     }

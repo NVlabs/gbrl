@@ -23,6 +23,7 @@ struct splitCondition {
     int feature_idx;
     float feature_value;
     bool inequality_direction;
+    float edge_weight;
     char *categorical_value;
 };
 
@@ -140,6 +141,7 @@ struct ensembleData {
     // leaf data
     int* feature_indices;
     float* feature_values;
+    float *edge_weights;
     bool* is_numerics;
     bool* inequality_directions; 
     char* categorical_values;  

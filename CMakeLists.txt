@@ -106,7 +106,7 @@ if(NOT pybind11_FOUND)
     list(APPEND CMAKE_PREFIX_PATH ${pybind11_DIR})
     find_package(pybind11 CONFIG REQUIRED)
 endif()
-find_package(Graphviz CONFIG QUIET)
+
 
 if(APPLE)
     find_package(OpenMP)
@@ -141,15 +141,20 @@ endif()
 # Include directories
 include_directories(${pybind11_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/gbrl/src/cpp)
 
+# find_package(GRAPHVIZ_DOT_EXECUTABLE DOT CONFIG QUIET)
+find_program(GRAPHVIZ_DOT_EXECUTABLE dot)
 # Graphviz
-if (GRAPHVIZ_FOUND)
+if (GRAPHVIZ_DOT_EXECUTABLE)
     add_definitions(-DUSE_GRAPHVIZ)
+    message(STATUS "Found Graphviz")
     if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
         include_directories(/usr/include/graphviz)
     elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
         execute_process(COMMAND brew --prefix graphviz OUTPUT_VARIABLE GRAPHVIZ_PREFIX OUTPUT_STRIP_TRAILING_WHITESPACE)
         include_directories(${GRAPHVIZ_PREFIX}/include/graphviz)
     endif()
+else()
+    message(STATUS "Did not Find Graphviz")
 endif()
 
 # Add subdirectories for cpp and cuda
@@ -204,7 +209,7 @@ elseif (WIN32)
 endif()
 
 # Link Graphviz libraries if available
-if (GRAPHVIZ_FOUND)
+if (GRAPHVIZ_DOT_EXECUTABLE)
     if (CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Darwin")
         target_link_libraries(gbrl_cpp PRIVATE gvc cgraph)
     elseif (WIN32)

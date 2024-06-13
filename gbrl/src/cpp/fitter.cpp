@@ -295,8 +295,6 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
 #else
                 int thread_num = 0;
 #endif
-                
-                
                 float local_best_score = -INFINITY;
                 int local_chosen_idx = -1;
                 int start_idx = thread_num * batch_size;
@@ -474,6 +472,7 @@ void Fitter::update_ensemble_per_leaf(ensembleData *edata, ensembleMetaData *met
             edata->feature_indices[row_idx+ i] = node->split_conditions[i].feature_idx;
             edata->feature_values[row_idx+ i] = node->split_conditions[i].feature_value;
             edata->inequality_directions[row_idx + i] = node->split_conditions[i].inequality_direction;
+            edata->edge_weights[row_idx + i] = node->split_conditions[i].edge_weight;
         }
     }
     metadata->n_leaves += 1;
@@ -499,6 +498,7 @@ void Fitter::update_ensemble_per_tree(ensembleData *edata, ensembleMetaData *met
                 edata->feature_indices[row_idx+ i] = node->split_conditions[i].feature_idx;
                 edata->feature_values[row_idx+ i] = node->split_conditions[i].feature_value;
                 edata->inequality_directions[metadata->n_leaves*metadata->max_depth + i] = node->split_conditions[i].inequality_direction;
+                edata->edge_weights[metadata->n_leaves*metadata->max_depth + i] = node->split_conditions[i].edge_weight;
             }
         }
         metadata->n_leaves += 1;
