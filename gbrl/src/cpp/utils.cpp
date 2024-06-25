@@ -71,3 +71,6 @@ void display_header(serializationHeader header){
     std::cout << "Version " << header.major_version << "."
                 << header.minor_version << "." << header.patch_version << std::endl;
 }
+
+template int count_distinct<int>(int* arr, int n);
+template int count_distinct<double>(double* arr, int n);

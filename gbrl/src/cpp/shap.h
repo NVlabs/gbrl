@@ -10,12 +10,13 @@ struct shapData {
     const float *base_poly;
     const float *offset_poly;
     const float *norm_values;
-    bool *active_nodes; 
+    bool *active_nodes;
+    int *feature_prev_node; 
+    int *left_children;
+    int *right_children;
 };
 
-shapData* alloc_shap_data(const ensembleMetaData *metadata, const ensembleData *edata, const int tree_idx){
-    
-}
+shapData* alloc_shap_data(const ensembleMetaData *metadata, const ensembleData *edata, const int tree_idx);
 
 void shap_inference(const ensembleMetaData *metadata, const ensembleData *edata, shapData *shap_data, const dataSet *dataset, float *shap_values);
 

@@ -155,6 +155,12 @@ struct serializationHeader {
     uint32_t reserved2 = 0;
 };
 
+struct nodeInfo {
+    int idx;
+    int depth;
+    
+};
+
 scoreFunc stringToScoreFunc(std::string str);
 generatorType stringTogeneratorType(std::string str);
 growPolicy stringTogrowPolicy(std::string str);
