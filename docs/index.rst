@@ -5,7 +5,7 @@
 
 Welcome to GBRL's documentation!
 ================================
-Gradient Boosting Reinforcement Learning (GBRL) is a Python-based GBT library designed and optimized for reinforcement learning (RL). GBRL is implemented in C++/CUDA aimed to seamlessly integrate within popular RL libraries. 
+GBRL is a Python-based Gradient Boosting Trees (GBT) library, similar to popular packages such as `XGBoost <https://xgboost.readthedocs.io/en/stable/>`__ , `CatBoos <https://catboost.ai/>`__ , but specifically designed and optimized for reinforcement learning (RL). GBRL is implemented in C++/CUDA aimed to seamlessly integrate within popular RL libraries. 
 
 .. toctree::
    :maxdepth: 2
