@@ -6,10 +6,10 @@ GBRL is a Python-based GBT library designed and optimized for reinforcement lear
 [![PyPI version](https://badge.fury.io/py/gbrl.svg)](https://badge.fury.io/py/gbrl)
 
 ## Key Features: 
-- GBTs Tailored for RL: GBRL adapts the power of Gradient Boosting Trees to the unique challenges of RL environments, including non-stationarity and delayed feedback.
+- GBTs Tailored for RL: GBRL adapts the power of Gradient Boosting Trees to the unique challenges of RL environments, including non-stationarity and the absence of predefined targets.
 - Optimized Actor-Critic Architecture: GBRL features a shared tree-based structure for policy and value functions. This significantly reduces memory and computational overhead, enabling it to tackle complex, high-dimensional RL problems.
 - Hardware Acceleration: GBRL leverages CUDA for hardware-accelerated computation, ensuring efficiency and speed.
-- Seamless Integration: GBRL is designed for easy integration with popular RL libraries, making it readily accessible for practitioners.
+- Seamless Integration: GBRL is designed for easy integration with popular RL libraries. We implemented GBT-based actor-critic algorithm implementations (A2C, PPO, and AWR) in stable_baselines3 [GBRL_SB3](https://github.com/NVlabs/gbrl_sb3). 
 
 
 ## Getting started
