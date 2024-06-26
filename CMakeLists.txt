@@ -73,21 +73,36 @@ if (USE_CUDA AND NOT APPLE)
             mark_as_advanced(CMAKE_CUDA_HOST_COMPILER)
             message(STATUS "Configured CUDA host compiler: ${CMAKE_CUDA_HOST_COMPILER}")
         endif()
-        enable_language(CUDA)
-        if(${CMAKE_CUDA_COMPILER_VERSION} VERSION_LESS 11.0)
-            message(FATAL_ERROR "CUDA version must be at least 11.0!")
+        if(DEFINED CMAKE_CUDA_COMPILER)  # Check if it's already set
+            message(STATUS "CMAKE_CUDA_COMPILER is set to: ${CMAKE_CUDA_COMPILER}")
+        elseif(DEFINED ENV{CUDACXX})     # Check the environment variable
+            set(CMAKE_CUDA_COMPILER $ENV{CUDACXX} CACHE FILEPATH "CUDA Compiler")
+            message(STATUS "CMAKE_CUDA_COMPILER set to $ENV{CUDACXX} from environment.")
+        else()                           # Neither is set, try to find it automatically
+            set(CMAKE_CUDA_COMPILER "${CUDAToolkit_BIN_DIR}/nvcc")  # Adjust the path if necessary
         endif()
-        if(DEFINED GPU_COMPUTE_VER)
-            compute_cmake_cuda_archs("${GPU_COMPUTE_VER}")
+            # Validate the compiler before enabling CUDA
+        if (NOT EXISTS ${CMAKE_CUDA_COMPILER})
+            message(WARNING "CUDA toolkit found, but could not locate nvcc at ${CMAKE_CUDA_COMPILER}. Disabling GPU acceleration.")
+            set(USE_CUDA OFF)
+        endif()
+        if (USE_CUDA)
+            enable_language(CUDA)
+            if(${CMAKE_CUDA_COMPILER_VERSION} VERSION_LESS 11.0)
+                message(FATAL_ERROR "CUDA version must be at least 11.0!")
+            endif()
+            if(DEFINED GPU_COMPUTE_VER)
+                compute_cmake_cuda_archs("${GPU_COMPUTE_VER}")
+            endif()
         endif()
     else()
         message(STATUS "CUDA not found, compiling for CPU only")
         set(USE_CUDA OFF)
     endif()
-else()
+endif()
+if(USE_CUDA)
     message(STATUS "Compiling for CPU only")
 endif()
-
 # Find required packages
 # Attempt to find pybind11 automatically
 find_package(pybind11 CONFIG QUIET)
