@@ -156,9 +156,11 @@ struct serializationHeader {
 };
 
 struct nodeInfo {
-    int idx;
+    int idx; // relative idx for current tree
+    int parent_idx;  // relative idx for current tree
     int depth;
-    
+    bool is_left;
+    bool is_right;
 };
 
 scoreFunc stringToScoreFunc(std::string str);

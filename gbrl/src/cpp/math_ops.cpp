@@ -508,6 +508,28 @@ float* copy_mat(const float *mat, const int size, const int par_th){
     return copied_mat;
 }
 
+void _copy_mat(float *mat_l, const float *mat_r, const int size, const int par_th){
+     int n_threads = calculate_num_threads(size, par_th);
+     if (n_threads > 1){
+        int elements_per_thread = size / n_threads;
+        omp_set_num_threads(n_threads);
+        #pragma omp parallel
+        {
+            int thread_id = omp_get_thread_num();
+            int start_idx = thread_id * elements_per_thread;
+            int end_idx = (thread_id == n_threads - 1) ? size : start_idx + elements_per_thread;
+#ifndef _MSC_VER
+    #pragma omp simd
+#endif
+            for (int i = start_idx; i < end_idx; ++i)
+                mat_l[i] = mat_r[i];
+        }
+     } else {
+        for (int i = 0; i < size; ++i)
+            mat_l[i] = mat_r[i];
+    }
+}
+
 void _element_wise_addition(float *mat_l, const float *mat_r, const int size, const int par_th){
      int n_threads = calculate_num_threads(size, par_th);
      if (n_threads > 1){
@@ -527,6 +549,28 @@ void _element_wise_addition(float *mat_l, const float *mat_r, const int size, co
      } else {
         for (int i = 0; i < size; ++i)
             mat_l[i] += mat_r[i];
+    }
+}
+
+void _element_wise_multiplication(float *mat_l, const float *mat_r, const int size, const int par_th){
+     int n_threads = calculate_num_threads(size, par_th);
+     if (n_threads > 1){
+        int elements_per_thread = size / n_threads;
+        omp_set_num_threads(n_threads);
+        #pragma omp parallel
+        {
+            int thread_id = omp_get_thread_num();
+            int start_idx = thread_id * elements_per_thread;
+            int end_idx = (thread_id == n_threads - 1) ? size : start_idx + elements_per_thread;
+#ifndef _MSC_VER
+    #pragma omp simd
+#endif
+            for (int i = start_idx; i < end_idx; ++i)
+                mat_l[i] *= mat_r[i];
+        }
+     } else {
+        for (int i = 0; i < size; ++i)
+            mat_l[i] *= mat_r[i];
     }
 }
 

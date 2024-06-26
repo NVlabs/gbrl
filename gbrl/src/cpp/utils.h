@@ -32,27 +32,8 @@ inline int calculate_num_threads(int total_elements, int min_elements_per_thread
 }
 
 template<typename T>
-inline int count_distinct(T *arr, int n){
-    /*
-    Count the number of distinct elements in an unsorted array O(n^2)
-    */
-    int res = 1;
+int count_distinct(T *arr, int n);
 
-    // Pick all elements one by one
-    for (int i = 1; i < n; i++) {
-        int j = 0;
-        for (j = 0; j < i; j++)
-            if (arr[i] == arr[j])
-                break;
-
-        if (i == j)
-            res++;
-    }
-    return res;
-}
-
-extern template int count_distinct<int>(int* arr, int n);
-extern template int count_distinct<float>(float* arr, int n);
 
 template<typename T>
 inline T* reallocate_and_copy(T* original, size_t new_n_elements, size_t old_n_elements) {

@@ -13,8 +13,8 @@ struct stack {
     bool is_empty() const;
     bool is_full() const;
     void push(const T &element);
-    T* pop();
-    T* peek() const;
+    T& top() const;
+    void pop();
 };
 
 #endif 

@@ -34,20 +34,21 @@ void stack<T>::push(const T &element) {
 }
 
 template <typename T>
-T* stack<T>::pop() {
+void stack<T>::pop() {
     if (is_empty()) {
         std::cerr << "Stack underflow\n";
-        return nullptr;
+        return;
     }
-    return &data[top_index--];
+    --top_index;
 }
 
+
 template <typename T>
-T* stack<T>::peek() const {
+T& stack<T>::top() const {
     if (is_empty()) {
-        return nullptr;
+        throw std::out_of_range("Stack is empty");
     }
-    return &data[top_index];
+    return data[top_index];
 }
 
 template struct stack<int>;

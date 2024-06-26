@@ -72,5 +72,24 @@ void display_header(serializationHeader header){
                 << header.minor_version << "." << header.patch_version << std::endl;
 }
 
+template<typename T>
+int count_distinct(T *arr, int n){
+    /*
+    Count the number of distinct elements in an unsorted array O(n^2)
+    */
+    int res = 1;
+
+    // Pick all elements one by one
+    for (int i = 1; i < n; i++) {
+        int j = 0;
+        for (j = 0; j < i; j++)
+            if (arr[i] == arr[j])
+                break;
+
+        if (i == j)
+            res++;
+    }
+    return res;
+}
 template int count_distinct<int>(int* arr, int n);
 template int count_distinct<double>(double* arr, int n);

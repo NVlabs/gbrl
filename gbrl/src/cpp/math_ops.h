@@ -19,8 +19,10 @@ void multiply_mat_by_scalar(float *mat, float scalar, const int n_samples, const
 float* calculate_var_and_center(float *mat, const float *mean, const int n_samples, const int n_cols, const int par_th);
 float* calculate_std_and_center(float *mat, const float *mean, const int n_samples, const int n_cols, const int par_th);
 float* copy_mat(const float *mat, const int size, const int par_th);
+void _copy_mat(float *mat_l, const float *mat_r, const int size, const int par_th);
 float* calculate_row_covariance(const float *mat_l, const float *mat_r, const int n_samples, const int n_cols, const int par_th);
 void _element_wise_addition(float *mat_l, const float *mat_r, const int size, const int par_th);
+void _element_wise_multiplication(float *mat_l, const float *mat_r, const int size, const int par_th);
 float* element_wise_division(const float *mat_l, const float *mat_r, const int size, const int par_th);
 void multiply_mat_by_vec_subtract_result(float *result, const float *mat, const float *vec, const int n_samples, const int n_cols, const int par_th);
 void divide_mat_by_vec_inplace(float *mat, const float *vec, const int n_samples, const int n_cols, const int par_th);
