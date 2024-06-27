@@ -8,6 +8,7 @@
 #include "math_ops.h"
 #include "data_structs.h"
 
+
 shapData* alloc_shap_data(const ensembleMetaData *metadata, const ensembleData *edata, const int tree_idx){
     if (tree_idx < 0 || tree_idx >= metadata->n_trees){
         std::cerr << "ERROR: invalid tree_idx " << tree_idx << " in ensemble with ntrees = " << metadata->n_trees << std::endl;
@@ -31,6 +32,7 @@ shapData* alloc_shap_data(const ensembleMetaData *metadata, const ensembleData *
     int *right_children = new int[n_leaves * metadata->max_depth];
     int *features_indices = new int[n_leaves * metadata->max_depth];
     float *feature_values = new float[n_leaves * metadata->max_depth];
+    float *predictions = new float[n_leaves * metadata->max_depth * metadata->output_dim];
     float *weights = new float[n_leaves * metadata->max_depth];
     for (int i = 0; i < n_leaves * metadata->max_depth; ++i){
         left_children[i] = -1;
@@ -47,6 +49,7 @@ shapData* alloc_shap_data(const ensembleMetaData *metadata, const ensembleData *
     float weight;
     
     memset(node_unique_features, 0, sizeof(int) * n_leaves * metadata->max_depth);
+    memset(predictions, 0, sizeof(float) * n_leaves * metadata->max_depth * metadata->output_dim);
     // Process the tree using DFS
     while (!node_stack.is_empty()) {
         nodeInfo crnt_node = node_stack.top();
@@ -96,6 +99,8 @@ shapData* alloc_shap_data(const ensembleMetaData *metadata, const ensembleData *
                 parent_idx = parents[parent_idx];
             }
             // Increment leaf index and mark children as non-existent (-1)
+            for (int d = 0; d < metadata->output_dim; ++d)
+                predictions[n_nodes*metadata->output_dim + d] = edata->values[leaf_idx*metadata->max_depth + d];
             ++leaf_idx;
         }
         if (crnt_node.parent_idx >= 0){
@@ -122,8 +127,9 @@ shapData* alloc_shap_data(const ensembleMetaData *metadata, const ensembleData *
     shap_data->weights = weights;
     shap_data->features_indices = features_indices;
     shap_data->feature_values = feature_values;
+    shap_data->predictions = predictions;
 
-    int size = (metadata->max_depth + 1) * metadata->max_depth;
+    int size = (metadata->max_depth + 1) * metadata->max_depth * metadata->output_dim;
     shap_data->C = new float[size];
     shap_data->E = new float[size];
     for (int i = 0; i < size; ++i)
@@ -137,6 +143,7 @@ void dealloc_shap_data(shapData *shap_data){
     delete[] shap_data->feature_prev_node;
     delete[] shap_data->features_indices;
     delete[] shap_data->features_values;
+    delete[] shap_data->predictions;
     delete[] shap_data->weights;
     delete[] shap_data->node_unique_features;
     delete[] shap_data->C;
@@ -154,27 +161,24 @@ void shap_inference(const ensembleMetaData *metadata, const ensembleData *edata,
         if (shap_data->active_nodes[feature_prev_node])
             temp_shap = 1.0f / shap_data->weights[feature_prev_node];
     }
-    float *current_e = shap_data->E + crnt_depth * metadata->max_depth;
-    float *child_e = shap_data->E + (crnt_depth + 1) * metadata->max_depth;
-    float *crnt_c = shap_data->C + crnt_depth * metadata->max_depth;
+    int col_size = metadata->max_depth * metadata->output_dim;
+    float *current_e = shap_data->E + crnt_depth * col_size;
+    float *child_e = shap_data->E + (crnt_depth + 1) * col_size;
+    float *crnt_c = shap_data->C + crnt_depth * col_size;
     float q = 0.0f;
-    if (feature >= 0)
-    {
-        if (shap_data->active_nodes[crnt_node])
-        {
+    if (feature >= 0){
+        if (shap_data->active_nodes[crnt_node]){
             q = 1.0f / shap_data->weights[crnt_node];
         }
 
-        float *prev_c = shap_data->C + (crnt_depth - 1) * metadata->max_depth;
-        for (int i = 0; i < metadata->max_depth; i++)
+        float *prev_c = shap_data->C + (crnt_depth - 1) * col_size;
+        for (int i = 0; i < col_size; i++)
         {
             current_c[i] = prev_c[i] * (Base[i] + q);
         }
 
-        if (feature_prev_node >= 0)
-        {
-            for (int i = 0; i < metadata->max_depth; i++)
-            {
+        if (feature_prev_node >= 0){
+            for (int i = 0; i < col_size; i++){
                 current_c[i] = current_c[i] / (Base[i] + temp_shap);
             }
         }
@@ -182,40 +186,37 @@ void shap_inference(const ensembleMetaData *metadata, const ensembleData *edata,
     int offset_degree = 0;
     int left = shap_data->children_left[crnt_node];
     int right = shap_data->children_right[crnt_node];
-    if (left >= 0)
-    {
+    if (left >= 0){
         shap_data->active_nodes[right] = (dataset->obs[sample_offset + shap_data->features_indices[crnt_node]] > shap_data->feature_values[crnt_node]) ? true : false;
         shap_data->active_nodes[left] = (dataset->obs[sample_offset + shap_data->features_indices[crnt_node]] > shap_data->feature_values[crnt_node]) ? false : true;
         shap_inference(metadata, edata, shap_data, dataset, shap_values, left, crnt_depth + 1, shap_data->feature_indices[crnt_node], sample_offset);
     
         offset_degree = shap_data->node_unique_features[crnt_node] - shap_data->node_unique_features[left];
-        _element_wise_multiplication(child_e, shap_data->offset_poly + offset_degree * metadata->max_depth, metadata->max_depth, metadata->par_th);
+        _element_wise_multiplication(child_e, shap_data->offset_poly + offset_degree * col_size, col_size metadata->par_th);
         _copy_mat(current_e, child_e, metadata->max_depth, metadta->par_th);
         shap_inference(metadata, edata, shap_data, dataset, shap_values, right, crnt_depth + 1, shap_data->feature_indices[crnt_node], sample_offset);
         offset_degree = shap_data->node_unique_features[crnt_node] - shap_data->node_unique_features[right];
-        _element_wise_multiplication(child_e, shap_data->offset_poly + offset_degree * metadata->max_depth, metadata->max_depth, metadata->par_th);
-        _element_wise_addition(current_e, child_e, metadata->max_depth, metadata->par_th);
+        _element_wise_multiplication(child_e, shap_data->offset_poly + offset_degree * col_size, col_size metadata->par_th);
+        _element_wise_addition(current_e, child_e, col_size, metadata->par_th);
     }
-    else
+    else 
     {
-        
-        times(current_c, current_e, tree.leaf_predictions[node], tree.max_depth);
+        _multiply_mat_by_vector_into_mat(current_e, current_c, shap_data->predictions[crnt_node * metadata->output_dim], metadata->max_depth, metadata->output_dim, metadata->par_th);
     }
-    if (feature >= 0)
-    {
-	if(parent >=0 && !activation[parent]){
-	    return;	
-	}
-        const tfloat *normal = Norm + tree.edge_heights[node] * tree.max_depth;
-        const tfloat *offset = Offset;
-        value[feature] += (q - 1) * psi(current_e, offset, Base, q, normal, tree.edge_heights[node]);
-        if (parent >= 0)
-        {
-            offset_degree = tree.edge_heights[parent] - tree.edge_heights[node];
-            const tfloat* normal = Norm + tree.edge_heights[parent] * tree.max_depth;
-            const tfloat* offset = Offset + offset_degree * tree.max_depth;
-            value[feature] -= (s - 1) * psi(current_e, offset, Base, s, normal, tree.edge_heights[parent]);
+    if (feature >= 0){
+        if(feature_prev_node >=0 && !shap_data->active_nodes[feature_prev_node]){
+            return;	
         }
+            const float *normal = shap_data->norm_values + shap_data->node_unique_features[crnt_node] * col_size;
+            const float *offset = shap_data->offset_poly;
+            value[feature] += (q - 1) * psi(current_e, offset, shap_data->base_poly, q, normal, shap_data->node_unique_features[crnt_node]);
+            if (feature_prev_node >= 0)
+            {
+                offset_degree = tree.edge_heights[feature_prev_node] - shap_data->node_unique_features[crnt_node];
+                const tfloat* normal = Norm + tree.edge_heights[feature_prev_node] * tree.max_depth;
+                const tfloat* offset = Offset + offset_degree * tree.max_depth;
+                value[feature] -= (s - 1) * psi(current_e, offset, Base, s, normal, tree.edge_heights[parent]);
+            }
     }
 
 } 

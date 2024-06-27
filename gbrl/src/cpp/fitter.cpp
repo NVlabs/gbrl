@@ -573,7 +573,7 @@ void Fitter::control_variates(dataSet *dataset, ensembleData *edata, ensembleMet
     }
 
     float error_correction = 1.0f / sqrtf(1.0f - powf(metadata->cv_beta, static_cast<float>(metadata->n_trees)));
-    multiply_mat_by_scalar(momentum, error_correction, n_samples, output_dim, par_th);
+    _multiply_mat_by_scalar(momentum, error_correction, n_samples, output_dim, par_th);
     float *grads_copy = copy_mat(dataset->grads, n_samples*output_dim, par_th);
     float *grads_mean = calculate_mean(grads_copy, n_samples, output_dim, par_th);
     float *momentum_mean = calculate_mean(momentum, n_samples, output_dim, par_th);

@@ -15,6 +15,7 @@ struct shapData {
     int *right_children;
     int *features;
     float *feature_values;
+    float *predictions;
     float *weights;
 };
 

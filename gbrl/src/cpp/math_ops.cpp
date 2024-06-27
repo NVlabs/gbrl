@@ -136,7 +136,7 @@ void subtract_vec_from_mat(float *mat, float *vec, const int n_samples, const in
 }
 
 
-void multiply_mat_by_scalar(float *mat, float scalar, const int n_samples, const int n_cols, const int par_th){
+void _multiply_mat_by_scalar(float *mat, float scalar, const int n_samples, const int n_cols, const int par_th){
     int n_elements = n_samples * n_cols;
     int n_threads = calculate_num_threads(n_elements, par_th);
     if (n_threads > 1){
@@ -160,6 +160,36 @@ void multiply_mat_by_scalar(float *mat, float scalar, const int n_samples, const
 #endif
         for (int i = 0; i < n_elements; ++i) {
             mat[i] *= scalar;  
+        }
+    }
+}
+
+void _multiply_mat_by_vector_into_mat(float *lmat, const float *rmat, float vec, const int n_samples, const int n_cols, const int par_th){
+    int n_elements = n_samples * n_cols;
+    int n_threads = calculate_num_threads(n_elements, par_th);
+    if (n_threads > 1){
+        int elements_per_thread = (n_elements) / n_threads;
+        omp_set_num_threads(n_threads);
+        #pragma omp parallel
+        {
+            int thread_id = omp_get_thread_num();
+            int start_idx = thread_id * elements_per_thread;
+            int end_idx = (thread_id == n_threads - 1) ? n_elements : start_idx + elements_per_thread;
+#ifndef _MSC_VER
+    #pragma omp simd
+#endif
+            for (int i = start_idx; i < end_idx; ++i) {
+                int col = i % n_cols;
+                lmat[i] = rmat[i]*vec[col]; 
+            }
+        }
+    } else {
+#ifndef _MSC_VER
+    #pragma omp simd
+#endif
+        for (int i = 0; i < n_elements; ++i) {
+            int col = i % n_cols
+            lmat[i] = rmat[i]*vec[col]; 
         }
     }
 }
