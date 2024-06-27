@@ -25,12 +25,12 @@ TreeNode::TreeNode(int *sample_indices, const int n_samples, const int n_num_fea
             sample_indices(sample_indices), n_samples(n_samples), n_num_features(n_num_features), n_cat_features(n_cat_features),
             output_dim(output_dim), policy_dim(policy_dim), depth(depth), node_idx(node_idx), feature_value(0.0),
             feature_idx(0){
-            if (depth > 0){
-                this->split_conditions = new splitCondition[depth];
-                for (int d = 0; d < depth; d++){
-                    this->split_conditions[d].categorical_value = nullptr;
-                }
-            }
+    if (depth > 0){
+        this->split_conditions = new splitCondition[depth];
+        for (int d = 0; d < depth; d++){
+            this->split_conditions[d].categorical_value = nullptr;
+        }
+    }
 }
 
 TreeNode::~TreeNode(){

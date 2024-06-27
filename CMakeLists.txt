@@ -100,13 +100,15 @@ if (USE_CUDA AND NOT APPLE)
         set(USE_CUDA OFF)
     endif()
 endif()
-if(USE_CUDA)
+
+if(NOT USE_CUDA)
     message(STATUS "Compiling for CPU only")
+else()
+    message(STATUS "CUDA found, compiling for CPU and GPU")
 endif()
 # Find required packages
 # Attempt to find pybind11 automatically
 find_package(pybind11 CONFIG QUIET)
-
 # If pybind11 is not found, use Python to find it
 if(NOT pybind11_FOUND)
     message(STATUS "pybind11 not found automatically, attempting to locate with Python")
@@ -203,7 +205,6 @@ set(CPP_SOURCES
 
 pybind11_add_module(gbrl_cpp MODULE ${CPP_SOURCES} ${CUDA_SOURCES})
 target_compile_definitions(gbrl_cpp PRIVATE MODULE_NAME="gbrl_cpp")
-
 # Platform-specific settings and linking
 if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_libraries(gbrl_cpp PRIVATE OpenMP::OpenMP_CXX)
