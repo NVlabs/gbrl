@@ -3,6 +3,7 @@ import sys
 import subprocess
 import setuptools
 import platform
+import shutil
 from setuptools import setup, Extension
 from setuptools.command.build_ext import build_ext
 from distutils import log
@@ -30,6 +31,11 @@ class CMakeBuild(build_ext):
         self.cmake_verbose = os.getenv('DEBUG', '0') == '1'
 
     def run(self):
+        for folder_name in ['build', 'dist', 'gbrl.egg-info']:
+            folder_path = os.path.join(os.path.dirname(__file__), folder_name)
+            if os.path.exists(folder_path):
+                log.info(f"Cleaning up existing '{folder_name}' folder...")
+                shutil.rmtree(folder_path)
         try:
             subprocess.check_output(['cmake', '--version'])
         except OSError:
@@ -46,7 +52,7 @@ class CMakeBuild(build_ext):
             '-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=' + extdir,
             '-DPYTHON_EXECUTABLE=' + sys.executable,
             '-DPYTHON_INCLUDE_DIR=' + sysconfig.get_path('include'),
-            '-DCMAKE_BUILD_TYPE=' + cfg
+            '-DCMAKE_BUILD_TYPE=' + cfg,
         ]   
         if sysconfig.get_config_var('LIBRARY') is not None:
             cmake_args.append('-DPYTHON_LIBRARY=' + sysconfig.get_config_var('LIBRARY'))
@@ -108,5 +114,4 @@ setup(
     },
     packages=['gbrl'],
     include_package_data=True,
-    # packages=setuptools.find_packages(where='gbrl'),
 )
