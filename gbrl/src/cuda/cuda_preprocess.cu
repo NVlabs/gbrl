@@ -10,6 +10,7 @@
 #include <device_launch_parameters.h>
 
 #include <iostream>
+#include <float.h>
 
 #include <thrust/sort.h>
 #include <thrust/unique.h>

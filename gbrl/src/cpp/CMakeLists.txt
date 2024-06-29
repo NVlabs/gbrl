@@ -8,7 +8,6 @@
 ##############################################################################
 
 set(CPP_SOURCES
-    gbrl_binding.cpp
     gbrl.cpp
     types.cpp
     optimizer.cpp
@@ -25,13 +24,14 @@ set(CPP_SOURCES
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 
 if (CUDAToolkit_FOUND AND NOT APPLE)
-    include_directories(${CMAKE_SOURCE_DIR}/gbrl/src/cuda)
+    include_directories(${CUDAToolkit_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/gbrl/src/cuda)
+    add_definitions(-DUSE_CUDA)
 endif()
 
 if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -std=c++14 -Wall -Wpedantic -Wextra -march=native")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -std=c++14 -Wall -Wpedantic -Wextra -march=native -fPIC")
 elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -std=c++14 -Wall -Wpedantic -Wextra")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -std=c++14 -Wall -Wpedantic -Wextra -fPIC")
 elseif (WIN32)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /O2 /std:c++14 /W3")
 endif()
@@ -42,4 +42,4 @@ endif()
 
 
 add_library(gbrl_cpp_src OBJECT ${CPP_SOURCES})
-target_compile_definitions(gbrl_cpp_src PRIVATE MODULE_NAME="gbrl_cpp")
+# target_compile_definitions(gbrl_cpp_src PUBLIC MODULE_NAME="gbrl_cpp")

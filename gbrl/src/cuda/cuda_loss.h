@@ -23,7 +23,7 @@ __global__ void sum_squares_kernel(const float* __restrict__ grads, int size, fl
 #endif 
 
 #ifdef __cplusplus
-}
+} // extern C
 #endif
 
-#endif // end CUDA_MATH_H
+#endif // end CUDA_LOSS_H
