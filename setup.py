@@ -60,8 +60,6 @@ class CMakeBuild(build_ext):
             cmake_args.append('-DCMAKE_C_COMPILER=' + os.environ['CC'])
         if 'CXX' in os.environ:
             cmake_args.append('-DCMAKE_CXX_COMPILER=' + os.environ['CXX'])
-        if 'CUDACXX' in os.environ:
-            cmake_args.append('-DCMAKE_CUDA_COMPILER=' + os.environ['CUDACXX'])
         build_args = ['--config', cfg]
         if self.cmake_verbose:
             cmake_args.append('-DCMAKE_VERBOSE_MAKEFILE:BOOL=ON')
@@ -69,6 +67,8 @@ class CMakeBuild(build_ext):
 
         if ('CPU_ONLY' not in os.environ and platform.system() != 'Darwin') or ('CPU_ONLY' in os.environ and os.environ['CPU_ONLY'] != '1'):
             cmake_args.append('-DUSE_CUDA=ON')
+            if 'CUDACXX' in os.environ:
+                cmake_args.append('-DCMAKE_CUDA_COMPILER=' + os.environ['CUDACXX'])
         
         build_temp = self.build_temp
         if not os.path.exists(build_temp):

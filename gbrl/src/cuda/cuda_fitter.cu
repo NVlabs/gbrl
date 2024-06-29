@@ -156,48 +156,6 @@ void evaluate_greedy_splits(dataSet *dataset, const TreeNodeGPU *node, candidate
     cudaDeviceSynchronize();
 }
 
-
-void update_ensemble_per_leaf_cuda(ensembleData *edata, ensembleMetaData *metadata, const TreeNode* node){
-    int idx = metadata->n_leaves; 
-    if (idx >= metadata->max_leaves) {
-        int new_size_leaves = metadata->n_leaves + metadata->max_leaves_batch;
-#ifdef DEBUG
-        edata->n_samples = reallocate_and_copy(edata->n_samples, new_size_leaves, idx);
-#endif 
-        int new_tree_size = metadata->n_trees + metadata->max_trees_batch;
-        edata->depths = reallocate_and_copy(edata->depths, new_tree_size, metadata->n_trees);
-        edata->values = reallocate_and_copy(edata->values, new_size_leaves*metadata->output_dim, idx*metadata->output_dim);
-        edata->feature_indices = reallocate_and_copy(edata->feature_indices, new_size_leaves*metadata->max_depth, idx*metadata->max_depth);
-        edata->feature_values = reallocate_and_copy(edata->feature_values, new_size_leaves*metadata->max_depth, idx*metadata->max_depth);
-        edata->is_numerics = reallocate_and_copy(edata->is_numerics, new_size_leaves*metadata->max_depth, idx*metadata->max_depth);
-        edata->inequality_directions = reallocate_and_copy(edata->inequality_directions, new_size_leaves*metadata->max_depth, idx*metadata->max_depth);
-        edata->categorical_values = reallocate_and_copy(edata->categorical_values, new_size_leaves*metadata->max_depth*MAX_CHAR_SIZE, idx*metadata->max_depth*MAX_CHAR_SIZE);
-  
-        metadata->max_leaves = new_size_leaves;
-        metadata->max_trees_batch = new_tree_size;
-    }
-#ifdef DEBUG
-    edata->n_samples[idx] = node->n_samples;
-#endif
-    edata->depths[idx] = node->depth;
-    int row_idx = idx*metadata->max_depth;
-    if (node->depth > 0){
-        for (int i = 0; i < node->depth; ++i){
-            if (node->split_conditions[i].categorical_value != nullptr){
-                memcpy(edata->categorical_values + (row_idx + i)*MAX_CHAR_SIZE, node->split_conditions[i].categorical_value, sizeof(char)*MAX_CHAR_SIZE);
-                edata->is_numerics[row_idx+ i] = false;
-            } else {
-                edata->is_numerics[row_idx+ i] = true;
-            }
-            edata->feature_indices[row_idx+ i] = node->split_conditions[i].feature_idx;
-            edata->feature_values[row_idx+ i] = node->split_conditions[i].feature_value;
-            edata->inequality_directions[row_idx + i] = node->split_conditions[i].inequality_direction;
-        }
-    }
-    metadata->n_leaves += 1;
-}
-
-
 void evaluate_oblivious_splits_cuda(dataSet *dataset, thrust::device_vector<TreeNodeGPU *> nodes, const int depth, candidatesData *candidata, ensembleMetaData *metadata, splitDataGPU *split_data){
     
     int threads_per_block;

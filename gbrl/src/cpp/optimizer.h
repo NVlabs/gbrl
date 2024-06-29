@@ -13,6 +13,7 @@
 
 #include "types.h"
 #include "scheduler.h"
+
 class Optimizer {
     public: 
         Optimizer();

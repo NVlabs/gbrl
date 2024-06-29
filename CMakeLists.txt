@@ -37,34 +37,29 @@ endif()
 # Find Python 3
 find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
 
-# Include Python and pybind11 directories
-include_directories(${Python3_INCLUDE_DIRS} ${pybind11_INCLUDE_DIRS})
-link_directories(${Python3_LIBRARY_DIRS})
 #-- Options
 include(CMakeDependentOption)
 option(USE_CUDA  "Build with GPU acceleration" OFF)
 # Check for CUDA availability
 if (USE_CUDA AND NOT APPLE)
     find_package(CUDAToolkit QUIET HINTS $ENV{CONDA_PREFIX}) 
-
     # 2. Fallback to system-wide CUDA if not found in Anaconda
     if (NOT CUDAToolkit_FOUND)
         find_package(CUDAToolkit QUIET)
     endif()
     if (CUDAToolkit_FOUND)
         # Ensure CUDA architectures are set before enabling CUDA language
-        message(STATUS "CUDA found, compiling with GPU acceleration")
         set(CUDA_ARCHS "60" "61" "62" "70" "75")
-        if(CUDA_VERSION VERSION_GREATER_EQUAL "110")
+        if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL "110")
             list(APPEND CUDA_ARCHS "80")
         endif()
-        if(CUDA_VERSION VERSION_GREATER_EQUAL "111")
+        if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL "111")
             list(APPEND CUDA_ARCHS "86")
         endif()
-        if(CUDA_VERSION VERSION_GREATER_EQUAL "115")
+        if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL "115")
             list(APPEND CUDA_ARCHS "87")
         endif()
-        if(CUDA_VERSION VERSION_GREATER_EQUAL "118")
+        if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL "118")
             list(APPEND CUDA_ARCHS "89")
             list(APPEND CUDA_ARCHS "90")
         endif()
@@ -109,11 +104,16 @@ endif()
 if(NOT USE_CUDA)
     message(STATUS "Compiling for CPU only")
 else()
-    message(STATUS "CUDA found, compiling for CPU and GPU")
+    message(STATUS "CUDA ${CUDAToolkit_VERSION} found, compiling for CPU and GPU")
 endif()
 # Find required packages
-# Attempt to find pybind11 automatically
-find_package(pybind11 CONFIG QUIET)
+# Attempt to find pybind11 automatically with Anaconda
+find_package(pybind11 CONFIG QUIET HINTS $ENV{CONDA_PREFIX}) 
+# 2. Fallback to system-wide CUDA if not found in Anaconda
+if (NOT pybind11)
+    find_package(pybind11 CONFIG QUIET)
+endif()
+# find_package(pybind11 CONFIG QUIET)
 # If pybind11 is not found, use Python to find it
 if(NOT pybind11_FOUND)
     message(STATUS "pybind11 not found automatically, attempting to locate with Python")
@@ -129,6 +129,7 @@ if(NOT pybind11_FOUND)
     find_package(pybind11 CONFIG REQUIRED)
 endif()
 
+find_package(Graphviz CONFIG QUIET)
 
 if(APPLE)
     find_package(OpenMP)
@@ -160,11 +161,6 @@ if (OpenMP_FOUND)
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}")
 endif()
 
-# Include directories
-include_directories(${pybind11_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/gbrl/src/cpp)
-
-# find_package(GRAPHVIZ_DOT_EXECUTABLE DOT CONFIG QUIET)
-find_program(GRAPHVIZ_DOT_EXECUTABLE dot)
 # Graphviz
 if (GRAPHVIZ_DOT_EXECUTABLE)
     add_definitions(-DUSE_GRAPHVIZ)
@@ -183,6 +179,7 @@ endif()
 add_subdirectory(gbrl/src/cpp)
 
 if (USE_CUDA AND NOT APPLE)
+    set(CMAKE_CUDA_STANDARD 14)  
     include_directories(${CUDAToolkit_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/gbrl/src/cuda)
     add_definitions(-DUSE_CUDA)
     add_subdirectory(gbrl/src/cuda)
@@ -194,7 +191,6 @@ endif()
 
 # Combine object files into a single library
 set(CPP_SOURCES
-    gbrl/src/cpp/gbrl_binding.cpp
     gbrl/src/cpp/gbrl.cpp
     gbrl/src/cpp/types.cpp
     gbrl/src/cpp/optimizer.cpp
@@ -207,11 +203,23 @@ set(CPP_SOURCES
     gbrl/src/cpp/loss.cpp
     gbrl/src/cpp/math_ops.cpp
 )
+# Only include pybind11 in the binding file
+set(PYBIND_SOURCES
+    gbrl/src/cpp/gbrl_binding.cpp
+)
 
-pybind11_add_module(gbrl_cpp MODULE ${CPP_SOURCES} ${CUDA_SOURCES})
+pybind11_add_module(gbrl_cpp MODULE ${PYBIND_SOURCES})
+target_include_directories(gbrl_cpp PRIVATE ${Python3_INCLUDE_DIRS} ${pybind11_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/gbrl/src/cpp)
 target_compile_definitions(gbrl_cpp PRIVATE MODULE_NAME="gbrl_cpp")
+target_link_libraries(gbrl_cpp PRIVATE ${Python3_LIBRARIES})
+target_link_libraries(gbrl_cpp PRIVATE gbrl_cpp_src)
+
+if (USE_CUDA)
+    target_link_libraries(gbrl_cpp PRIVATE cuda_gbrl_src)
+endif()
 # Platform-specific settings and linking
 if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    
     target_link_libraries(gbrl_cpp PRIVATE OpenMP::OpenMP_CXX)
     if (USE_CUDA)
         if(DEFINED ENV{CONDA_PREFIX})
@@ -219,6 +227,7 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
         else()
             target_link_libraries(gbrl_cpp PRIVATE CUDA::cudart)
         endif() 
+        # target_link_libraries(gbrl_cpp PRIVATE $<TARGET_OBJECTS:cuda_gbrl_src>)
     endif()
 elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
     find_package(LLVM REQUIRED)

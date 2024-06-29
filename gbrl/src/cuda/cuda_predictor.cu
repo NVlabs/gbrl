@@ -16,24 +16,6 @@
 #include "cuda_fitter.h"
 #include "cuda_utils.h"
 
-
-void freeSGDOptimizer(SGDOptimizerGPU **device_ops, const int n_opts){
-    if (device_ops != nullptr){
-        // Copy the GPU pointer array to host
-        SGDOptimizerGPU** host_ops = new SGDOptimizerGPU*[n_opts];
-        cudaMemcpy(host_ops, device_ops, sizeof(SGDOptimizerGPU*) * n_opts, cudaMemcpyDeviceToHost);
-        for (int i = 0; i < n_opts; ++i){
-            // This requires copying each SGDOptimizerGPU structure from GPU to CPU
-            if (host_ops[i] != nullptr)
-            {
-                cudaFree(host_ops[i]);
-            }
-        }
-        cudaFree(device_ops);
-        delete[] host_ops;
-    }
-}
-
 SGDOptimizerGPU** deepCopySGDOptimizerVectorToGPU(const std::vector<Optimizer*>& host_opts) {
     // Allocate memory for array of SGDOptimizerGPU pointers
     cudaError_t error;
@@ -68,6 +50,23 @@ SGDOptimizerGPU** deepCopySGDOptimizerVectorToGPU(const std::vector<Optimizer*>&
     }
     // Return the pointer to the array of SGDOptimizerGPU pointers
     return device_opts;
+}
+
+void freeSGDOptimizer(SGDOptimizerGPU **device_ops, const int n_opts){
+    if (device_ops != nullptr){
+        // Copy the GPU pointer array to host
+        SGDOptimizerGPU** host_ops = new SGDOptimizerGPU*[n_opts];
+        cudaMemcpy(host_ops, device_ops, sizeof(SGDOptimizerGPU*) * n_opts, cudaMemcpyDeviceToHost);
+        for (int i = 0; i < n_opts; ++i){
+            // This requires copying each SGDOptimizerGPU structure from GPU to CPU
+            if (host_ops[i] != nullptr)
+            {
+                cudaFree(host_ops[i]);
+            }
+        }
+        cudaFree(device_ops);
+        delete[] host_ops;
+    }
 }
 
 __global__ void add_vec_to_mat_kernel(const float *vec, float *mat, const int n_samples, const int n_cols){
