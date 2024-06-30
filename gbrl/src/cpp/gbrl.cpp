@@ -47,6 +47,7 @@
 #include "predictor.h"
 #include "loss.h"
 #include "utils.h"
+#include "shap.h"
 #include "math_ops.h"
 
 
@@ -215,9 +216,9 @@ float* GBRL::get_bias(){
 
 
 float* GBRL::predict(const float *obs, const char *categorical_obs, const int n_samples, const int n_num_features, const int n_cat_features, int start_tree_idx, int stop_tree_idx){
-    float *preds = init_zero_mat(n_samples*this->metadata->output_dim, this->metadata->par_th);
+    float *preds = init_zero_mat(n_samples*this->metadata->output_dim);
     for (size_t optIdx = 0; optIdx < this->opts.size(); ++optIdx){
-        this->opts[optIdx]->set_memory(n_samples ,this->metadata->output_dim, this->metadata->par_th);
+        this->opts[optIdx]->set_memory(n_samples ,this->metadata->output_dim);
     }
     if (this->metadata->iteration == 0){
         this->metadata->n_num_features = n_num_features;
@@ -251,7 +252,7 @@ float* GBRL::predict(const float *obs, const char *categorical_obs, const int n_
 
 void GBRL::predict(const float *obs, const char *categorical_obs, float *start_preds, const int n_samples, const int n_num_features, const int n_cat_features, int start_tree_idx, int stop_tree_idx){
     for (size_t optIdx = 0; optIdx < this->opts.size(); ++optIdx){
-        this->opts[optIdx]->set_memory(n_samples ,this->metadata->output_dim, this->metadata->par_th);
+        this->opts[optIdx]->set_memory(n_samples ,this->metadata->output_dim);
     }
     if (this->metadata->iteration == 0){
         this->metadata->n_num_features = n_num_features;
@@ -829,12 +830,19 @@ int GBRL::loadFromFile(const std::string& filename){
     return 0;  // Success
 }
 
+float* GBRL::tree_shap(const int tree_idx, const float *obs, const char *categorical_obs, const int n_samples){
+    valid_tree_idx(tree_idx, this->metadata);
+    shapData* shap_data = alloc_shap_data(this->metadata, this->edata, tree_idx);
+    float *shap_values = new float[(this->metadata->n_num_features + this->metadata->n_cat_features)*this->metadata->output_dim * n_samples];
+    dataSet dataset{obs, categorical_obs, nullptr, nullptr, nullptr, nullptr, n_samples};
+    get_shap_values(this->metadata, this->edata, shap_data, &dataset, shap_values);
+
+    dealloc_shap_data(shap_data);
+    return shap_values;
+}
+
 void GBRL::print_tree(int tree_idx){
-    if (tree_idx < 0 || tree_idx >= this->metadata->n_trees){
-        std::cerr << "ERROR: invalid tree_idx " << tree_idx << " in ensemble with ntrees = " << metadata->n_trees <<std::endl;
-        throw std::runtime_error("Invalid tree index");
-        return;
-    }
+    valid_tree_idx(tree_idx, this->metadata);
     ensembleData *edata_cpu = nullptr;
 #ifdef USE_CUDA
     if (this->device == gpu){
@@ -888,11 +896,7 @@ void GBRL::plot_tree(int tree_idx, const std::string &filename){
         edata_cpu = ensemble_data_copy_gpu_cpu(this->metadata, this->edata);
     }
 #endif 
-    if (tree_idx >= this->metadata->n_trees){
-        std::cerr << "ERROR - Tree idx: " << tree_idx <<  " > " << this->metadata->n_trees - 1 << " maximum index." << std::endl;
-        throw std::runtime_error("Invalid tree index");
-        return;
-    }
+    valid_tree_idx(tree_idx, this->metadata->n_trees);
     std::cout << "Plotting tree: " << tree_idx << " to filename: " << filename << ".png" << std::endl;
     
     GVC_t *gvc;

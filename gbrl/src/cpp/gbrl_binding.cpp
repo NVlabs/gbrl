@@ -307,6 +307,40 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         py::gil_scoped_release release; 
         self.print_tree(tree_idx); 
     }, "Print specified tree index");
+    gbrl.def("tree_shap", [](GBRL &self, const int tree_idx, py::object &obs, py::object &categorical_obs) -> py::array_t<float> {
+        const float* obs_ptr = nullptr;
+        int n_num_features = 0;
+        int n_samples = 0;
+         if (!obs.is_none()) {
+            py::array_t<float> obs_array = py::cast<py::array_t<float>>(obs);
+            if (!obs_array.attr("flags").attr("c_contiguous").cast<bool>())
+                throw std::runtime_error("Arrays must be C-contiguous");
+            py::buffer_info info_obs = obs_array.request();
+            obs_ptr = static_cast<const float*>(info_obs.ptr);
+            n_num_features = static_cast<int>(info_obs.shape[1]);
+            n_samples = static_cast<int>(info_obs.shape[0]);
+        }
+        int n_cat_features = 0;
+        const char *cat_obs_ptr = nullptr;
+        if (!categorical_obs.is_none()) {
+            py::array py_array = py::cast<py::array>(categorical_obs);
+            if (!py_array.attr("flags").attr("c_contiguous").cast<bool>())
+                throw std::runtime_error("Arrays must be C-contiguous");
+
+            py::buffer_info info_categorical_obs = py_array.request();
+            cat_obs_ptr = static_cast<const char*>(info_categorical_obs.ptr);
+            n_cat_features = static_cast<int>(info_categorical_obs.shape[1]);
+            n_samples = static_cast<int>(info_categorical_obs.shape[0]);
+        }
+
+        py::gil_scoped_release release; 
+        float* shap_values = self.tree_shap(tree_idx, obs_ptr, cat_obs_ptr, n_samples);
+        py::gil_scoped_acquire acquire;
+        auto capsule = py::capsule(shap_values, [](void* ptr) {
+        delete[] reinterpret_cast<float*>(ptr);
+        });
+        return py::array({n_samples, n_num_features + n_cat_features, self.metadata->output_dim}, shap_values, capsule);
+    }, py::arg("tree_idx")=0, py::arg("obs"), py::arg("categorical_obs"), "Calculate SHAP values of a single tree");
     gbrl.def_static("cuda_available", &GBRL::cuda_available, "Return if CUDA is available"); 
     gbrl.def("plot_tree", [](GBRL &self, int tree_idx, const std::string &filename) {
         py::gil_scoped_release release; 

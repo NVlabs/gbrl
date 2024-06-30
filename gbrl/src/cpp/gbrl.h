@@ -34,6 +34,7 @@ class GBRL {
         GBRL(const std::string& filename);
         GBRL(GBRL& other);
         ~GBRL();
+        float* tree_shap(const int tree_idx, const float *obs, const char *categorical_obs, const int n_samples);
         static bool cuda_available();
         void to_device(deviceType device);
         std::string get_device();

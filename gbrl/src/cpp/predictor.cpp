@@ -134,7 +134,7 @@ void Predictor::predict_cpu(dataSet *dataset, float *preds, const ensembleData *
         int trees_per_thread = num_trees / n_tree_threads;
         omp_set_num_threads(n_tree_threads);
         for (int i = 0; i < n_tree_threads; ++i)
-            preds_buffer[i] = init_zero_mat(n_samples*output_dim, par_th);
+            preds_buffer[i] = init_zero_mat(n_samples*output_dim);
         #pragma omp parallel
         {
             int thread_id = omp_get_thread_num();

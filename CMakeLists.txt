@@ -198,6 +198,8 @@ set(CPP_SOURCES
     gbrl/src/cpp/scheduler.cpp
     gbrl/src/cpp/node.cpp
     gbrl/src/cpp/utils.cpp
+    gbrl/src/cpp/shap.cpp
+    gbrl/src/cpp/data_structs.cpp
     gbrl/src/cpp/fitter.cpp
     gbrl/src/cpp/predictor.cpp
     gbrl/src/cpp/split_candidate_generator.cpp

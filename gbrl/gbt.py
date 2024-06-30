@@ -197,7 +197,18 @@ class GradientBoostingTrees:
             int: number of trees in the ensemble
         """
         return self._model.get_num_trees()
-        
+    
+    def tree_shap(self, tree_idx: int, features: Union[np.array, th.Tensor]) -> np.array:
+        """Calculates SHAP values for a single tree
+
+        Args:
+            tree_idx (int): tree index
+            features (Union[np.array, th.Tensor])
+
+        Returns:
+            np.array: SHAP values of shap [n_samples, number of input features, number of outputs]
+        """
+        return self._model.tree_shap(tree_idx, features)
 
     def save_model(self, save_path: str) -> None:
         """

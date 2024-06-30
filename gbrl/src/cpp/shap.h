@@ -1,6 +1,7 @@
 #ifndef SHAP_H
 #define SHAP_H
 
+#include "types.h"
 struct shapData {
     int n_nodes; 
     const float *base_poly;
@@ -13,7 +14,7 @@ struct shapData {
     int *node_unique_features;
     int *left_children;
     int *right_children;
-    int *features;
+    int *feature_indices;
     float *feature_values;
     float *predictions;
     float *weights;
@@ -21,7 +22,10 @@ struct shapData {
 
 shapData* alloc_shap_data(const ensembleMetaData *metadata, const ensembleData *edata, const int tree_idx);
 void dealloc_shap_data(shapData *shap_data);
+void get_shap_values(const ensembleMetaData *metadata, const ensembleData *edata, shapData *shap_data, const dataSet *dataset, float *shap_values);
 
-void shap_inference(const ensembleMetaData *metadata, const ensembleData *edata, shapData *shap_data, const dataSet *dataset, float *shap_values);
+void shap_inference(const ensembleMetaData *metadata, const ensembleData *edata, shapData *shap_data, const dataSet *dataset, float *shap_values, int crnt_node, int crnt_depth, int feature, const int sample_offset);
+void add_edge_shapley(float *shap_values, float *e, const float *offset, const float *base_poly, float q, const float *norm_value, int d, int output_dim);
+void subtract_closest_parent_edge_shapley(float *shap_values, float *e, const float *offset, const float *base_poly, float q_parent, const float *norm_value, int d, int output_dim);
 
 #endif 

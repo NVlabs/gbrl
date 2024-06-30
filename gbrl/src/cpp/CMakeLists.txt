@@ -15,6 +15,8 @@ set(CPP_SOURCES
     node.cpp
     utils.cpp
     fitter.cpp
+    shap.cpp
+    data_structs.cpp
     predictor.cpp
     split_candidate_generator.cpp
     loss.cpp

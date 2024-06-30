@@ -12,6 +12,7 @@
 #include <string>
 #include <cstring>
 #include <fstream>
+#include <stdexcept>
 #include <omp.h>
 
 #include "types.h"
@@ -33,6 +34,13 @@ inline int calculate_num_threads(int total_elements, int min_elements_per_thread
 
 template<typename T>
 int count_distinct(T *arr, int n);
+
+inline void valid_tree_idx(const int tree_idx, const ensembleMetaData* metadata){
+    if (tree_idx < 0 || tree_idx >= metadata->n_trees){
+        std::cerr << "ERROR: invalid tree_idx " << tree_idx << " in ensemble with ntrees = " << metadata->n_trees <<std::endl;
+        throw std::runtime_error("Invalid tree index");
+    }
+}
 
 
 template<typename T>

@@ -169,10 +169,9 @@ optimizerConfig* SGDOptimizer::getConfig() {
 }
 
 
-void SGDOptimizer::set_memory(const int n_samples, const int output_dim, const int par_th) {
+void SGDOptimizer::set_memory(const int n_samples, const int output_dim) {
     (void)n_samples;
     (void)output_dim;
-    (void)par_th;
 }
 
 AdamOptimizer::AdamOptimizer(float beta_1, float beta_2, float eps = 1.0e-8): Optimizer(), beta_1(beta_1), beta_2(beta_2), eps(eps){
@@ -276,7 +275,7 @@ void AdamOptimizer::step(float *theta, const float *raw_grad_theta, int t, int s
     }
 }
 
-void AdamOptimizer::set_memory(const int n_samples, const int output_dim, const int par_th) {
+void AdamOptimizer::set_memory(const int n_samples, const int output_dim) {
     if (this->m != nullptr){
         delete[] this->m;
         this->m = nullptr;
@@ -288,8 +287,8 @@ void AdamOptimizer::set_memory(const int n_samples, const int output_dim, const 
     }
 
     int size = n_samples*output_dim;
-    this->m = init_zero_mat(size, par_th);
-    this->v = init_zero_mat(size, par_th);
+    this->m = init_zero_mat(size);
+    this->v = init_zero_mat(size);
 }
 
 AdamOptimizer::~AdamOptimizer(){

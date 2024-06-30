@@ -264,6 +264,10 @@ class GBTWrapper:
             self.cpp_model.plot_tree(tree_idx, filename)
         except RuntimeError as e:
             print(f"Caught an exception in GBRL: {e}")
+
+    def tree_shap(self, tree_idx: int, features: Union[np.array, th.Tensor]) -> np.array:
+        num_features, cat_features = preprocess_features(features)
+        return self.cpp_model.tree_shap(tree_idx, num_features, cat_features) 
     
     def set_device(self, device: str) -> None:
         try:
