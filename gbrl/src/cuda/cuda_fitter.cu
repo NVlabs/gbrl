@@ -8,7 +8,6 @@
 //////////////////////////////////////////////////////////////////////////////
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
-#include <thrust/device_vector.h> // std::vector of cuda
 
 #include "utils.h"
 #include "cuda_fitter.h"
@@ -156,7 +155,7 @@ void evaluate_greedy_splits(dataSet *dataset, const TreeNodeGPU *node, candidate
     cudaDeviceSynchronize();
 }
 
-void evaluate_oblivious_splits_cuda(dataSet *dataset, thrust::device_vector<TreeNodeGPU *> nodes, const int depth, candidatesData *candidata, ensembleMetaData *metadata, splitDataGPU *split_data){
+void evaluate_oblivious_splits_cuda(dataSet *dataset, TreeNodeGPU ** nodes, const int depth, candidatesData *candidata, ensembleMetaData *metadata, splitDataGPU *split_data){
     
     int threads_per_block;
     int n_nodes = (1 << depth);
@@ -1129,9 +1128,10 @@ __global__ void update_child_nodes_kernel(const TreeNodeGPU* __restrict__ parent
 void fit_tree_oblivious_cuda(dataSet *dataset, ensembleData *edata, ensembleMetaData *metadata, candidatesData *candidata, splitDataGPU *split_data){
     allocate_ensemble_memory_cuda(metadata, edata);
     cudaMemcpy(edata->tree_indices + metadata->n_trees, &metadata->n_leaves, sizeof(int), cudaMemcpyHostToDevice);
-    thrust::device_vector<TreeNodeGPU *> tree_nodes(1 << metadata->max_depth);
+
+    TreeNodeGPU **tree_nodes = (TreeNodeGPU **)malloc((1 << metadata->max_depth) * sizeof(TreeNodeGPU *));
     // for oblivious trees
-    thrust::device_vector<TreeNodeGPU *> child_tree_nodes(1 << metadata->max_depth);
+    TreeNodeGPU **child_tree_nodes = (TreeNodeGPU **)malloc((1 << metadata->max_depth) * sizeof(TreeNodeGPU *));
 
     int crnt_node_ptr_idx = 0, host_status;
     TreeNodeGPU *crnt_node;
@@ -1173,13 +1173,15 @@ void fit_tree_oblivious_cuda(dataSet *dataset, ensembleData *edata, ensembleMeta
 
     root_node = nullptr;
     metadata->n_trees++;
+    free(tree_nodes);
+    free(child_tree_nodes);
 }
 
 void fit_tree_greedy_cuda(dataSet *dataset, ensembleData *edata, ensembleMetaData *metadata, candidatesData *candidata, splitDataGPU *split_data){
     allocate_ensemble_memory_cuda(metadata, edata);
     cudaMemcpy(edata->tree_indices + metadata->n_trees, &metadata->n_leaves, sizeof(int), cudaMemcpyHostToDevice);
       
-    thrust::device_vector<TreeNodeGPU *> tree_nodes(1 << metadata->max_depth);
+    TreeNodeGPU **tree_nodes = (TreeNodeGPU **)malloc((1 << metadata->max_depth) * sizeof(TreeNodeGPU *));
     
     int crnt_node_ptr_idx = 0, host_status;
     TreeNodeGPU *crnt_node;
@@ -1242,6 +1244,7 @@ void fit_tree_greedy_cuda(dataSet *dataset, ensembleData *edata, ensembleMetaDat
 
     root_node = nullptr;
     metadata->n_trees++;
+    free(tree_nodes);
 }
 
 __device__ int strcmpCuda(const char *str_a, const char *str_b){

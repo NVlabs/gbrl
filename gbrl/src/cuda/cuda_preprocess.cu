@@ -12,12 +12,6 @@
 #include <iostream>
 #include <float.h>
 
-#include <thrust/sort.h>
-#include <thrust/unique.h>
-#include <thrust/distance.h>
-#include <thrust/device_ptr.h>
-#include <thrust/functional.h>
-
 #include "cuda_preprocess.h"
 #include "cuda_predictor.h"
 #include "split_candidate_generator.h"

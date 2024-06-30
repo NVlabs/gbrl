@@ -9,7 +9,6 @@
 #ifndef CUDA_FITTER_H
 #define CUDA_FITTER_H
 
-#include <thrust/device_vector.h> // std::vector of cuda
 #include "types.h"
 #include "cuda_types.h"
 #include "node.h"
@@ -22,7 +21,7 @@ void allocate_child_tree_node(TreeNodeGPU* host_parent, TreeNodeGPU** device_chi
 void allocate_child_tree_nodes(dataSet *dataset, TreeNodeGPU* parent_node, TreeNodeGPU* host_parent, TreeNodeGPU** left_child, TreeNodeGPU** right_child, candidatesData *candidata, splitDataGPU *split_data);
 void free_tree_node(TreeNodeGPU* node);
 void evaluate_greedy_splits(dataSet *dataset, const TreeNodeGPU *node, candidatesData *candidata, ensembleMetaData *metadata, splitDataGPU* split_data, const int threads_per_block, const int parent_n_samples);
-void evaluate_oblivious_splits_cuda(dataSet *dataset, thrust::device_vector<TreeNodeGPU *> nodes, const int depth, candidatesData *candidata, ensembleMetaData *metadata, splitDataGPU *split_data);
+void evaluate_oblivious_splits_cuda(dataSet *dataset, TreeNodeGPU ** nodes, const int depth, candidatesData *candidata, ensembleMetaData *metadata, splitDataGPU *split_data);
 void calc_parallelism(const int n_candidates, const int output_dim, int &threads_per_block, const scoreFunc split_score_fun);
 void calc_oblivious_parallelism(const int n_candidates, const int output_dim, int &threads_per_block, const scoreFunc split_score_func, const int depth);
 void fit_tree_oblivious_cuda(dataSet *dataset, ensembleData *edata, ensembleMetaData *metadata, candidatesData *candidata, splitDataGPU *split_data);
