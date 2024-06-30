@@ -80,7 +80,10 @@ class TestGBTMulti(unittest.TestCase):
     def setUpClass(cls):
         print('Loading data...')
         # Imagine this loads your actual data
-        X ,y = datasets.load_diabetes(return_X_y=True, as_frame=False, scaled=False)
+        try:
+            X ,y = datasets.load_diabetes(return_X_y=True, as_frame=False, scaled=False)
+        except TypeError: #python3.7 uses older version of scikit-learn
+            X ,y = datasets.load_diabetes(return_X_y=True, as_frame=False)
         out_dim = 1 if len(y.shape) == 1  else  y.shape[1]
         if out_dim == 1:
             y = y[:, np.newaxis]

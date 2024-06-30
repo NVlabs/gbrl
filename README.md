@@ -14,7 +14,8 @@ GBRL is a Python-based Gradient Boosting Trees (GBT) library, similar to popular
 
 ## Getting started
 ### Prerequisites
-- Python 3.9 or higher
+- Python 3.7 or higher
+- LLVM and OpenMP (macOS).
 
 ### Installation
 To install GBRL via pip, use the following command:
@@ -22,7 +23,7 @@ To install GBRL via pip, use the following command:
 pip install gbrl
 ```
 
-For furthere installation details and dependencies see the documentation. 
+For further installation details and dependencies see the documentation. 
 
 ### Usage Example
 For a detailed usage example, see `tutorial.ipynb`

@@ -4,7 +4,7 @@ Quickstart
 Prerequisites
 -------------
 
-python3.9 or higher 
+python3.7 or higher 
 
 Installation
 ------------
@@ -49,15 +49,20 @@ After installation, set the necessary environment variables:
 CUDA
 ~~~~ 
 
-GBRL compiles CUDA and requires NVCC. Ensure that ``CUDA_HOME`` is set. Verify that NVCC exists by running the command
+GBRL compiles CUDA and requires NVCC. 
+
+Ensure that ``CUDA_HOME`` is set. Verify that NVCC exists by running the command
 
 .. code-block:: console
    
    nvcc --version
 
+And set ``CUDACXX`` to the location of NVCC.
+
 .. note:: 
 
-   CUDA installation via anaconda may not install the full CUDAToolkit. 
+   CUDA installation via anaconda may not install the full CUDAToolkit.  
+
    Run ``conda install cuda -c nvidia`` to install the full CUDAToolkit.
 
 For integration with Microsoft Visual Studio, copy the following files:
