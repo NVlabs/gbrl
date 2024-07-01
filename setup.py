@@ -112,6 +112,5 @@ setup(
     package_data={
         'gbrl': ['src/cpp/*', 'src/cuda/*'],  # Include C++ and CUDA files
     },
-    packages=['gbrl'],
-    include_package_data=True,
+    packages=setuptools.find_packages(where='gbrl')
 )

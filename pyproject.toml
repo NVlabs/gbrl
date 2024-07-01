@@ -37,7 +37,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules"
 ]
 
-requires-python = ">=3.9"
+requires-python = ">=3.7"
 
 [project.optional-dependencies]
 sklearn = ["scikit_learn==1.2.2"]
