@@ -761,7 +761,7 @@ int GBRL::saveToFile(const std::string& filename){
 
     file.close();
     return 0;  // success
-};
+}
 
 int GBRL::loadFromFile(const std::string& filename){
     std::ifstream file(filename, std::ios::binary);
