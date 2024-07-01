@@ -17,8 +17,9 @@ void subtract_vec_from_mat(float *mat, float *vec, const int n_samples, const in
 float* calculate_mean(const float *mat, const int n_samples, const int n_cols, const int par_th);
 float* calculate_var(const float *mat, const float *mean, const int n_samples, const int n_cols, const int par_th);
 void _multiply_mat_by_scalar(float *mat, float scalar, const int n_samples, const int n_cols, const int par_th);
-void _broadcast_mat_elementwise_mult_by_vec_into_mat(float *lmat, const float *rmat, const float *vec, const int n_samples, const int n_cols, const int par_th);
-void _broadcast_mat_elementwise_mult_by_vec(float *mat, const float *vec, const int n_samples, const int n_cols, const int par_th);
+void _broadcast_mat_elementwise_mult_by_vec_into_mat(float *lmat, const float *rmat, const float *vec, const float scalar, const int n_samples, const int n_cols, const int par_th);
+void _broadcast_mat_elementwise_mult_by_vec(float *mat, const float *vec, const float scalar, const int n_samples, const int n_cols, const int par_th);
+void _broadcast_mat_elementwise_div_by_vec(float *mat, const float *vec, const float scalar, const int n_samples, const int n_cols, const int par_th);
 float* calculate_var_and_center(float *mat, const float *mean, const int n_samples, const int n_cols, const int par_th);
 float* calculate_std_and_center(float *mat, const float *mean, const int n_samples, const int n_cols, const int par_th);
 float* copy_mat(const float *mat, const int size, const int par_th);

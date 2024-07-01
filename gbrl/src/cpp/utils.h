@@ -12,6 +12,7 @@
 #include <string>
 #include <cstring>
 #include <fstream>
+#include <iostream>
 #include <stdexcept>
 #include <omp.h>
 

@@ -12,6 +12,7 @@ from typing import Dict, List, Union, Tuple
 
 import numpy as np
 import torch as th
+import scipy.special as sp
 
 # Define custom dtypes
 numerical_dtype = np.dtype('float32')
@@ -21,6 +22,16 @@ categorical_dtype = np.dtype('S128')
 from typing import Dict
 
 from .gbrl_cpp import GBRL
+
+def get_norm_weight(M):
+    return np.array([sp.binom(M, i) for i in range(M + 1)])
+
+def get_N_v2(D):
+    depth = D.shape[0]
+    Ns = np.zeros((depth+1, depth))
+    for i in range(1, depth+1):
+        Ns[i,:i] = np.linalg.inv(np.vander(D[:i]).T).dot(1./get_norm_weight(i-1)) 
+    return Ns
 
 
 def process_array(arr: np.array)-> Tuple[np.array, np.array]:
@@ -267,7 +278,13 @@ class GBTWrapper:
 
     def tree_shap(self, tree_idx: int, features: Union[np.array, th.Tensor]) -> np.array:
         num_features, cat_features = preprocess_features(features)
-        return self.cpp_model.tree_shap(tree_idx, num_features, cat_features) 
+        
+
+        base_poly = np.polynomial.chebyshev.chebpts2(self.params['max_depth']).astype(numerical_dtype)
+        norm_values = get_N_v2(base_poly).astype(numerical_dtype)
+        offset = np.vander(base_poly + 1).T[::-1].astype(numerical_dtype)
+
+        return self.cpp_model.tree_shap(tree_idx, num_features, cat_features, np.ascontiguousarray(base_poly), np.ascontiguousarray(offset), np.ascontiguousarray(norm_values)) 
     
     def set_device(self, device: str) -> None:
         try:

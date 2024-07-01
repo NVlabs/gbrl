@@ -50,7 +50,7 @@ shapData* alloc_shap_data(const ensembleMetaData *metadata, const ensembleData *
 
         // Store the parent index for the current node
         parents[n_nodes] = crnt_node.parent_idx;
-        weights[n_nodes] = edata->edge_weights[n_nodes];
+        weights[n_nodes] = edata->edge_weights[leaf_idx*metadata->max_depth + crnt_node.depth];
         if (crnt_node.is_left)
             left_children[crnt_node.parent_idx] = crnt_node.idx;
         if (crnt_node.is_right)
@@ -144,8 +144,71 @@ void dealloc_shap_data(shapData *shap_data){
     delete shap_data;
 }
 
-void shap_inference(const ensembleMetaData *metadata, const ensembleData *edata, shapData *shap_data, const dataSet *dataset, float *shap_values, int crnt_node, int crnt_depth, int feature, const int sample_offset){
+void print_shap_data(const shapData *shap_data, const ensembleMetaData *metadata){
+    printf("**** shap_data with %d nodes *****\n", shap_data->n_nodes);
+    printf("left_children: [");
+    for (int i = 0; i < shap_data->n_nodes; i++){
+        printf("%d", shap_data->left_children[i]);
+        if (i < shap_data->n_nodes - 1)
+            printf(", ");
+    }
+    printf("]\n");
 
+    printf("right_children: [");
+    for (int i = 0; i < shap_data->n_nodes; i++){
+        printf("%d", shap_data->right_children[i]);
+        if (i < shap_data->n_nodes - 1)
+            printf(", ");
+    }
+    printf("]\n");
+    printf("feature_prev_node: [");
+    for (int i = 0; i < shap_data->n_nodes; i++){
+        printf("%d", shap_data->feature_prev_node[i]);
+        if (i < shap_data->n_nodes - 1)
+            printf(", ");
+    }
+    printf("]\n");
+    printf("node_unique_features: [");
+    for (int i = 0; i < shap_data->n_nodes; i++){
+        printf("%d", shap_data->node_unique_features[i]);
+        if (i < shap_data->n_nodes - 1)
+            printf(", ");
+    }
+    printf("]\n");
+    printf("feature_indices: [");
+    for (int i = 0; i < shap_data->n_nodes; i++){
+        printf("%d", shap_data->feature_indices[i]);
+        if (i < shap_data->n_nodes - 1)
+            printf(", ");
+    }
+    printf("]\n");
+    printf("feature_values: [");
+    for (int i = 0; i < shap_data->n_nodes; i++){
+        printf("%f", shap_data->feature_values[i]);
+        if (i < shap_data->n_nodes - 1)
+            printf(", ");
+    }
+    printf("]\n");
+    printf("weights: [");
+    for (int i = 0; i < shap_data->n_nodes; i++){
+        printf("%f", shap_data->weights[i]);
+        if (i < shap_data->n_nodes - 1)
+            printf(", ");
+    }
+    printf("]\n");
+    printf("predictions: [");
+    for (int i = 0; i < shap_data->n_nodes*metadata->output_dim; i++){
+        printf("%f", shap_data->predictions[i]);
+        if (i < shap_data->n_nodes*metadata->output_dim - 1)
+            printf(", ");
+    }
+    printf("]\n");
+
+    
+}
+
+void shap_inference(const ensembleMetaData *metadata, const ensembleData *edata, shapData *shap_data, const dataSet *dataset, float *shap_values, int crnt_node, int crnt_depth, int feature, const int sample_offset){
+    printf("running shap inference at depth %i for feature %i with sample offset %i\n", crnt_depth, feature, sample_offset);
     float q_parent = 0.0f; 
     int feature_prev_node = shap_data->feature_prev_node[crnt_node];
     
@@ -159,42 +222,43 @@ void shap_inference(const ensembleMetaData *metadata, const ensembleData *edata,
     float *child_e = shap_data->E + (crnt_depth + 1) * col_size;
     float *current_c = shap_data->C + crnt_depth * col_size;
     float q = 0.0f;
+
     if (feature >= 0){
         if (shap_data->active_nodes[crnt_node]){
             q = 1.0f / shap_data->weights[crnt_node];
         }
 
         float *prev_c = shap_data->C + (crnt_depth - 1) * col_size;
-        for (int i = 0; i < col_size; i++)
-        {
-            current_c[i] = prev_c[i] * (shap_data->base_poly[i] + q);
-        }
+        _broadcast_mat_elementwise_mult_by_vec_into_mat(current_c, prev_c, shap_data->base_poly, q, metadata->max_depth,  metadata->output_dim, metadata->par_th);
 
         if (feature_prev_node >= 0){
-            for (int i = 0; i < col_size; i++){
-                current_c[i] = current_c[i] / (shap_data->base_poly[i] + q_parent);
-            }
+            _broadcast_mat_elementwise_div_by_vec(current_c, shap_data->base_poly, 0.0f, metadata->max_depth, metadata->output_dim, metadata->par_th);
         }
     }
     int offset_degree = 0;
     int left = shap_data->left_children[crnt_node];
     int right = shap_data->right_children[crnt_node];
     if (left >= 0){
-        shap_data->active_nodes[right] = (dataset->obs[sample_offset + shap_data->feature_indices[crnt_node]] > shap_data->feature_values[crnt_node]) ? true : false;
-        shap_data->active_nodes[left] = (dataset->obs[sample_offset + shap_data->feature_indices[crnt_node]] > shap_data->feature_values[crnt_node]) ? false : true;
+        shap_data->active_nodes[right] = (dataset->obs[sample_offset*metadata->n_num_features + shap_data->feature_indices[crnt_node]] > shap_data->feature_values[crnt_node]) ? true : false;
+        shap_data->active_nodes[left] = (dataset->obs[sample_offset*metadata->n_num_features + shap_data->feature_indices[crnt_node]] > shap_data->feature_values[crnt_node]) ? false : true;
+        printf("crnt_node %d\n", crnt_node);
         shap_inference(metadata, edata, shap_data, dataset, shap_values, left, crnt_depth + 1, shap_data->feature_indices[crnt_node], sample_offset);
     
         offset_degree = shap_data->node_unique_features[crnt_node] - shap_data->node_unique_features[left];
-        _broadcast_mat_elementwise_mult_by_vec(child_e, shap_data->offset_poly + offset_degree * metadata->max_depth, metadata->max_depth, metadata->output_dim, metadata->par_th);
+        printf("multiplying left child mult\n");
+        _broadcast_mat_elementwise_mult_by_vec(child_e, shap_data->offset_poly + offset_degree * metadata->max_depth, 0.0f, metadata->max_depth, metadata->output_dim, metadata->par_th);
         _copy_mat(current_e, child_e, col_size, metadata->par_th);
         shap_inference(metadata, edata, shap_data, dataset, shap_values, right, crnt_depth + 1, shap_data->feature_indices[crnt_node], sample_offset);
         offset_degree = shap_data->node_unique_features[crnt_node] - shap_data->node_unique_features[right];
-        _broadcast_mat_elementwise_mult_by_vec(child_e, shap_data->offset_poly + offset_degree * metadata->max_depth, metadata->max_depth, metadata->output_dim, metadata->par_th);
+        printf("multiplying right child mult\n");
+        _broadcast_mat_elementwise_mult_by_vec(child_e, shap_data->offset_poly + offset_degree * metadata->max_depth, 0.0f, metadata->max_depth, metadata->output_dim, metadata->par_th);
+        printf("ele addition\n");
         _element_wise_addition(current_e, child_e, col_size, metadata->par_th);
     }
     else 
     {
-        _broadcast_mat_elementwise_mult_by_vec_into_mat(current_e, current_c, shap_data->predictions + crnt_node * metadata->output_dim, metadata->max_depth, metadata->output_dim, metadata->par_th);
+        printf("broadcast mult\n");
+        _broadcast_mat_elementwise_mult_by_vec_into_mat(current_e, current_c, shap_data->predictions + crnt_node * metadata->output_dim, 0.0f, metadata->max_depth, metadata->output_dim, metadata->par_th);
     }
     if (feature >= 0){
         if(feature_prev_node >=0 && !shap_data->active_nodes[feature_prev_node]){
