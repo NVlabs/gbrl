@@ -22,6 +22,7 @@ categorical_dtype = np.dtype('S128')
 from typing import Dict
 
 from .gbrl_cpp import GBRL
+from .utils import get_input_dim
 
 def get_norm_weight(M):
     return np.array([sp.binom(M, i) for i in range(M + 1)])
@@ -32,7 +33,6 @@ def get_N_v2(D):
     for i in range(1, depth+1):
         Ns[i,:i] = np.linalg.inv(np.vander(D[:i]).T).dot(1./get_norm_weight(i-1)) 
     return Ns
-
 
 def process_array(arr: np.array)-> Tuple[np.array, np.array]:
     """ Formats numpy array for C++ GBRL.
@@ -60,7 +60,6 @@ def to_numpy(arr: Union[np.array, th.Tensor]) -> Union[np.array, np.array]:
     else:
         return process_array(arr)
        
-
 def preprocess_features(arr: Union[np.array, th.Tensor]) -> Tuple[np.array, np.array]:
     """Preprocess array such that the dimensions and the data type match.
     Returns numerical and categorical features. 
@@ -70,7 +69,7 @@ def preprocess_features(arr: Union[np.array, th.Tensor]) -> Tuple[np.array, np.a
     Returns:
         Tuple[np.array, np.array]
     """
-    input_dim = 1 if len(arr.shape) == 1 else arr.shape[1]
+    input_dim = get_input_dim(arr)
     num_arr, cat_arr = to_numpy(arr)
     if num_arr is not None and len(num_arr.shape) == 1:
         if input_dim == 1:
@@ -115,7 +114,7 @@ class GBTWrapper:
         if feature_weights is not None:
             feature_weights, _ = to_numpy(feature_weights)
             feature_weights = feature_weights.flatten()
-            assert np.all(feature_weights > 0), "feature weights contains non-positive values"
+            assert np.all(feature_weights >= 0), "feature weights contains non-positive values"
         self.feature_weights = feature_weights
 
     def reset(self) -> None:
@@ -140,7 +139,7 @@ class GBTWrapper:
         if feature_weights is not None:
             feature_weights, _ = to_numpy(feature_weights)
             feature_weights = feature_weights.flatten()
-            assert np.all(feature_weights > 0), "feature weights contains non-positive values"
+            assert np.all(feature_weights >= 0), "feature weights contains non-positive values"
         self.feature_weights = feature_weights
 
     def step(self, features: Union[np.array, th.Tensor, Tuple], grads: Union[np.array, th.Tensor]) -> None:
@@ -152,7 +151,7 @@ class GBTWrapper:
         if self.feature_weights is None:
             self.feature_weights = np.ones(input_dim, dtype=numerical_dtype)
         assert len(self.feature_weights) == input_dim, "feature weights has to have the same number of elements as features"
-        assert np.all(self.feature_weights > 0), "feature weights contains non-positive values"
+        assert np.all(self.feature_weights >= 0), "feature weights contains non-positive values"
         self.cpp_model.step(num_features, cat_features, grads, self.feature_weights)
         self.iteration = self.cpp_model.get_iteration()
         self.total_iterations += 1
@@ -166,7 +165,7 @@ class GBTWrapper:
         if self.feature_weights is None:
             self.feature_weights = np.ones(input_dim, dtype=numerical_dtype)
         assert len(self.feature_weights) == input_dim, "feature weights has to have the same number of elements as features"
-        assert np.all(self.feature_weights > 0), "feature weights contains non-positive values"
+        assert np.all(self.feature_weights >= 0), "feature weights contains non-positive values"
         loss = self.cpp_model.fit(num_features, cat_features, targets, self.feature_weights, iterations, shuffle, loss_type)
         self.iteration = self.cpp_model.get_iteration()
         return loss
@@ -278,8 +277,6 @@ class GBTWrapper:
 
     def tree_shap(self, tree_idx: int, features: Union[np.array, th.Tensor]) -> np.array:
         num_features, cat_features = preprocess_features(features)
-        
-
         base_poly = np.polynomial.chebyshev.chebpts2(self.params['max_depth']).astype(numerical_dtype)
         
         norm_values = get_N_v2(base_poly).astype(numerical_dtype)
@@ -512,7 +509,7 @@ class SharedActorCriticWrapper(GBTWrapper):
         if self.feature_weights is None:
             self.feature_weights = np.ones(input_dim, dtype=numerical_dtype)
         assert len(self.feature_weights) == input_dim, "feature weights has to have the same number of elements as features"
-        assert np.all(self.feature_weights > 0), "feature weights contains non-positive values"
+        assert np.all(self.feature_weights >= 0), "feature weights contains non-positive values"
         self.cpp_model.step(num_observations, cat_observations, target_grads, self.feature_weights)
         self.iteration = self.cpp_model.get_iteration()
         self.total_iterations += 1

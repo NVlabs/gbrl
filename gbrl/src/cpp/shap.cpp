@@ -35,8 +35,10 @@ shapData* alloc_shap_data(const ensembleMetaData *metadata, const ensembleData *
     int *right_children = new int[n_leaves * metadata->max_depth];
     int *feature_indices = new int[n_leaves * metadata->max_depth];
     float *feature_values = new float[n_leaves * metadata->max_depth];
+    bool *numerics = new bool[n_leaves * metadata->max_depth];
     float *predictions = new float[n_leaves * metadata->max_depth * metadata->output_dim];
     float *weights = new float[n_leaves * metadata->max_depth];
+    char *categorical_values = new char[(n_leaves * metadata->max_depth)*MAX_CHAR_SIZE];
     for (int i = 0; i < n_leaves * metadata->max_depth; ++i){
         left_children[i] = -1;
         right_children[i] = -1;
@@ -73,7 +75,11 @@ shapData* alloc_shap_data(const ensembleMetaData *metadata, const ensembleData *
             node_stack.push(left_child);
             int feature_idx = edata->feature_indices[leaf_idx*metadata->max_depth + crnt_node.depth];
             feature_indices[n_nodes] = feature_idx;
-            feature_values[n_nodes] = edata->feature_values[leaf_idx*metadata->max_depth + crnt_node.depth];
+            if (edata->is_numerics[leaf_idx*metadata->max_depth + crnt_node.depth])
+                feature_values[n_nodes] = edata->feature_values[leaf_idx*metadata->max_depth + crnt_node.depth];
+            else 
+                 memcpy(categorical_values + n_nodes*MAX_CHAR_SIZE, edata->categorical_values + (leaf_idx*metadata->max_depth + crnt_node.depth)*MAX_CHAR_SIZE, sizeof(char)*MAX_CHAR_SIZE);
+            numerics[n_nodes] = edata->is_numerics[leaf_idx*metadata->max_depth + crnt_node.depth];
 
         } else {
             // Calculate number of unique features at the leaf node
@@ -129,6 +135,8 @@ shapData* alloc_shap_data(const ensembleMetaData *metadata, const ensembleData *
     shap_data->left_children = left_children;
     shap_data->right_children = right_children;
     shap_data->active_nodes = new bool[n_nodes];
+    shap_data->numerics = numerics;
+    shap_data->categorical_values = categorical_values;
     shap_data->feature_prev_node = feature_prev_node;
     shap_data->node_unique_features = node_unique_features;
     shap_data->n_nodes = n_nodes;
@@ -157,12 +165,14 @@ void dealloc_shap_data(shapData *shap_data){
     delete[] shap_data->left_children;
     delete[] shap_data->right_children;
     delete[] shap_data->active_nodes;
+    delete[] shap_data->numerics;
     delete[] shap_data->feature_prev_node;
     delete[] shap_data->feature_indices;
     delete[] shap_data->feature_values;
     delete[] shap_data->predictions;
     delete[] shap_data->weights;
     delete[] shap_data->node_unique_features;
+    delete[] shap_data->categorical_values;
     delete[] shap_data->C;
     delete[] shap_data->E;
     delete shap_data;
@@ -316,8 +326,9 @@ void shap_inference(const ensembleMetaData *metadata, const ensembleData *edata,
     }
     printf("q_eff: %f s_eff %f\n", q, q_parent);
     if (left >= 0){
-        shap_data->active_nodes[right] = (dataset->obs[sample_offset*metadata->n_num_features + shap_data->feature_indices[crnt_node]] > shap_data->feature_values[crnt_node]) ? true : false;
-        shap_data->active_nodes[left] = (dataset->obs[sample_offset*metadata->n_num_features + shap_data->feature_indices[crnt_node]] > shap_data->feature_values[crnt_node]) ? false : true;
+        bool is_greater = (shap_data->numerics[crnt_node]) ? dataset->obs[sample_offset*metadata->n_num_features + shap_data->feature_indices[crnt_node]] > shap_data->feature_values[crnt_node]: strcmp(&dataset->categorical_obs[(sample_offset*metadata->n_cat_features + shap_data->feature_indices[crnt_node]) * MAX_CHAR_SIZE],  shap_data->categorical_values + crnt_node*MAX_CHAR_SIZE) == 0;
+        shap_data->active_nodes[right] = (is_greater) ? true : false;
+        shap_data->active_nodes[left] = (is_greater) ? false : true;
         shap_inference(metadata, edata, shap_data, dataset, shap_values, left, crnt_depth + 1, shap_data->feature_indices[crnt_node], sample_offset);
         offset_degree = shap_data->node_unique_features[crnt_node] - shap_data->node_unique_features[left];
         _broadcast_mat_elementwise_mult_by_vec(child_e, shap_data->offset_poly + offset_degree * metadata->max_depth, 0.0f, metadata->max_depth, metadata->output_dim, metadata->par_th);

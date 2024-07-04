@@ -6,8 +6,9 @@
 # https://nvlabs.github.io/gbrl/license.html
 #
 ##############################################################################
-from typing import Dict 
+from typing import Dict, Union, Tuple
 import numpy as np
+import torch as th
 
 from .config import APPROVED_OPTIMIZERS, VALID_OPTIMIZER_ARGS
 
@@ -63,6 +64,20 @@ def clip_grad_norm(grads: np.array, grad_clip: float) -> np.array:
     grads[grad_norms > grad_clip] = grad_clip*grads[grad_norms > grad_clip] / grads[grad_norms > grad_clip]
     return grads
 
+
+def get_input_dim(arr: Union[np.array, th.Tensor]) -> int:
+    """Returns the column dimension of a 2D array
+
+    Args:
+        arr (np.array):input array
+
+    Returns:
+        int: input dimension
+    """
+    if isinstance(arr, Tuple):
+        num_arr, cat_arr = arr
+        return get_input_dim(num_arr) + get_input_dim(cat_arr)
+    return 1 if len(arr.shape) == 1 else arr.shape[1]
 
 
 

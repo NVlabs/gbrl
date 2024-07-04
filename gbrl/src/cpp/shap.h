@@ -18,6 +18,7 @@ struct shapData {
     float *E;
     float *C;
     bool *active_nodes;
+    bool *numerics;
     int *feature_prev_node; 
     int *node_unique_features;
     int *left_children;
@@ -26,6 +27,7 @@ struct shapData {
     float *feature_values;
     float *predictions;
     float *weights;
+    char *categorical_values;
 };
 
 shapData* alloc_shap_data(const ensembleMetaData *metadata, const ensembleData *edata, const int tree_idx);
