@@ -1,3 +1,11 @@
+//////////////////////////////////////////////////////////////////////////////
+// Copyright (c) 2024, NVIDIA Corporation. All rights reserved.
+//
+// This work is made available under the Nvidia Source Code License-NC.
+// To view a copy of this license, visit
+// https://nvlabs.github.io/gbrl/license.html
+//
+//////////////////////////////////////////////////////////////////////////////
 #ifndef SHAP_H
 #define SHAP_H
 
@@ -22,6 +30,7 @@ struct shapData {
 
 shapData* alloc_shap_data(const ensembleMetaData *metadata, const ensembleData *edata, const int tree_idx);
 void dealloc_shap_data(shapData *shap_data);
+void reset_shap_arrays(shapData *shap_data, const ensembleMetaData *metadata);
 void get_shap_values(const ensembleMetaData *metadata, const ensembleData *edata, shapData *shap_data, const dataSet *dataset, float *shap_values);
 void print_shap_data(const shapData *shap_data, const ensembleMetaData *metadata);
 void shap_inference(const ensembleMetaData *metadata, const ensembleData *edata, shapData *shap_data, const dataSet *dataset, float *shap_values, int crnt_node, int crnt_depth, int feature, const int sample_offset);

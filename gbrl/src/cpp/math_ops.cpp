@@ -164,7 +164,7 @@ void _multiply_mat_by_scalar(float *mat, float scalar, const int n_samples, cons
     }
 }
 
-void _broadcast_mat_elementwise_mult_by_vec_into_mat(float *lmat, const float *rmat, const float *vec, const float scalar, const int n_samples, const int n_cols, const int par_th){
+void _broadcast_mat_elementwise_mult_by_vec_into_mat(float *lmat, const float *rmat, const float *vec, const float scalar, const int n_samples, const int n_cols, const int par_th, const bool col_wise){
     /* Broadcastig element-wise multiplication of an NxM matrix by an Nx1 vector and storing the result in another matrix.
        Each row of the matrix is multiplied by */
     int n_elements = n_samples * n_cols;
@@ -181,8 +181,8 @@ void _broadcast_mat_elementwise_mult_by_vec_into_mat(float *lmat, const float *r
     #pragma omp simd
 #endif
             for (int i = start_idx; i < end_idx; ++i) {
-                int row = i / n_cols;
-                lmat[i] = rmat[i]*(vec[row] + scalar); 
+                int vec_idx = (col_wise) ? i % n_cols : i / n_cols;
+                lmat[i] = rmat[i]*(vec[vec_idx] + scalar); 
             }
         }
     } else {
@@ -190,8 +190,8 @@ void _broadcast_mat_elementwise_mult_by_vec_into_mat(float *lmat, const float *r
     #pragma omp simd
 #endif
         for (int i = 0; i < n_elements; ++i) {
-            int row = i / n_cols;
-            lmat[i] = rmat[i]*(vec[row] + scalar); 
+            int vec_idx = (col_wise) ? i % n_cols : i / n_cols;
+            lmat[i] = rmat[i]*(vec[vec_idx] + scalar); 
         }
     }
 }

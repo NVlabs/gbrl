@@ -1,3 +1,11 @@
+//////////////////////////////////////////////////////////////////////////////
+// Copyright (c) 2024, NVIDIA Corporation. All rights reserved.
+//
+// This work is made available under the Nvidia Source Code License-NC.
+// To view a copy of this license, visit
+// https://nvlabs.github.io/gbrl/license.html
+//
+//////////////////////////////////////////////////////////////////////////////
 #include <iostream>
 #include <stdexcept>
 #include <cstring>
@@ -50,7 +58,8 @@ shapData* alloc_shap_data(const ensembleMetaData *metadata, const ensembleData *
 
         // Store the parent index for the current node
         parents[n_nodes] = crnt_node.parent_idx;
-        weights[n_nodes] = edata->edge_weights[leaf_idx*metadata->max_depth + crnt_node.depth];
+        if (crnt_node.depth > 0)
+            weights[n_nodes] = edata->edge_weights[leaf_idx*metadata->max_depth + crnt_node.depth - 1];
         if (crnt_node.is_left)
             left_children[crnt_node.parent_idx] = crnt_node.idx;
         if (crnt_node.is_right)
@@ -65,22 +74,10 @@ shapData* alloc_shap_data(const ensembleMetaData *metadata, const ensembleData *
             int feature_idx = edata->feature_indices[leaf_idx*metadata->max_depth + crnt_node.depth];
             feature_indices[n_nodes] = feature_idx;
             feature_values[n_nodes] = edata->feature_values[leaf_idx*metadata->max_depth + crnt_node.depth];
-            
-            int parent_idx = parents[n_nodes];
-            bool found = false;
-            while (parent_idx >= 0) {
-                if (feature_idx ==  feature_indices[parent_idx]){
-                    found = true;
-                    break;
-                }
-                parent_idx = parents[parent_idx];
-            }
-            if (found)
-                feature_prev_node[n_nodes] = parent_idx;
 
         } else {
             // Calculate number of unique features at the leaf node
-            int n_unique_features = count_distinct(edata->feature_indices + leaf_idx * metadata->max_depth, edata->bias[leaf_idx]);
+            int n_unique_features = count_distinct(edata->feature_indices + leaf_idx * metadata->max_depth, edata->depths[leaf_idx]);
             // Backtrack to update node_unique_features array
             int parent_idx = parents[n_nodes];
             if (n_unique_features > node_unique_features[n_nodes])
@@ -92,15 +89,27 @@ shapData* alloc_shap_data(const ensembleMetaData *metadata, const ensembleData *
             }
             // Increment leaf index and mark children as non-existent (-1)
             for (int d = 0; d < metadata->output_dim; ++d)
-                predictions[n_nodes*metadata->output_dim + d] = edata->values[leaf_idx*metadata->max_depth + d];
+                predictions[n_nodes*metadata->output_dim + d] = edata->values[leaf_idx*metadata->output_dim + d]*edata->edge_weights[leaf_idx*metadata->max_depth + crnt_node.depth];
             ++leaf_idx;
         }
-        if (crnt_node.parent_idx >= 0){
-            float w = edata->edge_weights[leaf_idx*metadata->max_depth + crnt_node.depth];
-            // adjust node weight when a feature is used multiple times in a path
-            if (feature_prev_node[n_nodes] >= 0)
-                w *= weights[feature_prev_node[n_nodes]];
-            weights[n_nodes] = w;
+
+        int parent_idx = parents[n_nodes];
+        bool found = false;
+        if (parent_idx >= 0){
+            int grandparent_idx = parents[parent_idx];
+            int prev_feature = feature_indices[parent_idx];
+            while (grandparent_idx >= 0) {
+                if (prev_feature == feature_indices[grandparent_idx]){
+                    found = true;
+                    break;
+                }
+                grandparent_idx = parents[grandparent_idx];
+            }
+        }
+        
+        if (found){
+            feature_prev_node[n_nodes] = parent_idx;
+            weights[n_nodes] *= weights[parent_idx];
         }
         
         // Move to the next node
@@ -108,6 +117,13 @@ shapData* alloc_shap_data(const ensembleMetaData *metadata, const ensembleData *
     }
     
     delete[] parents;
+
+    // for debugging script
+    // float temp_preds[15] = {152.13348416,  54.24660633,  37.260181,    21.41628959,  15.8438914, 16.98642534,   1.239819  ,  15.74660633,  97.88687783,  42.69457014, 13.08371041,  29.61085973,  55.19230769,  36.33484163,  18.85746606}; 
+    // for (int i = 0; i < 15 ; ++i){
+    //     predictions[i] = temp_preds[i];
+    // }
+   
     
     shapData *shap_data = new shapData;
     shap_data->left_children = left_children;
@@ -121,12 +137,20 @@ shapData* alloc_shap_data(const ensembleMetaData *metadata, const ensembleData *
     shap_data->feature_values = feature_values;
     shap_data->predictions = predictions;
 
+    memset(shap_data->active_nodes, 0, sizeof(bool)*shap_data->n_nodes);
     int poly_size = (metadata->max_depth + 1) * metadata->max_depth * metadata->output_dim;
-    float *C = new float[poly_size];
-    set_mat_value(C, poly_size, 1.0f, metadata->par_th);
-    shap_data->C = C;
+    shap_data->C = init_zero_mat(poly_size);
     shap_data->E = init_zero_mat(poly_size);
     return shap_data;
+}
+
+void reset_shap_arrays(shapData *shap_data, const ensembleMetaData *metadata){
+    memset(shap_data->active_nodes, 0, sizeof(bool)*shap_data->n_nodes);
+    int poly_size = (metadata->max_depth + 1) * metadata->max_depth * metadata->output_dim;
+    memset(shap_data->C, 0, sizeof(float)*poly_size);
+    memset(shap_data->E, 0, sizeof(float)*poly_size);
+    // only set the first row of C
+    set_mat_value(shap_data->C, metadata->max_depth * metadata->output_dim, 1.0f, metadata->par_th); 
 }
 
 void dealloc_shap_data(shapData *shap_data){
@@ -221,85 +245,115 @@ void shap_inference(const ensembleMetaData *metadata, const ensembleData *edata,
     float *current_e = shap_data->E + crnt_depth * col_size;
     float *child_e = shap_data->E + (crnt_depth + 1) * col_size;
     float *current_c = shap_data->C + crnt_depth * col_size;
-    float q = 0.0f;
 
+    int offset_degree = 0;
+    int left = shap_data->left_children[crnt_node];
+    int right = shap_data->right_children[crnt_node];
+    printf("gbrl treeshap node %d depth: %d feature %d s: %f, left: %d, right %d: parent: %d, edge_height: %d child_feature_idx %d\n", crnt_node, crnt_depth, feature, q_parent, left, right, feature_prev_node, shap_data->node_unique_features[crnt_node], shap_data->feature_indices[crnt_node]);
+    int shap_size = (metadata->n_num_features + metadata->n_cat_features)*metadata->output_dim;
+    printf("shap_values: [");
+    for (int i = 0; i < shap_size; i++){
+        printf("%f", shap_values[sample_offset*(metadata->n_num_features + metadata->n_cat_features)*metadata->output_dim +i]);
+        if (i < shap_size - 1)
+            printf(", ");
+    }
+    printf("]\n");
+    printf("current_e: [");
+    for (int i = 0; i < col_size; i++){
+        printf("%f", current_e[i]);
+        if (i < col_size - 1)
+            printf(", ");
+    }
+    printf("]\n");
+    printf("child_e: [");
+    for (int i = 0; i < col_size; i++){
+        printf("%f", child_e[i]);
+        if (i < col_size - 1)
+            printf(", ");
+    }
+    printf("]\n");
+    printf("current_c: [");
+    for (int i = 0; i < col_size; i++){
+        printf("%f", current_c[i]);
+        if (i < col_size - 1)
+            printf(", ");
+    }
+    printf("]\n");
+    printf("activation: [");
+    for (int i = 0; i < shap_data->n_nodes; i++){
+        printf("%d", static_cast<int>(shap_data->active_nodes[i]));
+        if (i < shap_data->n_nodes - 1)
+            printf(", ");
+    }
+    printf("]\n");
+    printf("C: [");
+    for (int i = 0; i < col_size *( metadata->max_depth + 1); ++i){
+        printf("%f", shap_data->C[i]);
+        if (i < col_size * (metadata->max_depth + 1) - 1)
+            printf(", ");
+    }
+    printf("]\n");
+    printf("E: [");
+    for (int i = 0; i < col_size *( metadata->max_depth + 1); ++i){
+        printf("%f", shap_data->E[i]);
+        if (i < col_size * (metadata->max_depth + 1) - 1)
+            printf(", ");
+    }
+    printf("]\n");
+        
+    float q = 0.0f;
     if (feature >= 0){
         if (shap_data->active_nodes[crnt_node]){
             q = 1.0f / shap_data->weights[crnt_node];
         }
 
         float *prev_c = shap_data->C + (crnt_depth - 1) * col_size;
-        _broadcast_mat_elementwise_mult_by_vec_into_mat(current_c, prev_c, shap_data->base_poly, q, metadata->max_depth,  metadata->output_dim, metadata->par_th);
+        _broadcast_mat_elementwise_mult_by_vec_into_mat(current_c, prev_c, shap_data->base_poly, q, metadata->max_depth,  metadata->output_dim, metadata->par_th, false);
 
         if (feature_prev_node >= 0){
-            _broadcast_mat_elementwise_div_by_vec(current_c, shap_data->base_poly, 0.0f, metadata->max_depth, metadata->output_dim, metadata->par_th);
+            _broadcast_mat_elementwise_div_by_vec(current_c, shap_data->base_poly, q_parent, metadata->max_depth, metadata->output_dim, metadata->par_th);
         }
     }
-    int offset_degree = 0;
-    int left = shap_data->left_children[crnt_node];
-    int right = shap_data->right_children[crnt_node];
+    printf("q_eff: %f s_eff %f\n", q, q_parent);
     if (left >= 0){
         shap_data->active_nodes[right] = (dataset->obs[sample_offset*metadata->n_num_features + shap_data->feature_indices[crnt_node]] > shap_data->feature_values[crnt_node]) ? true : false;
         shap_data->active_nodes[left] = (dataset->obs[sample_offset*metadata->n_num_features + shap_data->feature_indices[crnt_node]] > shap_data->feature_values[crnt_node]) ? false : true;
-        printf("crnt_node %d\n", crnt_node);
         shap_inference(metadata, edata, shap_data, dataset, shap_values, left, crnt_depth + 1, shap_data->feature_indices[crnt_node], sample_offset);
-    
         offset_degree = shap_data->node_unique_features[crnt_node] - shap_data->node_unique_features[left];
-        printf("multiplying left child mult\n");
         _broadcast_mat_elementwise_mult_by_vec(child_e, shap_data->offset_poly + offset_degree * metadata->max_depth, 0.0f, metadata->max_depth, metadata->output_dim, metadata->par_th);
         _copy_mat(current_e, child_e, col_size, metadata->par_th);
         shap_inference(metadata, edata, shap_data, dataset, shap_values, right, crnt_depth + 1, shap_data->feature_indices[crnt_node], sample_offset);
         offset_degree = shap_data->node_unique_features[crnt_node] - shap_data->node_unique_features[right];
-        printf("multiplying right child mult\n");
         _broadcast_mat_elementwise_mult_by_vec(child_e, shap_data->offset_poly + offset_degree * metadata->max_depth, 0.0f, metadata->max_depth, metadata->output_dim, metadata->par_th);
-        printf("ele addition\n");
         _element_wise_addition(current_e, child_e, col_size, metadata->par_th);
     }
-    else 
-    {
-        printf("broadcast mult\n");
-        _broadcast_mat_elementwise_mult_by_vec_into_mat(current_e, current_c, shap_data->predictions + crnt_node * metadata->output_dim, 0.0f, metadata->max_depth, metadata->output_dim, metadata->par_th);
+    else {
+        _broadcast_mat_elementwise_mult_by_vec_into_mat(current_e, current_c, shap_data->predictions + crnt_node * metadata->output_dim, 0.0f, metadata->max_depth, metadata->output_dim, metadata->par_th, true);
     }
     if (feature >= 0){
         if(feature_prev_node >=0 && !shap_data->active_nodes[feature_prev_node]){
             return;	
         }
-            const float *norm_value = shap_data->norm_values + shap_data->node_unique_features[crnt_node] * col_size;
-            const float *offset = shap_data->offset_poly;
-            add_edge_shapley(shap_values + sample_offset*(metadata->n_num_features + metadata->n_cat_features)*metadata->output_dim + feature*metadata->output_dim, current_e, offset, shap_data->base_poly, q, norm_value, shap_data->node_unique_features[crnt_node], metadata->output_dim);
-            if (feature_prev_node >= 0)
-            {
-                offset_degree = shap_data->node_unique_features[feature_prev_node] - shap_data->node_unique_features[crnt_node];
-                norm_value = shap_data->norm_values + shap_data->node_unique_features[feature_prev_node] * metadata->max_depth;
-                offset = shap_data->offset_poly + offset_degree * metadata->max_depth;
-                subtract_closest_parent_edge_shapley(shap_values + sample_offset*(metadata->n_num_features + metadata->n_cat_features)*metadata->output_dim + feature*metadata->output_dim, current_e, offset, shap_data->base_poly, q_parent, norm_value, shap_data->node_unique_features[feature_prev_node], metadata->output_dim);
-            }
+        printf("added shaply\n");
+        const float *norm_value = shap_data->norm_values + shap_data->node_unique_features[crnt_node] * metadata->max_depth;
+        const float *offset = shap_data->offset_poly;
+        add_edge_shapley(shap_values + sample_offset*(metadata->n_num_features + metadata->n_cat_features)*metadata->output_dim + feature*metadata->output_dim, current_e, offset, shap_data->base_poly, q, norm_value, shap_data->node_unique_features[crnt_node], metadata->output_dim);
+        if (feature_prev_node >= 0){
+            printf("subtracted shaply\n");
+            offset_degree = shap_data->node_unique_features[feature_prev_node] - shap_data->node_unique_features[crnt_node];
+            norm_value = shap_data->norm_values + shap_data->node_unique_features[feature_prev_node] * metadata->max_depth;
+            offset = shap_data->offset_poly + offset_degree * metadata->max_depth;
+            subtract_closest_parent_edge_shapley(shap_values + sample_offset*(metadata->n_num_features + metadata->n_cat_features)*metadata->output_dim + feature*metadata->output_dim, current_e, offset, shap_data->base_poly, q_parent, norm_value, shap_data->node_unique_features[feature_prev_node], metadata->output_dim);
+        }
     }
 
 } 
 
 void get_shap_values(const ensembleMetaData *metadata, const ensembleData *edata, shapData *shap_data, const dataSet *dataset, float *shap_values){
-    int n_sample_threads = calculate_num_threads(dataset->n_samples, metadata->par_th);
-    // sample parallelization
-    if (n_sample_threads > 1) {
-        int samples_per_thread = dataset->n_samples / n_sample_threads;
-        omp_set_num_threads(n_sample_threads);
-        #pragma omp parallel
-        {
-            int thread_id = omp_get_thread_num();
-            int start_idx = thread_id * samples_per_thread;
-            int end_idx = (thread_id == n_sample_threads - 1) ? dataset->n_samples : start_idx + samples_per_thread;
-            for (int sample_idx = start_idx; sample_idx < end_idx; ++sample_idx) {
-                shap_inference(metadata, edata, shap_data, dataset, shap_values, 0, 0, -1, sample_idx);
-            }
-        }
-    // no parallelization
-    } else{ 
-        for (int sample_idx = 0; sample_idx < dataset->n_samples; ++sample_idx){
-            shap_inference(metadata, edata, shap_data, dataset, shap_values, 0, 0, -1, sample_idx);
-        }
+    for (int sample_idx = 0; sample_idx < dataset->n_samples; ++sample_idx){
+        reset_shap_arrays(shap_data, metadata);
+        shap_inference(metadata, edata, shap_data, dataset, shap_values, 0, 0, -1, sample_idx);
     }
-
 }
 
 void add_edge_shapley(float *shap_values, float *e, const float *offset, const float *base_poly, float q, const float *norm_value, int d, int output_dim)

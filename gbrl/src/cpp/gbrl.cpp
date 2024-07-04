@@ -836,11 +836,10 @@ float* GBRL::tree_shap(const int tree_idx, const float *obs, const char *categor
     shap_data->offset_poly = offset;
     shap_data->base_poly = base_poly;
     shap_data->norm_values = norm;
-    float *shap_values = new float[(this->metadata->n_num_features + this->metadata->n_cat_features)*this->metadata->output_dim * n_samples];
+    float *shap_values = init_zero_mat((this->metadata->n_num_features + this->metadata->n_cat_features)*this->metadata->output_dim * n_samples);
     dataSet dataset{obs, categorical_obs, nullptr, nullptr, nullptr, nullptr, n_samples};
     print_shap_data(shap_data, this->metadata);
     get_shap_values(this->metadata, this->edata, shap_data, &dataset, shap_values);
-
     dealloc_shap_data(shap_data);
     return shap_values;
 }
