@@ -276,12 +276,21 @@ class GBTWrapper:
             print(f"Caught an exception in GBRL: {e}")
 
     def tree_shap(self, tree_idx: int, features: Union[np.array, th.Tensor]) -> np.array:
+        """  
+        Implementation based on - https://github.com/yupbank/linear_tree_shap
+        See Linear TreeShap, Yu et al, 2023, https://arxiv.org/pdf/2209.08192 
+        Args:
+            tree_idx (int): tree index
+            features (Union[np.array, th.Tensor]):
+
+        Returns:
+            np.array: shap values
+        """
         num_features, cat_features = preprocess_features(features)
         base_poly = np.polynomial.chebyshev.chebpts2(self.params['max_depth']).astype(numerical_dtype)
         
         norm_values = get_N_v2(base_poly).astype(numerical_dtype)
         offset = np.vander(base_poly + 1).T[::-1].astype(numerical_dtype)
-        print("base_poly", base_poly, 'norm_values', norm_values, "offset", offset)
         return self.cpp_model.tree_shap(tree_idx, num_features, cat_features, np.ascontiguousarray(norm_values), np.ascontiguousarray(base_poly), np.ascontiguousarray(offset)) 
     
     def set_device(self, device: str) -> None:

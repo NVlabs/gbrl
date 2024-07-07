@@ -15,12 +15,12 @@ struct shapData {
     const float *base_poly;
     const float *offset_poly;
     const float *norm_values;
-    float *E;
+    float *G;
     float *C;
     bool *active_nodes;
     bool *numerics;
-    int *feature_prev_node; 
-    int *node_unique_features;
+    int *feature_parent_node; 
+    int *max_unique_features;
     int *left_children;
     int *right_children;
     int *feature_indices;
@@ -35,8 +35,8 @@ void dealloc_shap_data(shapData *shap_data);
 void reset_shap_arrays(shapData *shap_data, const ensembleMetaData *metadata);
 void get_shap_values(const ensembleMetaData *metadata, const ensembleData *edata, shapData *shap_data, const dataSet *dataset, float *shap_values);
 void print_shap_data(const shapData *shap_data, const ensembleMetaData *metadata);
-void shap_inference(const ensembleMetaData *metadata, const ensembleData *edata, shapData *shap_data, const dataSet *dataset, float *shap_values, int crnt_node, int crnt_depth, int feature, const int sample_offset);
-void add_edge_shapley(float *shap_values, float *e, const float *offset, const float *base_poly, float q, const float *norm_value, int d, int output_dim);
-void subtract_closest_parent_edge_shapley(float *shap_values, float *e, const float *offset, const float *base_poly, float q_parent, const float *norm_value, int d, int output_dim);
+void linear_tree_shap(const ensembleMetaData *metadata, const ensembleData *edata, shapData *shap_data, const dataSet *dataset, float *shap_values, int crnt_node, int crnt_depth, int crnt_feature, const int sample_offset);
+void add_edge_shapley(float *shap_values, float *e, const float *offset, const float *base_poly, float p_e, const float *norm_value, int d, int output_dim);
+void subtract_closest_parent_edge_shapley(float *shap_values, float *e, const float *offset, const float *base_poly, float p_e_ancestor, const float *norm_value, int d, int output_dim);
 
 #endif 

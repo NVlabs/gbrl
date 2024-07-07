@@ -190,22 +190,22 @@ else()
     set(CUDA_SOURCES "")
 endif()
 
-# Combine object files into a single library
-set(CPP_SOURCES
-    gbrl/src/cpp/gbrl.cpp
-    gbrl/src/cpp/types.cpp
-    gbrl/src/cpp/optimizer.cpp
-    gbrl/src/cpp/scheduler.cpp
-    gbrl/src/cpp/node.cpp
-    gbrl/src/cpp/utils.cpp
-    gbrl/src/cpp/shap.cpp
-    gbrl/src/cpp/data_structs.cpp
-    gbrl/src/cpp/fitter.cpp
-    gbrl/src/cpp/predictor.cpp
-    gbrl/src/cpp/split_candidate_generator.cpp
-    gbrl/src/cpp/loss.cpp
-    gbrl/src/cpp/math_ops.cpp
-)
+# # Combine object files into a single library
+# set(CPP_SOURCES
+#     gbrl/src/cpp/gbrl.cpp
+#     gbrl/src/cpp/types.cpp
+#     gbrl/src/cpp/optimizer.cpp
+#     gbrl/src/cpp/scheduler.cpp
+#     gbrl/src/cpp/node.cpp
+#     gbrl/src/cpp/utils.cpp
+#     gbrl/src/cpp/shap.cpp
+#     gbrl/src/cpp/data_structs.cpp
+#     gbrl/src/cpp/fitter.cpp
+#     gbrl/src/cpp/predictor.cpp
+#     gbrl/src/cpp/split_candidate_generator.cpp
+#     gbrl/src/cpp/loss.cpp
+#     gbrl/src/cpp/math_ops.cpp
+# )
 # Only include pybind11 in the binding file
 set(PYBIND_SOURCES
     gbrl/src/cpp/gbrl_binding.cpp
