@@ -61,9 +61,11 @@ And set ``CUDACXX`` to the location of NVCC.
 
 .. note:: 
 
-   CUDA installation via anaconda may not install the full CUDAToolkit.  
+   CUDA installation via Anaconda may not install the full CUDAToolkit.  
+   
+   Make sure that Anaconda is up-to-date and run ``conda install cuda -c nvidia`` to install the full CUDAToolkit.
 
-   Run ``conda install cuda -c nvidia`` to install the full CUDAToolkit.
+   Anaconda might still cause issues with CUDA. In such case, set ``CUDACXX`` and ``CUDA_HOME`` to the non-conda location. For example on Linux, the non-conda location of NVCC can be found by running ``which nvcc`` while Anaconda is deactivated.
 
 For integration with Microsoft Visual Studio, copy the following files:
 
