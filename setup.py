@@ -1,10 +1,9 @@
 import os
 import sys
 import subprocess
-import setuptools
 import platform
 import shutil
-from setuptools import setup, Extension
+from setuptools import setup, Extension, find_packages
 from setuptools.command.build_ext import build_ext
 from distutils import log
 import sysconfig
@@ -15,6 +14,7 @@ class CMakeExtension(Extension):
     def __init__(self, name, sourcedir=''):
         super().__init__(name, sources=[])
         self.sourcedir = os.path.abspath(sourcedir)
+        print(self.sourcedir)
 
 class CMakeBuild(build_ext):
     """Build extension using CMake"""
@@ -30,17 +30,17 @@ class CMakeBuild(build_ext):
         build_ext.finalize_options(self)
         self.cmake_verbose = os.getenv('DEBUG', '0') == '1'
 
-    def run(self):
-        for folder_name in ['build', 'dist', 'gbrl.egg-info']:
-            folder_path = os.path.join(os.path.dirname(__file__), folder_name)
-            if os.path.exists(folder_path):
-                log.info(f"Cleaning up existing '{folder_name}' folder...")
-                shutil.rmtree(folder_path)
-        try:
-            subprocess.check_output(['cmake', '--version'])
-        except OSError:
-            raise RuntimeError("CMake must be installed to build the following extensions: " +
-                               ", ".join(e.name for e in self.extensions))
+    # def run(self):
+    #     for folder_name in ['build', 'dist', 'gbrl.egg-info']:
+    #         folder_path = os.path.join(os.path.dirname(__file__), folder_name)
+    #         if os.path.exists(folder_path):
+    #             log.info(f"Cleaning up existing '{folder_name}' folder...")
+    #             shutil.rmtree(folder_path)
+    #     try:
+    #         subprocess.check_output(['cmake', '--version'])
+    #     except OSError:
+    #         raise RuntimeError("CMake must be installed to build the following extensions: " +
+    #                            ", ".join(e.name for e in self.extensions))
 
         for ext in self.extensions:
             self.build_extension(ext)
@@ -108,9 +108,6 @@ setup(
     name="gbrl",
     ext_modules=[CMakeExtension('gbrl/gbrl_cpp', sourcedir='.')],
     cmdclass=dict(build_ext=CMakeBuild),
-    package_dir={'gbrl': 'gbrl'},  # Specify the root directory for packages
-    package_data={
-        'gbrl': ['src/cpp/*', 'src/cuda/*'],  # Include C++ and CUDA files
-    },
-    packages=setuptools.find_packages(where='gbrl')
+    packages=find_packages(),  # List of all packages to include
+    include_package_data=True,
 )

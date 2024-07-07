@@ -3,14 +3,15 @@ requires = [
     "setuptools>=42",
     "wheel",
     "cmake>=3.18",
-    "pybind11[global]==2.13.1"
+    "pybind11[global]==2.13.1",
+    "scikit_learn==1.2.2"
 ]
 
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "gbrl"
-version = "1.0.0.dev7"
+version = "1.0.0"
 description = "Gradient Boosted Trees for RL"
 readme = { file = "README.md", content-type = "text/markdown" }
 authors = [
@@ -39,5 +40,3 @@ classifiers = [
 
 requires-python = ">=3.7"
 
-[project.optional-dependencies]
-sklearn = ["scikit_learn==1.2.2"]
