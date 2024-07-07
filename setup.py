@@ -30,18 +30,6 @@ class CMakeBuild(build_ext):
         build_ext.finalize_options(self)
         self.cmake_verbose = os.getenv('DEBUG', '0') == '1'
 
-    # def run(self):
-    #     for folder_name in ['build', 'dist', 'gbrl.egg-info']:
-    #         folder_path = os.path.join(os.path.dirname(__file__), folder_name)
-    #         if os.path.exists(folder_path):
-    #             log.info(f"Cleaning up existing '{folder_name}' folder...")
-    #             shutil.rmtree(folder_path)
-    #     try:
-    #         subprocess.check_output(['cmake', '--version'])
-    #     except OSError:
-    #         raise RuntimeError("CMake must be installed to build the following extensions: " +
-    #                            ", ".join(e.name for e in self.extensions))
-
         for ext in self.extensions:
             self.build_extension(ext)
 
