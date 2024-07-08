@@ -33,7 +33,7 @@ std::string VectoString(const float* vec, const int vec_size){
 
 int binaryToDecimal(const BoolVector& binaryPath) {
     int decimal = 0;
-    int i = binaryPath.size() - 1;
+    int i = static_cast<int>(binaryPath.size()) - 1;
     size_t j = 0;
     while (i >= 0){
         decimal += binaryPath[i] * (1 << j);

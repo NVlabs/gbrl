@@ -25,7 +25,7 @@ set(CPP_SOURCES
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 
-if (CUDAToolkit_FOUND AND NOT APPLE)
+if (CUDAToolkit_FOUND AND USE_CUDA AND NOT APPLE)
     include_directories(${CUDAToolkit_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/gbrl/src/cuda)
     add_definitions(-DUSE_CUDA)
 endif()
