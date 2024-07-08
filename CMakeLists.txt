@@ -130,7 +130,19 @@ if(NOT pybind11_FOUND)
     find_package(pybind11 CONFIG REQUIRED)
 endif()
 
-find_package(Graphviz CONFIG QUIET)
+find_path(GRAPHVIZ_INCLUDE_DIR         NAMES graphviz/cgraph.h
+          HINTS ${_GRAPHVIZ_INCLUDE_DIR})
+find_library(GRAPHVIZ_GVC_LIBRARY      NAMES gvc 
+             HINTS ${_GRAPHVIZ_LIBRARY_DIR})
+find_library(GRAPHVIZ_CGRAPH_LIBRARY   NAMES cgraph
+             HINTS ${_GRAPHVIZ_LIBRARY_DIR})
+if(GRAPHVIZ_INCLUDE_DIR AND GRAPHVIZ_GVC_LIBRARY
+    AND GRAPHVIZ_CGRAPH_LIBRARY)
+    set(GRAPHVIZ_FOUND TRUE)
+else()
+    set(GRAPHVIZ_FOUND FALSE)
+endif()
+         
 
 if(APPLE)
     find_package(OpenMP)
@@ -163,7 +175,7 @@ if (OpenMP_FOUND)
 endif()
 
 # Graphviz
-if (GRAPHVIZ_DOT_EXECUTABLE)
+if (GRAPHVIZ_FOUND)
     add_definitions(-DUSE_GRAPHVIZ)
     message(STATUS "Found Graphviz")
     if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -190,22 +202,6 @@ else()
     set(CUDA_SOURCES "")
 endif()
 
-# # Combine object files into a single library
-# set(CPP_SOURCES
-#     gbrl/src/cpp/gbrl.cpp
-#     gbrl/src/cpp/types.cpp
-#     gbrl/src/cpp/optimizer.cpp
-#     gbrl/src/cpp/scheduler.cpp
-#     gbrl/src/cpp/node.cpp
-#     gbrl/src/cpp/utils.cpp
-#     gbrl/src/cpp/shap.cpp
-#     gbrl/src/cpp/data_structs.cpp
-#     gbrl/src/cpp/fitter.cpp
-#     gbrl/src/cpp/predictor.cpp
-#     gbrl/src/cpp/split_candidate_generator.cpp
-#     gbrl/src/cpp/loss.cpp
-#     gbrl/src/cpp/math_ops.cpp
-# )
 # Only include pybind11 in the binding file
 set(PYBIND_SOURCES
     gbrl/src/cpp/gbrl_binding.cpp
@@ -241,7 +237,7 @@ elseif (WIN32)
 endif()
 
 # Link Graphviz libraries if available
-if (GRAPHVIZ_DOT_EXECUTABLE)
+if (GRAPHVIZ_FOUND)
     if (CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Darwin")
         target_link_libraries(gbrl_cpp PRIVATE gvc cgraph)
     elseif (WIN32)
