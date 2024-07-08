@@ -47,6 +47,7 @@ For a detailed usage example, see `tutorial.ipynb`
 - Shared Tree for policy and value function - (CPU/GPU)
 - Linear and constant learning rate scheduler - (CPU/GPU only constant)
 - Support for up to two different optimizers (e.g, policy/value) - **(CPU/GPU if both are SGD)
+- SHAP value calculation
 
 # Documentation 
 For comprehensive documentation, visit the [GBRL documentation](https://effective-adventure-22v795q.pages.github.io/index.html).

@@ -832,15 +832,58 @@ int GBRL::loadFromFile(const std::string& filename){
 
 float* GBRL::tree_shap(const int tree_idx, const float *obs, const char *categorical_obs, const int n_samples, float *norm, float *base_poly, float *offset){
     valid_tree_idx(tree_idx, this->metadata);
-    shapData* shap_data = alloc_shap_data(this->metadata, this->edata, tree_idx);
+ensembleData *edata_cpu = nullptr;
+#ifdef USE_CUDA
+    if (this->device == gpu){
+        edata_cpu = ensemble_data_copy_gpu_cpu(this->metadata, this->edata);
+    }
+#endif 
+    if (this->device == cpu)
+        edata_cpu = this->edata;
+    shapData* shap_data = alloc_shap_data(this->metadata, edata_cpu, tree_idx);
     shap_data->offset_poly = offset;
     shap_data->base_poly = base_poly;
     shap_data->norm_values = norm;
     float *shap_values = init_zero_mat((this->metadata->n_num_features + this->metadata->n_cat_features)*this->metadata->output_dim * n_samples);
     dataSet dataset{obs, categorical_obs, nullptr, nullptr, nullptr, nullptr, n_samples};
-    print_shap_data(shap_data, this->metadata);
-    get_shap_values(this->metadata, this->edata, shap_data, &dataset, shap_values);
+    // print_shap_data(shap_data, this->metadata);
+    get_shap_values(this->metadata, edata_cpu, shap_data, &dataset, shap_values);
     dealloc_shap_data(shap_data);
+#ifdef USE_CUDA
+    if (this->device == gpu){
+        ensemble_data_dealloc(edata_cpu);
+    }
+#endif 
+    return shap_values;
+}
+
+float* GBRL::ensemble_shap(const float *obs, const char *categorical_obs, const int n_samples, float *norm, float *base_poly, float *offset){
+    valid_tree_idx(0, this->metadata);
+    float *shap_values = init_zero_mat((this->metadata->n_num_features + this->metadata->n_cat_features)*this->metadata->output_dim * n_samples);
+    dataSet dataset{obs, categorical_obs, nullptr, nullptr, nullptr, nullptr, n_samples};
+    ensembleData *edata_cpu = nullptr;
+#ifdef USE_CUDA
+    if (this->device == gpu){
+        edata_cpu = ensemble_data_copy_gpu_cpu(this->metadata, this->edata);
+    }
+#endif 
+    if (this->device == cpu)
+        edata_cpu = this->edata;
+
+    for (int tree_idx = 0; tree_idx < this->metadata->n_trees; ++tree_idx){
+        shapData* shap_data = alloc_shap_data(this->metadata, edata_cpu, tree_idx);
+        shap_data->offset_poly = offset;
+        shap_data->base_poly = base_poly;
+        shap_data->norm_values = norm;
+        get_shap_values(this->metadata, edata_cpu, shap_data, &dataset, shap_values);
+        dealloc_shap_data(shap_data);
+    }
+#ifdef USE_CUDA
+    if (this->device == gpu){
+        ensemble_data_dealloc(edata_cpu);
+    }
+#endif 
+   
     return shap_values;
 }
 

@@ -9,6 +9,7 @@
 from typing import Dict, Union, Tuple
 import numpy as np
 import torch as th
+from scipy.special import binom
 
 from .config import APPROVED_OPTIMIZERS, VALID_OPTIMIZER_ARGS
 
@@ -80,4 +81,38 @@ def get_input_dim(arr: Union[np.array, th.Tensor]) -> int:
     return 1 if len(arr.shape) == 1 else arr.shape[1]
 
 
+def get_norm_values(base_poly: np.array) -> np.array:
+    """Precompute normalization values for linear tree shap
+    See https://github.com/yupbank/linear_tree_shap/blob/main/linear_tree_shap/utils.py
 
+    Args:
+        base_poly (np.array): base polynomial
+
+    Returns:
+        np.array: normalization values
+    """
+    depth = base_poly.shape[0]
+    norm_values = np.zeros((depth+1, depth))
+    for i in range(1, depth+1):
+        norm_weights = binom(i-1, np.arange(i))
+        norm_values[i,:i] = np.linalg.inv(np.vander(base_poly[:i]).T).dot(1./norm_weights) 
+    return norm_values
+
+
+def get_poly_vectors(max_depth: int, dtype: np.dtype) -> Tuple[np.array, np.array, np.array]:
+    """Returns polynomial vectors/matrices used in the calculation of linear tree shap
+    See https://arxiv.org/pdf/2209.08192
+    Args:
+        max_depth (int)
+        dtype (np.dtype)
+
+    Returns:
+        Tuple[np.array, np.array, np.array]: base_polynomial (chebyshev of the second kind), normalization values, offset
+    """
+    base_poly = np.polynomial.chebyshev.chebpts2(max_depth).astype(dtype)
+    a = -100  # Lower bound of the new interval
+    b = -2  # Upper bound of the new interval
+    base_poly = (base_poly + 1) * (b - a) / 2 + a
+    norm_values = get_norm_values(base_poly).astype(dtype)
+    offset = np.vander(base_poly + 1).T[::-1].astype(dtype)
+    return base_poly, norm_values, offset

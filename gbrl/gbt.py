@@ -198,17 +198,31 @@ class GradientBoostingTrees:
         """
         return self._model.get_num_trees()
     
-    def tree_shap(self, tree_idx: int, features: Union[np.array, th.Tensor]) -> np.array:
+    def tree_shap(self, tree_idx: int, features: Union[np.array, th.Tensor]) -> Union[np.array, Tuple[np.array, np.array]]:
         """Calculates SHAP values for a single tree
+            Implementation based on - https://github.com/yupbank/linear_tree_shap
+            See Linear TreeShap, Yu et al, 2023, https://arxiv.org/pdf/2209.08192 
 
         Args:
             tree_idx (int): tree index
             features (Union[np.array, th.Tensor])
 
         Returns:
-            np.array: SHAP values of shap [n_samples, number of input features, number of outputs]
+            Union[np.array, Tuple[np.array, np.array]]: SHAP values of shap [n_samples, number of input features, number of outputs]. The output is a tuple of SHAP values per model only in the case of a separate actor-critic model.
         """
         return self._model.tree_shap(tree_idx, features)
+    
+    def shap(self, features: Union[np.array, th.Tensor]) -> Union[np.array, Tuple[np.array, np.array]]:
+        """Calculates SHAP values for the entire ensemble
+            Implementation based on - https://github.com/yupbank/linear_tree_shap
+            See Linear TreeShap, Yu et al, 2023, https://arxiv.org/pdf/2209.08192 
+        Args:
+            features (Union[np.array, th.Tensor])
+
+        Returns:
+            Union[np.array, Tuple[np.array, np.array]]: SHAP values of shap [n_samples, number of input features, number of outputs]. The output is a tuple of SHAP values per model only in the case of a separate actor-critic model.
+        """
+        return self._model.shap(features)
 
     def save_model(self, save_path: str) -> None:
         """

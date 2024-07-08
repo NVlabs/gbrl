@@ -503,7 +503,6 @@ void Fitter::update_ensemble_per_tree(ensembleData *edata, ensembleMetaData *met
         }
         metadata->n_leaves += 1;
     }
-
 }
 
 

@@ -12,7 +12,6 @@ from typing import Dict, List, Union, Tuple
 
 import numpy as np
 import torch as th
-import scipy.special as sp
 
 # Define custom dtypes
 numerical_dtype = np.dtype('float32')
@@ -22,17 +21,7 @@ categorical_dtype = np.dtype('S128')
 from typing import Dict
 
 from .gbrl_cpp import GBRL
-from .utils import get_input_dim
-
-def get_norm_weight(M):
-    return np.array([sp.binom(M, i) for i in range(M + 1)])
-
-def get_N_v2(D):
-    depth = D.shape[0]
-    Ns = np.zeros((depth+1, depth))
-    for i in range(1, depth+1):
-        Ns[i,:i] = np.linalg.inv(np.vander(D[:i]).T).dot(1./get_norm_weight(i-1)) 
-    return Ns
+from .utils import get_input_dim, get_poly_vectors
 
 def process_array(arr: np.array)-> Tuple[np.array, np.array]:
     """ Formats numpy array for C++ GBRL.
@@ -287,11 +276,23 @@ class GBTWrapper:
             np.array: shap values
         """
         num_features, cat_features = preprocess_features(features)
-        base_poly = np.polynomial.chebyshev.chebpts2(self.params['max_depth']).astype(numerical_dtype)
-        
-        norm_values = get_N_v2(base_poly).astype(numerical_dtype)
-        offset = np.vander(base_poly + 1).T[::-1].astype(numerical_dtype)
+        base_poly, norm_values, offset = get_poly_vectors(self.params['max_depth'], numerical_dtype)
         return self.cpp_model.tree_shap(tree_idx, num_features, cat_features, np.ascontiguousarray(norm_values), np.ascontiguousarray(base_poly), np.ascontiguousarray(offset)) 
+    
+    def shap(self, features: Union[np.array, th.Tensor]) -> np.array:
+        """  
+        Uses Linear tree shap for each tree in the ensemble (sequentially)
+        Implementation based on - https://github.com/yupbank/linear_tree_shap
+        See Linear TreeShap, Yu et al, 2023, https://arxiv.org/pdf/2209.08192 
+        Args:
+            features (Union[np.array, th.Tensor]):
+
+        Returns:
+            np.array: shap values
+        """
+        num_features, cat_features = preprocess_features(features)
+        base_poly, norm_values, offset = get_poly_vectors(self.params['max_depth'], numerical_dtype)
+        return self.cpp_model.ensemble_shap(num_features, cat_features, np.ascontiguousarray(norm_values), np.ascontiguousarray(base_poly), np.ascontiguousarray(offset)) 
     
     def set_device(self, device: str) -> None:
         try:
@@ -388,6 +389,11 @@ class SeparateActorCriticWrapper:
         self.policy_model.set_device(device)
         self.value_model.set_device(device)
         self.device = device
+
+    def tree_shap(self, tree_idx: int, observations: Union[np.array, th.Tensor]) -> Tuple[np.array, np.array]:
+        policy_shap = self.policy_model.tree_shap(tree_idx, observations)
+        value_shap = self.value_model.tree_shap(tree_idx, observations)
+        return policy_shap, value_shap
 
     def get_total_iterations(self) -> int:
         return self.total_iterations
