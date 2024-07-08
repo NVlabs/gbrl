@@ -6,6 +6,7 @@ builds/
 *.tsv
 *.pyc
 *.so
+*.pyd
 *.db
 *.tfevents
 *.json
