@@ -136,8 +136,7 @@ find_library(GRAPHVIZ_GVC_LIBRARY      NAMES gvc
              HINTS ${_GRAPHVIZ_LIBRARY_DIR})
 find_library(GRAPHVIZ_CGRAPH_LIBRARY   NAMES cgraph
              HINTS ${_GRAPHVIZ_LIBRARY_DIR})
-if(GRAPHVIZ_INCLUDE_DIR AND GRAPHVIZ_GVC_LIBRARY
-    AND GRAPHVIZ_CGRAPH_LIBRARY)
+if(GRAPHVIZ_INCLUDE_DIR AND GRAPHVIZ_GVC_LIBRARY AND GRAPHVIZ_CGRAPH_LIBRARY)
     set(GRAPHVIZ_FOUND TRUE)
 else()
     set(GRAPHVIZ_FOUND FALSE)
@@ -174,20 +173,6 @@ if (OpenMP_FOUND)
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}")
 endif()
 
-# Graphviz
-if (GRAPHVIZ_FOUND)
-    add_definitions(-DUSE_GRAPHVIZ)
-    message(STATUS "Found Graphviz")
-    if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
-        include_directories(/usr/include/graphviz)
-    elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
-        execute_process(COMMAND brew --prefix graphviz OUTPUT_VARIABLE GRAPHVIZ_PREFIX OUTPUT_STRIP_TRAILING_WHITESPACE)
-        include_directories(${GRAPHVIZ_PREFIX}/include/graphviz)
-    endif()
-else()
-    message(STATUS "Did not Find Graphviz")
-endif()
-
 # Add subdirectories for cpp and cuda
 add_subdirectory(gbrl/src/cpp)
 
@@ -206,6 +191,20 @@ endif()
 set(PYBIND_SOURCES
     gbrl/src/cpp/gbrl_binding.cpp
 )
+
+# # Graphviz
+# if (GRAPHVIZ_FOUND)
+#     add_definitions(-DUSE_GRAPHVIZ)
+#     message(STATUS "Found Graphviz")
+#     if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+#         include_directories(/usr/include/graphviz)
+#     elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+#         execute_process(COMMAND brew --prefix graphviz OUTPUT_VARIABLE GRAPHVIZ_PREFIX OUTPUT_STRIP_TRAILING_WHITESPACE)
+#         include_directories(${GRAPHVIZ_PREFIX}/include/graphviz)
+#     endif()
+# else()
+#     message(STATUS "Did not Find Graphviz")
+# endif()
 
 pybind11_add_module(gbrl_cpp MODULE ${PYBIND_SOURCES})
 target_include_directories(gbrl_cpp PRIVATE ${Python3_INCLUDE_DIRS} ${pybind11_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/gbrl/src/cpp)
@@ -239,7 +238,8 @@ endif()
 # Link Graphviz libraries if available
 if (GRAPHVIZ_FOUND)
     if (CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Darwin")
-        target_link_libraries(gbrl_cpp PRIVATE gvc cgraph)
+        # target_link_libraries(gbrl_cpp PRIVATE gvc cgraph)
+        target_link_libraries(gbrl_cpp PRIVATE ${GRAPHVIZ_GVC_LIBRARY} ${GRAPHVIZ_CGRAPH_LIBRARY})
     elseif (WIN32)
         target_link_libraries(gbrl_cpp PRIVATE gvc.lib cgraph.lib)
     endif()

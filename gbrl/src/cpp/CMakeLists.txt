@@ -30,6 +30,16 @@ if (CUDAToolkit_FOUND AND NOT APPLE)
     add_definitions(-DUSE_CUDA)
 endif()
 
+if (GRAPHVIZ_FOUND)
+message(STATUS "Found Graphviz")
+    set(GRAPHVIZ_INCLUDE_DIRS ${GRAPHVIZ_INCLUDE_DIR} ${GRAPHVIZ_INCLUDE_DIR}/graphviz)
+    add_definitions(-DUSE_GRAPHVIZ)
+    include_directories(${GRAPHVIZ_INCLUDE_DIRS})
+else()
+    message(STATUS "Did not Find Graphviz")
+endif()
+
+
 if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -std=c++14 -Wall -Wpedantic -Wextra -march=native -fPIC")
 elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin")

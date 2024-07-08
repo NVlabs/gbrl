@@ -942,7 +942,7 @@ void GBRL::plot_tree(int tree_idx, const std::string &filename){
         edata_cpu = ensemble_data_copy_gpu_cpu(this->metadata, this->edata);
     }
 #endif 
-    valid_tree_idx(tree_idx, this->metadata->n_trees);
+    valid_tree_idx(tree_idx, this->metadata);
     std::cout << "Plotting tree: " << tree_idx << " to filename: " << filename << ".png" << std::endl;
     
     GVC_t *gvc;
