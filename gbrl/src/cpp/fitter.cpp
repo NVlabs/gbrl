@@ -47,7 +47,7 @@ void Fitter::step_cpu(dataSet *dataset, ensembleData *edata, ensembleMetaData *m
 
     float *norm_grads = nullptr;
     if (metadata->split_score_func == Cosine || metadata->n_cat_features > 0){
-        norm_grads = init_zero_mat(dataset->n_samples*metadata->output_dim, par_th);
+        norm_grads = init_zero_mat(dataset->n_samples*metadata->output_dim);
         calculate_squared_norm(norm_grads, dataset->grads, dataset->n_samples, metadata->output_dim, par_th);
     }
 
@@ -102,14 +102,14 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
     int batch_preds_size = metadata->batch_size*metadata->output_dim, last_batch_preds_size = (dataset->n_samples % metadata->batch_size)*metadata->output_dim;
     float batch_loss = INFINITY; 
     float *build_grads, *preds, *grads, *norm_grads;
-    float *batch_preds = init_zero_mat(batch_preds_size, metadata->par_th); // Assuming batch_size is the max batch size
-    float *batch_build_grads = init_zero_mat(batch_preds_size, metadata->par_th); // Assuming batch_size is the max batch size
-    float *last_batch_preds = init_zero_mat(last_batch_preds_size, metadata->par_th); // Assuming batch_size is the max batch size
-    float *batch_grads = init_zero_mat(batch_preds_size, metadata->par_th); // Assuming batch_size is the max batch size
-    float *last_batch_grads = init_zero_mat(last_batch_preds_size, metadata->par_th); // Assuming batch_size is the max batch size
-    float *last_batch_build_grads = init_zero_mat(last_batch_preds_size, metadata->par_th); // Assuming batch_size is the max batch size
-    float *batch_grad_norms = init_zero_mat(metadata->batch_size, metadata->par_th); // Assuming batch_size is the max batch size
-    float *last_batch_grad_norms = init_zero_mat(dataset->n_samples % metadata->batch_size, metadata->par_th); // Assuming batch_size is the max batch size
+    float *batch_preds = init_zero_mat(batch_preds_size); // Assuming batch_size is the max batch size
+    float *batch_build_grads = init_zero_mat(batch_preds_size); // Assuming batch_size is the max batch size
+    float *last_batch_preds = init_zero_mat(last_batch_preds_size); // Assuming batch_size is the max batch size
+    float *batch_grads = init_zero_mat(batch_preds_size); // Assuming batch_size is the max batch size
+    float *last_batch_grads = init_zero_mat(last_batch_preds_size); // Assuming batch_size is the max batch size
+    float *last_batch_build_grads = init_zero_mat(last_batch_preds_size); // Assuming batch_size is the max batch size
+    float *batch_grad_norms = init_zero_mat(metadata->batch_size); // Assuming batch_size is the max batch size
+    float *last_batch_grad_norms = init_zero_mat(dataset->n_samples % metadata->batch_size); // Assuming batch_size is the max batch size
 
     SplitCandidateGenerator generator = SplitCandidateGenerator(dataset->n_samples, metadata->n_num_features, metadata->n_cat_features, metadata->n_bins, metadata->par_th, metadata->generator_type);
     int **indices = nullptr;
@@ -131,10 +131,10 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
     }
     float *full_preds = nullptr;
     if (metadata->n_cat_features > 0){
-        full_preds = init_zero_mat(dataset->n_samples*metadata->output_dim, metadata->par_th); 
+        full_preds = init_zero_mat(dataset->n_samples*metadata->output_dim); 
         Predictor::predict_cpu(dataset, full_preds, edata, metadata, 0, iterations, false, opts);
-        float *full_grads = init_zero_mat(dataset->n_samples*metadata->output_dim, metadata->par_th); 
-        float *full_grad_norms = init_zero_mat(dataset->n_samples, metadata->par_th); 
+        float *full_grads = init_zero_mat(dataset->n_samples*metadata->output_dim); 
+        float *full_grad_norms = init_zero_mat(dataset->n_samples); 
         batch_loss = MultiRMSE::get_loss_and_gradients(full_preds, targets, full_grads, dataset->n_samples, metadata->output_dim);
         calculate_squared_norm(full_grad_norms, full_grads, dataset->n_samples, metadata->output_dim, metadata->par_th);
         generator.processCategoricalCandidates(dataset->categorical_obs, full_grad_norms);
@@ -216,7 +216,7 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
         delete[] indices;
     }
     
-    full_preds = init_zero_mat(dataset->n_samples*metadata->output_dim, metadata->par_th); 
+    full_preds = init_zero_mat(dataset->n_samples*metadata->output_dim); 
 
     Predictor::predict_cpu(dataset, full_preds, edata, metadata, 0, iterations, false, opts);
     float full_loss = INFINITY;
@@ -295,8 +295,6 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
 #else
                 int thread_num = 0;
 #endif
-                
-                
                 float local_best_score = -INFINITY;
                 int local_chosen_idx = -1;
                 int start_idx = thread_num * batch_size;
@@ -474,6 +472,7 @@ void Fitter::update_ensemble_per_leaf(ensembleData *edata, ensembleMetaData *met
             edata->feature_indices[row_idx+ i] = node->split_conditions[i].feature_idx;
             edata->feature_values[row_idx+ i] = node->split_conditions[i].feature_value;
             edata->inequality_directions[row_idx + i] = node->split_conditions[i].inequality_direction;
+            edata->edge_weights[row_idx + i] = node->split_conditions[i].edge_weight;
         }
     }
     metadata->n_leaves += 1;
@@ -499,11 +498,11 @@ void Fitter::update_ensemble_per_tree(ensembleData *edata, ensembleMetaData *met
                 edata->feature_indices[row_idx+ i] = node->split_conditions[i].feature_idx;
                 edata->feature_values[row_idx+ i] = node->split_conditions[i].feature_value;
                 edata->inequality_directions[metadata->n_leaves*metadata->max_depth + i] = node->split_conditions[i].inequality_direction;
+                edata->edge_weights[metadata->n_leaves*metadata->max_depth + i] = node->split_conditions[i].edge_weight;
             }
         }
         metadata->n_leaves += 1;
     }
-
 }
 
 
@@ -552,7 +551,7 @@ void Fitter::control_variates(dataSet *dataset, ensembleData *edata, ensembleMet
     int n_sample_threads = calculate_num_threads(n_samples, par_th);
     void (*momemntFunc)(const float*, const char*, float*, const ensembleData*, const ensembleMetaData*, const int, const int, const int) = nullptr;
     momemntFunc = (metadata->grow_policy == OBLIVIOUS) ? &Predictor::momentum_over_trees : &Predictor::momentum_over_leaves;
-    float *momentum = init_zero_mat(n_samples*output_dim, par_th);
+    float *momentum = init_zero_mat(n_samples*output_dim);
     if (n_sample_threads > 1) {
         omp_set_num_threads(n_sample_threads);
         int elements_per_thread = n_samples / n_sample_threads; // Determine the size of each batch
@@ -573,7 +572,7 @@ void Fitter::control_variates(dataSet *dataset, ensembleData *edata, ensembleMet
     }
 
     float error_correction = 1.0f / sqrtf(1.0f - powf(metadata->cv_beta, static_cast<float>(metadata->n_trees)));
-    multiply_mat_by_scalar(momentum, error_correction, n_samples, output_dim, par_th);
+    _multiply_mat_by_scalar(momentum, error_correction, n_samples, output_dim, par_th);
     float *grads_copy = copy_mat(dataset->grads, n_samples*output_dim, par_th);
     float *grads_mean = calculate_mean(grads_copy, n_samples, output_dim, par_th);
     float *momentum_mean = calculate_mean(momentum, n_samples, output_dim, par_th);

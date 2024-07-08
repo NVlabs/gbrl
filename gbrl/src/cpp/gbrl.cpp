@@ -12,6 +12,7 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <iomanip>
 #include <tuple>
 #include <numeric>
 #include <unordered_set> 
@@ -46,6 +47,7 @@
 #include "predictor.h"
 #include "loss.h"
 #include "utils.h"
+#include "shap.h"
 #include "math_ops.h"
 
 
@@ -214,9 +216,9 @@ float* GBRL::get_bias(){
 
 
 float* GBRL::predict(const float *obs, const char *categorical_obs, const int n_samples, const int n_num_features, const int n_cat_features, int start_tree_idx, int stop_tree_idx){
-    float *preds = init_zero_mat(n_samples*this->metadata->output_dim, this->metadata->par_th);
+    float *preds = init_zero_mat(n_samples*this->metadata->output_dim);
     for (size_t optIdx = 0; optIdx < this->opts.size(); ++optIdx){
-        this->opts[optIdx]->set_memory(n_samples ,this->metadata->output_dim, this->metadata->par_th);
+        this->opts[optIdx]->set_memory(n_samples ,this->metadata->output_dim);
     }
     if (this->metadata->iteration == 0){
         this->metadata->n_num_features = n_num_features;
@@ -250,7 +252,7 @@ float* GBRL::predict(const float *obs, const char *categorical_obs, const int n_
 
 void GBRL::predict(const float *obs, const char *categorical_obs, float *start_preds, const int n_samples, const int n_num_features, const int n_cat_features, int start_tree_idx, int stop_tree_idx){
     for (size_t optIdx = 0; optIdx < this->opts.size(); ++optIdx){
-        this->opts[optIdx]->set_memory(n_samples ,this->metadata->output_dim, this->metadata->par_th);
+        this->opts[optIdx]->set_memory(n_samples ,this->metadata->output_dim);
     }
     if (this->metadata->iteration == 0){
         this->metadata->n_num_features = n_num_features;
@@ -828,12 +830,65 @@ int GBRL::loadFromFile(const std::string& filename){
     return 0;  // Success
 }
 
-void GBRL::print_tree(int tree_idx){
-    if (tree_idx < 0 || tree_idx >= this->metadata->n_trees){
-        std::cerr << "ERROR: invalid tree_idx " << tree_idx << " in ensemble with ntrees = " << metadata->n_trees <<std::endl;
-        throw std::runtime_error("Invalid tree index");
-        return;
+float* GBRL::tree_shap(const int tree_idx, const float *obs, const char *categorical_obs, const int n_samples, float *norm, float *base_poly, float *offset){
+    valid_tree_idx(tree_idx, this->metadata);
+ensembleData *edata_cpu = nullptr;
+#ifdef USE_CUDA
+    if (this->device == gpu){
+        edata_cpu = ensemble_data_copy_gpu_cpu(this->metadata, this->edata);
     }
+#endif 
+    if (this->device == cpu)
+        edata_cpu = this->edata;
+    shapData* shap_data = alloc_shap_data(this->metadata, edata_cpu, tree_idx);
+    shap_data->offset_poly = offset;
+    shap_data->base_poly = base_poly;
+    shap_data->norm_values = norm;
+    float *shap_values = init_zero_mat((this->metadata->n_num_features + this->metadata->n_cat_features)*this->metadata->output_dim * n_samples);
+    dataSet dataset{obs, categorical_obs, nullptr, nullptr, nullptr, nullptr, n_samples};
+    // print_shap_data(shap_data, this->metadata);
+    get_shap_values(this->metadata, edata_cpu, shap_data, &dataset, shap_values);
+    dealloc_shap_data(shap_data);
+#ifdef USE_CUDA
+    if (this->device == gpu){
+        ensemble_data_dealloc(edata_cpu);
+    }
+#endif 
+    return shap_values;
+}
+
+float* GBRL::ensemble_shap(const float *obs, const char *categorical_obs, const int n_samples, float *norm, float *base_poly, float *offset){
+    valid_tree_idx(0, this->metadata);
+    float *shap_values = init_zero_mat((this->metadata->n_num_features + this->metadata->n_cat_features)*this->metadata->output_dim * n_samples);
+    dataSet dataset{obs, categorical_obs, nullptr, nullptr, nullptr, nullptr, n_samples};
+    ensembleData *edata_cpu = nullptr;
+#ifdef USE_CUDA
+    if (this->device == gpu){
+        edata_cpu = ensemble_data_copy_gpu_cpu(this->metadata, this->edata);
+    }
+#endif 
+    if (this->device == cpu)
+        edata_cpu = this->edata;
+
+    for (int tree_idx = 0; tree_idx < this->metadata->n_trees; ++tree_idx){
+        shapData* shap_data = alloc_shap_data(this->metadata, edata_cpu, tree_idx);
+        shap_data->offset_poly = offset;
+        shap_data->base_poly = base_poly;
+        shap_data->norm_values = norm;
+        get_shap_values(this->metadata, edata_cpu, shap_data, &dataset, shap_values);
+        dealloc_shap_data(shap_data);
+    }
+#ifdef USE_CUDA
+    if (this->device == gpu){
+        ensemble_data_dealloc(edata_cpu);
+    }
+#endif 
+   
+    return shap_values;
+}
+
+void GBRL::print_tree(int tree_idx){
+    valid_tree_idx(tree_idx, this->metadata);
     ensembleData *edata_cpu = nullptr;
 #ifdef USE_CUDA
     if (this->device == gpu){
@@ -887,11 +942,7 @@ void GBRL::plot_tree(int tree_idx, const std::string &filename){
         edata_cpu = ensemble_data_copy_gpu_cpu(this->metadata, this->edata);
     }
 #endif 
-    if (tree_idx >= this->metadata->n_trees){
-        std::cerr << "ERROR - Tree idx: " << tree_idx <<  " > " << this->metadata->n_trees - 1 << " maximum index." << std::endl;
-        throw std::runtime_error("Invalid tree index");
-        return;
-    }
+    valid_tree_idx(tree_idx, this->metadata);
     std::cout << "Plotting tree: " << tree_idx << " to filename: " << filename << ".png" << std::endl;
     
     GVC_t *gvc;
@@ -909,7 +960,6 @@ void GBRL::plot_tree(int tree_idx, const std::string &filename){
     int stop_leaf_idx = tree_idx == n_trees - 1 ? this->metadata->n_leaves  : edata_cpu->tree_indices[tree_idx+1];
     
     for (int leaf_idx = edata_cpu->tree_indices[tree_idx]; leaf_idx < stop_leaf_idx; ++leaf_idx){
-        // std::cout << "Working on leaf idx: " << leaf_idx << "/" << stop_leaf_idx << std::endl;
         int nodeIndex = 0, parentIdx = 0; 
         int idx = (this->metadata->grow_policy == OBLIVIOUS) ? tree_idx : leaf_idx;
         int depth = edata_cpu->depths[idx];
@@ -919,6 +969,7 @@ void GBRL::plot_tree(int tree_idx, const std::string &filename){
         float feature_value = edata_cpu->feature_values[cond_idx];
         char *categorical_value = edata_cpu->categorical_values + cond_idx * MAX_CHAR_SIZE;
         bool inequality_direction  = edata_cpu->inequality_directions[leaf_idx*this->metadata->max_depth];
+        float edge_weight  = edata_cpu->edge_weights[leaf_idx*this->metadata->max_depth];
         bool is_numeric  = edata_cpu->is_numerics[cond_idx];
         
         if (nodesMap.find(nodeIndex) == nodesMap.end()) {  // Check if the root node already exists
@@ -945,20 +996,27 @@ void GBRL::plot_tree(int tree_idx, const std::string &filename){
             if (nodesMap.find(nodeIndex) == nodesMap.end()) {
                 std::strcpy(buffer, std::to_string(nodeIndex).c_str());
                 currentNode = agnode(g, buffer, true);
-                std::string nodeLabel = is_numeric ? std::to_string(feature_idx) + ", value > " + std::to_string(feature_value) : std::to_string(feature_idx + this->metadata->n_num_features) + ", value == " + std::string(categorical_value) ;
-            
-                std::strcpy(buffer, nodeLabel.c_str());
+                std::stringstream nodeLabel;
+                nodeLabel << std::fixed << std::setprecision(3);
+                if (is_numeric) {
+                    nodeLabel << feature_idx << ", value > " << feature_value;
+                } else {
+                    nodeLabel << feature_idx + this->metadata->n_num_features << ", value == " << categorical_value;
+                }
+                std::strcpy(buffer, nodeLabel.str().c_str());
+
                 agsafeset(currentNode, (char*)"label", buffer, (char*)"");
                 nodesMap[nodeIndex] = currentNode;
             } else {
                 currentNode = nodesMap[nodeIndex];
             }
 
-            std::string edgeLabel = inequality_direction ? "Yes" : "No";
-            std::string edgeKey = std::to_string(parentIdx) + "->" + std::to_string(nodeIndex) + " " + edgeLabel;
+            std::stringstream edgeLabel;
+            edgeLabel << (inequality_direction ? "Yes\nweight: " : "No\nweight: ") << std::fixed << std::setprecision(3) << edge_weight;
+            std::string edgeKey = std::to_string(parentIdx) + "->" + std::to_string(nodeIndex) + " " + edgeLabel.str();
 
             if (edgesSet.find(edgeKey) == edgesSet.end()) {
-                std::strcpy(buffer, edgeLabel.c_str());
+                std::strcpy(buffer, edgeLabel.str().c_str());
                 edge = agedge(g, parentNode, currentNode, buffer, true);
                 agsafeset(edge, (char*)"label", buffer, (char*)"");
                 edgesSet.insert(edgeKey);  
@@ -967,6 +1025,7 @@ void GBRL::plot_tree(int tree_idx, const std::string &filename){
             parentNode = currentNode;
             parentIdx = nodeIndex;
             inequality_direction = edata_cpu->inequality_directions[leaf_idx*this->metadata->max_depth + i];
+            edge_weight = edata_cpu->edge_weights[leaf_idx*this->metadata->max_depth + i];
 
         }
     
@@ -981,9 +1040,10 @@ void GBRL::plot_tree(int tree_idx, const std::string &filename){
         agsafeset(currentNode, (char*)"color", (char*)"red", (char*)"");
         std::strcpy(buffer, leafLabel.c_str());  // Setting the displayed label
         agset(currentNode, (char*)"label", buffer);
-        
-        std::string edgeLabel = edata_cpu->inequality_directions[leaf_idx*this->metadata->max_depth + depth - 1] ? "Yes" : "No";
-        std::strcpy(buffer, edgeLabel.c_str());
+        std::stringstream edgeLabel;
+        edgeLabel << (edata_cpu->inequality_directions[leaf_idx * this->metadata->max_depth + depth - 1] ? "Yes\nweight: " : "No\nweight: ")
+                  << std::fixed << std::setprecision(3) << edata_cpu->edge_weights[leaf_idx * this->metadata->max_depth + depth - 1];
+        std::strcpy(buffer, edgeLabel.str().c_str());
         agsafeset(edge, (char*)"label", buffer, (char*)"");  // Fixing edge label
     }
 

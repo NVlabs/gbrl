@@ -10,6 +10,7 @@
 #include <string>
 #include <fstream>
 #include <sstream>
+#include <iomanip>
 
 #include "utils.h"
 #include "config.h"
@@ -17,6 +18,7 @@
 
 std::string VectoString(const float* vec, const int vec_size){
     std::ostringstream oss;
+    oss << std::fixed << std::setprecision(3);  // Set precision to 3
     if (vec_size > 1)
         oss << "[";
     for (int i = 0; i < vec_size; ++i) {
@@ -69,3 +71,25 @@ void display_header(serializationHeader header){
     std::cout << "Version " << header.major_version << "."
                 << header.minor_version << "." << header.patch_version << std::endl;
 }
+
+template<typename T>
+int count_distinct(T *arr, int n){
+    /*
+    Count the number of distinct elements in an unsorted array O(n^2)
+    */
+    int res = 1;
+
+    // Pick all elements one by one
+    for (int i = 1; i < n; i++) {
+        int j = 0;
+        for (j = 0; j < i; j++)
+            if (arr[i] == arr[j])
+                break;
+
+        if (i == j)
+            res++;
+    }
+    return res;
+}
+template int count_distinct<int>(int* arr, int n);
+template int count_distinct<double>(double* arr, int n);

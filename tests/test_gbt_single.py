@@ -13,6 +13,8 @@ import unittest
 
 import numpy as np
 from sklearn import datasets
+from sklearn.tree import DecisionTreeRegressor
+import shap
 import torch as th
 from torch.nn.functional import mse_loss
 
@@ -106,6 +108,32 @@ class TestGBTSingle(unittest.TestCase):
         loss = rmse_model(model, X_categorical, y_categorical, self.n_epochs)
         value = 5000
         self.assertTrue(loss < value, f'Expected Categorical loss = {loss} < {value}')
+
+    def test_shap_cpu(self):
+        print("Running test_shap_cpu")
+        X, y = self.single_data
+        tree_struct = {'max_depth': 3, 
+                'n_bins': 256,'min_data_in_leaf': 1,
+                'par_th': 2,
+                'grow_policy': 'greedy'}
+        optimizer = { 'algo': 'SGD',
+                    'lr': 1.0,
+                }
+        gbrl_params = dict({"control_variates": False, "split_score_func": "L2",
+                            "generator_type": "Uniform"})
+        model = GradientBoostingTrees(
+                            output_dim=self.out_dim,
+                            tree_struct=tree_struct,
+                            optimizer=optimizer,
+                            gbrl_params=gbrl_params,
+                            verbose=0,
+                            device='cpu')
+        model._model.step(X, y)
+        gbrl_shap = model.tree_shap(0, X[0, :]).flatten()
+        clf = DecisionTreeRegressor(max_depth=3).fit(X, y)
+
+        target_shap = shap.TreeExplainer(clf).shap_values(X[0])
+        self.assertTrue(np.allclose(gbrl_shap, target_shap, rtol=1e-3), f'GBRL SHAP values are not close to target SHAP values')
 
     def test_cosine_adam_cpu(self):
         print("Running test_cosine_adam_cpu")

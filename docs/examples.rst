@@ -301,3 +301,33 @@ Let's start by training a simple Reinforce algorithm.
         if episode % 100 == 0:
             print(f"Episode {episode} - boosting iteration: {agent.get_iteration()} episodic return: {np.mean(wrapped_env.return_queue)}")
 
+Explainability
+--------------
+GBRL implements SHAP value calculation. SHAP values can be calculated over the entire ensemble as well as for individual trees.
+GBRL returns SHAP values with shap: [n_samples, n_features, n_actions].
+
+.. code-block:: python
+
+    # per tree shap values
+    tree_shap = agent.tree_shap(0, obs)
+    # for the entire ensemble
+    shap_values = agent.shap(obs)
+
+SHAP values are calculated internally and can be plotted using the `SHAP library <https://github.com/shap/shap>`__.
+
+.. code-block:: python
+
+    import shap
+    import matplotlib.pyplot as plt
+    plt.close('all')
+    explainable_values_action_1 = shap.Explanation(tree_shap.squeeze()[: , 0])
+    explainable_values_action_2 = shap.Explanation(tree_shap.squeeze()[: , 1])
+
+    fig, ax = plt.subplots()
+    shap.plots.bar(explainable_values_action_1, ax=ax)
+    ax.set_title("SHAP values Action 1")
+    fig, ax = plt.subplots()
+    shap.plots.bar(explainable_values_action_2, ax=ax)
+    ax.set_title("SHAP values Action 2")
+
+    plt.show()

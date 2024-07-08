@@ -136,7 +136,7 @@ void subtract_vec_from_mat(float *mat, float *vec, const int n_samples, const in
 }
 
 
-void multiply_mat_by_scalar(float *mat, float scalar, const int n_samples, const int n_cols, const int par_th){
+void _multiply_mat_by_scalar(float *mat, float scalar, const int n_samples, const int n_cols, const int par_th){
     int n_elements = n_samples * n_cols;
     int n_threads = calculate_num_threads(n_elements, par_th);
     if (n_threads > 1){
@@ -163,6 +163,106 @@ void multiply_mat_by_scalar(float *mat, float scalar, const int n_samples, const
         }
     }
 }
+
+void _broadcast_mat_elementwise_mult_by_vec_into_mat(float *lmat, const float *rmat, const float *vec, const float scalar, const int n_samples, const int n_cols, const int par_th, const bool col_wise){
+    /* Broadcastig element-wise multiplication of an NxM matrix by an Nx1 vector and storing the result in another matrix.
+       Each row of the matrix is multiplied by */
+    int n_elements = n_samples * n_cols;
+    int n_threads = calculate_num_threads(n_elements, par_th);
+    if (n_threads > 1){
+        int elements_per_thread = (n_elements) / n_threads;
+        omp_set_num_threads(n_threads);
+        #pragma omp parallel
+        {
+            int thread_id = omp_get_thread_num();
+            int start_idx = thread_id * elements_per_thread;
+            int end_idx = (thread_id == n_threads - 1) ? n_elements : start_idx + elements_per_thread;
+#ifndef _MSC_VER
+    #pragma omp simd
+#endif
+            for (int i = start_idx; i < end_idx; ++i) {
+                int vec_idx = (col_wise) ? i % n_cols : i / n_cols;
+                lmat[i] = rmat[i]*(vec[vec_idx] + scalar); 
+            }
+        }
+    } else {
+#ifndef _MSC_VER
+    #pragma omp simd
+#endif
+        for (int i = 0; i < n_elements; ++i) {
+            int vec_idx = (col_wise) ? i % n_cols : i / n_cols;
+            lmat[i] = rmat[i]*(vec[vec_idx] + scalar); 
+        }
+    }
+}
+
+
+void _broadcast_mat_elementwise_mult_by_vec(float *mat, const float *vec, const float scalar, const int n_samples, const int n_cols, const int par_th){
+    /* Broadcastig element-wise multiplication of an NxM matrix by an Nx1 vector.
+       Each row of the matrix is multiplied by the same vector element*/
+    int n_elements = n_samples * n_cols;
+    int n_threads = calculate_num_threads(n_elements, par_th);
+    if (n_threads > 1){
+        int elements_per_thread = (n_elements) / n_threads;
+        omp_set_num_threads(n_threads);
+        #pragma omp parallel
+        {
+            int thread_id = omp_get_thread_num();
+            int start_idx = thread_id * elements_per_thread;
+            int end_idx = (thread_id == n_threads - 1) ? n_elements : start_idx + elements_per_thread;
+#ifndef _MSC_VER
+    #pragma omp simd
+#endif
+            for (int i = start_idx; i < end_idx; ++i) {
+                int row = i / n_cols;
+                mat[i] *= (vec[row] + scalar); 
+            }
+        }
+    } else {
+#ifndef _MSC_VER
+    #pragma omp simd
+#endif
+        for (int i = 0; i < n_elements; ++i) {
+            int row = i / n_cols;
+            mat[i] *= (vec[row] + scalar); 
+        }
+    }
+}
+
+
+void _broadcast_mat_elementwise_div_by_vec(float *mat, const float *vec, const float scalar, const int n_samples, const int n_cols, const int par_th){
+    /* Broadcastig element-wise multiplication of an NxM matrix by an Nx1 vector.
+       Each row of the matrix is multiplied by the same vector element*/
+    int n_elements = n_samples * n_cols;
+    int n_threads = calculate_num_threads(n_elements, par_th);
+    if (n_threads > 1){
+        int elements_per_thread = (n_elements) / n_threads;
+        omp_set_num_threads(n_threads);
+        #pragma omp parallel
+        {
+            int thread_id = omp_get_thread_num();
+            int start_idx = thread_id * elements_per_thread;
+            int end_idx = (thread_id == n_threads - 1) ? n_elements : start_idx + elements_per_thread;
+#ifndef _MSC_VER
+    #pragma omp simd
+#endif
+            for (int i = start_idx; i < end_idx; ++i) {
+                int row = i / n_cols;
+                mat[i] /= (vec[row] + scalar); 
+            }
+        }
+    } else {
+#ifndef _MSC_VER
+    #pragma omp simd
+#endif
+        for (int i = 0; i < n_elements; ++i) {
+            int row = i / n_cols;
+            mat[i] /= (vec[row] + scalar); 
+        }
+    }
+}
+
+
 
 float* calculate_mean(const float *mat, const int n_samples, const int n_cols, const int par_th){
     int n_elements = n_samples * n_cols;
@@ -508,6 +608,28 @@ float* copy_mat(const float *mat, const int size, const int par_th){
     return copied_mat;
 }
 
+void _copy_mat(float *mat_l, const float *mat_r, const int size, const int par_th){
+     int n_threads = calculate_num_threads(size, par_th);
+     if (n_threads > 1){
+        int elements_per_thread = size / n_threads;
+        omp_set_num_threads(n_threads);
+        #pragma omp parallel
+        {
+            int thread_id = omp_get_thread_num();
+            int start_idx = thread_id * elements_per_thread;
+            int end_idx = (thread_id == n_threads - 1) ? size : start_idx + elements_per_thread;
+#ifndef _MSC_VER
+    #pragma omp simd
+#endif
+            for (int i = start_idx; i < end_idx; ++i)
+                mat_l[i] = mat_r[i];
+        }
+     } else {
+        for (int i = 0; i < size; ++i)
+            mat_l[i] = mat_r[i];
+    }
+}
+
 void _element_wise_addition(float *mat_l, const float *mat_r, const int size, const int par_th){
      int n_threads = calculate_num_threads(size, par_th);
      if (n_threads > 1){
@@ -527,6 +649,28 @@ void _element_wise_addition(float *mat_l, const float *mat_r, const int size, co
      } else {
         for (int i = 0; i < size; ++i)
             mat_l[i] += mat_r[i];
+    }
+}
+
+void _element_wise_multiplication(float *mat_l, const float *mat_r, const int size, const int par_th){
+     int n_threads = calculate_num_threads(size, par_th);
+     if (n_threads > 1){
+        int elements_per_thread = size / n_threads;
+        omp_set_num_threads(n_threads);
+        #pragma omp parallel
+        {
+            int thread_id = omp_get_thread_num();
+            int start_idx = thread_id * elements_per_thread;
+            int end_idx = (thread_id == n_threads - 1) ? size : start_idx + elements_per_thread;
+#ifndef _MSC_VER
+    #pragma omp simd
+#endif
+            for (int i = start_idx; i < end_idx; ++i)
+                mat_l[i] *= mat_r[i];
+        }
+     } else {
+        for (int i = 0; i < size; ++i)
+            mat_l[i] *= mat_r[i];
     }
 }
 
@@ -554,7 +698,7 @@ float* element_wise_division(const float *mat_l, const float *mat_r, const int s
     return result;
 }
 
-void set_zero_mat(float *mat, const int size, const int par_th){
+void set_mat_value(float *mat, const int size, const float value, const int par_th){
     int n_threads = calculate_num_threads(size, par_th);
      if (n_threads > 1){
         int elements_per_thread = size / n_threads;
@@ -568,24 +712,16 @@ void set_zero_mat(float *mat, const int size, const int par_th){
     #pragma omp simd
 #endif
             for (int i = start_idx; i < end_idx; ++i)
-                mat[i] = 0.0f;
+                mat[i] = value;
         }
      } else {
 #ifndef _MSC_VER
     #pragma omp simd
 #endif
         for (int i = 0; i < size; ++i)
-            mat[i] = 0.0f;
+            mat[i] = value;
     }
 }
-
-
-float* init_zero_mat(const int size, const int par_th){
-    float *mat = new float[size];
-    set_zero_mat(mat, size, par_th);
-    return mat;
-}
-
 
 float* calculate_max(const float *mat, const int n_samples, const int n_cols, const int par_th){
     int n_elements = n_samples * n_cols;

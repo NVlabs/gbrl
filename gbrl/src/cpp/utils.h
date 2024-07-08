@@ -12,6 +12,8 @@
 #include <string>
 #include <cstring>
 #include <fstream>
+#include <iostream>
+#include <stdexcept>
 #include <omp.h>
 
 #include "types.h"
@@ -30,6 +32,17 @@ inline int calculate_num_threads(int total_elements, int min_elements_per_thread
         return n_threads; // Number of threads based on workload
     }
 }
+
+template<typename T>
+int count_distinct(T *arr, int n);
+
+inline void valid_tree_idx(const int tree_idx, const ensembleMetaData* metadata){
+    if (tree_idx < 0 || tree_idx >= metadata->n_trees){
+        std::cerr << "ERROR: invalid tree_idx " << tree_idx << " in ensemble with ntrees = " << metadata->n_trees <<std::endl;
+        throw std::runtime_error("Invalid tree index");
+    }
+}
+
 
 template<typename T>
 inline T* reallocate_and_copy(T* original, size_t new_n_elements, size_t old_n_elements) {

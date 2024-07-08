@@ -195,6 +195,8 @@ ensembleData* ensemble_data_alloc(ensembleMetaData *metadata){
     memset(edata->feature_indices, 0, split_sizes*metadata->max_depth * sizeof(int));
     edata->feature_values = new float[split_sizes*metadata->max_depth];
     memset(edata->feature_values, 0, split_sizes*metadata->max_depth * sizeof(float));
+    edata->edge_weights = new float[metadata->max_leaves*metadata->max_depth];
+    memset(edata->edge_weights, 0, metadata->max_leaves*metadata->max_depth * sizeof(float));
     edata->is_numerics = new bool[split_sizes*metadata->max_depth];
     memset(edata->is_numerics, 0, split_sizes*metadata->max_depth * sizeof(bool));
     edata->inequality_directions = new bool[metadata->max_leaves*metadata->max_depth]; 
@@ -205,7 +207,7 @@ ensembleData* ensemble_data_alloc(ensembleMetaData *metadata){
 }
 
 ensembleData* ensemble_copy_data_alloc(ensembleMetaData *metadata){
-    // same as normal allco but only allocate memory for existing size 
+    // same as normal alloc but only allocate memory for existing size 
     ensembleData *edata = new ensembleData;
     if (metadata == nullptr){
         std::cerr << "Error metadata is nullptr cannot allocate ensembleData." << std::endl;
@@ -230,6 +232,8 @@ ensembleData* ensemble_copy_data_alloc(ensembleMetaData *metadata){
     memset(edata->feature_indices, 0, split_sizes*metadata->max_depth * sizeof(int));
     edata->feature_values = new float[split_sizes*metadata->max_depth];
     memset(edata->feature_values, 0, split_sizes*metadata->max_depth * sizeof(float));
+    edata->edge_weights = new float[metadata->n_leaves*metadata->max_depth];
+    memset(edata->edge_weights, 0, metadata->n_leaves*metadata->max_depth * sizeof(float));
     edata->is_numerics = new bool[split_sizes*metadata->max_depth];
     memset(edata->is_numerics, 0, split_sizes*metadata->max_depth * sizeof(bool));
     edata->inequality_directions = new bool[metadata->n_leaves*metadata->max_depth]; 
@@ -264,6 +268,8 @@ ensembleData* copy_ensemble_data(ensembleData *other_edata, ensembleMetaData *me
     memcpy(edata->feature_indices, other_edata->feature_indices, split_sizes*metadata->max_depth * sizeof(int));
     edata->feature_values = new float[split_sizes*metadata->max_depth];
     memcpy(edata->feature_values, other_edata->feature_values, split_sizes*metadata->max_depth * sizeof(float));
+    edata->edge_weights = new float[metadata->n_leaves*metadata->max_depth];
+    memcpy(edata->edge_weights, other_edata->edge_weights, metadata->n_leaves*metadata->max_depth * sizeof(float));
     edata->is_numerics = new bool[split_sizes*metadata->max_depth];
     memcpy(edata->is_numerics, other_edata->is_numerics, split_sizes*metadata->max_depth * sizeof(bool));
     edata->categorical_values = new char[split_sizes*metadata->max_depth*MAX_CHAR_SIZE];
@@ -285,6 +291,7 @@ void ensemble_data_dealloc(ensembleData *edata){
     delete[] edata->feature_indices;
     delete[] edata->tree_indices;
     delete[] edata->feature_values;
+    delete[] edata->edge_weights;
     delete[] edata->is_numerics;
     delete[] edata->categorical_values;
     delete[] edata->inequality_directions; 
@@ -409,13 +416,7 @@ void export_ensemble_data(std::ofstream& header_file, const std::string& model_n
         }
     }
     header_file << "};\n";
-    // header_file << "\tconst unsigned int tree_indices[N_TREES] = {";
-    // for (int i  = 0; i < metadata->n_trees; ++i){
-    //     header_file << edata_cpu->tree_indices[i];
-    //     if (i < metadata->n_trees - 1)
-    //         header_file << ", ";
-    // }
-    // header_file << "};\n";
+
     header_file << "\tleaf_ptr = 0;\n";
     header_file << "\tcond_ptr = 0;\n";
     header_file << "\tunsigned char pass;\n";
@@ -488,6 +489,10 @@ void save_ensemble_data(std::ofstream& file, ensembleData *edata, ensembleMetaDa
     file.write(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
     if (edata_cpu->feature_values != nullptr)
         file.write(reinterpret_cast<char*>(edata_cpu->feature_values), metadata->max_depth * sizes * sizeof(float));
+    check = edata_cpu->edge_weights != nullptr ? VALID : NULL_OPT;
+    file.write(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
+    if (edata_cpu->edge_weights != nullptr)
+        file.write(reinterpret_cast<char*>(edata_cpu->edge_weights), metadata->max_depth * metadata->n_leaves * sizeof(float));
     check = edata_cpu->is_numerics != nullptr ? VALID : NULL_OPT;
     file.write(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
     if (edata_cpu->is_numerics != nullptr)
@@ -547,6 +552,10 @@ ensembleData* load_ensemble_data(std::ifstream& file, ensembleMetaData *metadata
         file.read(reinterpret_cast<char*>(edata_cpu->feature_values), metadata->max_depth * sizes *sizeof(float));
     } 
     file.read(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
+       if (check == VALID) {
+        file.read(reinterpret_cast<char*>(edata_cpu->edge_weights), metadata->max_depth * metadata->n_leaves *sizeof(float));
+    } 
+    file.read(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
     if (check == VALID) {
         file.read(reinterpret_cast<char*>(edata_cpu->is_numerics), metadata->max_depth * sizes *sizeof(bool));
     } 
@@ -577,6 +586,7 @@ void allocate_ensemble_memory(ensembleMetaData *metadata, ensembleData *edata){
         memcpy(new_data->values, edata->values, leaf_idx*metadata->output_dim*sizeof(float));
         memcpy(new_data->tree_indices, edata->tree_indices, tree_idx*sizeof(int));
         memcpy(new_data->inequality_directions, edata->inequality_directions, leaf_idx*metadata->max_depth*sizeof(bool));
+        memcpy(new_data->edge_weights, edata->edge_weights, leaf_idx*metadata->max_depth*sizeof(float));
         if (metadata->grow_policy == GREEDY){
             memcpy(new_data->depths, edata->depths, leaf_idx*sizeof(int));
             memcpy(new_data->feature_indices, edata->feature_indices, leaf_idx*metadata->max_depth*sizeof(int));
@@ -600,6 +610,7 @@ void allocate_ensemble_memory(ensembleMetaData *metadata, ensembleData *edata){
         delete[] edata->feature_indices;
         delete[] edata->tree_indices;
         delete[] edata->feature_values;
+        delete[] edata->edge_weights;
         delete[] edata->is_numerics;
         delete[] edata->categorical_values;
         delete[] edata->inequality_directions; 
@@ -614,6 +625,7 @@ void allocate_ensemble_memory(ensembleMetaData *metadata, ensembleData *edata){
         edata->inequality_directions = new_data->inequality_directions;
         edata->feature_indices = new_data->feature_indices;
         edata->feature_values = new_data->feature_values;
+        edata->edge_weights = new_data->edge_weights;
         edata->is_numerics = new_data->is_numerics;
         edata->categorical_values = new_data->categorical_values;
         delete new_data;

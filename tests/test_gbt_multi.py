@@ -14,15 +14,11 @@ from typing import Union, Tuple
 
 import numpy as np
 import torch as th
+from sklearn.tree import DecisionTreeRegressor
+import shap
 from torch.nn.functional import mse_loss
 
 from sklearn import datasets
-import sys
-FILE_PATH = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-
-sys.path.append(FILE_PATH)
-sys.path.insert(0, str(FILE_PATH))
-sys.path.insert(0, os.path.join(FILE_PATH, 'gbrl'))
 
 from gbrl import GradientBoostingTrees, cuda_available, ActorCritic
 
@@ -126,6 +122,31 @@ class TestGBTMulti(unittest.TestCase):
         value = 20.0
         self.assertTrue(loss < 2.0, f'Expected loss = {loss} < 2.0')
         model.save_model(os.path.join(self.test_dir, 'test_cosine_cpu'))
+
+    def test_shap_cpu(self):
+        print("Running test_shap_cpu")
+        X, y = self.data
+        tree_struct = {'max_depth': 3, 
+                'n_bins': 256,'min_data_in_leaf': 1,
+                'par_th': 2,
+                'grow_policy': 'greedy'}
+        optimizer = { 'algo': 'SGD',
+                    'lr': 1.0,
+                }
+        gbrl_params = dict({"control_variates": False, "split_score_func": "L2",
+                            "generator_type": "Uniform"})
+        model = GradientBoostingTrees(
+                            output_dim=self.out_dim,
+                            tree_struct=tree_struct,
+                            optimizer=optimizer,
+                            gbrl_params=gbrl_params,
+                            verbose=0,
+                            device='cpu')
+        model._model.step(X, y)
+        gbrl_shap = model.tree_shap(0, X[0, :])
+        clf = DecisionTreeRegressor(max_depth=3).fit(X, y)
+        target_shap = shap.TreeExplainer(clf).shap_values(X[0])
+        self.assertTrue(np.allclose(gbrl_shap, target_shap, rtol=1e-3), f'GBRL sHAP values are not close to target SHAP values')
 
     def test_cosine_adam_cpu(self):
         print("Running Multi test_cosine_adam_cpu")

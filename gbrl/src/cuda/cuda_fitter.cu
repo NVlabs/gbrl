@@ -802,6 +802,7 @@ TreeNodeGPU* allocate_root_tree_node(dataSet *dataset, ensembleMetaData *metadat
     tempNode.sample_indices = nullptr;
     tempNode.feature_indices = nullptr;
     tempNode.feature_values = nullptr;
+    tempNode.edge_weights = nullptr;
     tempNode.inequality_directions = nullptr;
     tempNode.is_numerics = nullptr;
     tempNode.categorical_values = nullptr;
@@ -840,6 +841,7 @@ void allocate_child_tree_node(TreeNodeGPU* host_parent, TreeNodeGPU** device_chi
     host_child.feature_indices = nullptr;
     host_child.feature_values = nullptr;
     host_child.inequality_directions = nullptr;
+    host_child.edge_weights = nullptr;
     host_child.is_numerics = nullptr;
     host_child.categorical_values = nullptr;
 
@@ -847,6 +849,7 @@ void allocate_child_tree_node(TreeNodeGPU* host_parent, TreeNodeGPU** device_chi
     size_t conditions_size = sizeof(int) * n_samples // sample_indices
                 + sizeof(int) * depth    // feature_indices
                 + sizeof(float) * depth  // feature_values
+                + sizeof(float) * depth   // edge_weights
                 + sizeof(bool) * depth   // inequality_directions
                 + sizeof(bool) * depth   // is_numerics
                 + sizeof(char) * depth * MAX_CHAR_SIZE; // categorical_values
@@ -871,6 +874,8 @@ void allocate_child_tree_node(TreeNodeGPU* host_parent, TreeNodeGPU** device_chi
     host_child.feature_indices = (int*)(device_memory_block + trace);
     trace += sizeof(int) * depth;
     host_child.feature_values = (float*)(device_memory_block + trace);
+    trace += sizeof(float) * depth;
+    host_child.edge_weights = (float*)(device_memory_block + trace);
     trace += sizeof(float) * depth;
     host_child.inequality_directions = (bool*)(device_memory_block + trace);
     trace += sizeof(bool) * depth;
@@ -913,7 +918,7 @@ void add_leaf_node(const TreeNodeGPU *node, const int depth, ensembleMetaData *m
     int n_threads = WARP_SIZE*((MAX_CHAR_SIZE + WARP_SIZE - 1) / WARP_SIZE);
     if (depth > 0){
         int global_idx = (metadata->grow_policy == GREEDY) ? leaf_idx : tree_idx;
-        copy_node_to_data<<<depth, n_threads>>>(node, edata->depths, edata->feature_indices, edata->feature_values, edata->inequality_directions, edata->is_numerics, edata->categorical_values, global_idx, leaf_idx, metadata->max_depth);
+        copy_node_to_data<<<depth, n_threads>>>(node, edata->depths, edata->feature_indices, edata->feature_values, edata->edge_weights, edata->inequality_directions, edata->is_numerics, edata->categorical_values, global_idx, leaf_idx, metadata->max_depth);
         cudaDeviceSynchronize();
     }
 
@@ -936,7 +941,7 @@ void add_leaf_node(const TreeNodeGPU *node, const int depth, ensembleMetaData *m
     metadata->n_leaves += 1;
 }
 
-__global__ void copy_node_to_data(const TreeNodeGPU* __restrict__ node, int* __restrict__ depths, int* __restrict__ feature_indices, float* __restrict__ feature_values, bool* __restrict__ inequality_directions, bool* __restrict__ is_numerics, char * __restrict__  categorical_values, const int global_idx, const int leaf_idx, const int max_depth){
+__global__ void copy_node_to_data(const TreeNodeGPU* __restrict__ node, int* __restrict__ depths, int* __restrict__ feature_indices, float* __restrict__ feature_values, float* __restrict__ edge_weights, bool* __restrict__ inequality_directions, bool* __restrict__ is_numerics, char * __restrict__  categorical_values, const int global_idx, const int leaf_idx, const int max_depth){
     if (blockIdx.x == 0 && threadIdx.x == 0){
         depths[global_idx] = node->depth;
     }
@@ -945,6 +950,7 @@ __global__ void copy_node_to_data(const TreeNodeGPU* __restrict__ node, int* __r
             feature_indices[global_idx*max_depth + blockIdx.x] = node->feature_indices[blockIdx.x];
             feature_values[global_idx*max_depth + blockIdx.x] = node->feature_values[blockIdx.x];
             inequality_directions[leaf_idx*max_depth + blockIdx.x] = node->inequality_directions[blockIdx.x];
+            edge_weights[leaf_idx*max_depth + blockIdx.x] = node->edge_weights[blockIdx.x];
             is_numerics[global_idx*max_depth + blockIdx.x] = node->is_numerics[blockIdx.x];
         }  
         if (threadIdx.x < MAX_CHAR_SIZE){
@@ -1075,10 +1081,12 @@ __global__ void update_child_nodes_kernel(const TreeNodeGPU* __restrict__ parent
             left_child->feature_indices[blockIdx.x] = parent_node->feature_indices[blockIdx.x];
             left_child->feature_values[blockIdx.x] = parent_node->feature_values[blockIdx.x];
             left_child->inequality_directions[blockIdx.x] = parent_node->inequality_directions[blockIdx.x];
+            left_child->edge_weights[blockIdx.x] = parent_node->edge_weights[blockIdx.x];
             left_child->is_numerics[blockIdx.x] = parent_node->is_numerics[blockIdx.x];
             right_child->feature_indices[blockIdx.x] = parent_node->feature_indices[blockIdx.x];
             right_child->feature_values[blockIdx.x] = parent_node->feature_values[blockIdx.x];
             right_child->inequality_directions[blockIdx.x] = parent_node->inequality_directions[blockIdx.x];
+            right_child->edge_weights[blockIdx.x] = parent_node->edge_weights[blockIdx.x];
             right_child->is_numerics[blockIdx.x] = parent_node->is_numerics[blockIdx.x];
         }
         if (threadIdx.x < MAX_CHAR_SIZE){
@@ -1091,10 +1099,12 @@ __global__ void update_child_nodes_kernel(const TreeNodeGPU* __restrict__ parent
             left_child->feature_indices[blockIdx.x] = candidate_indices[*best_idx];
             left_child->feature_values[blockIdx.x] = candidate_values[*best_idx];
             left_child->inequality_directions[blockIdx.x] = false;
+            left_child->edge_weights[blockIdx.x] = (tree_counters[0] + tree_counters[1] > 0) ? static_cast<float>(tree_counters[0]) / (static_cast<float>(tree_counters[0]) + static_cast<float>(tree_counters[1])) : 0.0f;
             left_child->is_numerics[blockIdx.x] = candidate_numeric[*best_idx];
             right_child->feature_indices[blockIdx.x] = candidate_indices[*best_idx];
             right_child->feature_values[blockIdx.x] = candidate_values[*best_idx];
             right_child->inequality_directions[blockIdx.x] = true;
+            right_child->edge_weights[blockIdx.x] = (tree_counters[0] + tree_counters[1] > 0) ? static_cast<float>(tree_counters[1]) / (static_cast<float>(tree_counters[0]) + static_cast<float>(tree_counters[1])) : 0.0f;
             right_child->is_numerics[blockIdx.x] = candidate_numeric[*best_idx];
         }
         if (threadIdx.x < MAX_CHAR_SIZE){

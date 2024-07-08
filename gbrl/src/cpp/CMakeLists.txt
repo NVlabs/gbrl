@@ -15,6 +15,8 @@ set(CPP_SOURCES
     node.cpp
     utils.cpp
     fitter.cpp
+    shap.cpp
+    data_structs.cpp
     predictor.cpp
     split_candidate_generator.cpp
     loss.cpp
@@ -27,6 +29,16 @@ if (CUDAToolkit_FOUND AND NOT APPLE)
     include_directories(${CUDAToolkit_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/gbrl/src/cuda)
     add_definitions(-DUSE_CUDA)
 endif()
+
+if (GRAPHVIZ_FOUND)
+message(STATUS "Found Graphviz")
+    set(GRAPHVIZ_INCLUDE_DIRS ${GRAPHVIZ_INCLUDE_DIR} ${GRAPHVIZ_INCLUDE_DIR}/graphviz)
+    add_definitions(-DUSE_GRAPHVIZ)
+    include_directories(${GRAPHVIZ_INCLUDE_DIRS})
+else()
+    message(STATUS "Did not Find Graphviz")
+endif()
+
 
 if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -std=c++14 -Wall -Wpedantic -Wextra -march=native -fPIC")

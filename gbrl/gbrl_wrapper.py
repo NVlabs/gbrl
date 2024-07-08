@@ -21,7 +21,7 @@ categorical_dtype = np.dtype('S128')
 from typing import Dict
 
 from .gbrl_cpp import GBRL
-
+from .utils import get_input_dim, get_poly_vectors
 
 def process_array(arr: np.array)-> Tuple[np.array, np.array]:
     """ Formats numpy array for C++ GBRL.
@@ -49,7 +49,6 @@ def to_numpy(arr: Union[np.array, th.Tensor]) -> Union[np.array, np.array]:
     else:
         return process_array(arr)
        
-
 def preprocess_features(arr: Union[np.array, th.Tensor]) -> Tuple[np.array, np.array]:
     """Preprocess array such that the dimensions and the data type match.
     Returns numerical and categorical features. 
@@ -59,7 +58,7 @@ def preprocess_features(arr: Union[np.array, th.Tensor]) -> Tuple[np.array, np.a
     Returns:
         Tuple[np.array, np.array]
     """
-    input_dim = 1 if len(arr.shape) == 1 else arr.shape[1]
+    input_dim = get_input_dim(arr)
     num_arr, cat_arr = to_numpy(arr)
     if num_arr is not None and len(num_arr.shape) == 1:
         if input_dim == 1:
@@ -104,7 +103,7 @@ class GBTWrapper:
         if feature_weights is not None:
             feature_weights, _ = to_numpy(feature_weights)
             feature_weights = feature_weights.flatten()
-            assert np.all(feature_weights > 0), "feature weights contains non-positive values"
+            assert np.all(feature_weights >= 0), "feature weights contains non-positive values"
         self.feature_weights = feature_weights
 
     def reset(self) -> None:
@@ -129,7 +128,7 @@ class GBTWrapper:
         if feature_weights is not None:
             feature_weights, _ = to_numpy(feature_weights)
             feature_weights = feature_weights.flatten()
-            assert np.all(feature_weights > 0), "feature weights contains non-positive values"
+            assert np.all(feature_weights >= 0), "feature weights contains non-positive values"
         self.feature_weights = feature_weights
 
     def step(self, features: Union[np.array, th.Tensor, Tuple], grads: Union[np.array, th.Tensor]) -> None:
@@ -141,7 +140,7 @@ class GBTWrapper:
         if self.feature_weights is None:
             self.feature_weights = np.ones(input_dim, dtype=numerical_dtype)
         assert len(self.feature_weights) == input_dim, "feature weights has to have the same number of elements as features"
-        assert np.all(self.feature_weights > 0), "feature weights contains non-positive values"
+        assert np.all(self.feature_weights >= 0), "feature weights contains non-positive values"
         self.cpp_model.step(num_features, cat_features, grads, self.feature_weights)
         self.iteration = self.cpp_model.get_iteration()
         self.total_iterations += 1
@@ -155,7 +154,7 @@ class GBTWrapper:
         if self.feature_weights is None:
             self.feature_weights = np.ones(input_dim, dtype=numerical_dtype)
         assert len(self.feature_weights) == input_dim, "feature weights has to have the same number of elements as features"
-        assert np.all(self.feature_weights > 0), "feature weights contains non-positive values"
+        assert np.all(self.feature_weights >= 0), "feature weights contains non-positive values"
         loss = self.cpp_model.fit(num_features, cat_features, targets, self.feature_weights, iterations, shuffle, loss_type)
         self.iteration = self.cpp_model.get_iteration()
         return loss
@@ -261,13 +260,46 @@ class GBTWrapper:
     
     def plot_tree(self, tree_idx: int, filename: str) -> None:
         try:
-            self.cpp_model.print_tree(tree_idx, filename)
+            self.cpp_model.plot_tree(tree_idx, filename)
         except RuntimeError as e:
             print(f"Caught an exception in GBRL: {e}")
+
+    def tree_shap(self, tree_idx: int, features: Union[np.array, th.Tensor]) -> np.array:
+        """  
+        Implementation based on - https://github.com/yupbank/linear_tree_shap
+        See Linear TreeShap, Yu et al, 2023, https://arxiv.org/pdf/2209.08192 
+        Args:
+            tree_idx (int): tree index
+            features (Union[np.array, th.Tensor]):
+
+        Returns:
+            np.array: shap values
+        """
+        num_features, cat_features = preprocess_features(features)
+        base_poly, norm_values, offset = get_poly_vectors(self.params['max_depth'], numerical_dtype)
+        return self.cpp_model.tree_shap(tree_idx, num_features, cat_features, np.ascontiguousarray(norm_values), np.ascontiguousarray(base_poly), np.ascontiguousarray(offset)) 
+    
+    def shap(self, features: Union[np.array, th.Tensor]) -> np.array:
+        """  
+        Uses Linear tree shap for each tree in the ensemble (sequentially)
+        Implementation based on - https://github.com/yupbank/linear_tree_shap
+        See Linear TreeShap, Yu et al, 2023, https://arxiv.org/pdf/2209.08192 
+        Args:
+            features (Union[np.array, th.Tensor]):
+
+        Returns:
+            np.array: shap values
+        """
+        num_features, cat_features = preprocess_features(features)
+        base_poly, norm_values, offset = get_poly_vectors(self.params['max_depth'], numerical_dtype)
+        return self.cpp_model.ensemble_shap(num_features, cat_features, np.ascontiguousarray(norm_values), np.ascontiguousarray(base_poly), np.ascontiguousarray(offset)) 
     
     def set_device(self, device: str) -> None:
-        self.cpp_model.to_device(device)
-        self.device = device
+        try:
+            self.cpp_model.to_device(device)
+            self.device = device
+        except RuntimeError as e:
+            print(f"Caught an exception in GBRL: {e}")
     
     def predict(self, features: Union[np.array, th.Tensor], start_idx: int=0, stop_idx: int=None) -> np.array:
         num_features, cat_features = preprocess_features(features)
@@ -320,7 +352,7 @@ class GBTWrapper:
         copy_.iteration = self.iteration 
         copy_.total_iterations = self.total_iterations
         if self.cpp_model is not None:
-            copy_.model = GBRL(self.cpp_model)
+            copy_.cpp_model = GBRL(self.cpp_model)
         if self.student_model is not None:
             copy_.student_model = GBRL(self.student_model)
         return copy_
@@ -357,6 +389,11 @@ class SeparateActorCriticWrapper:
         self.policy_model.set_device(device)
         self.value_model.set_device(device)
         self.device = device
+
+    def tree_shap(self, tree_idx: int, observations: Union[np.array, th.Tensor]) -> Tuple[np.array, np.array]:
+        policy_shap = self.policy_model.tree_shap(tree_idx, observations)
+        value_shap = self.value_model.tree_shap(tree_idx, observations)
+        return policy_shap, value_shap
 
     def get_total_iterations(self) -> int:
         return self.total_iterations
@@ -487,7 +524,7 @@ class SharedActorCriticWrapper(GBTWrapper):
         if self.feature_weights is None:
             self.feature_weights = np.ones(input_dim, dtype=numerical_dtype)
         assert len(self.feature_weights) == input_dim, "feature weights has to have the same number of elements as features"
-        assert np.all(self.feature_weights > 0), "feature weights contains non-positive values"
+        assert np.all(self.feature_weights >= 0), "feature weights contains non-positive values"
         self.cpp_model.step(num_observations, cat_observations, target_grads, self.feature_weights)
         self.iteration = self.cpp_model.get_iteration()
         self.total_iterations += 1

@@ -123,6 +123,7 @@ int TreeNode::splitNode(const float *obs, const char *categorical_obs, const int
     }
     this->left_child->split_conditions[this->depth].feature_idx = split_candidate.feature_idx;
     this->left_child->split_conditions[this->depth].feature_value = split_candidate.feature_value;
+    this->left_child->split_conditions[this->depth].edge_weight = (this->n_samples > 0) ? static_cast<float>(left_count) / (static_cast<float>(this->n_samples)) : 0.0f;
     if (split_candidate.categorical_value != nullptr){
         this->left_child->split_conditions[this->depth].categorical_value = new char[MAX_CHAR_SIZE];
         std::copy(split_candidate.categorical_value, split_candidate.categorical_value + MAX_CHAR_SIZE, this->left_child->split_conditions[this->depth].categorical_value);
@@ -132,6 +133,7 @@ int TreeNode::splitNode(const float *obs, const char *categorical_obs, const int
     // For right child
     this->right_child->split_conditions[this->depth].feature_idx = split_candidate.feature_idx;
     this->right_child->split_conditions[this->depth].feature_value = split_candidate.feature_value;
+    this->right_child->split_conditions[this->depth].edge_weight = (this->n_samples > 0) ? static_cast<float>(right_count) / (static_cast<float>(this->n_samples)) : 0.0f;
     if (split_candidate.categorical_value != nullptr){
         this->right_child->split_conditions[this->depth].categorical_value = new char[MAX_CHAR_SIZE];
         std::copy(split_candidate.categorical_value, split_candidate.categorical_value + MAX_CHAR_SIZE, this->right_child->split_conditions[this->depth].categorical_value);
@@ -553,6 +555,13 @@ void print_leaf(const int global_leaf_idx, const int leaf_idx, const int tree_id
             std::cout << ", ";
     }
     
+    std::cout << "]" << std::endl;
+    std::cout << " edge_weights: [";
+    for (int i = 0 ; i < edata->depths[idx] ; i++){
+        std::cout << edata->edge_weights[global_leaf_idx * metadata->max_depth + i];
+        if (i < edata->depths[idx] - 1)
+            std::cout << ", ";
+    }
     std::cout << "]" << std::endl;
     return;
 }

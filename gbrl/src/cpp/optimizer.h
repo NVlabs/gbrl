@@ -25,7 +25,7 @@ class Optimizer {
         virtual optimizerConfig* getConfig() = 0;
         virtual int saveToFile(std::ofstream& file) = 0;
         static Optimizer* loadFromFile(std::ifstream& file);
-        virtual void set_memory(const int n_samples, const int output_dim, const int par_th) = 0 ;
+        virtual void set_memory(const int n_samples, const int output_dim) = 0 ;
         void setAlgo(optimizerAlgo algo);
         optimizerAlgo getAlgo() const ;
         void set_indices(int start_idx, int end_idx);
@@ -47,7 +47,7 @@ class SGDOptimizer: public Optimizer {
         optimizerConfig* getConfig() override;
         
         void step(float *theta, const float *raw_grad_theta, int t, int sample_idx) override;
-        void set_memory(const int n_samples, const int output_dim, const int par_th) override; 
+        void set_memory(const int n_samples, const int output_dim) override; 
         int saveToFile(std::ofstream& file) override;
         static SGDOptimizer* loadFromFile(std::ifstream& file);
 };
@@ -62,7 +62,7 @@ class AdamOptimizer: public Optimizer {
         optimizerConfig* getConfig() override;
 
         void step(float *theta, const float *raw_grad_theta, int t, int sample_idx) override;
-        void set_memory(const int n_samples, const int output_dim, const int par_th) override; 
+        void set_memory(const int n_samples, const int output_dim) override; 
         int saveToFile(std::ofstream& file) override;
         static AdamOptimizer* loadFromFile(std::ifstream& file);
 

@@ -3,8 +3,7 @@ requires = [
     "setuptools>=42",
     "wheel",
     "cmake>=3.18",
-    "pybind11[global]==2.13.1",
-    "scikit_learn==1.2.2"
+    "pybind11[global]==2.13.1"
 ]
 
 build-backend = "setuptools.build_meta"
@@ -23,7 +22,11 @@ dependencies = [
     "pybind11[global]==2.13.1",
     "numpy",
     "cmake>=3.18",
-    "torch"
+    "torch",
+    "scikit_learn==1.2.2",
+    "scipy",
+    "shap",
+    "matplotlib",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
