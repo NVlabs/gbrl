@@ -35,7 +35,7 @@ GBRL requires LLVM and OpenMP. These can be installed using Homebrew:
    brew install libomp llvm
 
 
-After installation, set the necessary environment variables:
+After installation, set the necessary environment variables. For example:
 
 .. code-block:: bash
 
@@ -92,7 +92,10 @@ After installing GBRL, verify that CUDA is enabled:
 Graphviz (optional)
 ~~~~~~~~~~~~~~~~~~~
 
-To enable tree visualization, ensure Graphviz is installed before compiling.
+To enable tree visualization, ensure  `Graphviz <https://graphviz.org/download//>`__  and its development headers are installed before compiling.
+
+
+
 
 
  
