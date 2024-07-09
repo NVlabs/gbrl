@@ -770,7 +770,11 @@ int GBRL::loadFromFile(const std::string& filename){
         throw std::runtime_error("Error opening file");
         return -1;
     }
+    serializationHeader crnt_sheader = create_header();
+    std::cout << "Current GBRL Library ";
+    display_header(crnt_sheader);
     this->sheader = read_header(file);
+    std::cout << "Reading GBRL Library ";
     display_header(this->sheader);
     this->metadata = new ensembleMetaData;
     file.read(reinterpret_cast<char*>(this->metadata), sizeof(ensembleMetaData));
