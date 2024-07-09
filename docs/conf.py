@@ -9,10 +9,11 @@
 import sys
 import os 
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__))) 
+ROOT_PATH = os.path.dirname(os.path.dirname(__file__))
+sys.path.insert(0, ROOT_PATH) 
 
-with open('../gbrl/__init__.py') as file_handler:
-    __version__ = file_handler.readlines()[7].split('"')[1]
+with open(ROOT_PATH + '/gbrl/__init__.py') as file_handler:
+    __version__ = file_handler.readlines()[8].split('"')[1]
 
 from unittest.mock import MagicMock
 class Mock(MagicMock):
@@ -53,3 +54,4 @@ exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 
 html_theme = 'sphinx_rtd_theme'
 html_static_path = ['_static']
+
