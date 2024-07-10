@@ -2,12 +2,13 @@ scripts/
 build/
 builds/
 *egg*/
-*.png
 *.tsv
 *.pyc
 *.so
 *.pyd
 *.db
+*.gbrl_model
 *.tfevents
 *.json
+dist/
 docs/_build/

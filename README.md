@@ -5,12 +5,25 @@ GBRL is a Python-based Gradient Boosting Trees (GBT) library, similar to popular
 [![License](https://img.shields.io/badge/license-NVIDIA-green.svg)](https://nvlabs.github.io/gbrl/license.htm)
 [![PyPI version](https://badge.fury.io/py/gbrl.svg)](https://badge.fury.io/py/gbrl)
 
+## Overview
+
+GBRL adapts the power of Gradient Boosting Trees to the unique challenges of RL environments, including non-stationarity and the absence of predefined targets. The following diagram illustrates how GBRL uses gradient boosting trees in RL:
+
+![GBRL Diagram](docs/images/gbrl_diagram.png)
+
+GBRL features a shared tree-based structure for policy and value functions, significantly reducing memory and computational overhead, enabling it to tackle complex, high-dimensional RL problems.
+
 ## Key Features: 
 - GBT Tailored for RL: GBRL adapts the power of Gradient Boosting Trees to the unique challenges of RL environments, including non-stationarity and the absence of predefined targets.
 - Optimized Actor-Critic Architecture: GBRL features a shared tree-based structure for policy and value functions. This significantly reduces memory and computational overhead, enabling it to tackle complex, high-dimensional RL problems.
 - Hardware Acceleration: GBRL leverages CUDA for hardware-accelerated computation, ensuring efficiency and speed.
 - Seamless Integration: GBRL is designed for easy integration with popular RL libraries. We implemented GBT-based actor-critic algorithm implementations (A2C, PPO, and AWR) in stable_baselines3 [GBRL_SB3](https://github.com/NVlabs/gbrl_sb3). 
 
+## Performance
+
+The following results, obtained using the `GBRL_SB3` repository, demonstrate the performance of PPO with GBRL compared to neural-networks across various scenarios and environments:
+
+![PPO GBRL results in stable_baselines3](docs/images/relative_ppo_performance.png)
 
 ## Getting started
 ### Prerequisites

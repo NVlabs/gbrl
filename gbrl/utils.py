@@ -110,8 +110,8 @@ def get_poly_vectors(max_depth: int, dtype: np.dtype) -> Tuple[np.array, np.arra
         Tuple[np.array, np.array, np.array]: base_polynomial (chebyshev of the second kind), normalization values, offset
     """
     base_poly = np.polynomial.chebyshev.chebpts2(max_depth).astype(dtype)
-    a = -100  # Lower bound of the new interval
-    b = -2  # Upper bound of the new interval
+    a = 2  # Lower bound of the new interval
+    b = 3  # Upper bound of the new interval
     base_poly = (base_poly + 1) * (b - a) / 2 + a
     norm_values = get_norm_values(base_poly).astype(dtype)
     offset = np.vander(base_poly + 1).T[::-1].astype(dtype)
