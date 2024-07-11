@@ -63,14 +63,14 @@ For a detailed usage example, see `tutorial.ipynb`
 - SHAP value calculation
 
 # Documentation 
-For comprehensive documentation, visit the [GBRL documentation](https://effective-adventure-22v795q.pages.github.io/index.html).
+For comprehensive documentation, visit the [GBRL documentation](https://nvlabs.github.io/gbrl/).
 
 # Citation
 ``` 
 TODO
 @article{gbrl,
   title={Gradient Boosting Reinforcement Learning},
-  author={},
+  author={Benjamin Fuhrer, Chen Tessler, Gal Dalal},
   journal={arXiv preprint arXiv:2406.xxxxx},
   year={2024}
 }
