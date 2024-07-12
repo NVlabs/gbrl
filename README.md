@@ -67,12 +67,14 @@ For comprehensive documentation, visit the [GBRL documentation](https://nvlabs.g
 
 # Citation
 ``` 
-TODO
 @article{gbrl,
   title={Gradient Boosting Reinforcement Learning},
   author={Benjamin Fuhrer, Chen Tessler, Gal Dalal},
-  journal={arXiv preprint arXiv:2406.xxxxx},
-  year={2024}
+  year={2024},
+  eprint={2407.08250},
+  archivePrefix={arXiv},
+  primaryClass={cs.LG},
+  url={https://arxiv.org/abs/2407.08250}, 
 }
 ```
 # Licenses
