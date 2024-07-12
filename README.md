@@ -9,7 +9,7 @@ GBRL is a Python-based Gradient Boosting Trees (GBT) library, similar to popular
 
 GBRL adapts the power of Gradient Boosting Trees to the unique challenges of RL environments, including non-stationarity and the absence of predefined targets. The following diagram illustrates how GBRL uses gradient boosting trees in RL:
 
-![GBRL Diagram](docs/images/gbrl_diagram.png)
+![GBRL Diagram](https://github.com/NVlabs/gbrl/raw/master/docs/images/gbrl_diagram.png)
 
 GBRL features a shared tree-based structure for policy and value functions, significantly reducing memory and computational overhead, enabling it to tackle complex, high-dimensional RL problems.
 
@@ -23,7 +23,7 @@ GBRL features a shared tree-based structure for policy and value functions, sign
 
 The following results, obtained using the `GBRL_SB3` repository, demonstrate the performance of PPO with GBRL compared to neural-networks across various scenarios and environments:
 
-![PPO GBRL results in stable_baselines3](docs/images/relative_ppo_performance.png)
+![PPO GBRL results in stable_baselines3](https://github.com/NVlabs/gbrl/raw/master/docs/images/relative_ppo_performance.png)
 
 ## Getting started
 ### Prerequisites
