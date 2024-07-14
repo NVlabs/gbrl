@@ -126,15 +126,7 @@ shapData* alloc_shap_data(const ensembleMetaData *metadata, const ensembleData *
         ++n_nodes;
     }
     
-    delete[] parents;
-
-    // // for debugging script
-    // float temp_preds[15] = {152.13348416,  54.24660633,  37.260181,    21.41628959,  15.8438914, 16.98642534,   1.239819  ,  15.74660633,  97.88687783,  42.69457014, 13.08371041,  29.61085973,  55.19230769,  36.33484163,  18.85746606}; 
-    // for (int i = 0; i < 15 ; ++i){
-    //     for (int j = 0; j< metadata->output_dim; ++j )
-    //         predictions[i*metadata->output_dim + j] = temp_preds[i];
-    // }
-   
+    delete[] parents;   
     
     shapData *shap_data = new shapData;
     shap_data->left_children = left_children;
@@ -281,71 +273,15 @@ void linear_tree_shap(const ensembleMetaData *metadata, const ensembleData *edat
         }
 
         float *C_prev_depth = shap_data->C + (crnt_depth - 1) * col_size;
-        // printf("p_e %f and C_prev_depth: [", p_e);
-        //     for (int i = 0; i < metadata->output_dim*metadata->max_depth; i++){
-        //         printf("%f", C_prev_depth[i]);
-        //         if ( i < metadata->output_dim*metadata->max_depth - 1)
-        //             printf(", ");
-        //     }
-        // printf("]\n");
         _broadcast_mat_elementwise_mult_by_vec_into_mat(C_depth, C_prev_depth, shap_data->base_poly, p_e, metadata->max_depth, metadata->output_dim, metadata->par_th, false);
-        // printf("C_depth after mull: [");
-        //     for (int i = 0; i < metadata->output_dim*metadata->max_depth; i++){
-        //         printf("%f", C_depth[i]);
-        //         if ( i < metadata->output_dim*metadata->max_depth - 1)
-        //             printf(", ");
-        //     }
-        // printf("]\n");
         if (feature_parent_node >= 0){
             _broadcast_mat_elementwise_div_by_vec(C_depth, shap_data->base_poly, p_e_ancestor, metadata->max_depth, metadata->output_dim, metadata->par_th);
-            // printf("C_depth after div by p_e_ancestor: [");
-            // for (int i = 0; i < metadata->output_dim*metadata->max_depth; i++){
-            //     printf("%f", C_depth[i]);
-            //     if ( i < metadata->output_dim*metadata->max_depth - 1)
-            //         printf(", ");
-            // }
-            // printf("]\n");
-            // printf("base_poly after div by p_e_ancestor: [");
-            // for (int i = 0; i < metadata->max_depth; i++){
-            //     printf("%f", shap_data->base_poly[i]);
-            //     if ( i < metadata->max_depth - 1)
-            //         printf(", ");
-            // }
-            // printf("]\n");
         }
 
     }
-    // printf("node: %d depth %d p_e %f p_e_ancesotr %f\n", crnt_node, crnt_depth, p_e, p_e_ancestor);
-    // printf("G_depth: [");
-    //     for (int i = 0; i < metadata->output_dim*metadata->max_depth; i++){
-    //         printf("%f", G_depth[i]);
-    //         if ( i < metadata->output_dim*metadata->max_depth - 1)
-    //             printf(", ");
-    //     }
-    //     printf("]\n");
-    //     printf("G_next_depth: [");
-    //     for (int i = 0; i < metadata->output_dim*metadata->max_depth; i++){
-    //         printf("%f", G_next_depth[i]);
-    //         if ( i < metadata->output_dim*metadata->max_depth - 1)
-    //             printf(", ");
-    //     }
-    //     printf("]\n");
-    //     printf("C_depth: [");
-    //         for (int i = 0; i < metadata->output_dim*metadata->max_depth; i++){
-    //             printf("%f", C_depth[i]);
-    //             if ( i < metadata->output_dim*metadata->max_depth - 1)
-    //                 printf(", ");
-    //         }
-    //     printf("]\n");
+
     if (is_leaf){
         _broadcast_mat_elementwise_mult_by_vec_into_mat(G_depth, C_depth, shap_data->predictions + crnt_node * metadata->output_dim, 0.0f, metadata->max_depth, metadata->output_dim, metadata->par_th, true);
-        // printf("is leaf: G_depth: [");
-        // for (int i = 0; i < metadata->output_dim*metadata->max_depth; i++){
-        //     printf("%f", G_depth[i]);
-        //     if ( i < metadata->output_dim*metadata->max_depth - 1)
-        //         printf(", ");
-        // }
-        // printf("]\n");
     }
     else{
         bool is_greater = (shap_data->numerics[crnt_node]) ? dataset->obs[sample_offset*metadata->n_num_features + shap_data->feature_indices[crnt_node]] > shap_data->feature_values[crnt_node]: strcmp(&dataset->categorical_obs[(sample_offset*metadata->n_cat_features + shap_data->feature_indices[crnt_node]) * MAX_CHAR_SIZE],  shap_data->categorical_values + crnt_node*MAX_CHAR_SIZE) == 0;
@@ -353,21 +289,7 @@ void linear_tree_shap(const ensembleMetaData *metadata, const ensembleData *edat
         shap_data->active_nodes[left] = (is_greater) ? false : true;
         linear_tree_shap(metadata, edata, shap_data, dataset, shap_values, left, crnt_depth + 1, shap_data->feature_indices[crnt_node], sample_offset);
         poly_degree = shap_data->max_unique_features[crnt_node] - shap_data->max_unique_features[left];
-        // printf("offestPoly: [");
-        // for (int i = 0; i < metadata->max_depth; i++){
-        //     printf("%f", shap_data->offset_poly[poly_degree * metadata->max_depth + i]);
-        //     if ( i < metadata->max_depth - 1)
-        //         printf(", ");
-        // }
-        // printf("]\n");
         _broadcast_mat_elementwise_mult_by_vec(G_next_depth, shap_data->offset_poly + poly_degree * metadata->max_depth, 0.0f, metadata->max_depth, metadata->output_dim, metadata->par_th);
-        // printf("left broadcast: G_next_depth: [");
-        // for (int i = 0; i < metadata->output_dim*metadata->max_depth; i++){
-        //     printf("%f", G_depth[i]);
-        //     if ( i < metadata->output_dim*metadata->max_depth - 1)
-        //         printf(", ");
-        // }
-        // printf("]\n");
         _copy_mat(G_depth, G_next_depth, col_size, metadata->par_th);
         linear_tree_shap(metadata, edata, shap_data, dataset, shap_values, right, crnt_depth + 1, shap_data->feature_indices[crnt_node], sample_offset);
         poly_degree = shap_data->max_unique_features[crnt_node] - shap_data->max_unique_features[right];
@@ -381,20 +303,7 @@ void linear_tree_shap(const ensembleMetaData *metadata, const ensembleData *edat
         }
         const float *norm_value = shap_data->norm_values + shap_data->max_unique_features[crnt_node] * metadata->max_depth;
         const float *offset = shap_data->offset_poly;
-        // printf("shap before: [");
-        // for (int i = 0; i < shap_size; i++){
-        //     printf("%f", shap_values[sample_offset*shap_size + i]);
-        //     if ( i < shap_size - 1)
-        //         printf(", ");
-        // }
-        // printf("]\n");
-        // printf("G_depth: [");
-        // for (int i = 0; i < metadata->output_dim*metadata->max_depth; i++){
-        //     printf("%f", G_depth[i]);
-        //     if ( i < metadata->output_dim*metadata->max_depth - 1)
-        //         printf(", ");
-        // }
-        // printf("]\n");
+
         add_edge_shapley(shap_values + sample_offset*shap_size + crnt_feature*metadata->output_dim, G_depth, offset, shap_data->base_poly, p_e, norm_value, shap_data->max_unique_features[crnt_node], metadata->output_dim);
         if (feature_parent_node >= 0){
             poly_degree = shap_data->max_unique_features[feature_parent_node] - shap_data->max_unique_features[crnt_node];
@@ -402,13 +311,6 @@ void linear_tree_shap(const ensembleMetaData *metadata, const ensembleData *edat
             offset = shap_data->offset_poly + poly_degree * metadata->max_depth;
             subtract_closest_parent_edge_shapley(shap_values + sample_offset*shap_size + crnt_feature*metadata->output_dim, G_depth, offset, shap_data->base_poly, p_e_ancestor, norm_value, shap_data->max_unique_features[feature_parent_node], metadata->output_dim);
         }
-        // printf("shap after: [");
-        // for (int i = 0; i < shap_size; i++){
-        //     printf("%f", shap_values[sample_offset*shap_size + i]);
-        //     if ( i < shap_size - 1)
-        //         printf(", ");
-        // }
-        // printf("]\n");
     }
 } 
 
