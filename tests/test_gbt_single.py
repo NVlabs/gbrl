@@ -95,6 +95,9 @@ class TestGBTSingle(unittest.TestCase):
         loss = rmse_model(model, X, y, self.n_epochs)
         value = 2
         self.assertTrue(loss < value, f'Expected loss = {loss} < {value}')
+
+        A, V = model._model.get_matrix_representation(X)
+        self.assertTrue(np.allclose(A@V, model.predict(X)))
         model.save_model(os.path.join(self.test_dir, 'test_cosine_cpu'))
 
         model._model.reset()
@@ -182,6 +185,8 @@ class TestGBTSingle(unittest.TestCase):
         loss = rmse_model(model, X, y, self.n_epochs)
         value = 2
         self.assertTrue(loss < value, f'Expected loss = {loss} < {value}')
+        A, V = model._model.get_matrix_representation(X)
+        self.assertTrue(np.allclose(A@V, model.predict(X)))
         model.save_model(os.path.join(self.test_dir, 'test_cosine_gpu'))
 
         model._model.reset()
@@ -219,6 +224,8 @@ class TestGBTSingle(unittest.TestCase):
         loss = rmse_model(model, X, y, self.n_epochs)
         value = 10
         self.assertTrue(loss < value, f'Expected loss = {loss} < {value}')
+        A, V = model._model.get_matrix_representation(X)
+        self.assertTrue(np.allclose(A@V, model.predict(X)))
         model.save_model(os.path.join(self.test_dir, 'test_cosine_oblivious_gpu'))
         model._model.reset()
         model.set_bias_from_targets(y)
@@ -254,6 +261,8 @@ class TestGBTSingle(unittest.TestCase):
         loss = rmse_model(model, X, y, self.n_epochs)
         value = 12
         self.assertTrue(loss < value, f'Expected loss = {loss} < {value}')
+        A, V = model._model.get_matrix_representation(X)
+        self.assertTrue(np.allclose(A@V, model.predict(X)))
         model.save_model(os.path.join(self.test_dir, 'test_cosine_oblivious_gpu'))
         model._model.reset()
         model.set_bias_from_targets(y)
@@ -266,6 +275,8 @@ class TestGBTSingle(unittest.TestCase):
         loss = rmse_model(model, X_categorical, y_categorical, self.n_epochs)
         value = 5000
         self.assertTrue(loss < value, f'Expected Categorical loss = {loss} < {value}')
+        A, V = model._model.get_matrix_representation(X_categorical)
+        self.assertTrue(np.allclose(A@V, model.predict(X_categorical)))
 
     def test_l2_cpu(self):
         print("Running test_l2_cpu")

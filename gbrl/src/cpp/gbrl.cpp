@@ -265,9 +265,19 @@ matrixRepresentation* GBRL::get_matrix_representation(const float *obs, const ch
 
     dataSet dataset{obs, categorical_obs, nullptr, nullptr, nullptr, nullptr, n_samples};
     matrixRepresentation* matrix = new matrixRepresentation;
+#ifdef USE_CUDA
+    if (this->device == gpu){
+        if (this->cuda_opt == nullptr){
+            this->cuda_opt = deepCopySGDOptimizerVectorToGPU(this->opts);
+            this->n_cuda_opts = static_cast<int>(this->opts.size());
+        }
+        get_matrix_representation_cuda(&dataset, this->metadata, this->edata, this->cuda_opt, this->n_cuda_opts, start_tree_idx, stop_tree_idx, matrix);
+    }
+#endif
     if (this->device == cpu)
         Predictor::get_matrix_representation_cpu(&dataset, this->edata, this->metadata, start_tree_idx, stop_tree_idx, this->parallel_predict, matrix, this->opts);
-    
+
+
     return matrix;
 
 }

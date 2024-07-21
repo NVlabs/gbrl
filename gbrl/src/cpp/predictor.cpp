@@ -300,7 +300,7 @@ void Predictor::get_representation_matrix_over_leaves(const float *obs, const ch
                 break;
         }
         if (passed){
-            matrix->A[sample_idx*(n_leaves + 1) + leaf_idx + 1] = true;
+            matrix->A[sample_idx*(n_leaves + 1) + leaf_idx + 1 - base_leaf_idx] = true;
             for (size_t opt_idx = 0; opt_idx < opts.size(); ++opt_idx){
                 opts[opt_idx]->copy_and_scale(matrix->V + (leaf_idx + 1 - base_leaf_idx)*metadata->output_dim, values + leaf_idx*metadata->output_dim, tree_idx);
             }
@@ -379,7 +379,7 @@ void Predictor::get_representation_matrix_over_trees(const float *obs, const cha
             passed = (numerics[cond_idx + depth_idx]) ? (obs[obs_row + feature_indices[cond_idx + depth_idx]] >  feature_values[cond_idx + depth_idx]) : strcmp(&categorical_obs[(categorical_obs_row + feature_indices[cond_idx + depth_idx]) * MAX_CHAR_SIZE],  categorical_values + (cond_idx + depth_idx)*MAX_CHAR_SIZE) == 0;
             leaf_idx |= (passed <<  (depths[tree_idx] - 1 - depth_idx));
         }
-        matrix->A[sample_idx*(n_leaves + 1) + initial_leaf_idx + leaf_idx + 1] = true;
+        matrix->A[sample_idx*(n_leaves + 1) + initial_leaf_idx + leaf_idx + 1 - offset_leaf_idx] = true;
         int value_idx = (initial_leaf_idx + leaf_idx)*metadata->output_dim;
         for (size_t opt_idx = 0; opt_idx < opts.size(); ++opt_idx){
             opts[opt_idx]->copy_and_scale(matrix->V + (initial_leaf_idx + leaf_idx + 1 - offset_leaf_idx) *metadata->output_dim, values + value_idx, tree_idx);

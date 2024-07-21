@@ -120,7 +120,9 @@ class TestGBTMulti(unittest.TestCase):
         model.set_bias_from_targets(y)
         loss = rmse_model(model, X, y, self.n_epochs)
         value = 20.0
-        self.assertTrue(loss < 2.0, f'Expected loss = {loss} < 2.0')
+        self.assertTrue(loss < value, f'Expected loss = {loss} < {value}')
+        A, V = model._model.get_matrix_representation(X)
+        self.assertTrue(np.allclose(A@V, model.predict(X)))
         model.save_model(os.path.join(self.test_dir, 'test_cosine_cpu'))
 
     def test_shap_cpu(self):
@@ -194,6 +196,8 @@ class TestGBTMulti(unittest.TestCase):
         model.set_bias_from_targets(y)
         loss = rmse_model(model, X, y, self.n_epochs)
         self.assertTrue(loss < 2.0, f'Expected loss = {loss} < 2.0')
+        A, V = model._model.get_matrix_representation(X)
+        self.assertTrue(np.allclose(A@V, model.predict(X)))
         model.save_model(os.path.join(self.test_dir, 'test_cosine_gpu'))
 
     def test_cosine_oblivious_cpu(self):
@@ -217,6 +221,8 @@ class TestGBTMulti(unittest.TestCase):
         model.set_bias_from_targets(y)
         loss = rmse_model(model, X, y, self.n_epochs)
         self.assertTrue(loss < 12, f'Expected loss = {loss} < 12')
+        A, V = model._model.get_matrix_representation(X)
+        self.assertTrue(np.allclose(A@V, model.predict(X)))
         model.save_model(os.path.join(self.test_dir, 'test_cosine_oblivious_cpu'))
     
     @unittest.skipIf(not cuda_available(), "cuda not available skipping over gpu tests")
@@ -241,6 +247,8 @@ class TestGBTMulti(unittest.TestCase):
         model.set_bias_from_targets(y)
         loss = rmse_model(model, X, y, self.n_epochs)
         self.assertTrue(loss < 12, f'Expected loss = {loss} < 12')
+        A, V = model._model.get_matrix_representation(X)
+        self.assertTrue(np.allclose(A@V, model.predict(X)))
         model.save_model(os.path.join(self.test_dir, 'test_cosine_oblivious_gpu'))
 
     def test_l2_cpu(self):
