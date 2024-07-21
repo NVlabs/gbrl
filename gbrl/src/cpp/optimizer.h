@@ -22,6 +22,7 @@ class Optimizer {
         Optimizer(schedulerFunc schedule_func, float init_lr, float stop_lr, int T);
         Optimizer(const Optimizer& other);
         virtual void step(float *theta, const float *raw_grad_theta, int t, int sample_idx) = 0;
+        void copy_and_scale(float *scaled_grad_theta, const float *raw_grad_theta, int t);
         virtual optimizerConfig* getConfig() = 0;
         virtual int saveToFile(std::ofstream& file) = 0;
         static Optimizer* loadFromFile(std::ifstream& file);

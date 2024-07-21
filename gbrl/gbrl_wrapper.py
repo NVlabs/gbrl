@@ -317,6 +317,13 @@ class GBTWrapper:
             preds = self.cpp_model.predict(num_features, cat_features, start_idx, stop_idx)
         return preds
     
+    def get_matrix_representation(self, features: Union[np.array, th.Tensor], start_idx: int=0, stop_idx: int=None) -> np.array:
+        num_features, cat_features = preprocess_features(features)
+        if stop_idx is None:
+            stop_idx = 0
+        A, V = self.cpp_model.get_matrix_representation(num_features, cat_features, start_idx, stop_idx)
+        return A, V
+    
     def distil(self, obs: Union[np.array, th.Tensor], targets: np.array, params: Dict, verbose: int=0) -> Tuple[int, Dict]:
         num_obs, cat_obs = preprocess_features(obs)
         distil_params = {'output_dim': self.params['output_dim'], 'policy_dim': self.params['output_dim'], 'split_score_func': 'L2',

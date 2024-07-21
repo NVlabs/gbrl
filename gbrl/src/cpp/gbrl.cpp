@@ -250,6 +250,28 @@ float* GBRL::predict(const float *obs, const char *categorical_obs, const int n_
 
 }
 
+matrixRepresentation* GBRL::get_matrix_representation(const float *obs, const char *categorical_obs, const int n_samples, const int n_num_features, const int n_cat_features, int start_tree_idx, int stop_tree_idx){
+    if (stop_tree_idx == 0)
+        stop_tree_idx = this->metadata->n_trees;
+    valid_tree_range(start_tree_idx, stop_tree_idx, this->metadata);
+    if (this->metadata->iteration == 0){
+        this->metadata->n_num_features = n_num_features;
+        this->metadata->n_cat_features = n_cat_features;
+    }
+    if (n_num_features != metadata->n_num_features || n_cat_features != metadata->n_cat_features){
+        std::cerr << "Error. Cannot use ensemble with this dataset. Excepted input with " << metadata->n_num_features << " numerical features followed by " << metadata->n_cat_features << " categorical features, but received " << n_num_features << " numerical features and " << n_cat_features << " categorical features.";
+        throw std::runtime_error("Incompatible dataset");
+    }
+
+    dataSet dataset{obs, categorical_obs, nullptr, nullptr, nullptr, nullptr, n_samples};
+    matrixRepresentation* matrix = new matrixRepresentation;
+    if (this->device == cpu)
+        Predictor::get_matrix_representation_cpu(&dataset, this->edata, this->metadata, start_tree_idx, stop_tree_idx, this->parallel_predict, matrix, this->opts);
+    
+    return matrix;
+
+}
+
 void GBRL::predict(const float *obs, const char *categorical_obs, float *start_preds, const int n_samples, const int n_num_features, const int n_cat_features, int start_tree_idx, int stop_tree_idx){
     for (size_t optIdx = 0; optIdx < this->opts.size(); ++optIdx){
         this->opts[optIdx]->set_memory(n_samples ,this->metadata->output_dim);

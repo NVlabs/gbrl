@@ -275,6 +275,51 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         int n_samples = static_cast<int>(info_preds.shape[0]);
         self.predict(obs_ptr, cat_obs_ptr, preds_ptr, n_samples, n_num_features, n_cat_features, start_tree_idx, stop_tree_idx);  
     }, py::arg("obs"), py::arg("categorical_obs"), py::arg("start_preds"), py::arg("start_tree_idx")=0, py::arg("stop_tree_idx")=0, "Predict using the model");
+    gbrl.def("get_matrix_representation", [](GBRL &self, py::object &obs, py::object &categorical_obs, int start_tree_idx, int stop_tree_idx){
+
+        const float* obs_ptr = nullptr;
+        int n_num_features = 0;
+        int n_samples = 0;
+         if (!obs.is_none()) {
+            py::array_t<float> obs_array = py::cast<py::array_t<float>>(obs);
+            if (!obs_array.attr("flags").attr("c_contiguous").cast<bool>())
+                throw std::runtime_error("Arrays must be C-contiguous");
+            py::buffer_info info_obs = obs_array.request();
+            obs_ptr = static_cast<const float*>(info_obs.ptr);
+            n_num_features = static_cast<int>(info_obs.shape[1]);
+            n_samples = static_cast<int>(info_obs.shape[0]);
+        }
+        int n_cat_features = 0;
+        const char *cat_obs_ptr = nullptr;
+        if (!categorical_obs.is_none()) {
+            py::array py_array = py::cast<py::array>(categorical_obs);
+            if (!py_array.attr("flags").attr("c_contiguous").cast<bool>())
+                throw std::runtime_error("Arrays must be C-contiguous");
+            py::buffer_info info_categorical_obs = py_array.request();
+            cat_obs_ptr = static_cast<const char*>(info_categorical_obs.ptr);
+            n_cat_features = static_cast<int>(info_categorical_obs.shape[1]);
+            n_samples = static_cast<int>(info_categorical_obs.shape[0]);
+        }
+        
+        py::gil_scoped_release release; 
+        
+        matrixRepresentation *matrix = self.get_matrix_representation(obs_ptr, cat_obs_ptr, n_samples, n_num_features, n_cat_features, start_tree_idx, stop_tree_idx);  
+        py::gil_scoped_acquire acquire;
+       
+        auto capsule_A = py::capsule(matrix->A, [](void* ptr) {
+            delete[] reinterpret_cast<bool*>(ptr);
+        });
+
+        auto capsule_V = py::capsule(matrix->V, [](void* ptr) {
+            delete[] reinterpret_cast<float*>(ptr);
+        });
+
+        auto np_array_A = py::array_t<bool>({n_samples, matrix->n_leaves + 1}, matrix->A, capsule_A);
+        auto np_array_V = py::array_t<float>({matrix->n_leaves + 1, self.metadata->output_dim}, matrix->V, capsule_V);
+
+        delete matrix;
+        return py::make_tuple(np_array_A, np_array_V);
+    }, py::arg("obs"), py::arg("categorical_obs"), py::arg("start_tree_idx")=0, py::arg("stop_tree_idx")=0, "Predict using the model");
         // saveToFile method
     gbrl.def("save", [](GBRL &self, const std::string& filename) -> int {
         py::gil_scoped_release release; 

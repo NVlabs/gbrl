@@ -89,6 +89,21 @@ Optimizer* Optimizer::loadFromFile(std::ifstream& file){
     }
 }
 
+void Optimizer::copy_and_scale(float *scaled_grad_theta, const float *raw_grad_theta, int t){
+    /*Copy and scale gradient of theta (leaf values) according to learning rate
+    */
+
+    int start_idx = this->start_idx, end_idx = this->end_idx;
+    float lr = this->scheduler->get_lr(t);
+#ifndef _MSC_VER
+    #pragma omp simd
+#endif
+    for (int i = start_idx; i < end_idx; i++){
+        scaled_grad_theta[i] = -lr * raw_grad_theta[i];
+    }
+    
+}
+
 SGDOptimizer::SGDOptimizer(): Optimizer(){
     optimizerAlgo algo = SGD;
     this->setAlgo(algo);

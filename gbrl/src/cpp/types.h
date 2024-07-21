@@ -163,6 +163,12 @@ struct nodeInfo {
     bool is_right;
 };
 
+struct matrixRepresentation {
+    bool *A;
+    float *V;
+    int n_leaves;
+};
+
 scoreFunc stringToScoreFunc(std::string str);
 generatorType stringTogeneratorType(std::string str);
 growPolicy stringTogrowPolicy(std::string str);
