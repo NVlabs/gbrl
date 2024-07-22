@@ -40,6 +40,15 @@ find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
 #-- Options
 include(CMakeDependentOption)
 option(USE_CUDA  "Build with GPU acceleration" OFF)
+
+if(DEFINED ENV{COVERAGE} AND $ENV{COVERAGE} STREQUAL "1")
+  message(STATUS "Coverage build")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --coverage")
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} --coverage")
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} --coverage")
+  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} --coverage")
+endif()
+
 # Check for CUDA availability
 if (USE_CUDA AND NOT APPLE)
     find_package(CUDAToolkit QUIET HINTS $ENV{CONDA_PREFIX}) 
