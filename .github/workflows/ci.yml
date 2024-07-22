@@ -32,6 +32,7 @@ jobs:
         brew update
         brew install libomp llvm
         brew install cmake
+        echo "LLVM_DIR=$(brew --prefix)/opt/llvm" >> $GITHUB_ENV
 
     - name: Install dependencies and build
       run: |
