@@ -33,6 +33,9 @@ jobs:
         brew install libomp llvm
         brew install cmake
         echo "LLVM_DIR=$(brew --prefix)/opt/llvm" >> $GITHUB_ENV
+        echo "BREW_PREFIX=$(brew --prefix)" >> $GITHUB_ENV
+        echo "LDFLAGS=-L$(brew --prefix libomp)/lib -L$(brew --prefix llvm)/lib -L$(brew --prefix llvm)/lib/c++ -Wl,-rpath,$(brew --prefix llvm)/lib/c++" >> $GITHUB_ENV
+        echo "CPPFLAGS=-I$(brew --prefix libomp)/include -I$(brew --prefix llvm)/include" >> $GITHUB_ENV
 
     - name: Install dependencies and build
       run: |
