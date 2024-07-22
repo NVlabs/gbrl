@@ -50,11 +50,14 @@ jobs:
         coverage report
         coverage xml
 
-    - name: Generate C++/CUDA coverage report
+    - name: Generate C++ coverage report
       run: |
         lcov --capture --directory . --output-file coverage.info
         lcov --remove coverage.info '/usr/*' --output-file coverage.info
         lcov --list coverage.info
+  
+    - name: Combine coverage reports
+      run: |
         lcov --add-tracefile coverage.info --output-file combined.info
         coverage combine
         coverage xml -o combined_coverage.xml

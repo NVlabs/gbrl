@@ -1,9 +1,10 @@
 # Gradient Boosting Reinforcement Learning (GBRL)
 GBRL is a Python-based Gradient Boosting Trees (GBT) library, similar to popular packages such as [XGBoost](https://xgboost.readthedocs.io/en/stable/), [CatBoost](https://catboost.ai/), but specifically designed and optimized for reinforcement learning (RL). GBRL is implemented in C++/CUDA aimed to seamlessly integrate within popular RL libraries. 
 
-<!-- [![Build Status](https://img.shields.io/github/workflow/status/Nvlabs/gbrl/CI)](https://github.com/NVlabs/gbrl/actions) -->
+[![Build Status](https://img.shields.io/github/workflow/status/Nvlabs/gbrl/CI)](https://github.com/NVlabs/gbrl/actions)
 [![License](https://img.shields.io/badge/license-NVIDIA-green.svg)](https://nvlabs.github.io/gbrl/license.htm)
 [![PyPI version](https://badge.fury.io/py/gbrl.svg)](https://badge.fury.io/py/gbrl)
+[![codecov](https://codecov.io/gh/Nvlabs/gbrl/branch/master/graph/badge.svg)](https://codecov.io/gh/Nvlabs/gbrl)
 
 ## Overview
 
