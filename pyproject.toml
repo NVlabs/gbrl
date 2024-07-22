@@ -20,20 +20,19 @@ authors = [
 ]
 dependencies = [
     "pybind11[global]==2.13.1",
-    "numpy",
+    "numpy>=1.21.0",
     "cmake>=3.18",
-    "torch",
-    "scikit_learn==1.2.2",
-    "scipy",
-    "shap",
-    "matplotlib",
+    "torch>=1.10.0",
+    "scikit-learn>=1.0.0",
+    "scipy>=1.7.0",
+    "shap>=0.40.0",
+    "matplotlib>=3.5.0",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
     "License :: Other/Proprietary License",
-    "Programming Language :: Python :: 3.7",
     "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
@@ -41,7 +40,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules"
 ]
 
-requires-python = ">=3.7"
+requires-python = ">=3.8"
 
 [tool.poetry]
 name = "gbrl"
@@ -54,13 +53,13 @@ packages = [{include = "gbrl"}]
 [tool.poetry.dependencies]
 python = ">=3.8"
 pybind11 = {version = "2.13.1", extras = ["global"]}
-numpy = "*"
+numpy = ">=1.21.0"
 cmake = ">=3.18"
-torch = "*"
-scikit-learn = "1.2.2"
-scipy = "*"
-shap = "*"
-matplotlib = "*"
+torch = ">=1.10.0"
+scikit-learn = ">=1.0.0"
+scipy = ">=1.7.0"
+shap = ">=0.40.0"
+matplotlib = ">=3.5.0"
 
 [tool.poetry.dev-dependencies]
 pytest = "*"
