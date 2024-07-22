@@ -23,7 +23,7 @@ dependencies = [
     "numpy>=1.21.0",
     "cmake>=3.18",
     "torch>=1.10.0",
-    "scikit-learn>=1.0.0",
+    "scikit-learn>=1.5.0",
     "scipy>=1.7.0",
     "shap>=0.40.0",
     "matplotlib>=3.5.0",
@@ -56,7 +56,7 @@ pybind11 = {version = "2.13.1", extras = ["global"]}
 numpy = ">=1.21.0"
 cmake = ">=3.18"
 torch = ">=1.10.0"
-scikit-learn = ">=1.0.0"
+scikit-learn = ">=1.5.0"
 scipy = ">=1.7.0"
 shap = ">=0.40.0"
 matplotlib = ">=3.5.0"

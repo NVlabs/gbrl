@@ -55,19 +55,11 @@ jobs:
         lcov --capture --directory . --output-file coverage.info
         lcov --remove coverage.info '/usr/*' --output-file coverage.info
         lcov --list coverage.info
-  
-    - name: Upload Python coverage to Codecov
-      uses: codecov/codecov-action@v2
+ 
+    - name: Upload coverage reports as artifacts
+      uses: actions/upload-artifact@v2
       with:
-        files: ./coverage.xml
-        flags: python
-        name: python-coverage
-        fail_ci_if_error: true
-
-    - name: Upload C++ coverage to Codecov
-      uses: codecov/codecov-action@v2
-      with:
-        files: ./coverage.info
-        flags: cpp
-        name: cpp-coverage
-        fail_ci_if_error: true
+        name: coverage-reports
+        path: |
+          coverage.xml
+          coverage.info
