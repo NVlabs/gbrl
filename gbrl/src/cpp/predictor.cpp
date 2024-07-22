@@ -268,6 +268,11 @@ void Predictor::get_matrix_representation_cpu(dataSet *dataset, const ensembleDa
             getRepresentationFunc(dataset->obs, dataset->categorical_obs, sample_idx, edata, metadata, start_tree_idx, stop_tree_idx, n_leaves, opts, matrix);
         }
     }
+    matrix->n_leaves_per_tree = new int[n_trees];
+    for (int i = start_tree_idx; i < stop_tree_idx - 1; ++i )
+        matrix->n_leaves_per_tree[i-start_tree_idx] = edata->tree_indices[i+1] - edata->tree_indices[i];
+    matrix->n_leaves_per_tree[n_trees - 1] = stop_leaf_idx - edata->tree_indices[stop_tree_idx - 1];
+    matrix->n_trees = n_trees;
 }
 
 void Predictor::get_representation_matrix_over_leaves(const float *obs, const char *categorical_obs, const int sample_idx, const ensembleData *edata, const ensembleMetaData *metadata, const int start_tree_idx, const int stop_tree_idx, const int n_leaves, std::vector<Optimizer*> opts, matrixRepresentation *matrix){

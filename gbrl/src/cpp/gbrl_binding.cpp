@@ -276,7 +276,6 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         self.predict(obs_ptr, cat_obs_ptr, preds_ptr, n_samples, n_num_features, n_cat_features, start_tree_idx, stop_tree_idx);  
     }, py::arg("obs"), py::arg("categorical_obs"), py::arg("start_preds"), py::arg("start_tree_idx")=0, py::arg("stop_tree_idx")=0, "Predict using the model");
     gbrl.def("get_matrix_representation", [](GBRL &self, py::object &obs, py::object &categorical_obs, int start_tree_idx, int stop_tree_idx){
-
         const float* obs_ptr = nullptr;
         int n_num_features = 0;
         int n_samples = 0;
@@ -314,11 +313,16 @@ PYBIND11_MODULE(gbrl_cpp, m) {
             delete[] reinterpret_cast<float*>(ptr);
         });
 
+        auto capsule_n_leaves_per_tree = py::capsule(matrix->n_leaves_per_tree, [](void* ptr) {
+            delete[] reinterpret_cast<int*>(ptr);
+        });
+
         auto np_array_A = py::array_t<bool>({n_samples, matrix->n_leaves + 1}, matrix->A, capsule_A);
         auto np_array_V = py::array_t<float>({matrix->n_leaves + 1, self.metadata->output_dim}, matrix->V, capsule_V);
-
+        auto np_array_n_leaves_per_tree = py::array_t<int>({matrix->n_trees}, matrix->n_leaves_per_tree, capsule_n_leaves_per_tree);
+        auto matrix_tuple = py::make_tuple(np_array_A, np_array_V, np_array_n_leaves_per_tree, matrix->n_leaves, matrix->n_trees);
         delete matrix;
-        return py::make_tuple(np_array_A, np_array_V);
+        return matrix_tuple;
     }, py::arg("obs"), py::arg("categorical_obs"), py::arg("start_tree_idx")=0, py::arg("stop_tree_idx")=0, "Predict using the model");
         // saveToFile method
     gbrl.def("save", [](GBRL &self, const std::string& filename) -> int {

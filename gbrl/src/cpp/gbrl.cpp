@@ -276,8 +276,6 @@ matrixRepresentation* GBRL::get_matrix_representation(const float *obs, const ch
 #endif
     if (this->device == cpu)
         Predictor::get_matrix_representation_cpu(&dataset, this->edata, this->metadata, start_tree_idx, stop_tree_idx, this->parallel_predict, matrix, this->opts);
-
-
     return matrix;
 
 }

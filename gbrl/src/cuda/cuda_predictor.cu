@@ -437,7 +437,7 @@ void get_matrix_representation_cuda(dataSet *dataset, ensembleMetaData *metadata
     int stop_leaf_idx = metadata->n_leaves;
     if (stop_tree_idx < metadata->n_trees)
         cudaMemcpy(&stop_leaf_idx, edata->tree_indices + stop_tree_idx, sizeof(int), cudaMemcpyDeviceToHost);
-
+    int n_trees = stop_tree_idx - start_tree_idx;
     int n_leaves = stop_leaf_idx - start_leaf_idx;
     int n_samples = dataset->n_samples;
     float *device_batch_obs;
@@ -509,7 +509,7 @@ void get_matrix_representation_cuda(dataSet *dataset, ensembleMetaData *metadata
         else
             get_representation_kernel_tree_wise<<<n_leaves, threads_per_block>>>(device_batch_obs, device_batch_cat_obs, dataset->n_samples, metadata->n_num_features, metadata->n_cat_features, edata->feature_indices, edata->depths, edata->feature_values, edata->inequality_directions, edata->values, edata->categorical_values, edata->is_numerics, opts, n_opts, metadata->output_dim, metadata->max_depth, start_leaf_idx, n_leaves, device_A, device_V);
     } else{
-        int n_trees = stop_tree_idx - start_tree_idx;
+        
         if (metadata->n_cat_features == 0)
             get_representation_oblivious_kernel_numerical_only<<<n_trees, threads_per_block>>>(device_batch_obs, dataset->n_samples, metadata->n_num_features, edata->feature_indices, edata->depths, edata->feature_values, edata->inequality_directions, edata->values, edata->tree_indices, opts, n_opts, metadata->output_dim, metadata->max_depth, start_tree_idx, n_leaves, device_A, device_V);
         else
@@ -525,6 +525,14 @@ void get_matrix_representation_cuda(dataSet *dataset, ensembleMetaData *metadata
     // Copy results back to CPU
     matrix->n_leaves = n_leaves;
     cudaFree(device_data);
+    int *tree_indices = new int[n_trees];
+    cudaMemcpy(tree_indices, edata->tree_indices + start_tree_idx,  sizeof(int)*n_trees, cudaMemcpyDeviceToHost);
+    matrix->n_leaves_per_tree = new int[n_trees];
+    for (int i = 0; i < n_trees - 1; ++i )
+        matrix->n_leaves_per_tree[i] = tree_indices[i+1] - tree_indices[i];
+    matrix->n_leaves_per_tree[n_trees - 1] = stop_leaf_idx - tree_indices[stop_tree_idx - 1];
+    matrix->n_trees = n_trees;
+    delete[] tree_indices;
 }
 
 __global__ void get_representation_oblivious_kernel_tree_wise(const float* __restrict__ obs, const char* __restrict__ categorical_obs, const int n_samples, const int n_num_features, const int n_cat_features, 

@@ -321,8 +321,8 @@ class GBTWrapper:
         num_features, cat_features = preprocess_features(features)
         if stop_idx is None:
             stop_idx = 0
-        A, V = self.cpp_model.get_matrix_representation(num_features, cat_features, start_idx, stop_idx)
-        return A, V
+        A, V, n_leaves_per_tree, n_leaves, n_trees = self.cpp_model.get_matrix_representation(num_features, cat_features, start_idx, stop_idx)
+        return A, V, n_leaves_per_tree, n_leaves, n_trees
     
     def distil(self, obs: Union[np.array, th.Tensor], targets: np.array, params: Dict, verbose: int=0) -> Tuple[int, Dict]:
         num_obs, cat_obs = preprocess_features(obs)

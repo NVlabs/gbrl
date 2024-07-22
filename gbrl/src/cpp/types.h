@@ -167,6 +167,8 @@ struct matrixRepresentation {
     bool *A;
     float *V;
     int n_leaves;
+    int n_trees;
+    int *n_leaves_per_tree;
 };
 
 scoreFunc stringToScoreFunc(std::string str);
