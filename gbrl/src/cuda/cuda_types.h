@@ -86,9 +86,11 @@ extern "C" {
 #endif
 ensembleData* ensemble_data_alloc_cuda(ensembleMetaData *metadata);
 ensembleData* ensemble_copy_data_alloc_cuda(ensembleMetaData *metadata);
+ensembleData* ensemble_compressed_data_alloc_cuda(ensembleMetaData *metadata, const int n_compressed_leaves, const int n_compressed_trees);
 splitDataGPU* allocate_split_data(ensembleMetaData *metadata, const int n_candidates);
 void ensemble_data_dealloc_cuda(ensembleData *edata);
 ensembleData* ensemble_data_copy_gpu_gpu(ensembleMetaData *metadata, ensembleData *other_edata);
+ensembleData* ensemble_compressed_data_copy_gpu_gpu(ensembleMetaData *metadata, ensembleData *other_edata, const int n_compressed_leaves, const int n_compressed_trees, const int *leaf_indices, const int *tree_indices, const int *new_tree_indices);
 ensembleData* ensemble_data_copy_cpu_gpu(ensembleMetaData *metadata, ensembleData *other_edata);
 ensembleData* ensemble_data_copy_gpu_cpu(ensembleMetaData *metadata, ensembleData *other_edata);
 void allocate_ensemble_memory_cuda(ensembleMetaData *metadata, ensembleData *edata);

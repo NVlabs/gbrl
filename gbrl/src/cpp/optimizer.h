@@ -23,6 +23,7 @@ class Optimizer {
         Optimizer(const Optimizer& other);
         virtual void step(float *theta, const float *raw_grad_theta, int t, int sample_idx) = 0;
         void copy_and_scale(float *scaled_grad_theta, const float *raw_grad_theta, int t);
+        void add_scaled(float *raw_grad_theta, const float *scaled_grad_theta, int t);
         virtual optimizerConfig* getConfig() = 0;
         virtual int saveToFile(std::ofstream& file) = 0;
         static Optimizer* loadFromFile(std::ifstream& file);

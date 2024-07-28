@@ -275,7 +275,7 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         int n_samples = static_cast<int>(info_preds.shape[0]);
         self.predict(obs_ptr, cat_obs_ptr, preds_ptr, n_samples, n_num_features, n_cat_features, start_tree_idx, stop_tree_idx);  
     }, py::arg("obs"), py::arg("categorical_obs"), py::arg("start_preds"), py::arg("start_tree_idx")=0, py::arg("stop_tree_idx")=0, "Predict using the model");
-    gbrl.def("get_matrix_representation", [](GBRL &self, py::object &obs, py::object &categorical_obs, int start_tree_idx, int stop_tree_idx){
+    gbrl.def("get_matrix_representation", [](GBRL &self, py::object &obs, py::object &categorical_obs){
         const float* obs_ptr = nullptr;
         int n_num_features = 0;
         int n_samples = 0;
@@ -302,28 +302,65 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         
         py::gil_scoped_release release; 
         
-        matrixRepresentation *matrix = self.get_matrix_representation(obs_ptr, cat_obs_ptr, n_samples, n_num_features, n_cat_features, start_tree_idx, stop_tree_idx);  
+        matrixRepresentation *matrix = self.get_matrix_representation(obs_ptr, cat_obs_ptr, n_samples, n_num_features, n_cat_features);  
         py::gil_scoped_acquire acquire;
        
         auto capsule_A = py::capsule(matrix->A, [](void* ptr) {
             delete[] reinterpret_cast<bool*>(ptr);
         });
-
         auto capsule_V = py::capsule(matrix->V, [](void* ptr) {
             delete[] reinterpret_cast<float*>(ptr);
         });
-
         auto capsule_n_leaves_per_tree = py::capsule(matrix->n_leaves_per_tree, [](void* ptr) {
             delete[] reinterpret_cast<int*>(ptr);
         });
-
         auto np_array_A = py::array_t<bool>({n_samples, matrix->n_leaves + 1}, matrix->A, capsule_A);
         auto np_array_V = py::array_t<float>({matrix->n_leaves + 1, self.metadata->output_dim}, matrix->V, capsule_V);
         auto np_array_n_leaves_per_tree = py::array_t<int>({matrix->n_trees}, matrix->n_leaves_per_tree, capsule_n_leaves_per_tree);
         auto matrix_tuple = py::make_tuple(np_array_A, np_array_V, np_array_n_leaves_per_tree, matrix->n_leaves, matrix->n_trees);
         delete matrix;
         return matrix_tuple;
-    }, py::arg("obs"), py::arg("categorical_obs"), py::arg("start_tree_idx")=0, py::arg("stop_tree_idx")=0, "Predict using the model");
+    }, py::arg("obs"), py::arg("categorical_obs"), "Get matrix representation of model given an input");
+    gbrl.def("compress", [](GBRL &self, const int n_compressed_leaves, const int n_compressed_trees, py::object &leaf_indices, py::object &tree_indices, py::object &new_tree_indices, py::object &W){
+        const int* leaf_indices_ptr = nullptr;
+        py::buffer_info info;
+         if (!leaf_indices.is_none()) {
+            py::array_t<int> leaf_indices_array = py::cast<py::array_t<int>>(leaf_indices);
+            if (!leaf_indices_array.attr("flags").attr("c_contiguous").cast<bool>())
+                throw std::runtime_error("Arrays must be C-contiguous");
+            info = leaf_indices_array.request();
+            leaf_indices_ptr = static_cast<const int*>(info.ptr);
+        }
+        const int* tree_indices_ptr = nullptr;
+         if (!tree_indices.is_none()) {
+            py::array_t<int> tree_indices_array = py::cast<py::array_t<int>>(tree_indices);
+            if (!tree_indices_array.attr("flags").attr("c_contiguous").cast<bool>())
+                throw std::runtime_error("Arrays must be C-contiguous");
+            info = tree_indices_array.request();
+            tree_indices_ptr = static_cast<const int*>(info.ptr);
+        }
+        const int* new_tree_indices_ptr = nullptr;
+         if (!new_tree_indices.is_none()) {
+            py::array_t<int> new_tree_indices_array = py::cast<py::array_t<int>>(new_tree_indices);
+            if (!new_tree_indices_array.attr("flags").attr("c_contiguous").cast<bool>())
+                throw std::runtime_error("Arrays must be C-contiguous");
+            info = new_tree_indices_array.request();
+            new_tree_indices_ptr = static_cast<const int*>(info.ptr);
+        }
+        const float* W_ptr = nullptr;
+         if (!W.is_none()) {
+            py::array_t<float> W_array = py::cast<py::array_t<float>>(W);
+            if (!W_array.attr("flags").attr("c_contiguous").cast<bool>())
+                throw std::runtime_error("Arrays must be C-contiguous");
+            info = W_array.request();
+            W_ptr = static_cast<const float*>(info.ptr);
+        }
+        
+        
+        py::gil_scoped_release release; 
+        self.compress_ensemble(n_compressed_leaves, n_compressed_trees, leaf_indices_ptr, tree_indices_ptr, new_tree_indices_ptr, W_ptr);  
+
+    }, py::arg("n_compressed_leaves"), py::arg("n_compressed_trees"), py::arg("leaf_indices"), py::arg("tree_indices"), py::arg("new_tree_indices"), py::arg("W") , "Compress ensemble");
         // saveToFile method
     gbrl.def("save", [](GBRL &self, const std::string& filename) -> int {
         py::gil_scoped_release release; 

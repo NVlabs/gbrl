@@ -36,6 +36,11 @@ inline int calculate_num_threads(int total_elements, int min_elements_per_thread
 template<typename T>
 int count_distinct(T *arr, int n);
 
+template <typename T>
+void selective_copy(const int num_indices, const int* indices, T* dest, const T* src, const int elements_dim);
+
+void selective_copy_char(const int num_indices, const int* indices, char* dest, const char* src, const int elements_dim);
+
 inline void valid_tree_idx(const int tree_idx, const ensembleMetaData* metadata){
     if (tree_idx < 0 || tree_idx > metadata->n_trees){
         std::cerr << "ERROR: invalid tree_idx " << tree_idx << " in ensemble with ntrees = " << metadata->n_trees <<std::endl;

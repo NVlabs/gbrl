@@ -18,10 +18,12 @@ numerical_dtype = np.dtype('float32')
 categorical_dtype = np.dtype('S128')  
 
 
-from typing import Dict
+from typing import Dict, Optional, Any
 
 from .gbrl_cpp import GBRL
 from .utils import get_input_dim, get_poly_vectors
+from .compression import TreeCompression, SharedActorCriticCompression, ParametricActorCompression
+
 
 def process_array(arr: np.array)-> Tuple[np.array, np.array]:
     """ Formats numpy array for C++ GBRL.
@@ -106,6 +108,7 @@ class GBTWrapper:
             assert np.all(feature_weights >= 0), "feature weights contains non-positive values"
         self.feature_weights = feature_weights
 
+
     def reset(self) -> None:
         if self.cpp_model is not None:
             policy_lr, value_lr = self.cpp_model.get_scheduler_lrs()
@@ -178,6 +181,7 @@ class GBTWrapper:
             assert status == 0, "Failed to export model"
         except RuntimeError as e:
             print(f"Caught an exception in GBRL: {e}")
+
     @classmethod
     def load(cls, filename: str) -> "GBTWrapper":
         filename = filename.rstrip('.')
@@ -317,11 +321,11 @@ class GBTWrapper:
             preds = self.cpp_model.predict(num_features, cat_features, start_idx, stop_idx)
         return preds
     
-    def get_matrix_representation(self, features: Union[np.array, th.Tensor], start_idx: int=0, stop_idx: int=None) -> np.array:
+    def get_matrix_representation(self, features: Union[np.array, th.Tensor]) -> np.array:
         num_features, cat_features = preprocess_features(features)
         if stop_idx is None:
             stop_idx = 0
-        A, V, n_leaves_per_tree, n_leaves, n_trees = self.cpp_model.get_matrix_representation(num_features, cat_features, start_idx, stop_idx)
+        A, V, n_leaves_per_tree, n_leaves, n_trees = self.cpp_model.get_matrix_representation(num_features, cat_features)
         return A, V, n_leaves_per_tree, n_leaves, n_trees
     
     def distil(self, obs: Union[np.array, th.Tensor], targets: np.array, params: Dict, verbose: int=0) -> Tuple[int, Dict]:
@@ -350,6 +354,43 @@ class GBTWrapper:
                 break
         self.reset()
         return tr_loss, params
+
+    def compress(self, k: int, gradient_steps: int, features: Union[np.array, th.Tensor], actions: th.Tensor = None, log_std: th.Tensor = None,
+                 method: str = 'first_k', dist_type: str = 'supervised_learning', optimizer_kwargs: Optional[Dict[str, Any]] = None, 
+                 least_squares_W: bool = True, temperature: float = 1.0):
+        assert actions is not None or dist_type != 'supervised_learning', "Cannot compress a policy using supervised learning compression methods"
+        A, V, n_leaves_per_tree, n_leaves, n_trees = self.get_matrix_representation(features) 
+        A, V, n_leaves_per_tree = th.tensor(A), th.tensor(V), th.tensor(n_leaves_per_tree)
+        compression_params = {'k': k, 'gradient_steps': gradient_steps, 'method': method, 
+                              'dist_type': dist_type, 'optimizer_kwargs': optimizer_kwargs, 
+                              'least_squares_W': least_squares_W, 'temperature': temperature,
+                              'n_leaves': n_leaves, 'n_trees': n_trees, 'n_leaves_per_tree': n_leaves_per_tree,
+                              'output_dim': self.output_dim}
+        
+        if actions is not None:
+            compression_params['policy_dim'] = self.policy_dim
+            compressor = ParametricActorCompression(**compression_params)
+            leaves_selection, tree_selection, W, n_compressed_trees, n_compressed_leaves = compressor.compress(A, V, actions, log_std)
+        else:
+            compressor = TreeCompression(**compression_params)
+            leaves_selection, tree_selection, W, n_compressed_trees, n_compressed_leaves = compressor.compress(A, V)
+        # indices of selected leaves / trees in original indexing
+        compressed_leaf_indices = np.where(leaves_selection > 0)[0].astype(int)
+        compressed_tree_indices = np.where(tree_selection > 0)[0].astype(int)
+        #TODO FIX THIS
+        # indices of the start of each leaf according to the compressed model
+        new_tree_indices = np.zeros(n_compressed_trees)
+        new_tree_indices[1:] = np.cumsum(n_leaves_per_tree[tree_selection])[:-1]
+        self.cpp_model.compress(n_compressed_leaves, n_compressed_trees, compressed_leaf_indices, compressed_tree_indices, new_tree_indices.astype(int), W)
+        
+
+            
+
+            
+        
+        
+
+
 
     def copy(self):
         return self.__copy__()

@@ -12,6 +12,7 @@ set(CPP_SOURCES
     types.cpp
     optimizer.cpp
     scheduler.cpp
+    compression.cpp
     node.cpp
     utils.cpp
     fitter.cpp

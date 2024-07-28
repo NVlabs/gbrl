@@ -11,6 +11,7 @@
 #include <fstream>
 #include <sstream>
 #include <iomanip>
+#include <omp.h>
 
 #include "utils.h"
 #include "config.h"
@@ -92,4 +93,26 @@ int count_distinct(T *arr, int n){
     return res;
 }
 template int count_distinct<int>(int* arr, int n);
-template int count_distinct<double>(double* arr, int n);
+template int count_distinct<float>(float* arr, int n);
+
+template <typename T>
+void selective_copy(const int num_indices, const int* indices, T* dest, const T* src, const int elements_dim){
+    #pragma omp parallel for
+    for (int i = 0; i < num_indices; ++i) {
+        int start_idx = indices[i];
+        for (int j = 0; j < elements_dim; ++j) {
+            dest[i*elements_dim + j] = src[start_idx*elements_dim + j];
+        }
+    }
+}
+
+template void selective_copy<float>(const int num_indices, const int* indices, float* dest, const float* src, const int elements_dim);
+template void selective_copy<int>(const int num_indices, const int* indices, int* dest, const int* src, const int elements_dim);
+template void selective_copy<bool>(const int num_indices, const int* indices, bool* dest, const bool* src, const int elements_dim);
+
+void selective_copy_char(const int num_indices, const int* indices, char* dest, const char* src, const int elements_dim){
+    #pragma omp parallel for
+    for (int i = 0; i < num_indices; ++i) {
+        memcpy(dest + (i*elements_dim)*MAX_CHAR_SIZE, src + (indices[i] * elements_dim) * MAX_CHAR_SIZE, sizeof(char)*MAX_CHAR_SIZE);
+    }
+}

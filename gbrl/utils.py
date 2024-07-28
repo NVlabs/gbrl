@@ -116,3 +116,5 @@ def get_poly_vectors(max_depth: int, dtype: np.dtype) -> Tuple[np.array, np.arra
     norm_values = get_norm_values(base_poly).astype(dtype)
     offset = np.vander(base_poly + 1).T[::-1].astype(dtype)
     return base_poly, norm_values, offset
+
+

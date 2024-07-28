@@ -42,6 +42,7 @@ class GBRL {
         int saveToFile(const std::string& filename);
         int exportModel(const std::string& filename, const std::string& modelname);
         int loadFromFile(const std::string& filename);
+        void ensemble_check();
 
         void step(const float *obs, const char *categorical_obs, float *grads, const float *feature_weights, const int n_samples, const int n_num_features, const int n_cat_features);
 #ifdef USE_CUDA
@@ -54,7 +55,8 @@ class GBRL {
         float* predict(const float *obs, const char *categorical_obs, const int n_samples, const int n_num_features, const int n_cat_features, int start_tree_idx, int stop_tree_idx);
         void predict(const float *obs, const char *categorical_obs, float *start_preds, const int n_samples, const int n_num_features, const int n_cat_features, int start_tree_idx = 0, int stop_tree_idx = 0);
         
-        matrixRepresentation* get_matrix_representation(const float *obs, const char *categorical_obs, const int n_samples, const int n_num_features, const int n_cat_features, int start_tree_idx, int stop_tree_idx);
+        matrixRepresentation* get_matrix_representation(const float *obs, const char *categorical_obs, const int n_samples, const int n_num_features, const int n_cat_features);
+        void compress_ensemble(const int n_compressed_leaves, const int n_compressed_trees, const int *leaf_indices, const int *tree_indices, const int *new_tree_indices, const float *W);
         std::tuple<float, float> get_scheduler_lrs();
 
         int get_num_trees();

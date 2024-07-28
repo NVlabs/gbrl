@@ -191,6 +191,7 @@ ensembleMetaData* ensemble_metadata_alloc(int max_trees, int max_leaves, int max
 ensembleData* ensemble_data_alloc(ensembleMetaData *metadata);
 ensembleData* ensemble_copy_data_alloc(ensembleMetaData *metadata);
 ensembleData* copy_ensemble_data(ensembleData *other_edata, ensembleMetaData *metadata);
+ensembleData* copy_compressed_ensemble_data(ensembleData *other_edata, ensembleMetaData *metadata, const int *leaf_indices, const int *tree_indices, const int n_compressed_leaves, const int n_compressed_trees, const int *new_tree_indices);
 void ensemble_data_dealloc(ensembleData *edata);
 void save_ensemble_data(std::ofstream& file, ensembleData *edata, ensembleMetaData *metadata, deviceType device);
 void export_ensemble_data(std::ofstream& header_file, const std::string& model_name, ensembleData *edata, ensembleMetaData *metadata, deviceType device, std::vector<Optimizer*> opts);

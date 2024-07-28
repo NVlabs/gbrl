@@ -25,6 +25,7 @@ class ActorCritic(GradientBoostingTrees):
                  value_optimizer: Dict= None,
                  shared_tree_struct: bool=True,
                  gbrl_params: Dict=dict(),
+                 compression_params: Dict=None,
                  bias: np.array = None,
                  verbose: int=0,
                  device: str='cpu'):
@@ -74,6 +75,10 @@ class ActorCritic(GradientBoostingTrees):
             self._model = SeparateActorCriticWrapper(self.output_dim, self.tree_struct, self.policy_optimizer, self.value_optimizer, self.gbrl_params, self.verbose, self.device)
         self._model.reset()
         self._model.set_bias(self.bias)
+        self.compressor = None
+        if compression_params:
+            if shared_tree_struct:
+
         
     @classmethod
     def load_model(cls, load_name: str) -> "ActorCritic":
