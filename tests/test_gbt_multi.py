@@ -20,6 +20,12 @@ from torch.nn.functional import mse_loss
 
 from sklearn import datasets
 
+import sys 
+FILE_PATH = os.path.dirname(os.path.dirname(__file__))
+
+sys.path.append(FILE_PATH)
+sys.path.insert(0, str(FILE_PATH))
+sys.path.insert(0, os.path.join(FILE_PATH, 'gbrl'))
 from gbrl import GradientBoostingTrees, cuda_available, ActorCritic
 
 def rmse(preds: Union[np.array, th.Tensor], targets: Union[np.array, th.Tensor]) -> Tuple[float, np.array]:

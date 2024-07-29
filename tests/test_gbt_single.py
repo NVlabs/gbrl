@@ -17,7 +17,12 @@ from sklearn.tree import DecisionTreeRegressor
 import shap
 import torch as th
 from torch.nn.functional import mse_loss
+import sys 
+FILE_PATH = os.path.dirname(os.path.dirname(__file__))
 
+sys.path.append(FILE_PATH)
+sys.path.insert(0, str(FILE_PATH))
+sys.path.insert(0, os.path.join(FILE_PATH, 'gbrl'))
 from gbrl import GradientBoostingTrees, cuda_available
 from tests import CATEGORICAL_INPUTS, CATEGORICAL_OUTPUTS
 

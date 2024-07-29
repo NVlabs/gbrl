@@ -34,7 +34,7 @@ def process_array(arr: np.array)-> Tuple[np.array, np.array]:
         fixed_str = np.char.encode(arr.astype(str), 'utf-8').astype(categorical_dtype)
         return None, np.ascontiguousarray(fixed_str)
     
-def to_numpy(arr: Union[np.array, th.Tensor]) -> Union[np.array, np.array]:
+def obs_to_numpy(arr: Union[np.array, th.Tensor]) -> Tuple[np.array, np.array]:
     if isinstance(arr, th.Tensor):
         arr = arr.detach().cpu().numpy()
         return np.ascontiguousarray(arr, dtype=numerical_dtype), None 
@@ -50,6 +50,11 @@ def to_numpy(arr: Union[np.array, th.Tensor]) -> Union[np.array, np.array]:
         return num_arr, cat_arr
     else:
         return process_array(arr)
+    
+def to_numpy(arr: Union[np.array, th.Tensor]) -> Tuple[np.array, np.array]:
+    if isinstance(arr, th.Tensor):
+        arr = arr.detach().cpu().numpy()
+        return np.ascontiguousarray(arr, dtype=numerical_dtype)
        
 def preprocess_features(arr: Union[np.array, th.Tensor]) -> Tuple[np.array, np.array]:
     """Preprocess array such that the dimensions and the data type match.
@@ -61,7 +66,7 @@ def preprocess_features(arr: Union[np.array, th.Tensor]) -> Tuple[np.array, np.a
         Tuple[np.array, np.array]
     """
     input_dim = get_input_dim(arr)
-    num_arr, cat_arr = to_numpy(arr)
+    num_arr, cat_arr = obs_to_numpy(arr)
     if num_arr is not None and len(num_arr.shape) == 1:
         if input_dim == 1:
             num_arr = num_arr[np.newaxis, :]
@@ -103,7 +108,7 @@ class GBTWrapper:
         self.verbose = verbose
         feature_weights = gbrl_params.get('feature_weights', None)
         if feature_weights is not None:
-            feature_weights, _ = to_numpy(feature_weights)
+            feature_weights = to_numpy(feature_weights)
             feature_weights = feature_weights.flatten()
             assert np.all(feature_weights >= 0), "feature weights contains non-positive values"
         self.feature_weights = feature_weights
@@ -129,14 +134,14 @@ class GBTWrapper:
             print(f"Caught an exception in GBRL: {e}")
         feature_weights = self.gbrl_params.get('feature_weights', None)
         if feature_weights is not None:
-            feature_weights, _ = to_numpy(feature_weights)
+            feature_weights = to_numpy(feature_weights)
             feature_weights = feature_weights.flatten()
             assert np.all(feature_weights >= 0), "feature weights contains non-positive values"
         self.feature_weights = feature_weights
 
     def step(self, features: Union[np.array, th.Tensor, Tuple], grads: Union[np.array, th.Tensor]) -> None:
         num_features, cat_features = preprocess_features(features)
-        grads, _ = to_numpy(grads)
+        grads = to_numpy(grads)
         grads = grads.reshape((len(grads), self.params['output_dim']))
         input_dim = 0 if num_features is None else num_features.shape[1]
         input_dim += 0 if cat_features is None else cat_features.shape[1]
@@ -150,7 +155,7 @@ class GBTWrapper:
 
     def fit(self, features: Union[np.array, th.Tensor], targets: Union[np.array, th.Tensor], iterations: int, shuffle: bool=True, loss_type: str='MultiRMSE') -> float:
         num_features, cat_features = preprocess_features(features)
-        targets, _ = to_numpy(targets)
+        targets = to_numpy(targets)
         targets = targets.reshape((len(targets), self.params['output_dim'])).astype(numerical_dtype)
         input_dim = 0 if num_features is None else num_features.shape[1]
         input_dim += 0 if cat_features is None else cat_features.shape[1]
@@ -361,8 +366,8 @@ class GBTWrapper:
         A, V, n_leaves_per_tree = th.tensor(A), th.tensor(V), th.tensor(n_leaves_per_tree)
         compression_params = {'k': k, 'gradient_steps': gradient_steps, 'method': method, 
                               'dist_type': dist_type, 'optimizer_kwargs': optimizer_kwargs, 
-                              'least_squares_W': least_squares_W, 'temperature': temperature,
-                              'n_leaves': n_leaves, 'n_trees': n_trees, 'n_leaves_per_tree': n_leaves_per_tree,
+                              'temperature': temperature, 'n_leaves': n_leaves, 'n_trees': n_trees, 
+                              'n_leaves_per_tree': n_leaves_per_tree,
                               'output_dim': self.output_dim}
         
         if actions is not None:
@@ -370,6 +375,7 @@ class GBTWrapper:
             compressor = ParametricActorCompression(**compression_params)
             leaves_selection, tree_selection, W, n_compressed_trees, n_compressed_leaves = compressor.compress(A, V, actions, log_std)
         else:
+            compression_params['least_squares_W'] =  least_squares_W
             compressor = TreeCompression(**compression_params)
             leaves_selection, tree_selection, W, n_compressed_trees, n_compressed_leaves = compressor.compress(A, V)
         # indices of selected leaves / trees in original indexing
@@ -380,15 +386,6 @@ class GBTWrapper:
         new_tree_indices = np.zeros(n_compressed_trees)
         new_tree_indices[1:] = np.cumsum(n_leaves_per_tree[tree_selection])[:-1]
         self.cpp_model.compress(n_compressed_leaves, n_compressed_trees, compressed_leaf_indices, compressed_tree_indices, new_tree_indices.astype(int), W)
-        
-
-            
-
-            
-        
-        
-
-
 
     def copy(self):
         return self.__copy__()
@@ -435,6 +432,12 @@ class SeparateActorCriticWrapper:
         self.policy_model.set_device(device)
         self.value_model.set_device(device)
         self.device = device
+    
+    def compress(self, k: int, gradients_steps: int, observations: Union[np.array, th.Tensor], actions: th.Tensor, log_std: th.Tensor = None, method: str = 'first_k', dist_type: str = 'supervised_learning', optimizer_kwargs: Optional[Dict[str, Any]] = None, 
+                 least_squares_W: bool = True, temperature: float = 1.0) -> None:
+        assert dist_type != 'supervised_learning', 'Cannot use supervised learning as a dist_type for an actor'
+        self.policy_model.compress(k, gradients_steps, observations, actions, log_std, method, dist_type, optimizer_kwargs, least_squares_W, temperature)
+        self.value_model.compress(k, gradients_steps, observations, actions, log_std, method, 'supervised_learning', optimizer_kwargs, True, temperature)
 
     def tree_shap(self, tree_idx: int, observations: Union[np.array, th.Tensor]) -> Tuple[np.array, np.array]:
         policy_shap = self.policy_model.tree_shap(tree_idx, observations)
