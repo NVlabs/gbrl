@@ -76,8 +76,8 @@ class ActorCritic(GradientBoostingTrees):
         self._model.reset()
         self._model.set_bias(self.bias)
         self.compressor = None
-        if compression_params:
-            if shared_tree_struct:
+        # if compression_params:
+        #     if shared_tree_struct:
 
         
     @classmethod

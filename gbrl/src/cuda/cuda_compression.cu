@@ -25,7 +25,7 @@ void get_matrix_representation_cuda(dataSet *dataset, ensembleMetaData *metadata
     bool *device_A;
     // assuming row-major order
     size_t A_size = dataset->n_samples * (metadata->n_leaves+1) * sizeof(bool);
-    size_t V_size = (metadata->n_leaves+1) * metadata->output_dim*sizeof(float);
+    size_t V_size = (metadata->n_leaves+1) * metadata->output_dim * sizeof(float);
     size_t obs_matrix_size = dataset->n_samples * metadata->n_num_features * sizeof(float);
     size_t cat_obs_matrix_size = dataset->n_samples * metadata->n_cat_features * sizeof(char) * MAX_CHAR_SIZE;
     cudaError_t alloc_error = cudaMalloc((void**)&device_data, obs_matrix_size + cat_obs_matrix_size + A_size + V_size);
@@ -83,16 +83,19 @@ void get_matrix_representation_cuda(dataSet *dataset, ensembleMetaData *metadata
 
     if (metadata->grow_policy == GREEDY){
         if (metadata->n_cat_features == 0)
-            get_representation_kernel_numerical_only<<<metadata->n_leaves, threads_per_block>>>(device_batch_obs, dataset->n_samples, metadata->n_num_features, edata->feature_indices, edata->depths, edata->feature_values, edata->inequality_directions, edata->values, opts, n_opts, metadata->output_dim, metadata->max_depth, metadata->n_leaves, device_A, device_V);
+            get_representation_kernel_numerical_only<<<metadata->n_leaves, threads_per_block>>>(device_batch_obs, dataset->n_samples, metadata->n_num_features, edata->feature_indices, edata->depths, edata->feature_values, edata->inequality_directions, edata->values, metadata->output_dim, metadata->max_depth, metadata->n_leaves, device_A);
         else
-            get_representation_kernel_tree_wise<<<metadata->n_leaves, threads_per_block>>>(device_batch_obs, device_batch_cat_obs, dataset->n_samples, metadata->n_num_features, metadata->n_cat_features, edata->feature_indices, edata->depths, edata->feature_values, edata->inequality_directions, edata->values, edata->categorical_values, edata->is_numerics, opts, n_opts, metadata->output_dim, metadata->max_depth, metadata->n_leaves, device_A, device_V);
+            get_representation_kernel_tree_wise<<<metadata->n_leaves, threads_per_block>>>(device_batch_obs, device_batch_cat_obs, dataset->n_samples, metadata->n_num_features, metadata->n_cat_features, edata->feature_indices, edata->depths, edata->feature_values, edata->inequality_directions, edata->values, edata->categorical_values, edata->is_numerics, metadata->output_dim, metadata->max_depth, metadata->n_leaves, device_A);
     } else{
         
         if (metadata->n_cat_features == 0)
-            get_representation_oblivious_kernel_numerical_only<<<metadata->n_trees, threads_per_block>>>(device_batch_obs, dataset->n_samples, metadata->n_num_features, edata->feature_indices, edata->depths, edata->feature_values, edata->inequality_directions, edata->values, edata->tree_indices, opts, n_opts, metadata->output_dim, metadata->max_depth, metadata->n_leaves, device_A, device_V);
+            get_representation_oblivious_kernel_numerical_only<<<metadata->n_trees, threads_per_block>>>(device_batch_obs, dataset->n_samples, metadata->n_num_features, edata->feature_indices, edata->depths, edata->feature_values, edata->inequality_directions, edata->values, edata->tree_indices, metadata->output_dim, metadata->max_depth, metadata->n_leaves, device_A);
         else
-            get_representation_oblivious_kernel_tree_wise<<<metadata->n_trees, threads_per_block>>>(device_batch_obs, device_batch_cat_obs, dataset->n_samples, metadata->n_num_features, metadata->n_cat_features, edata->feature_indices, edata->depths, edata->feature_values, edata->inequality_directions, edata->values, edata->tree_indices, edata->categorical_values, edata->is_numerics, opts, n_opts, metadata->output_dim, metadata->max_depth, metadata->n_leaves, device_A, device_V);
+            get_representation_oblivious_kernel_tree_wise<<<metadata->n_trees, threads_per_block>>>(device_batch_obs, device_batch_cat_obs, dataset->n_samples, metadata->n_num_features, metadata->n_cat_features, edata->feature_indices, edata->depths, edata->feature_values, edata->inequality_directions, edata->values, edata->tree_indices, edata->categorical_values, edata->is_numerics, metadata->output_dim, metadata->max_depth, metadata->n_leaves, device_A);
     }
+    cudaDeviceSynchronize();
+    n_blocks = metadata->n_leaves / THREADS_PER_BLOCK + 1; 
+    get_V_kernel<<<n_blocks, THREADS_PER_BLOCK>>>(device_V, edata->values, opts, n_opts, metadata->output_dim, metadata->n_leaves);
     cudaDeviceSynchronize();
     matrix->A = new bool[A_size];
     cudaMemcpy(matrix->A, device_A, A_size, cudaMemcpyDeviceToHost);
@@ -146,8 +149,8 @@ ensembleData* compress_ensemble_cuda(ensembleMetaData *metadata, ensembleData *e
 
 __global__ void get_representation_oblivious_kernel_tree_wise(const float* __restrict__ obs, const char* __restrict__ categorical_obs, const int n_samples, const int n_num_features, const int n_cat_features, 
                                                    const int* __restrict__ feature_indices, const int* __restrict__ depths, const float* __restrict__ feature_values, const bool* __restrict__ inequality_directions, const float* __restrict__ leaf_values,
-                                                   const int* __restrict__ tree_indices, const char* __restrict__ categorical_values, const bool* __restrict__ is_numerics, SGDOptimizerGPU** opts, const int n_opts, const int output_dim, const int max_depth,
-                                                   const int n_leaves, bool* __restrict__ A, float * __restrict__ V){
+                                                   const int* __restrict__ tree_indices, const char* __restrict__ categorical_values, const bool* __restrict__ is_numerics, const int output_dim, const int max_depth,
+                                                   const int n_leaves, bool* __restrict__ A){
     bool decision;
     int tree_idx = blockIdx.x;
     int leaf_idx, initial_leaf_idx = __ldg(tree_indices + tree_idx);
@@ -169,58 +172,31 @@ __global__ void get_representation_oblivious_kernel_tree_wise(const float* __res
             leaf_idx |= (decision <<  (__ldg(depths + tree_idx) - 1 - depth_idx));
         }
         A[sample_idx*(n_leaves + 1) + leaf_idx + 1 + initial_leaf_idx] = true;
-        if (n_opts == 1){
-            for (int i = opts[0]->start_idx; i < opts[0]->end_idx; ++i){
-                V[(leaf_idx + initial_leaf_idx + 1)*output_dim + i] = -opts[0]->init_lr * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i);
-            }
-        } else {
-            for (int i = opts[0]->start_idx; i < opts[0]->end_idx; ++i){
-                 V[(leaf_idx + initial_leaf_idx + 1)*output_dim + i] = -opts[0]->init_lr * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i);
-            }
-            for (int i = opts[1]->start_idx; i < opts[1]->end_idx; ++i){
-                 V[(leaf_idx + initial_leaf_idx + 1)*output_dim + i] = -opts[1]->init_lr * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i);
-            }
-        }
     }
 }
 
 __global__ void get_representation_oblivious_kernel_numerical_only(const float* __restrict__ obs, const int n_samples, const int n_num_features, 
                                                         const int* __restrict__ feature_indices, const int* __restrict__ depths, const float* __restrict__ feature_values, const bool* __restrict__ inequality_directions, const float* __restrict__ leaf_values,
-                                                        const int* __restrict__ tree_indices, SGDOptimizerGPU** opts, const int n_opts, const int output_dim, const int max_depth,
-                                                        const int n_leaves, bool* __restrict__ A, float * __restrict__ V){
+                                                        const int* __restrict__ tree_indices, const int output_dim, const int max_depth,
+                                                        const int n_leaves, bool* __restrict__ A){
     
     int leaf_idx, initial_leaf_idx = __ldg(tree_indices + blockIdx.x);
     for (int sample_idx = threadIdx.x; sample_idx < n_samples; sample_idx += blockDim.x){
         leaf_idx = 0;
         for (int depth_idx = 0; depth_idx < __ldg(depths + blockIdx.x); depth_idx++){ 
             bool decision = (__ldg(&obs[sample_idx*n_num_features + __ldg(feature_indices + blockIdx.x * max_depth + depth_idx)])) > (__ldg(feature_values + blockIdx.x * max_depth + depth_idx));
-            leaf_idx |= (decision <<  (__ldg(depths + blockIdx.x - 1 - depth_idx)));
+            leaf_idx |= (decision << (__ldg(depths + blockIdx.x) - 1 - depth_idx));
         }
         A[sample_idx*(n_leaves + 1) + leaf_idx + initial_leaf_idx + 1] = true;
-        if (n_opts == 1){
-            for (int i = opts[0]->start_idx; i < opts[0]->end_idx; ++i){
-                V[(leaf_idx + initial_leaf_idx + 1)*output_dim + i] = -opts[0]->init_lr * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i);
-            }
-        } 
-        else {
-            for (int i = opts[0]->start_idx; i < opts[0]->end_idx; ++i){
-                 V[(leaf_idx + initial_leaf_idx + 1)*output_dim + i] = -opts[0]->init_lr * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i);
-            }
-            for (int i = opts[1]->start_idx; i < opts[1]->end_idx; ++i){
-                 V[(leaf_idx + initial_leaf_idx + 1)*output_dim + i] = -opts[1]->init_lr * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i);
-            }
-        }
     }
-
 }
 
 
 __global__ void get_representation_kernel_numerical_only(const float* __restrict__ obs, const int n_samples, const int n_num_features, const int* __restrict__ feature_indices,
                                               const int* __restrict__ depths, const float* __restrict__ feature_values, const bool* __restrict__ inequality_directions, const float* __restrict__ leaf_values, 
-                                              SGDOptimizerGPU** opts, const int n_opts, const int output_dim, const int max_depth,
-                                              const int n_leaves, bool* __restrict__ A, float* __restrict__ V){
+                                              const int output_dim, const int max_depth,
+                                              const int n_leaves, bool* __restrict__ A){
     int cond_idx = blockIdx.x * max_depth;
-    int value_idx = blockIdx.x * output_dim;
     int depth_idx; // Initialize mask to all bits set
     bool passed;
     for (int sample_idx = threadIdx.x; sample_idx < n_samples; sample_idx += blockDim.x){
@@ -232,19 +208,6 @@ __global__ void get_representation_kernel_numerical_only(const float* __restrict
         }
         if (passed){
             A[sample_idx*(n_leaves + 1) + blockIdx.x + 1] = true;
-            if (n_opts == 1){
-                for (int i = opts[0]->start_idx; i < opts[0]->end_idx; ++i){
-                    V[(blockIdx.x + 1)*output_dim + i] = -opts[0]->init_lr * __ldg(leaf_values + value_idx + i);
-                }
-            } 
-            else {
-                for (int i = opts[0]->start_idx; i < opts[0]->end_idx; ++i){
-                    V[(blockIdx.x + 1)*output_dim + i] = -opts[0]->init_lr * __ldg(leaf_values + value_idx + i);
-                }
-                for (int i = opts[1]->start_idx; i < opts[1]->end_idx; ++i){
-                    V[(blockIdx.x + 1)*output_dim + i] = -opts[1]->init_lr * __ldg(leaf_values + value_idx + i);
-                }
-            }
         }
     }
 }
@@ -253,12 +216,11 @@ __global__ void get_representation_kernel_numerical_only(const float* __restrict
 
 __global__ void get_representation_kernel_tree_wise(const float* __restrict__ obs, const char* __restrict__ categorical_obs, const int n_samples, const int n_num_features, const int n_cat_features, 
                                          const int* __restrict__ feature_indices, const int* __restrict__ depths, const float* __restrict__ feature_values, const bool* __restrict__ inequality_directions, const float* __restrict__ leaf_values, 
-                                         const char* __restrict__ categorical_values, const bool* __restrict__ is_numerics, SGDOptimizerGPU** opts, const int n_opts, const int output_dim, const int max_depth,
-                                         const int n_leaves, bool* __restrict__ A, float* __restrict__ V){
+                                         const char* __restrict__ categorical_values, const bool* __restrict__ is_numerics, const int output_dim, const int max_depth,
+                                         const int n_leaves, bool* __restrict__ A){
     
     bool equal, passed;
     int cond_idx = blockIdx.x * max_depth, depth_idx;
-    int value_idx = blockIdx.x * output_dim;
     for (int sample_idx = threadIdx.x; sample_idx < n_samples; sample_idx += blockDim.x){
         passed = true;
         depth_idx = __ldg(depths + blockIdx.x) - 1;
@@ -281,19 +243,6 @@ __global__ void get_representation_kernel_tree_wise(const float* __restrict__ ob
         }
         if (passed){
             A[sample_idx*(n_leaves + 1) + blockIdx.x + 1] = true;
-            if (n_opts == 1){
-                for (int i = opts[0]->start_idx; i < opts[0]->end_idx; ++i){
-                    V[(blockIdx.x + 1)*output_dim + i] = -opts[0]->init_lr * __ldg(leaf_values + value_idx + i);
-                }
-            } 
-            else {
-                for (int i = opts[0]->start_idx; i < opts[0]->end_idx; ++i){
-                    V[(blockIdx.x + 1)*output_dim + i] = -opts[0]->init_lr * __ldg(leaf_values + value_idx + i);
-                }
-                for (int i = opts[1]->start_idx; i < opts[1]->end_idx; ++i){
-                    V[(blockIdx.x + 1)*output_dim + i] = -opts[1]->init_lr * __ldg(leaf_values + value_idx + i);
-                }
-            }
         }
     }
 }
@@ -330,6 +279,24 @@ __global__ void add_W_matrix_to_values_kernel(const float * __restrict__ W, floa
                     bias[value_idx + i] += __ldg(W + value_idx + i);
                 }
         }
+        }
+    }
+}
+
+
+__global__  void get_V_kernel(float* __restrict__ V, const float* __restrict__ leaf_values, SGDOptimizerGPU** opts, const int n_opts, const int output_dim, const int n_leaves){
+    int leaf_idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (leaf_idx < n_leaves){
+        if (n_opts == 1){
+            for (int i = opts[0]->start_idx; i < opts[0]->end_idx; ++i)
+                V[(leaf_idx + 1)*output_dim + i] = -opts[0]->init_lr * __ldg(leaf_values + leaf_idx*output_dim + i);
+        } 
+        else {
+            for (int i = opts[0]->start_idx; i < opts[0]->end_idx; ++i)
+                 V[(leaf_idx + 1)*output_dim + i] = -opts[0]->init_lr * __ldg(leaf_values + leaf_idx*output_dim + i);
+            for (int i = opts[1]->start_idx; i < opts[1]->end_idx; ++i)
+                 V[(leaf_idx + 1)*output_dim + i] = -opts[1]->init_lr * __ldg(leaf_values + leaf_idx*output_dim + i);
+            
         }
     }
 }

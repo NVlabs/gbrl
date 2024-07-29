@@ -27,7 +27,7 @@ void Compressor::get_matrix_representation_cpu(dataSet *dataset, const ensembleD
     matrix->V = new float[metadata->output_dim*(metadata->n_leaves + 1)];
     memcpy(matrix->V, edata->bias, sizeof(float)*metadata->output_dim);
     matrix->n_leaves = metadata->n_leaves;
-    void (*getRepresentationFunc)(const float*, const char*, const int, const ensembleData*, const ensembleMetaData*, const int, const int, std::vector<Optimizer*>, matrixRepresentation*) = nullptr;
+    void (*getRepresentationFunc)(const float*, const char*, const int, const ensembleData*, const ensembleMetaData*, const int, const int, matrixRepresentation*) = nullptr;
     getRepresentationFunc = (metadata->grow_policy == OBLIVIOUS) ? &Compressor::get_representation_matrix_over_trees : &Compressor::get_representation_matrix_over_leaves;
     int n_tree_threads = calculate_num_threads(metadata->n_trees, par_th);
     int n_sample_threads = calculate_num_threads(n_samples, par_th);
@@ -42,7 +42,7 @@ void Compressor::get_matrix_representation_cpu(dataSet *dataset, const ensembleD
             int thread_start_tree_idx = thread_id * trees_per_thread;
             int thread_stop_tree_idx = (thread_id == n_tree_threads - 1) ? metadata->n_trees : thread_start_tree_idx + trees_per_thread;
             for (int sample_idx = 0; sample_idx < n_samples; ++sample_idx){
-                getRepresentationFunc(dataset->obs, dataset->categorical_obs, sample_idx, edata, metadata, thread_start_tree_idx, thread_stop_tree_idx, opts, matrix);
+                getRepresentationFunc(dataset->obs, dataset->categorical_obs, sample_idx, edata, metadata, thread_start_tree_idx, thread_stop_tree_idx, matrix);
             }        
         }
 
@@ -56,15 +56,16 @@ void Compressor::get_matrix_representation_cpu(dataSet *dataset, const ensembleD
             int start_idx = thread_id * samples_per_thread;
             int end_idx = (thread_id == n_sample_threads - 1) ? n_samples : start_idx + samples_per_thread;
             for (int sample_idx = start_idx; sample_idx < end_idx; ++sample_idx) {
-                getRepresentationFunc(dataset->obs, dataset->categorical_obs, sample_idx, edata, metadata, 0, metadata->n_trees, opts, matrix);
+                getRepresentationFunc(dataset->obs, dataset->categorical_obs, sample_idx, edata, metadata, 0, metadata->n_trees, matrix);
             }
         }
     // no parallelization
     } else{ 
         for (int sample_idx = 0; sample_idx < n_samples; ++sample_idx){
-            getRepresentationFunc(dataset->obs, dataset->categorical_obs, sample_idx, edata, metadata, 0, metadata->n_trees, opts, matrix);
+            getRepresentationFunc(dataset->obs, dataset->categorical_obs, sample_idx, edata, metadata, 0, metadata->n_trees, matrix);
         }
     }
+    get_V(matrix, edata, metadata, opts);
     matrix->n_leaves_per_tree = new int[metadata->n_trees];
     for (int i = 0; i < metadata->n_trees - 1; ++i )
         matrix->n_leaves_per_tree[i] = edata->tree_indices[i+1] - edata->tree_indices[i];
@@ -72,7 +73,7 @@ void Compressor::get_matrix_representation_cpu(dataSet *dataset, const ensembleD
     matrix->n_trees = metadata->n_trees;
 }
 
-void Compressor::get_representation_matrix_over_leaves(const float *obs, const char *categorical_obs, const int sample_idx, const ensembleData *edata, const ensembleMetaData *metadata, const int start_tree_idx, const int stop_tree_idx, std::vector<Optimizer*> opts, matrixRepresentation *matrix){
+void Compressor::get_representation_matrix_over_leaves(const float *obs, const char *categorical_obs, const int sample_idx, const ensembleData *edata, const ensembleMetaData *metadata, const int start_tree_idx, const int stop_tree_idx, matrixRepresentation *matrix){
     /* Return A - a binary matrix mapping inputs to leaves for non-oblivious trees
     */
     int tree_idx = start_tree_idx;
@@ -83,7 +84,6 @@ void Compressor::get_representation_matrix_over_leaves(const float *obs, const c
 
     const bool *numerics = edata->is_numerics;
     const float *feature_values = edata->feature_values;
-    const float *values = edata->values;
     const int* feature_indices = edata->feature_indices;
     const int* tree_indices = edata->tree_indices;
     const bool* inequality_directions = edata->inequality_directions;
@@ -103,9 +103,6 @@ void Compressor::get_representation_matrix_over_leaves(const float *obs, const c
         }
         if (passed){
             matrix->A[sample_idx*(metadata->n_leaves + 1) + leaf_idx + 1 - base_leaf_idx] = true;
-            for (size_t opt_idx = 0; opt_idx < opts.size(); ++opt_idx){
-                opts[opt_idx]->copy_and_scale(matrix->V + (leaf_idx + 1)*metadata->output_dim, values + leaf_idx*metadata->output_dim, tree_idx);
-            }
             ++tree_idx;
             if (tree_idx < stop_tree_idx)
                 leaf_idx = tree_indices[tree_idx];
@@ -115,7 +112,7 @@ void Compressor::get_representation_matrix_over_leaves(const float *obs, const c
     }
 }
 
-void Compressor::get_representation_matrix_over_trees(const float *obs, const char *categorical_obs, const int sample_idx, const ensembleData *edata, const ensembleMetaData *metadata, const int start_tree_idx, const int stop_tree_idx, std::vector<Optimizer*> opts, matrixRepresentation *matrix){
+void Compressor::get_representation_matrix_over_trees(const float *obs, const char *categorical_obs, const int sample_idx, const ensembleData *edata, const ensembleMetaData *metadata, const int start_tree_idx, const int stop_tree_idx, matrixRepresentation *matrix){
     /* Return A - a binary matrix mapping inputs to leaves for oblivious trees
     */
     int tree_idx = start_tree_idx;
@@ -127,12 +124,10 @@ void Compressor::get_representation_matrix_over_trees(const float *obs, const ch
     const bool *numerics = edata->is_numerics;
     const int *depths = edata->depths;
     const float *feature_values = edata->feature_values;
-    const float *values = edata->values;
     const int* feature_indices = edata->feature_indices;
     const int* tree_indices = edata->tree_indices;
     const char* categorical_values = edata->categorical_values;
     const int offset_leaf_idx = tree_indices[tree_idx];
-    
 
     while (tree_idx < stop_tree_idx)
     {
@@ -144,11 +139,6 @@ void Compressor::get_representation_matrix_over_trees(const float *obs, const ch
             leaf_idx |= (passed <<  (depths[tree_idx] - 1 - depth_idx));
         }
         matrix->A[sample_idx*(metadata->n_leaves + 1) + initial_leaf_idx + leaf_idx + 1 - offset_leaf_idx] = true;
-        int value_idx = (initial_leaf_idx + leaf_idx)*metadata->output_dim;
-        for (size_t opt_idx = 0; opt_idx < opts.size(); ++opt_idx){
-            opts[opt_idx]->copy_and_scale(matrix->V + (initial_leaf_idx + leaf_idx + 1 - offset_leaf_idx) *metadata->output_dim, values + value_idx, tree_idx);
-        }
-    
         ++tree_idx;
     }
 }
@@ -179,6 +169,37 @@ void Compressor::add_W_matrix_to_values(const float *W, const ensembleData *edat
         for (int leaf_idx = 0; leaf_idx < size; ++leaf_idx){
             for (size_t opt_idx = 0; opt_idx < opts.size(); ++opt_idx){
                 opts[opt_idx]->add_scaled(edata->values + leaf_idx*metadata->output_dim, W + (leaf_idx + 1) * metadata->output_dim, 0);
+            }
+        }     
+    }
+}
+
+
+void Compressor::get_V(matrixRepresentation *matrix, const ensembleData *edata, const ensembleMetaData *metadata, std::vector<Optimizer*> opts){
+    int size = metadata->n_leaves;
+    int n_threads = calculate_num_threads(size, metadata->par_th);
+     if (n_threads > 1){
+        int elements_per_thread = (size) / n_threads;
+        omp_set_num_threads(n_threads);
+        #pragma omp parallel
+        {
+            int thread_id = omp_get_thread_num();
+            int start_idx = thread_id * elements_per_thread;
+            int end_idx = (thread_id == n_threads - 1) ? size : start_idx + elements_per_thread;
+#ifndef _MSC_VER
+    #pragma omp simd
+#endif
+            for (int leaf_idx = start_idx; leaf_idx < end_idx; ++leaf_idx){
+                for (size_t opt_idx = 0; opt_idx < opts.size(); ++opt_idx){
+                    opts[opt_idx]->copy_and_scale(matrix->V + (leaf_idx + 1) *metadata->output_dim, edata->values + leaf_idx*metadata->output_dim, 0);
+                }
+            }
+                
+        }
+     } else {
+        for (int leaf_idx = 0; leaf_idx < size; ++leaf_idx){
+            for (size_t opt_idx = 0; opt_idx < opts.size(); ++opt_idx){
+                opts[opt_idx]->copy_and_scale(matrix->V + (leaf_idx + 1) *metadata->output_dim, edata->values + leaf_idx*metadata->output_dim, 0);
             }
         }     
     }

@@ -323,8 +323,6 @@ class GBTWrapper:
     
     def get_matrix_representation(self, features: Union[np.array, th.Tensor]) -> np.array:
         num_features, cat_features = preprocess_features(features)
-        if stop_idx is None:
-            stop_idx = 0
         A, V, n_leaves_per_tree, n_leaves, n_trees = self.cpp_model.get_matrix_representation(num_features, cat_features)
         return A, V, n_leaves_per_tree, n_leaves, n_trees
     

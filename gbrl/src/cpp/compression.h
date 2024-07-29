@@ -15,9 +15,10 @@
 class Compressor {
     public:
         static void get_matrix_representation_cpu(dataSet *dataset, const ensembleData *edata, const ensembleMetaData *metadata, const bool parallel_predict, matrixRepresentation *matrix,  std::vector<Optimizer*> opts);
-        static void get_representation_matrix_over_leaves(const float *obs, const char *categorical_obs, const int sample_idx, const ensembleData *edata, const ensembleMetaData *metadata, const int start_tree_idx, const int stop_tree_idx, std::vector<Optimizer*> opts, matrixRepresentation *matrix);
-        static void get_representation_matrix_over_trees(const float *obs, const char *categorical_obs, const int sample_idx, const ensembleData *edata, const ensembleMetaData *metadata, const int start_tree_idx, const int stop_tree_idx, std::vector<Optimizer*> opts, matrixRepresentation *matrix);
+        static void get_representation_matrix_over_leaves(const float *obs, const char *categorical_obs, const int sample_idx, const ensembleData *edata, const ensembleMetaData *metadata, const int start_tree_idx, const int stop_tree_idx, matrixRepresentation *matrix);
+        static void get_representation_matrix_over_trees(const float *obs, const char *categorical_obs, const int sample_idx, const ensembleData *edata, const ensembleMetaData *metadata, const int start_tree_idx, const int stop_tree_idx, matrixRepresentation *matrix);
         static void add_W_matrix_to_values(const float *W, const ensembleData *edata, const ensembleMetaData *metadata, std::vector<Optimizer*> opts);
+        static void get_V(matrixRepresentation *matrix, const ensembleData *edata, const ensembleMetaData *metadata, std::vector<Optimizer*> opts);
         static ensembleData* compress_ensemble(ensembleMetaData *metadata, ensembleData *edata, std::vector<Optimizer*> opts, const int n_compressed_leaves, const int n_compressed_trees, const int *leaf_indices, const int *tree_indices, const int *new_tree_indices, const float *W);
 };
 
