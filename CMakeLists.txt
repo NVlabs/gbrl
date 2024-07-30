@@ -41,7 +41,7 @@ find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
 include(CMakeDependentOption)
 option(USE_CUDA  "Build with GPU acceleration" OFF)
 
-if(DEFINED $ENV{COVERAGE} AND $ENV{COVERAGE} STREQUAL "1")
+if(DEFINED ENV{COVERAGE} AND $ENV{COVERAGE} STREQUAL "1")
   message(STATUS "Coverage build")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --coverage")
   set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} --coverage")

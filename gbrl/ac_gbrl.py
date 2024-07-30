@@ -560,6 +560,7 @@ class ContinuousCritic(GBRL):
         verbose (int, optional): verbosity level. Defaults to 0.
         device (str, optional): GBRL device 'cpu' or 'cuda/gpu'. Defaults to 'cpu'.
         """
+
         weights_optimizer = setup_optimizer(weights_optimizer, prefix='weights_')
         bias_optimizer = setup_optimizer(bias_optimizer, prefix='bias_')
 
@@ -585,9 +586,10 @@ class ContinuousCritic(GBRL):
         Args:
             observations (Union[np.array, th.Tensor]):
             q_grad_clip (float, optional):. Defaults to None.
- weight_grad (Optional[Union[np.array, th.tensor]], optional): manually calculated gradients. Defaults to None.
+        weight_grad (Optional[Union[np.array, th.tensor]], optional): manually calculated gradients. Defaults to None.
             bias_grad (Optional[Union[np.array, th.tensor]], optional): manually calculated gradients. Defaults to None.           
         """
+
         n_samples = len(observations)
         if weight_grad is None:
             weight_grad = self.params[0].grad.detach().cpu().numpy() * n_samples

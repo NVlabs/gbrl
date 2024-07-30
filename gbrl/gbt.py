@@ -228,12 +228,14 @@ class GBRL:
         """Calculates SHAP values for the entire ensemble
             Implementation based on - https://github.com/yupbank/linear_tree_shap
             See Linear TreeShap, Yu et al, 2023, https://arxiv.org/pdf/2209.08192 
+            
         Args:
             features (Union[np.array, th.Tensor])
 
         Returns:
             Union[np.array, Tuple[np.array, np.array]]: SHAP values of shap [n_samples, number of input features, number of outputs]. The output is a tuple of SHAP values per model only in the case of a separate actor-critic model.
         """
+
         return self._model.shap(features)
 
     def save_model(self, save_path: str) -> None:

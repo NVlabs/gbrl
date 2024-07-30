@@ -25,6 +25,7 @@ jobs:
           pip install sphinx-rtd-theme
           pip install numpy
           pip install torch
+          pip install .
 
       - name: Build documentation
         run: |
