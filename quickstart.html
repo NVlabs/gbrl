@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Quickstart &mdash; GBRL 1.0.2 documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=80d5e7a1" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=19f00094" />
+
+  
+  <!--[if lt IE 9]>
+    <script src="_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  
+        <script src="_static/jquery.js?v=5d32c60e"></script>
+        <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+        <script src="_static/documentation_options.js?v=1ed6394b"></script>
+        <script src="_static/doctools.js?v=9a2dae69"></script>
+        <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Examples" href="examples.html" />
+    <link rel="prev" title="Welcome to GBRL’s documentation!" href="index.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            GBRL
+          </a>
+              <div class="version">
+                master (1.0.2 )
+              </div>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">User Guide:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Quickstart</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#prerequisites">Prerequisites</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#installation">Installation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#dependencies">Dependencies</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#macos">macOS</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#cuda">CUDA</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#environment-variables">Environment Variables</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#graphviz-optional">Graphviz (optional)</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="examples.html">Examples</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Documentation:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="gbt.html">GBRL Module</a></li>
+<li class="toctree-l1"><a class="reference internal" href="actor_critic/index.html">Actor Critic Module</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">GBRL</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">Quickstart</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/quickstart.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="quickstart">
+<h1>Quickstart<a class="headerlink" href="#quickstart" title="Link to this heading"></a></h1>
+<section id="prerequisites">
+<h2>Prerequisites<a class="headerlink" href="#prerequisites" title="Link to this heading"></a></h2>
+<p>python3.7 or higher</p>
+</section>
+<section id="installation">
+<h2>Installation<a class="headerlink" href="#installation" title="Link to this heading"></a></h2>
+<p>To install GBRL via pip, use the following command:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">pip install gbrl</span>
+</pre></div>
+</div>
+<p>To install the CPU-only version, even with a valid CUDA installation, set the CPU_ONLY environment variable:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">export CPU_ONLY=1</span>
+<span class="go">pip install gbrl</span>
+</pre></div>
+</div>
+</section>
+<section id="dependencies">
+<h2>Dependencies<a class="headerlink" href="#dependencies" title="Link to this heading"></a></h2>
+<section id="macos">
+<h3>macOS<a class="headerlink" href="#macos" title="Link to this heading"></a></h3>
+<p>GBRL requires LLVM and OpenMP. These can be installed using Homebrew:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">brew install libomp llvm</span>
+</pre></div>
+</div>
+</section>
+<section id="cuda">
+<h3>CUDA<a class="headerlink" href="#cuda" title="Link to this heading"></a></h3>
+<p>GBRL compiles CUDA and requires NVCC.</p>
+<p>Ensure that <code class="docutils literal notranslate"><span class="pre">CUDA_PATH</span></code> is set. Verify that NVCC exists by running the command</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">nvcc --version</span>
+</pre></div>
+</div>
+<p>And set <code class="docutils literal notranslate"><span class="pre">CUDACXX</span></code> to the location of NVCC.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>CUDA installation via Anaconda may not install the full CUDAToolkit.</p>
+<p>Make sure that Anaconda is up-to-date and run <code class="docutils literal notranslate"><span class="pre">conda</span> <span class="pre">install</span> <span class="pre">cuda</span> <span class="pre">-c</span> <span class="pre">nvidia</span></code> to install the full CUDAToolkit.</p>
+<p>Anaconda might still cause issues with CUDA. In such case, set <code class="docutils literal notranslate"><span class="pre">CUDACXX</span></code> and <code class="docutils literal notranslate"><span class="pre">CUDA_PATH</span></code> to the non-conda location. For example on Linux, the non-conda location of NVCC can be found by running <code class="docutils literal notranslate"><span class="pre">which</span> <span class="pre">nvcc</span></code> while Anaconda is deactivated.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>For integration with Microsoft Visual Studio, copy the following files:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">CUDA &lt;cuda_version&gt;.props</span>
+<span class="go">CUDA &lt;cuda_version&gt;.targets</span>
+<span class="go">CUDA &lt;cuda_version&gt;.xml</span>
+<span class="go">Nvda.Build.CudaTasks.v&lt;cuda_version&gt;.dll</span>
+<span class="go">cudart.lib</span>
+</pre></div>
+</div>
+<p>into <code class="docutils literal notranslate"><span class="pre">&lt;visual</span> <span class="pre">studio</span> <span class="pre">path&gt;\BuildTools\MSBuild\Microsoft\VC\&lt;visual</span> <span class="pre">studio</span> <span class="pre">version&gt;\BuildCustomizations</span></code>.</p>
+</div>
+<p>After installing GBRL, verify that CUDA is enabled:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">gbrl</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="n">gbrl</span><span class="o">.</span><span class="n">cuda_available</span><span class="p">())</span>
+</pre></div>
+</div>
+</section>
+<section id="environment-variables">
+<h3>Environment Variables<a class="headerlink" href="#environment-variables" title="Link to this heading"></a></h3>
+<p>After installation, you may need to set environment variables to ensure that your system correctly locates all necessary files. Here are examples of setting these variables for different operating systems.</p>
+<p>### Windows PowerShell using Visual Studio 16 2019 and CUDA 12.4</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp"># </span>PowerShell<span class="w"> </span>script<span class="w"> </span>to<span class="w"> </span><span class="nb">set</span><span class="w"> </span>environment<span class="w"> </span>variables
+<span class="gp">$</span>env:CMAKE_GENERATOR<span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;Visual Studio 16 2019&quot;</span><span class="w"> </span><span class="c1"># Adjust version as necessary</span>
+<span class="gp">$</span>env:VS160COMNTOOLS<span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\Common7\Tools&quot;</span><span class="w">  </span><span class="c1"># Adjust path as necessary</span>
+<span class="gp">$</span>env:CUDA_PATH<span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.4&quot;</span>
+<span class="gp">$</span>env:CUDA_PATH_V12_4<span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nv">$env</span>:CUDA_PATH<span class="w">  </span><span class="c1"># Adjust CUDA version as necessary</span>
+<span class="gp">$</span>env:PATH<span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$env</span><span class="s2">:CUDA_PATH\bin;</span><span class="nv">$env</span><span class="s2">:PATH&quot;</span>
+<span class="gp">$</span>env:INCLUDE<span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$env</span><span class="s2">:CUDA_PATH\include;</span><span class="nv">$env</span><span class="s2">:INCLUDE&quot;</span>
+<span class="gp">$</span>env:LIB<span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$env</span><span class="s2">:CUDA_PATH\lib\x64;</span><span class="nv">$env</span><span class="s2">:LIB&quot;</span>
+<span class="gp">$</span>env:CUDACXX<span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$env</span><span class="s2">:CUDA_PATH\bin\nvcc.exe&quot;</span>
+</pre></div>
+</div>
+<p>### macOS</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="nb">export</span><span class="w"> </span><span class="nv">PATH</span><span class="o">=</span><span class="s2">&quot;</span><span class="k">$(</span>brew<span class="w"> </span>--prefix<span class="w"> </span>llvm<span class="k">)</span><span class="s2">/bin:</span><span class="nv">$PATH</span><span class="s2">&quot;</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">LDFLAGS</span><span class="o">=</span><span class="s2">&quot;-L</span><span class="k">$(</span>brew<span class="w"> </span>--prefix<span class="w"> </span>libomp<span class="k">)</span><span class="s2">/lib -L</span><span class="k">$(</span>brew<span class="w"> </span>--prefix<span class="w"> </span>llvm<span class="k">)</span><span class="s2">/lib -L</span><span class="k">$(</span>brew<span class="w"> </span>--prefix<span class="w"> </span>llvm<span class="k">)</span><span class="s2">/lib/c++ -Wl,-rpath,</span><span class="k">$(</span>brew<span class="w"> </span>--prefix<span class="w"> </span>llvm<span class="k">)</span><span class="s2">/lib/c++&quot;</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">CPPFLAGS</span><span class="o">=</span><span class="s2">&quot;-I</span><span class="k">$(</span>brew<span class="w"> </span>--prefix<span class="w"> </span>libomp<span class="k">)</span><span class="s2">/include -I</span><span class="k">$(</span>brew<span class="w"> </span>--prefix<span class="w"> </span>llvm<span class="k">)</span><span class="s2">/include&quot;</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">CC</span><span class="o">=</span><span class="s2">&quot;</span><span class="k">$(</span>brew<span class="w"> </span>--prefix<span class="w"> </span>llvm<span class="k">)</span><span class="s2">/bin/clang&quot;</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">CXX</span><span class="o">=</span><span class="s2">&quot;</span><span class="k">$(</span>brew<span class="w"> </span>--prefix<span class="w"> </span>llvm<span class="k">)</span><span class="s2">/bin/clang++&quot;</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">DYLD_LIBRARY_PATH</span><span class="o">=</span><span class="s2">&quot;</span><span class="k">$(</span>brew<span class="w"> </span>--prefix<span class="w"> </span>llvm<span class="k">)</span><span class="s2">/lib:</span><span class="k">$(</span>brew<span class="w"> </span>--prefix<span class="w"> </span>libomp<span class="k">)</span><span class="s2">/lib&quot;</span>
+</pre></div>
+</div>
+<p>### Linux</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="nb">export</span><span class="w"> </span><span class="nv">CUDA_HOME</span><span class="o">=</span>/usr/local/cuda
+<span class="nb">export</span><span class="w"> </span><span class="nv">PATH</span><span class="o">=</span><span class="nv">$PATH</span>:<span class="nv">$CUDA_HOME</span>/bin:/usr/local/bin
+<span class="nb">export</span><span class="w"> </span><span class="nv">CUDACXX</span><span class="o">=</span><span class="nv">$CUDA_HOME</span>/bin/nvcc
+<span class="nb">export</span><span class="w"> </span><span class="nv">CC</span><span class="o">=</span>/usr/bin/gcc
+<span class="nb">export</span><span class="w"> </span><span class="nv">CXX</span><span class="o">=</span>/usr/bin/g++
+</pre></div>
+</div>
+<p>Explanation:
+- <cite>CMAKE_GENERATOR</cite> and <cite>CMAKE_GENERATOR_PLATFORM</cite> are used by CMake to specify the build system.
+- <cite>CUDA_PATH</cite> (or <cite>CUDA_HOME</cite> for consistency with CUDA-related tools) specifies the location of the CUDA Toolkit.
+- <cite>PATH</cite> is updated to include the CUDA binaries.
+- <cite>INCLUDE</cite> and <cite>LIB</cite> are updated to include CUDA headers and libraries.
+- <cite>CUDACXX</cite> specifies the location of, NVCC, the CUDA compiler.</p>
+</section>
+<section id="graphviz-optional">
+<h3>Graphviz (optional)<a class="headerlink" href="#graphviz-optional" title="Link to this heading"></a></h3>
+<p>To enable tree visualization, ensure  <a class="reference external" href="https://graphviz.org/download//">Graphviz</a>  and its development headers are installed before compiling.</p>
+</section>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="index.html" class="btn btn-neutral float-left" title="Welcome to GBRL’s documentation!" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="examples.html" class="btn btn-neutral float-right" title="Examples" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024, NVIDIA Corporation.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
