@@ -21,9 +21,9 @@
 #include "types.h"
 
 
-TreeNode::TreeNode(int *sample_indices, const int n_samples, const int n_num_features, const int n_cat_features, const int output_dim, const int policy_dim, const int depth, const int node_idx): 
+TreeNode::TreeNode(int *sample_indices, const int n_samples, const int n_num_features, const int n_cat_features, const int output_dim, const int depth, const int node_idx): 
             sample_indices(sample_indices), n_samples(n_samples), n_num_features(n_num_features), n_cat_features(n_cat_features),
-            output_dim(output_dim), policy_dim(policy_dim), depth(depth), node_idx(node_idx), feature_value(0.0),
+            output_dim(output_dim), depth(depth), node_idx(node_idx), feature_value(0.0),
             feature_idx(0){
     if (depth > 0){
         this->split_conditions = new splitCondition[depth];
@@ -94,7 +94,7 @@ int TreeNode::splitNode(const float *obs, const char *categorical_obs, const int
     int *left_indices = new int[left_count];
     std::copy(pre_left_indices.begin(), pre_left_indices.begin() + left_count, left_indices);
 
-    this->left_child = new TreeNode(left_indices, left_count, this->n_num_features, this->n_cat_features, this->output_dim, this->policy_dim, this->depth + 1, node_idx + 1);
+    this->left_child = new TreeNode(left_indices, left_count, this->n_num_features, this->n_cat_features, this->output_dim, this->depth + 1, node_idx + 1);
     if (this->left_child == nullptr) {
         std::cerr << "Memory allocation failed" << std::endl;
         delete[] left_indices;
@@ -102,7 +102,7 @@ int TreeNode::splitNode(const float *obs, const char *categorical_obs, const int
     }
     int *right_indices = new int[right_count];
     std::copy(pre_right_indices.begin(), pre_right_indices.begin() + right_count, right_indices);
-    this->right_child = new TreeNode(right_indices, right_count, this->n_num_features, this->n_cat_features, this->output_dim, this->policy_dim, this->depth + 1, node_idx + 2);
+    this->right_child = new TreeNode(right_indices, right_count, this->n_num_features, this->n_cat_features, this->output_dim, this->depth + 1, node_idx + 2);
     if (this->right_child == nullptr) {
         std::cerr << "Memory allocation failed" << std::endl;
         delete[] right_indices;

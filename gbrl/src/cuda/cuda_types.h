@@ -31,7 +31,7 @@
 
 struct SGDOptimizerGPU{
     int start_idx;
-    int end_idx;
+    int stop_idx;
     float init_lr;
     schedulerFunc scheduler;
 };

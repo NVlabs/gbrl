@@ -52,11 +52,11 @@
 
 
 
-GBRL::GBRL(int output_dim, int policy_dim, int max_depth, int min_data_in_leaf, 
+GBRL::GBRL(int output_dim, int max_depth, int min_data_in_leaf, 
            int n_bins, int par_th, float cv_beta, scoreFunc split_score_func,
            generatorType generator_type, bool use_cv, int batch_size, growPolicy grow_policy, int verbose, 
            deviceType device){
-    this->metadata = ensemble_metadata_alloc(INITAL_MAX_TREES, INITAL_MAX_TREES * (1 << max_depth), TREES_BATCH, TREES_BATCH * (1 << max_depth), output_dim, policy_dim, max_depth, min_data_in_leaf, n_bins, par_th, cv_beta, verbose, batch_size, use_cv, split_score_func, generator_type, grow_policy);
+    this->metadata = ensemble_metadata_alloc(INITAL_MAX_TREES, INITAL_MAX_TREES * (1 << max_depth), TREES_BATCH, TREES_BATCH * (1 << max_depth), output_dim, max_depth, min_data_in_leaf, n_bins, par_th, cv_beta, verbose, batch_size, use_cv, split_score_func, generator_type, grow_policy);
     this->sheader = create_header();
 #ifdef USE_CUDA
     if (device == gpu){
@@ -70,11 +70,11 @@ GBRL::GBRL(int output_dim, int policy_dim, int max_depth, int min_data_in_leaf,
         
 }
 
-GBRL::GBRL(int output_dim, int policy_dim, int max_depth, int min_data_in_leaf, 
+GBRL::GBRL(int output_dim, int max_depth, int min_data_in_leaf, 
            int n_bins, int par_th, float cv_beta, std::string split_score_func,
            std::string generator_type, bool use_cv, int batch_size, 
            std::string grow_policy, int verbose, std::string device){
-    this->metadata = ensemble_metadata_alloc(INITAL_MAX_TREES, INITAL_MAX_TREES * (1 << max_depth), TREES_BATCH, TREES_BATCH * (1 << max_depth), output_dim, policy_dim, max_depth, min_data_in_leaf, n_bins, par_th, cv_beta, verbose, batch_size, use_cv, stringToScoreFunc(split_score_func), stringTogeneratorType(generator_type), stringTogrowPolicy(grow_policy));
+    this->metadata = ensemble_metadata_alloc(INITAL_MAX_TREES, INITAL_MAX_TREES * (1 << max_depth), TREES_BATCH, TREES_BATCH * (1 << max_depth), output_dim, max_depth, min_data_in_leaf, n_bins, par_th, cv_beta, verbose, batch_size, use_cv, stringToScoreFunc(split_score_func), stringTogeneratorType(generator_type), stringTogrowPolicy(grow_policy));
     this->sheader = create_header();
 #ifdef USE_CUDA
     if (stringTodeviceType(device) == gpu){
@@ -293,12 +293,24 @@ std::string GBRL::get_device(){
 }
 
 void GBRL::set_optimizer(optimizerAlgo algo, schedulerFunc scheduler_func, float init_lr, 
+                        int start_idx, int stop_idx, 
                         float stop_lr, int T, 
-                        float beta_1, float beta_2, float eps = 1.0e-8, float shrinkage = 1.0e-5){
-    if (this->opts.size() >= 2){
-        std::cerr << "Already set two optimizers. This is the limit." << std::endl;
+                        float beta_1, float beta_2, 
+                        float eps = 1.0e-8, float shrinkage = 1.0e-5){
+    if (this->opts.size() >= static_cast<size_t>(this->metadata->output_dim)){
+        std::cerr << "Already set " << this->opts.size() << " optimizers. This is the limit." << std::endl;
         throw std::runtime_error("Optimizer Limit Reached");
         return;
+    }
+    if (start_idx >= stop_idx){
+        std::cerr << "start idx " << start_idx << " is not < " << stop_idx << "! Start idx must be smaller than stop idx" << std::endl;
+        throw std::runtime_error("invalid index ranges");
+        return; 
+    }
+    if (start_idx < 0 || stop_idx <= 0 || start_idx >= this->metadata->output_dim || stop_idx > this->metadata->output_dim){
+        std::cerr << "Invalid start index: "  << start_idx << " or stop index: " << stop_idx << " in range: [0, " << this->metadata->output_dim  <<  "]" << std::endl;
+        throw std::runtime_error("invalid index ranges");
+        return; 
     }
 
     (void)shrinkage;
@@ -317,21 +329,11 @@ void GBRL::set_optimizer(optimizerAlgo algo, schedulerFunc scheduler_func, float
         } else if (scheduler_func == Linear){
             opt = new AdamOptimizer(scheduler_func, init_lr, stop_lr, T,  beta_1, beta_2, eps);
         } else {
-            std::cerr << "Unrecoginized scheduler func." << std::endl;
+            std::cerr << "Unrecognized scheduler func." << std::endl;
             opt = nullptr;
             throw std::runtime_error("Unrecognized scheduler func");
             return;
         }
-
-        if (this->opts.size() == 0){
-            opt->set_indices(0, this->metadata->policy_dim);
-            std::cout << "Setting policy optimizer." << std::endl;
-        } else {
-             opt->set_indices(this->metadata->policy_dim, this->metadata->output_dim);
-             std::cout << "Setting value optimizer. Warning cannot set more optimizers" << std::endl;
-        }
-
-        this->opts.push_back(opt);
         this->parallel_predict = false;
     } else if (algo == SGD){
         if (scheduler_func == Const){
@@ -339,34 +341,36 @@ void GBRL::set_optimizer(optimizerAlgo algo, schedulerFunc scheduler_func, float
         } else if (scheduler_func == Linear){
             opt = new SGDOptimizer(scheduler_func, init_lr, stop_lr, T);
         } else {
-            std::cerr << "Unrecoginized scheduler func." << std::endl;
+            std::cerr << "Unrecognized scheduler func." << std::endl;
             opt = nullptr;
-            throw std::runtime_error("Unrecoginized scheduler func");
+            throw std::runtime_error("Unrecognized scheduler func");
             return;
         }
-        if (this->opts.size() == 0){
-            opt->set_indices(0, this->metadata->policy_dim);
-            std::cout << "Setting policy optimizer indices: 0" << "->" <<  this->metadata->policy_dim << std::endl;
-
-        } else {
-             opt->set_indices(this->metadata->policy_dim, this->metadata->output_dim);
-             std::cout << "Setting value optimizer indices: " << this->metadata->policy_dim << "->" << this->metadata->output_dim << std::endl;
-             std::cout <<"Note cannot set more optimizers" << std::endl;
+    } else {
+            std::cerr << "Unrecognized optimizer algo" << std::endl;
+            opt = nullptr;
+            throw std::runtime_error("Unrecognized optimizer algo");
+            return;
         }
-        this->opts.push_back(opt);
-    }
+     opt->set_indices(start_idx, stop_idx);
+#ifdef DEBUG
+            std::cout << "Setting optimizer " << this->opts.size() + 1 << " out of a maximum of " << this->metadata->output_dim << std::endl;
+#endif
+    this->opts.push_back(opt);
 }
 
-std::tuple<float, float> GBRL::get_scheduler_lrs(){
-    float lr_policy = 0.0, lr_value = 0.0;
-    int T = this->metadata->n_trees;
-    if (this->opts.size() > 0){
-        lr_policy = this->opts[0]->scheduler->get_lr(T);
-        if (this->opts.size() == 2){
-            lr_value = this->opts[1]->scheduler->get_lr(T);
-        }
+float* GBRL::get_scheduler_lrs(){
+    if (this->opts.size() == 0){
+        std::cerr << "No optimizers found." << std::endl;
+        throw std::runtime_error("No optimizers found");
+        return nullptr;
     }
-    return std::make_tuple(lr_policy, lr_value);
+    float *lrs = init_zero_mat(static_cast<int>(this->opts.size()));
+    int T = this->metadata->n_trees;
+    for (size_t i = 0; i < this->opts.size(); ++i){
+        lrs[i] = this->opts[i]->scheduler->get_lr(T);
+    }
+    return lrs;
 }
 
 bool GBRL::cuda_available(){
@@ -821,7 +825,7 @@ int GBRL::loadFromFile(const std::string& filename){
 
     this->device = cpu;
     std::cout << "######## Loaded GBRL model ########" << std::endl;
-    std::cout << "output_dim: " << this->metadata->output_dim << " policy_dim: " << this->metadata->policy_dim;
+    std::cout << "output_dim: " << this->metadata->output_dim;
     std::cout << " max_depth: " << this->metadata->max_depth << " min_data_in_leaf: " << this->metadata->min_data_in_leaf << std::endl;
     std::cout << "generator_type: " << generatorTypeToString(this->metadata->generator_type) << " n_bins: " << this->metadata->n_bins;
     std::cout << " cv_beta: " << this->metadata->cv_beta << " split_score_func: " << scoreFuncToString(this->metadata->split_score_func) << std::endl;
@@ -907,7 +911,7 @@ void GBRL::print_tree(int tree_idx){
     int n_leaves = stop_leaf_idx - edata_cpu->tree_indices[tree_idx];
 
     std::cout << growPolicyToString(this->metadata->grow_policy) <<" DecisionTree idx: " << tree_idx;
-    std::cout <<  " output_dim: " << this->metadata->output_dim << " policy_dim: " << this->metadata->policy_dim << " n_bins: " << this->metadata->n_bins;
+    std::cout <<  " output_dim: " << this->metadata->output_dim << " n_bins: " << this->metadata->n_bins;
     std::cout <<  " min_data_in_leaf: " << this->metadata->min_data_in_leaf << " par_th: " << this->metadata->par_th << " max_depth: " << this->metadata->max_depth << std::endl;
     std::cout << "Leaf Nodes: " << n_leaves << std::endl;
     int ctr = 0;

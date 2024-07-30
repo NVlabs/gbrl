@@ -248,7 +248,7 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
     std::iota(root_sample_indices, root_sample_indices + n_samples, 0);
 
     std::vector<TreeNode*> tree_nodes; 
-    TreeNode *rootNode = new TreeNode(root_sample_indices, n_samples, metadata->n_num_features, metadata->n_cat_features, metadata->output_dim, metadata->policy_dim, depth, 0);
+    TreeNode *rootNode = new TreeNode(root_sample_indices, n_samples, metadata->n_num_features, metadata->n_cat_features, metadata->output_dim, depth, 0);
     tree_nodes.push_back(rootNode);
 
     int n_candidates = generator.n_candidates;
@@ -363,7 +363,7 @@ int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMe
 
     std::vector<TreeNode*> tree_nodes(max_n_leaves); 
     std::vector<TreeNode*> child_tree_nodes(max_n_leaves); 
-    TreeNode *rootNode = new TreeNode(root_sample_indices, n_samples, metadata->n_num_features, metadata->n_cat_features, metadata->output_dim, metadata->policy_dim, depth, 0);
+    TreeNode *rootNode = new TreeNode(root_sample_indices, n_samples, metadata->n_num_features, metadata->n_cat_features, metadata->output_dim, depth, 0);
     tree_nodes[0] = rootNode;
     float parent_score = 0.0f;
 

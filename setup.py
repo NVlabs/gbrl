@@ -96,6 +96,6 @@ setup(
     name="gbrl",
     ext_modules=[CMakeExtension('gbrl/gbrl_cpp', sourcedir='.')],
     cmdclass=dict(build_ext=CMakeBuild),
-    packages=find_packages(),  # List of all packages to include
+    packages=find_packages(include=["gbrl"]),  # List of all packages to include
     include_package_data=True,
 )

@@ -143,10 +143,9 @@ std::string schedulerTypeToString(schedulerFunc func) {
     }
 }
 
-ensembleMetaData* ensemble_metadata_alloc(int max_trees, int max_leaves, int max_trees_batch, int max_leaves_batch, int output_dim, int policy_dim, int max_depth, int min_data_in_leaf, int n_bins, int par_th, float cv_beta, int verbose, int batch_size, bool use_cv, scoreFunc split_score_func, generatorType generator_type, growPolicy grow_policy){
+ensembleMetaData* ensemble_metadata_alloc(int max_trees, int max_leaves, int max_trees_batch, int max_leaves_batch, int output_dim, int max_depth, int min_data_in_leaf, int n_bins, int par_th, float cv_beta, int verbose, int batch_size, bool use_cv, scoreFunc split_score_func, generatorType generator_type, growPolicy grow_policy){
     ensembleMetaData *metadata = new ensembleMetaData;
     metadata->output_dim = output_dim; 
-    metadata->policy_dim = policy_dim; 
     metadata->max_depth = max_depth; 
     metadata->min_data_in_leaf = min_data_in_leaf; 
     metadata->par_th = par_th; 
@@ -342,7 +341,6 @@ void export_ensemble_data(std::ofstream& header_file, const std::string& model_n
     header_file << "max_trees_batch: " << metadata->max_trees_batch << ", ";
     header_file << "max_leaves_batch: " << metadata->max_leaves_batch << ", ";
     header_file << "output_dim: " << metadata->output_dim << ", ";
-    header_file << "policy_dim: " << metadata->policy_dim;
     header_file << "\nmax_depth: " << metadata->max_depth << ", ";
     header_file << "min_data_in_leaf: " << metadata->min_data_in_leaf << ", ";
     header_file << "n_bins: " << metadata->n_bins << ", ";
@@ -407,7 +405,7 @@ void export_ensemble_data(std::ofstream& header_file, const std::string& model_n
         }
         int value_idx = i*metadata->output_dim;
         for (size_t opt_idx = 0; opt_idx < opts.size(); ++opt_idx){
-            for (int j=opts[opt_idx]->start_idx; j < opts[opt_idx]->end_idx; ++j){
+            for (int j=opts[opt_idx]->start_idx; j < opts[opt_idx]->stop_idx; ++j){
                 value = -edata_cpu->values[value_idx + j] * opts[opt_idx]->scheduler->get_lr(tree_idx);
                 header_file << value;
                 if ((i < metadata->n_leaves - 1) || (j < metadata->output_dim - 1  && i == metadata->n_leaves - 1))

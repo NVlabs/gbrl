@@ -20,7 +20,7 @@ from torch.nn.functional import mse_loss
 
 from sklearn import datasets
 
-from gbrl import GradientBoostingTrees, cuda_available, ActorCritic
+from gbrl import GBRL, cuda_available, ActorCritic
 
 def rmse(preds: Union[np.array, th.Tensor], targets: Union[np.array, th.Tensor]) -> Tuple[float, np.array]:
     if isinstance(preds, th.Tensor):
@@ -51,13 +51,13 @@ def rmse_model(model, X, y, n_epochs):
     loss = (0.5*mse_loss(y_pred, y_)).sqrt().item()
     return loss
 
-def ac_rmse_model(model, X, y, n_epochs, shared):
+def ac_rmse_model(model, X, y, n_epochs):
     y_ac = th.tensor(y[:, :-1], dtype=th.float32)
     y_value = th.tensor(y[:, -1], dtype=th.float32)
     X_ = X.copy()
     epoch = 0
     while epoch < n_epochs:
-        theta, value = model(X_, requires_grad=True)
+        theta, value = model(X_)
         loss_theta = 0.5*mse_loss(theta, y_ac) * y_ac.shape[1]
         loss_theta.backward()
         loss_value = 0.5*mse_loss(value, y_value)
@@ -92,6 +92,15 @@ class TestGBTMulti(unittest.TestCase):
         cls.out_dim = out_dim
         cls.n_epochs = 100
         cls.test_dir = tempfile.mkdtemp()
+        cls.tree_struct = {'max_depth': 4, 
+                'n_bins': 256,'min_data_in_leaf': 0,
+                'par_th': 2,
+                'grow_policy': 'greedy'}
+        cls.sgd_optimizer = { 'algo': 'SGD',
+                    'lr': 1.0,
+                    'start_idx': 0,
+                    'stop_idx': out_dim
+                }
     
     @classmethod 
     def tearDownClass(cls):
@@ -102,18 +111,11 @@ class TestGBTMulti(unittest.TestCase):
     def test_cosine_cpu(self):
         print("Running Multi test_cosine_cpu")
         X, y = self.data
-        tree_struct = {'max_depth': 4, 
-                'n_bins': 256,'min_data_in_leaf': 0,
-                'par_th': 2,
-                'grow_policy': 'greedy'}
-        optimizer = { 'algo': 'SGD',
-                    'lr': 1.0,
-                }
         gbrl_params = dict({"control_variates": False, "split_score_func": "Cosine"})
-        model = GradientBoostingTrees(
+        model = GBRL(
                             output_dim=self.out_dim,
-                            tree_struct=tree_struct,
-                            optimizer=optimizer,
+                            tree_struct=self.tree_struct,
+                            optimizer=self.sgd_optimizer,
                             gbrl_params=gbrl_params,
                             verbose=0,
                             device='cpu')
@@ -130,15 +132,13 @@ class TestGBTMulti(unittest.TestCase):
                 'n_bins': 256,'min_data_in_leaf': 1,
                 'par_th': 2,
                 'grow_policy': 'greedy'}
-        optimizer = { 'algo': 'SGD',
-                    'lr': 1.0,
-                }
+
         gbrl_params = dict({"control_variates": False, "split_score_func": "L2",
                             "generator_type": "Uniform"})
-        model = GradientBoostingTrees(
+        model = GBRL(
                             output_dim=self.out_dim,
                             tree_struct=tree_struct,
-                            optimizer=optimizer,
+                            optimizer=self.sgd_optimizer,
                             gbrl_params=gbrl_params,
                             verbose=0,
                             device='cpu')
@@ -151,21 +151,19 @@ class TestGBTMulti(unittest.TestCase):
     def test_cosine_adam_cpu(self):
         print("Running Multi test_cosine_adam_cpu")
         X, y = self.data
-        tree_struct = {'max_depth': 4, 
-                'n_bins': 256,'min_data_in_leaf': 0,
-                'par_th': 2,
-                'grow_policy': 'greedy'}
-        optimizer = { 'algo': 'Adam',
+        optimizer = {'algo': 'Adam',
                     'lr': 1.0,
+                    'start_idx': 0,
+                    'stop_idx': self.out_dim
                 }
         gbrl_params = dict({"control_variates": False, "split_score_func": "Cosine"})
-        model = GradientBoostingTrees(
-                            output_dim=self.out_dim,
-                            tree_struct=tree_struct,
-                            optimizer=optimizer,
-                            gbrl_params=gbrl_params,
-                            verbose=0,
-                            device='cpu')
+        model = GBRL(
+                    output_dim=self.out_dim,
+                    tree_struct=self.tree_struct,
+                    optimizer=optimizer,
+                    gbrl_params=gbrl_params,
+                    verbose=0,
+                    device='cpu')
         model.set_bias_from_targets(y)
         loss = rmse_model(model, X, y, self.n_epochs)
         value = 50.0
@@ -176,18 +174,11 @@ class TestGBTMulti(unittest.TestCase):
     def test_cosine_gpu(self):
         print("Running Multi test_cosine_gpu")
         X, y = self.data
-        tree_struct = {'max_depth': 4, 
-                       'n_bins': 256,'min_data_in_leaf': 0,
-                       'par_th': 2,
-                       'grow_policy': 'greedy'}
-        optimizer = { 'algo': 'SGD',
-                    'lr': 1.0,
-                }
         gbrl_params = dict({"control_variates": False, "split_score_func": "Cosine"})
-        model = GradientBoostingTrees(
+        model = GBRL(
                             output_dim=self.out_dim,
-                            tree_struct=tree_struct,
-                            optimizer=optimizer,
+                            tree_struct=self.tree_struct,
+                            optimizer=self.sgd_optimizer,
                             gbrl_params=gbrl_params,
                             verbose=0,
                             device='cuda')
@@ -203,14 +194,11 @@ class TestGBTMulti(unittest.TestCase):
                 'n_bins': 256,'min_data_in_leaf': 0,
                 'par_th': 2,
                 'grow_policy': 'oblivious'}
-        optimizer = { 'algo': 'SGD',
-                    'lr': 1.0,
-                }
         gbrl_params = dict({"control_variates": False, "split_score_func": "Cosine"})
-        model = GradientBoostingTrees(
+        model = GBRL(
                             output_dim=self.out_dim,
                             tree_struct=tree_struct,
-                            optimizer=optimizer,
+                            optimizer=self.sgd_optimizer,
                             gbrl_params=gbrl_params,
                             verbose=0,
                             device='cpu')
@@ -227,14 +215,11 @@ class TestGBTMulti(unittest.TestCase):
                 'n_bins': 256,'min_data_in_leaf': 0,
                 'par_th': 2,
                 'grow_policy': 'oblivious'}
-        optimizer = { 'algo': 'SGD',
-                    'lr': 1.0,
-                }
         gbrl_params = dict({"control_variates": False, "split_score_func": "Cosine"})
-        model = GradientBoostingTrees(
+        model = GBRL(
                             output_dim=self.out_dim,
                             tree_struct=tree_struct,
-                            optimizer=optimizer,
+                            optimizer=self.sgd_optimizer,
                             gbrl_params=gbrl_params,
                             verbose=0,
                             device='cuda')
@@ -246,18 +231,11 @@ class TestGBTMulti(unittest.TestCase):
     def test_l2_cpu(self):
         print("Running Multi test_l2_cpu")
         X, y = self.data
-        tree_struct = {'max_depth': 4, 
-                'n_bins': 256,'min_data_in_leaf': 0,
-                'par_th': 2,
-                'grow_policy': 'greedy'}
-        optimizer = { 'algo': 'SGD',
-                    'lr': 1.0,
-                }
         gbrl_params = dict({"control_variates": False, "split_score_func": "L2"})
-        model = GradientBoostingTrees(
+        model = GBRL(
                             output_dim=self.out_dim,
-                            tree_struct=tree_struct,
-                            optimizer=optimizer,
+                            tree_struct=self.tree_struct,
+                            optimizer=self.sgd_optimizer,
                             gbrl_params=gbrl_params,
                             verbose=0,
                             device='cpu')
@@ -270,18 +248,11 @@ class TestGBTMulti(unittest.TestCase):
     def test_l2_gpu(self):
         print("Running Multi test_l2_gpu")
         X, y = self.data
-        tree_struct = {'max_depth': 4, 
-                'n_bins': 256,'min_data_in_leaf': 0,
-                'par_th': 2,
-                'grow_policy': 'greedy'}
-        optimizer = { 'algo': 'SGD',
-                    'lr': 1.0,
-                }
         gbrl_params = dict({"control_variates": False, "split_score_func": "L2"})
-        model = GradientBoostingTrees(
+        model = GBRL(
                             output_dim=self.out_dim,
-                            tree_struct=tree_struct,
-                            optimizer=optimizer,
+                            tree_struct=self.tree_struct,
+                            optimizer=self.sgd_optimizer,
                             gbrl_params=gbrl_params,
                             verbose=0,
                             device='cuda')
@@ -297,14 +268,11 @@ class TestGBTMulti(unittest.TestCase):
                 'n_bins': 256,'min_data_in_leaf': 0,
                 'par_th': 2,
                 'grow_policy': 'oblivious'}
-        optimizer = { 'algo': 'SGD',
-                    'lr': 1.0,
-                }
         gbrl_params = dict({"control_variates": False, "split_score_func": "L2"})
-        model = GradientBoostingTrees(
+        model = GBRL(
                             output_dim=self.out_dim,
                             tree_struct=tree_struct,
-                            optimizer=optimizer,
+                            optimizer=self.sgd_optimizer,
                             gbrl_params=gbrl_params,
                             verbose=0,
                             device='cpu')
@@ -316,30 +284,29 @@ class TestGBTMulti(unittest.TestCase):
     def test_1shared_cpu(self):
         print("Running shared_cpu")
         X, y = self.data
-        tree_struct = {'max_depth': 4, 
-                        'n_bins': 256,'min_data_in_leaf': 0,
-                        'par_th': 2,
-                        'grow_policy': 'greedy'
-                        }
         policy_optimizer = {
             'policy_algo': 'SGD',
             'policy_lr': 1.0,
+            'start_idx': 0,
+            'stop_idx': self.out_dim - 1
         }
         value_optimizer = {
                     'value_algo': 'SGD',
                     'value_lr': 0.1,
+                    'start_idx': self.out_dim - 1,
+                    'stop_idx': self.out_dim
                 }
         gbrl_params = dict({"control_variates": False, "split_score_func": "cosine"})
         model = ActorCritic(
                             output_dim=self.out_dim,
-                            tree_struct=tree_struct,
+                            tree_struct=self.tree_struct,
                             policy_optimizer=policy_optimizer,
                             shared_tree_struct=True,
                             value_optimizer=value_optimizer,
                             gbrl_params=gbrl_params,
                             verbose=0,
                             device='cpu')
-        policy_loss, value_loss = ac_rmse_model(model, X, y, self.n_epochs, shared=True)
+        policy_loss, value_loss = ac_rmse_model(model, X, y, self.n_epochs)
         policy_value = 10.0
         value_value = 30
         self.assertTrue(policy_loss < policy_value, f'Expected loss = {policy_loss} < {policy_value}')
@@ -349,31 +316,29 @@ class TestGBTMulti(unittest.TestCase):
     def test_1separate_cpu(self):
         print("Running separate_cpu")
         X, y = self.data
-        tree_struct = {'max_depth': 4, 
-                        'n_bins': 256,'min_data_in_leaf': 0,
-                        'par_th': 2,
-                        'grow_policy': 'greedy'
-                        }
         policy_optimizer = {
             'policy_algo': 'SGD',
             'policy_lr': 1.0,
+            'start_idx': 0,
+            'stop_idx': self.out_dim - 1
         }
         value_optimizer = {
-                    'value_algo': 'SGD',
-                    'value_lr': 0.1,
-                }
+            'value_algo': 'SGD',
+            'value_lr': 0.1,
+            'start_idx': 0,
+            'stop_idx': 1
+        }
         gbrl_params = dict({"control_variates": False, "split_score_func": "cosine"})
         model = ActorCritic(
                             output_dim=self.out_dim,
-                            tree_struct=tree_struct,
+                            tree_struct=self.tree_struct,
                             policy_optimizer=policy_optimizer,
                             shared_tree_struct=False,
                             value_optimizer=value_optimizer,
                             gbrl_params=gbrl_params,
                             verbose=0,
                             device='cpu')
-
-        policy_loss, value_loss = ac_rmse_model(model, X, y, self.n_epochs, shared=False)
+        policy_loss, value_loss = ac_rmse_model(model, X, y, self.n_epochs)
         policy_value = 3.0
         value_value = 30
         self.assertTrue(policy_loss < policy_value, f'Expected loss = {policy_loss} < {policy_value}')
@@ -384,30 +349,29 @@ class TestGBTMulti(unittest.TestCase):
     def test_1separate_gpu(self):
         print("Running separate_gpu")
         X, y = self.data
-        tree_struct = {'max_depth': 4, 
-                        'n_bins': 256,'min_data_in_leaf': 0,
-                        'par_th': 2,
-                        'grow_policy': 'greedy'
-                        }
         policy_optimizer = {
             'policy_algo': 'SGD',
             'policy_lr': 1.0,
+            'start_idx': 0,
+            'stop_idx': self.out_dim -1
         }
         value_optimizer = {
                     'value_algo': 'SGD',
                     'value_lr': 0.1,
+                    'start_idx': 0,
+                    'stop_idx': 1
                 }
         gbrl_params = dict({"control_variates": False, "split_score_func": "cosine"})
         model = ActorCritic(
                             output_dim=self.out_dim,
-                            tree_struct=tree_struct,
+                            tree_struct=self.tree_struct,
                             policy_optimizer=policy_optimizer,
                             shared_tree_struct=False,
                             value_optimizer=value_optimizer,
                             gbrl_params=gbrl_params,
                             verbose=0,
                             device='gpu')
-        policy_loss, value_loss = ac_rmse_model(model, X, y, self.n_epochs, shared=False)
+        policy_loss, value_loss = ac_rmse_model(model, X, y, self.n_epochs)
         policy_value = 2.0
         value_value = 30
         self.assertTrue(policy_loss < policy_value, f'Expected loss = {policy_loss} < {policy_value}')
@@ -418,30 +382,29 @@ class TestGBTMulti(unittest.TestCase):
     def test_1shared_gpu(self):
         print("Running shared_gpu")
         X, y = self.data
-        tree_struct = {'max_depth': 4, 
-                        'n_bins': 256,'min_data_in_leaf': 0,
-                        'par_th': 2,
-                        'grow_policy': 'greedy'
-                        }
         policy_optimizer = {
             'policy_algo': 'SGD',
             'policy_lr': 1.0,
+            'start_idx': 0,
+            'stop_idx': self.out_dim - 1
         }
         value_optimizer = {
                     'value_algo': 'SGD',
                     'value_lr': 0.1,
+                    'start_idx': self.out_dim - 1,
+                    'stop_idx': self.out_dim
                 }
         gbrl_params = dict({"control_variates": False, "split_score_func": "cosine"})
         model = ActorCritic(
                             output_dim=self.out_dim,
-                            tree_struct=tree_struct,
+                            tree_struct=self.tree_struct,
                             policy_optimizer=policy_optimizer,
                             shared_tree_struct=True,
                             value_optimizer=value_optimizer,
                             gbrl_params=gbrl_params,
                             verbose=0,
                             device='cuda')
-        policy_loss, value_loss = ac_rmse_model(model, X, y, self.n_epochs, shared=True)
+        policy_loss, value_loss = ac_rmse_model(model, X, y, self.n_epochs)
         policy_value = 10.0
         value_value = 30
         self.assertTrue(policy_loss < policy_value, f'Expected loss = {policy_loss} < {policy_value}')
@@ -456,14 +419,11 @@ class TestGBTMulti(unittest.TestCase):
                 'n_bins': 256,'min_data_in_leaf': 0,
                 'par_th': 2,
                 'grow_policy': 'oblivious'}
-        optimizer = { 'algo': 'SGD',
-                    'lr': 1.0,
-                }
         gbrl_params = dict({"control_variates": False, "split_score_func": "L2"})
-        model = GradientBoostingTrees(
+        model = GBRL(
                             output_dim=self.out_dim,
                             tree_struct=tree_struct,
-                            optimizer=optimizer,
+                            optimizer=self.sgd_optimizer,
                             gbrl_params=gbrl_params,
                             verbose=0,
                             device='cuda')
@@ -475,13 +435,13 @@ class TestGBTMulti(unittest.TestCase):
     def test_loading(self):
         X, y = self.data
 
-        model = GradientBoostingTrees.load_model(os.path.join(self.test_dir, 'test_cosine_cpu'))
+        model = GBRL.load_model(os.path.join(self.test_dir, 'test_cosine_cpu'))
         y_pred = model.predict(X)
         loss = np.sqrt(np.mean((y_pred.squeeze() - y.squeeze())**2))
         self.assertTrue(loss < 2.0, f'Expected loss = {loss} < 2.0')
         
         
-        model = GradientBoostingTrees.load_model(os.path.join(self.test_dir, 'test_l2_cpu'))
+        model = GBRL.load_model(os.path.join(self.test_dir, 'test_l2_cpu'))
         y_pred = model.predict(X)
         loss = np.sqrt(np.mean((y_pred.squeeze() - y.squeeze())**2))
         self.assertTrue(loss < 0.5, f'Expected loss = {loss} < 0.5')
@@ -505,22 +465,22 @@ class TestGBTMulti(unittest.TestCase):
         self.assertTrue(value_loss < value_value, f'Expected loss = {value_loss} < {value_value}')
         
         if (cuda_available()):
-            model = GradientBoostingTrees.load_model(os.path.join(self.test_dir, 'test_cosine_gpu'))
+            model = GBRL.load_model(os.path.join(self.test_dir, 'test_cosine_gpu'))
             y_pred = model.predict(X)
             loss = np.sqrt(np.mean((y_pred.squeeze() - y.squeeze())**2))
             self.assertTrue(loss < 2.0, f'Expected loss = {loss} < 2.0')
             
-            model = GradientBoostingTrees.load_model(os.path.join(self.test_dir, 'test_cosine_oblivious_gpu'))
+            model = GBRL.load_model(os.path.join(self.test_dir, 'test_cosine_oblivious_gpu'))
             y_pred = model.predict(X)
             loss = np.sqrt(np.mean((y_pred.squeeze() - y.squeeze())**2))
             self.assertTrue(loss < 12.0, f'Expected loss = {loss} < 12.0')
             
-            model = GradientBoostingTrees.load_model(os.path.join(self.test_dir, 'test_l2_gpu'))
+            model = GBRL.load_model(os.path.join(self.test_dir, 'test_l2_gpu'))
             y_pred = model.predict(X)
             loss = np.sqrt(np.mean((y_pred.squeeze() - y.squeeze())**2))
             self.assertTrue(loss < 0.5, f'Expected loss = {loss} < 0.5')
 
-            model = GradientBoostingTrees.load_model(os.path.join(self.test_dir, 'test_l2_oblivious_gpu'))
+            model = GBRL.load_model(os.path.join(self.test_dir, 'test_l2_oblivious_gpu'))
             y_pred = model.predict(X)
             loss = np.sqrt(np.mean((y_pred.squeeze() - y.squeeze())**2))
             self.assertTrue(loss < 10.0, f'Expected loss = {loss} < 10.0')
@@ -543,7 +503,7 @@ class TestGBTMulti(unittest.TestCase):
             self.assertTrue(policy_loss < policy_value, f'Expected loss = {policy_loss} < {policy_value}')
             self.assertTrue(value_loss < value_value, f'Expected loss = {value_loss} < {value_value}')
 
-        model = GradientBoostingTrees.load_model(os.path.join(self.test_dir, 'test_cosine_adam_cpu'))
+        model = GBRL.load_model(os.path.join(self.test_dir, 'test_cosine_adam_cpu'))
         y_pred = model.predict(X)
         loss = np.sqrt(np.mean((y_pred.squeeze() - y.squeeze())**2))
         value = 50.0

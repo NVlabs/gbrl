@@ -108,30 +108,32 @@ void Predictor::predict_cpu(dataSet *dataset, float *preds, const ensembleData *
     const int output_dim = metadata->output_dim, par_th = metadata->par_th, n_samples = dataset->n_samples;
     add_vec_to_mat(preds, edata->bias, n_samples, output_dim, par_th);
     
-    int num_trees = metadata->n_trees;
-    if (stop_tree_idx > num_trees){
-        std::cerr << "Given stop_tree_idx idx: " << stop_tree_idx << " greater than number of trees in model: " << num_trees << std::endl;
+    int n_trees = metadata->n_trees;
+    if (n_trees == 0)
+        return;
+    if (stop_tree_idx > n_trees){
+        std::cerr << "Given stop_tree_idx: " << stop_tree_idx << " greater than number of trees in model: " << n_trees << std::endl;
         return;
     } 
-    if (num_trees == 0)
+    if (n_trees == 0)
         return; 
     
     if (stop_tree_idx == 0)
-        stop_tree_idx = num_trees;
+        stop_tree_idx = n_trees;
 
     if (opts.size() == 0){
         std::cerr << "No optimizers." << std::endl;
         return;
     }
-    num_trees = stop_tree_idx - start_tree_idx;
+    n_trees = stop_tree_idx - start_tree_idx;
     void (*predictFunc)(const float*, const char*, float*, const int, const ensembleData*, const ensembleMetaData*, const int, const int, std::vector<Optimizer*>) = nullptr;
     predictFunc = (metadata->grow_policy == OBLIVIOUS) ? &Predictor::predict_over_trees : &Predictor::predict_over_leaves;
-    int n_tree_threads = calculate_num_threads(num_trees, par_th);
+    int n_tree_threads = calculate_num_threads(n_trees, par_th);
     int n_sample_threads = calculate_num_threads(n_samples, par_th);
     // parallellize over trees
     if (n_tree_threads > 1 && parallel_predict && n_tree_threads > n_sample_threads){
         std::vector<float *> preds_buffer(n_tree_threads);
-        int trees_per_thread = num_trees / n_tree_threads;
+        int trees_per_thread = n_trees / n_tree_threads;
         omp_set_num_threads(n_tree_threads);
         for (int i = 0; i < n_tree_threads; ++i)
             preds_buffer[i] = init_zero_mat(n_samples*output_dim);

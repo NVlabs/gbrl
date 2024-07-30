@@ -13,16 +13,38 @@ from scipy.special import binom
 
 from .config import APPROVED_OPTIMIZERS, VALID_OPTIMIZER_ARGS
 
+import numpy as np 
+# Define custom dtypes
+numerical_dtype = np.dtype('float32')
+categorical_dtype = np.dtype('S128')  
+
+
+def process_array(arr: np.array)-> Tuple[np.array, np.array]:
+    """ Formats numpy array for C++ GBRL.
+    """
+    if np.issubdtype(arr.dtype, np.floating) or np.issubdtype(arr.dtype, np.integer):
+        return np.ascontiguousarray(arr, dtype=numerical_dtype), None 
+    else:
+        fixed_str = np.char.encode(arr.astype(str), 'utf-8').astype(categorical_dtype)
+        return None, np.ascontiguousarray(fixed_str)
+    
+def to_numpy(arr: Union[np.array, th.Tensor]) -> np.array:
+    if isinstance(arr, th.Tensor):
+        arr = arr.detach().cpu().numpy()
+    return np.ascontiguousarray(arr, dtype=numerical_dtype)
+
 def setup_optimizer(optimizer: Dict, prefix: str='') -> Dict:
     """Setup optimizer to correctly allign with GBRL C++ module
 
     Args:
         optimizer (Dict): optimizer dictionary
         prefix (str, optional): optimizer parameter prefix names such as: mu_lr, mu_algo, std_algo, policy_algo, value_algo, etc. Defaults to ''.
-
     Returns:
         Dict: modified optimizer dictionary
     """
+    assert isinstance(optimizer, dict), 'optimization must be a dictionary'
+    assert 'start_idx' in optimizer, "optimizer must have a start idx"
+    assert 'stop_idx' in optimizer, "optimizer must have a stop idx"
     if prefix:
         optimizer = {k.replace(prefix, ''): v for k, v in optimizer.items()}
     lr = optimizer.get('lr', 1.0) if 'init_lr' not in optimizer else optimizer['init_lr']
@@ -30,20 +52,21 @@ def setup_optimizer(optimizer: Dict, prefix: str='') -> Dict:
     optimizer['scheduler'] = 'Const'
     assert isinstance(lr, int) or isinstance(lr, float) or isinstance(lr, str), "lr must be a float or string"
     if isinstance(lr, str) and 'lin_' in lr:
+        assert 'T' in optimizer, "Linear optimizer must contain T the total number of iterations used for scheduling"
         lr = lr.replace('lin_', '')
         optimizer['scheduler'] = 'Linear'
     optimizer['init_lr'] = float(lr)
     optimizer['algo'] = optimizer.get('algo', 'SGD')
     assert optimizer['algo'] in APPROVED_OPTIMIZERS, f"optimization algo has to be in {APPROVED_OPTIMIZERS}"
-    optimizer['stop_lr'] = optimizer.get('stop_lr', 1.0e-8)
-    optimizer['beta_1'] = optimizer.get('beta_1', 0.9)
-    optimizer['beta_2'] = optimizer.get('beta_2', 0.999)
-    optimizer['eps'] = optimizer.get('eps', 1.0e-5)
-    optimizer['shrinkage'] = optimizer.get('shrinkage', 0.0)
-    if optimizer['shrinkage'] is None:
-        optimizer['shrinkage'] = 0.0
+    # optimizer['stop_lr'] = optimizer.get('stop_lr', 1.0e-8)
+    # optimizer['beta_1'] = optimizer.get('beta_1', 0.9)
+    # optimizer['beta_2'] = optimizer.get('beta_2', 0.999)
+    # optimizer['eps'] = optimizer.get('eps', 1.0e-5)
+    # optimizer['shrinkage'] = optimizer.get('shrinkage', 0.0)
+    # if optimizer['shrinkage'] is None:
+    #     optimizer['shrinkage'] = 0.0
 
-    return {k: v for k, v in optimizer.items() if k in VALID_OPTIMIZER_ARGS}
+    return {k: v for k, v in optimizer.items() if k in VALID_OPTIMIZER_ARGS and v is not None}
 
 
 def clip_grad_norm(grads: np.array, grad_clip: float) -> np.array:
@@ -56,6 +79,7 @@ def clip_grad_norm(grads: np.array, grad_clip: float) -> np.array:
     Returns:
         np.array: clipped gradients
     """
+    grads = to_numpy(grads)
     if grad_clip is None or grad_clip == 0.0:
         return grads
     if len(grads.shape) == 1:

@@ -28,11 +28,11 @@ class Optimizer {
         virtual void set_memory(const int n_samples, const int output_dim) = 0 ;
         void setAlgo(optimizerAlgo algo);
         optimizerAlgo getAlgo() const ;
-        void set_indices(int start_idx, int end_idx);
+        void set_indices(int start_idx, int stop_idx);
 
         Scheduler *scheduler;
         int start_idx = 0;
-        int end_idx = 0;
+        int stop_idx = 0;
     private:
         optimizerAlgo algo;
 };

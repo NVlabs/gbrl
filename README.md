@@ -29,7 +29,7 @@ The following results, obtained using the `GBRL_SB3` repository, demonstrate the
 
 ## Getting started
 ### Prerequisites
-- Python 3.7 or higher
+- Python 3.9 or higher
 - LLVM and OpenMP (macOS).
 
 ### Installation
