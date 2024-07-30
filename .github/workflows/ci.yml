@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - master
+    paths:
+      - 'gbrl/**'   # Trigger on changes to files in the src directory
   pull_request:
     branches:
       - master
