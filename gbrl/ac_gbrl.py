@@ -6,18 +6,18 @@
 # https://nvlabs.github.io/gbrl/license.html
 #
 ##############################################################################
-from typing import Dict, Tuple, Union
+from typing import Dict, Tuple, Union, Optional
 import os 
 import numpy as np
 import torch as th
 
 from .gbrl_wrapper import (GBTWrapper, SeparateActorCriticWrapper,
-                           SharedActorCriticWrapper, numerical_dtype)
-from .gbt import GradientBoostingTrees
-from .utils import setup_optimizer, clip_grad_norm
+                           SharedActorCriticWrapper, )
+from .gbt import GBRL
+from .utils import setup_optimizer, clip_grad_norm, numerical_dtype
 
 
-class ActorCritic(GradientBoostingTrees):
+class ActorCritic(GBRL):
     def __init__(self, 
                  tree_struct: Dict,
                  output_dim: int, 
@@ -53,12 +53,10 @@ class ActorCritic(GradientBoostingTrees):
         device (str, optional): GBRL device 'cpu' or 'cuda/gpu'. Defaults to 'cpu'.
         """
         policy_optimizer = setup_optimizer(policy_optimizer, prefix='policy_')
-        policy_optimizer['T'] = gbrl_params.get('T', 10000)
         if value_optimizer is not None:
             value_optimizer = setup_optimizer(value_optimizer, prefix='value_')
-            value_optimizer['T'] = gbrl_params.get('T', 10000)
         super().__init__(tree_struct,
-                         output_dim if shared_tree_struct else output_dim - 1,
+                         output_dim,
                          None,
                          gbrl_params,
                          verbose,
@@ -67,7 +65,7 @@ class ActorCritic(GradientBoostingTrees):
         self.value_optimizer = value_optimizer
 
         self.shared_tree_struct = True if value_optimizer is None else shared_tree_struct
-        self.bias = bias if bias is not None else np.zeros(self.output_dim, dtype=numerical_dtype)
+        self.bias = bias if bias is not None else np.zeros(self.output_dim if shared_tree_struct else self.output_dim - 1, dtype=numerical_dtype)
         # init model
         if self.shared_tree_struct:
             self._model = SharedActorCriticWrapper(self.output_dim, self.tree_struct, self.policy_optimizer, self.value_optimizer, self.gbrl_params, self.verbose, self.device) 
@@ -76,9 +74,9 @@ class ActorCritic(GradientBoostingTrees):
         self._model.reset()
         self._model.set_bias(self.bias)
         self.compressor = None
-        # if compression_params:
-        #     if shared_tree_struct:
 
+        self.policy_grad = None 
+        self.value_grad = None
         
     @classmethod
     def load_model(cls, load_name: str) -> "ActorCritic":
@@ -156,73 +154,93 @@ class ActorCritic(GradientBoostingTrees):
         theta, values = self.predict(observations)
         params = (th.tensor(theta.astype(np.single), requires_grad=requires_grad), th.tensor(values.astype(np.single), requires_grad=requires_grad))
         if requires_grad:
+            self.policy_grad = None
+            self.value_grad = None
             self.params = params
         return params
     
-    def step(self, observations: Union[np.array, th.Tensor], policy_grad_clip: float = None, value_grad_clip : float = None) -> Tuple[np.array, np.array]:
+    def step(self, observations: Union[np.array, th.Tensor], policy_grad_clip: float = None, value_grad_clip : float = None, policy_grad: Optional[Union[np.array, th.tensor]] = None, value_grad: Optional[Union[np.array, th.tensor]] = None) -> None:
         """Performs a boosting step for both actor and critic
 
         Args:
             observations (Union[np.array, th.Tensor]):
             policy_grad_clip (float, optional): . Defaults to None.
             value_grad_clip (float, optional):. Defaults to None.
-
-        Returns:
-            Tuple[np.array, np.array]: policy and value gradients
+            policy_grad (Optional[Union[np.array, th.tensor]], optional): manually calculated gradients. Defaults to None.
+            value_grad (Optional[Union[np.array, th.tensor]], optional): manually calculated gradients. Defaults to None.
         """
         n_samples = len(observations)
-        theta_grad = self.params[0].grad.detach().cpu().numpy() * n_samples
-        value_grad = self.params[1].grad.detach().cpu().numpy() * n_samples
+        if policy_grad is None:
+            policy_grad = self.params[0].grad.detach().cpu().numpy() * n_samples
 
-        theta_grad = clip_grad_norm(theta_grad, policy_grad_clip)
+        if value_grad is None:
+            value_grad = self.params[1].grad.detach().cpu().numpy() * n_samples
+
+        policy_grad = clip_grad_norm(policy_grad, policy_grad_clip)
         value_grad = clip_grad_norm(value_grad, value_grad_clip)
 
-        assert ~np.isnan(theta_grad).any(), "nan in assigned grads"
-        assert ~np.isinf(theta_grad).any(), "infinity in assigned grads"
+        assert ~np.isnan(policy_grad).any(), "nan in assigned grads"
+        assert ~np.isinf(policy_grad).any(), "infinity in assigned grads"
         assert ~np.isnan(value_grad).any(), "nan in assigned grads"
         assert ~np.isinf(value_grad).any(), "infinity in assigned grads"
-        self._model.step(observations, theta_grad, value_grad)
-        return theta_grad, value_grad
+        self._model.step(observations, policy_grad, value_grad)
+        self.policy_grad = policy_grad
+        self.value_grad = value_grad
     
-    def actor_step(self, observations: Union[np.array, th.Tensor], policy_grad_clip: float = None) -> np.array:
+    def actor_step(self, observations: Union[np.array, th.Tensor], policy_grad_clip: float = None, policy_grad: Optional[Union[np.array, th.tensor]] = None) -> None:
         """Performs a single boosting step for the actor (should only be used if actor and critic use separate models)
 
         Args:
             observations (Union[np.array, th.Tensor]):
             policy_grad_clip (float, optional): Defaults to None.
+            policy_grad (Optional[Union[np.array, th.tensor]], optional): manually calculated gradients. Defaults to None.
 
         Returns:
             np.array: policy gradient
         """
         assert not self.shared_tree_struct, "Cannot separate boosting steps for actor and critic when using separate tree architectures!"
         n_samples = len(observations)
-        theta_grad = self.params[0].grad.detach().cpu().numpy() * n_samples
-        theta_grad = clip_grad_norm(theta_grad, policy_grad_clip)
-        assert ~np.isnan(theta_grad).any(), "nan in assigned grads"
-        assert ~np.isinf(theta_grad).any(), "infinity in assigned grads"
+        if policy_grad is None:
+            policy_grad = self.params[0].grad.detach().cpu().numpy() * n_samples
+        policy_grad = clip_grad_norm(policy_grad, policy_grad_clip)
+        assert ~np.isnan(policy_grad).any(), "nan in assigned grads"
+        assert ~np.isinf(policy_grad).any(), "infinity in assigned grads"
 
-        self._model.step_policy(observations, theta_grad)
-        return theta_grad
+        self._model.step_policy(observations, policy_grad)
+        self.policy_grad = policy_grad
     
-    def critic_step(self, observations: Union[np.array, th.Tensor], value_grad_clip : float = None) -> np.array:
+    def critic_step(self, observations: Union[np.array, th.Tensor], value_grad_clip : float = None, value_grad: Optional[Union[np.array, th.tensor]] = None) -> None:
         """Performs a single boosting step for the critic (should only be used if actor and critic use separate models)
 
         Args:
             observations (Union[np.array, th.Tensor]):
             value_grad_clip (float, optional): Defaults to None.
+            value_grad (Optional[Union[np.array, th.tensor]], optional): manually calculated gradients. Defaults to None.
 
         Returns:
             np.array: value gradient
         """
         assert not self.shared_tree_struct, "Cannot separate boosting steps for actor and critic when using separate tree architectures!"
-        n_samples = len(observations)
-        value_grad = self.params[1].grad.detach().cpu().numpy() * n_samples
+        if value_grad is None:
+            n_samples = len(observations)
+            value_grad = self.params[1].grad.detach().cpu().numpy() * n_samples
         value_grad = clip_grad_norm(value_grad, value_grad_clip)
 
         assert ~np.isnan(value_grad).any(), "nan in assigned grads"
         assert ~np.isinf(value_grad).any(), "infinity in assigned grads"
         self._model.step_critic(observations, value_grad)
-        return value_grad
+        self.value_grad = value_grad
+
+    def get_params(self) -> Tuple[np.array, np.array]:
+        """Returns predicted actor and critic parameters and their respective gradients
+
+        Returns:
+            Tuple[np.array, np.array]
+        """
+        assert self.params is not None, "must run a forward pass first"
+        if isinstance(self.params, tuple):
+            (self.params[0].detach().cpu().numpy(),self.params[1].detach().cpu().numpy()) , (self.policy_grad, self.value_grad)
+        return self.params, (self.policy_grad, self.value_grad)
     
     def copy(self) -> "ActorCritic":
         """Copy class instance 
@@ -239,7 +257,7 @@ class ActorCritic(GradientBoostingTrees):
             copy_._model = self._model.copy()
         return copy_
     
-class ParametricActor(GradientBoostingTrees):
+class ParametricActor(GBRL):
     def __init__(self, 
                  tree_struct: Dict,
                  output_dim: int, 
@@ -270,7 +288,6 @@ class ParametricActor(GradientBoostingTrees):
         device (str, optional): GBRL device 'cpu' or 'cuda/gpu'. Defaults to 'cpu'.
         """
         policy_optimizer = setup_optimizer(policy_optimizer, prefix='policy_')
-        policy_optimizer['T'] = gbrl_params.get('T', 10000)
         super().__init__(tree_struct,
                          output_dim,
                          None,
@@ -280,28 +297,27 @@ class ParametricActor(GradientBoostingTrees):
         self.policy_optimizer = policy_optimizer
         self.bias = bias if bias is not None else np.zeros(self.output_dim, dtype=numerical_dtype)
         # init model
-        self._model = GBTWrapper(self.output_dim, self.output_dim, self.tree_struct, self.policy_optimizer, self.gbrl_params, self.verbose, self.device) 
+        self._model = GBTWrapper(self.output_dim, self.tree_struct, self.policy_optimizer, self.gbrl_params, self.verbose, self.device) 
         self._model.reset()
         self._model.set_bias(self.bias)
 
-    def step(self, observations: Union[np.array, th.Tensor], policy_grad_clip: float = None) -> np.array:
+    def step(self, observations: Union[np.array, th.Tensor], policy_grad_clip: float = None, policy_grad: Optional[Union[np.array, th.tensor]] = None) -> None:
         """Performs a single boosting iteration.
 
         Args:
             observations (Union[np.array, th.Tensor]):
             policy_grad_clip (float, optional): . Defaults to None.
-
-        Returns:
-            np.array: gradient w.r.t model outputs.
+            policy_grad (Optional[Union[np.array, th.tensor]], optional): manually calculated gradients. Defaults to None.
         """
-        n_samples = len(observations)
-        theta_grad = self.params.grad.detach().cpu().numpy() * n_samples
-        theta_grad = clip_grad_norm(theta_grad, policy_grad_clip)
-        assert ~np.isnan(theta_grad).any(), "nan in assigned grads"
-        assert ~np.isinf(theta_grad).any(), "infinity in assigned grads"
+        if policy_grad is None:
+            n_samples = len(observations)
+            policy_grad = self.params.grad.detach().cpu().numpy() * n_samples
+        policy_grad = clip_grad_norm(policy_grad, policy_grad_clip)
+        assert ~np.isnan(policy_grad).any(), "nan in assigned grads"
+        assert ~np.isinf(policy_grad).any(), "infinity in assigned grads"
 
-        self._model.step(observations, theta_grad)
-        return theta_grad
+        self._model.step(observations, policy_grad)
+        self.grad = policy_grad
 
     @classmethod
     def load_model(cls, load_name: str) -> "ParametricActor":
@@ -341,11 +357,12 @@ class ParametricActor(GradientBoostingTrees):
         """
         return self._model.get_num_trees()
      
-    def __call__(self, observations: Union[np.array, th.Tensor], requires_grad : bool = False) -> th.Tensor:
+    def __call__(self, observations: Union[np.array, th.Tensor], requires_grad : bool = True) -> th.Tensor:
         """ Returns actor output as Tensor. If `requires_grad=True` then stores 
            differentiable parameters in self.params 
         Args:
             observations (Union[np.array, th.Tensor])
+            requires_grad bool: Defaults to None.
 
         Returns:
             th.Tensor: GBRL outputs - a single parameter per action dimension.
@@ -353,6 +370,7 @@ class ParametricActor(GradientBoostingTrees):
         theta = self._model.predict(observations)
         params = th.tensor(theta, requires_grad=requires_grad)
         if requires_grad:
+            self.grads = None
             self.params = params
         return params
     
@@ -362,7 +380,7 @@ class ParametricActor(GradientBoostingTrees):
             copy_._model = self._model.copy()
         return copy_
     
-class GaussianActor(GradientBoostingTrees):
+class GaussianActor(GBRL):
     def __init__(self, 
                  tree_struct: Dict,
                  output_dim: int, 
@@ -398,14 +416,12 @@ class GaussianActor(GradientBoostingTrees):
         device (str, optional): GBRL device 'cpu' or 'cuda/gpu'. Defaults to 'cpu'.
         """
         mu_optimizer = setup_optimizer(mu_optimizer, prefix='mu_')
-        mu_optimizer['T'] = gbrl_params.get('T', 10000)
 
         self.bias = bias if bias is not None else np.zeros(output_dim, dtype=numerical_dtype)
 
         policy_dim = output_dim
         if std_optimizer is not None:
             std_optimizer = setup_optimizer(std_optimizer, prefix='std_')
-            std_optimizer['T'] = gbrl_params.get('T', 10000)
             policy_dim = output_dim // 2
             self.bias[policy_dim:] = log_std_init*np.ones(policy_dim, dtype=numerical_dtype)
         
@@ -423,28 +439,31 @@ class GaussianActor(GradientBoostingTrees):
         
         self.policy_dim = policy_dim
         # init model
-        self._model = GBTWrapper(self.output_dim, self.policy_dim, self.tree_struct, [mu_optimizer, std_optimizer], self.gbrl_params, self.verbose, self.device)
+        self._model = GBTWrapper(self.output_dim, self.tree_struct, [mu_optimizer, std_optimizer], self.gbrl_params, self.verbose, self.device)
         self._model.reset()
         self._model.set_bias(self.bias)
         
-    def step(self, observations: Union[np.array, th.Tensor], mu_grad_clip: float = None, std_grad_clip: float = None) -> Tuple[np.array, np.array]:
+    def step(self, observations: Union[np.array, th.Tensor], mu_grad_clip: float = None, log_std_grad_clip: float = None, mu_grad: Optional[Union[np.array, th.tensor]] = None, log_std_grad: Optional[Union[np.array, th.tensor]] = None) -> None:
         """Performs a single boosting iteration.
 
         Args:
             observations (Union[np.array, th.Tensor])
             mu_grad_clip (float, optional). Defaults to None.
-            std_grad_clip (float, optional). Defaults to None.
-
-        Returns:
-            Tuple[np.array, np.array]: Gradients w.r.t Gaussian parameters: mu and sigma.
+            log_std_grad_clip (float, optional). Defaults to None.
+            mu_grad (Optional[Union[np.array, th.tensor]], optional): manually calculated gradients. Defaults to None.
+            log_std_grad (Optional[Union[np.array, th.tensor]], optional): manually calculated gradients. Defaults to None.
         """
+
+
         n_samples = len(observations)
-        mu_grad = self.params[0].grad.detach().cpu().numpy() * n_samples
+        if mu_grad is None:
+            mu_grad = self.params[0].grad.detach().cpu().numpy() * n_samples
         mu_grad = clip_grad_norm(mu_grad, mu_grad_clip)
-        log_std_grad = None
+  
         if self.std_optimizer is not None:
-            log_std_grad = self.params[1].grad.detach().cpu().numpy() * n_samples
-            log_std_grad = clip_grad_norm(log_std_grad, std_grad_clip)
+            if log_std_grad is None:
+                log_std_grad = self.params[1].grad.detach().cpu().numpy() * n_samples
+            log_std_grad = clip_grad_norm(log_std_grad, log_std_grad_clip)
             theta_grad = np.concatenate([mu_grad, log_std_grad], axis=1)
         else:
             theta_grad = mu_grad
@@ -452,7 +471,9 @@ class GaussianActor(GradientBoostingTrees):
         assert ~np.isinf(theta_grad).any(), "infinity in assigned grads"
 
         self._model.step(observations, theta_grad)
-        return mu_grad, log_std_grad
+        self.grad = mu_grad
+        if self.std_optimizer is not None:
+            self.grad = (mu_grad, log_std_grad)
         
     def predict(self, observations: Union[np.array, th.Tensor]) -> Tuple[np.array, np.array]:
         """Predict the parameters of a Gaussian Distrbution as numpy arrays.
@@ -476,22 +497,23 @@ class GaussianActor(GradientBoostingTrees):
         """
         return self._model.get_num_trees()
 
-    def __call__(self, observations: Union[np.array, th.Tensor], requires_grad : bool = False) -> th.Tensor:
+    def __call__(self, observations: Union[np.array, th.Tensor], requires_grad : bool = True) -> th.Tensor:
         """Returns actor's outputs as tensor. If `requires_grad=True` then stores 
            differentiable parameters in self.params 
 
         Args:
             observations (Union[np.array, th.Tensor]):
-            requires_grad (bool, optional):. Defaults to False.
+            requires_grad (bool, optional):. Defaults to True.
 
         Returns:
             th.Tensor: Gaussian parameters
         """
         mean_actions, log_std = self.predict(observations)
-        params = (th.tensor(mean_actions, requires_grad=requires_grad), th.tensor(log_std, requires_grad=requires_grad if self.std_optimizer is not None else False))
+        gaussian_params = (th.tensor(mean_actions, requires_grad=requires_grad), th.tensor(log_std, requires_grad=requires_grad if self.std_optimizer is not None else False))
         if requires_grad:
-            self.params = params
-        return params
+            self.grad = None
+            self.params = gaussian_params
+        return gaussian_params
     
     def __copy__(self) -> "GaussianActor":
         std_optimizer = None if self.std_optimizer is None else self.std_optimizer.copy()
@@ -501,7 +523,7 @@ class GaussianActor(GradientBoostingTrees):
         return copy_
     
 
-class ContinuousCritic(GradientBoostingTrees):
+class ContinuousCritic(GBRL):
     def __init__(self, 
                  tree_struct: Dict,
                  output_dim: int, 
@@ -541,42 +563,41 @@ class ContinuousCritic(GradientBoostingTrees):
         verbose (int, optional): verbosity level. Defaults to 0.
         device (str, optional): GBRL device 'cpu' or 'cuda/gpu'. Defaults to 'cpu'.
         """
+
         weights_optimizer = setup_optimizer(weights_optimizer, prefix='weights_')
         bias_optimizer = setup_optimizer(bias_optimizer, prefix='bias_')
-        weights_optimizer['T'] = gbrl_params.get('T', 10000)
-        bias_optimizer['T'] = gbrl_params.get('T', 10000)
 
-        policy_dim = output_dim - 1
         super().__init__(tree_struct,
                          output_dim,
                          None, 
                          gbrl_params,
                          verbose,
                          device)
-        self.policy_dim = policy_dim
         self.weights_optimizer = weights_optimizer
         self.bias_optimizer = bias_optimizer
         self.target_model = None
         self.bias = bias if bias is not None else np.zeros(self.output_dim, dtype=numerical_dtype)
         self.target_update_interval = target_update_interval
         # init model
-        self._model = GBTWrapper(self.output_dim, self.policy_dim, self.tree_struct, [weights_optimizer, bias_optimizer], self.gbrl_params, self.verbose, self.device)
+        self._model = GBTWrapper(self.output_dim, self.tree_struct, [weights_optimizer, bias_optimizer], self.gbrl_params, self.verbose, self.device)
         self._model.reset()
         self._model.set_bias(self.bias)
         
-    def step(self, observations: Union[np.array, th.Tensor], q_grad_clip: float = None) -> Tuple[np.array, np.array]:
+    def step(self, observations: Union[np.array, th.Tensor], q_grad_clip: float = None, weight_grad: Optional[Union[np.array, th.tensor]] = None, bias_grad: Optional[Union[np.array, th.tensor]] = None) -> None:
         """Performs a single boosting step
 
         Args:
             observations (Union[np.array, th.Tensor]):
             q_grad_clip (float, optional):. Defaults to None.
-
-        Returns:
-            Tuple[np.array, np.array]: gradients w.r.t GBRL outputs: weight, bias vectors.
+        weight_grad (Optional[Union[np.array, th.tensor]], optional): manually calculated gradients. Defaults to None.
+            bias_grad (Optional[Union[np.array, th.tensor]], optional): manually calculated gradients. Defaults to None.           
         """
+
         n_samples = len(observations)
-        weight_grad = self.params[0].grad.detach().cpu().numpy() * n_samples
-        bias_grad = self.params[1].grad.detach().cpu().numpy() * n_samples
+        if weight_grad is None:
+            weight_grad = self.params[0].grad.detach().cpu().numpy() * n_samples
+        if bias_grad is None:
+            bias_grad = self.params[1].grad.detach().cpu().numpy() * n_samples
         weight_grad = clip_grad_norm(weight_grad, q_grad_clip)
         bias_grad = clip_grad_norm(bias_grad, q_grad_clip)
 
@@ -586,7 +607,7 @@ class ContinuousCritic(GradientBoostingTrees):
         assert ~np.isinf(bias_grad).any(), "infinity in assigned grads"
         theta_grad = np.concatenate([weight_grad, bias_grad], axis=1)
         self._model.step(observations, theta_grad)
-        return weight_grad, bias_grad
+        self.grad = (weight_grad, bias_grad)
         
     def predict(self, observations: Union[np.array, th.Tensor]) -> Tuple[np.array, np.array]:
         """Predict the parameters of a Continuous Critic as numpy arrays.
@@ -598,7 +619,8 @@ class ContinuousCritic(GradientBoostingTrees):
             np.array: _description_
         """
         theta = self._model.predict(observations)
-        weights, bias = theta[:, :self.policy_dim], theta[:, self.policy_dim:]
+        policy_dim = self.output_dim // 2
+        weights, bias = theta[:, :policy_dim], theta[:, policy_dim:]
         return weights, bias
 
     def predict_target(self, observations: Union[np.array, th.Tensor]) -> Tuple[th.Tensor, th.Tensor]:
@@ -613,7 +635,8 @@ class ContinuousCritic(GradientBoostingTrees):
         """
         n_trees = self._model.get_num_trees()
         theta = self._model.predict(observations, stop_idx=max(n_trees - self.target_update_interval, 1))
-        weights, bias = theta[:, :self.policy_dim], theta[:, self.policy_dim:]
+        policy_dim = self.output_dim // 2
+        weights, bias = theta[:, :policy_dim], theta[:, policy_dim:]
         return th.tensor(weights), th.tensor(bias)
 
     def get_num_trees(self) -> int:
@@ -638,6 +661,7 @@ class ContinuousCritic(GradientBoostingTrees):
         weights, bias = self.predict(observations)
         params = (th.tensor(weights, requires_grad=requires_grad), th.tensor(bias, requires_grad=requires_grad))
         if requires_grad:
+            self.grad = None
             self.params = params
         return params
     
@@ -648,7 +672,7 @@ class ContinuousCritic(GradientBoostingTrees):
         return copy_
     
 
-class DiscreteCritic(GradientBoostingTrees):
+class DiscreteCritic(GBRL):
     def __init__(self, 
                  tree_struct: Dict,
                  output_dim: int, 
@@ -679,7 +703,6 @@ class DiscreteCritic(GradientBoostingTrees):
         device (str, optional): GBRL device 'cpu' or 'cuda/gpu'. Defaults to 'cpu'.
         """
         critic_optimizer = setup_optimizer(critic_optimizer, prefix='critic_')
-        critic_optimizer['T'] = gbrl_params.get('T', 10000)
         super().__init__(tree_struct,
                          output_dim,
                          None, 
@@ -690,27 +713,25 @@ class DiscreteCritic(GradientBoostingTrees):
         self.target_update_interval = target_update_interval
         self.bias = bias if bias is not None else np.zeros(self.output_dim, dtype=numerical_dtype)
         # init model
-        self._model = GBTWrapper(self.output_dim, self.output_dim, self.tree_struct, self.critic_optimizer, self.gbrl_params, self.verbose, self.device)
+        self._model = GBTWrapper(self.output_dim, self.tree_struct, self.critic_optimizer, self.gbrl_params, self.verbose, self.device)
         self._model.reset()
         self._model.set_bias(self.bias)
 
-    def step(self, observations: Union[np.array, th.Tensor], max_q_grad_norm: np.array = None) -> np.array:
+    def step(self, observations: Union[np.array, th.Tensor], max_q_grad_norm: np.array = None, q_grad: Optional[Union[np.array, th.tensor]] = None) -> None:
         """Performs a single boosting iterations.
 
         Args:
             observations (Union[np.array, th.Tensor]):
             max_q_grad_norm (np.array, optional). Defaults to None.
-
-        Returns:
-            np.array: gradient w.r.t Critic's output.
+            q_grad (Optional[Union[np.array, th.tensor]], optional): manually calculated gradients. Defaults to None.
         """
-        n_samples = len(observations)
-        q_grad = self.params.grad.detach().cpu().numpy() * n_samples
+        if q_grad is None:
+            n_samples = len(observations)
+            q_grad = self.params.grad.detach().cpu().numpy() * n_samples
         q_grad = clip_grad_norm(q_grad, max_q_grad_norm)
       
         self._model.step(observations, q_grad)
-        return q_grad
-
+        self.grad = q_grad
 
     def predict(self, observations: Union[np.array, th.Tensor]) -> np.array:
         """Predict and return Critic's outputs as numpy array.
@@ -737,6 +758,7 @@ class DiscreteCritic(GradientBoostingTrees):
         q_values = self.predict(observations)
         params = th.tensor(q_values, requires_grad=requires_grad)
         if requires_grad:
+            self.grad = None
             self.params = params
         return params
 

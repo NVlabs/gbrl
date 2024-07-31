@@ -41,7 +41,7 @@ SGDOptimizerGPU** deepCopySGDOptimizerVectorToGPU(const std::vector<Optimizer*>&
         }
         cudaMemset(device_opt, 0, sizeof(SGDOptimizerGPU));
         cudaMemcpy(&(device_opt->start_idx), &(host_opts[i]->start_idx), sizeof(int), cudaMemcpyHostToDevice);
-        cudaMemcpy(&(device_opt->end_idx), &(host_opts[i]->end_idx), sizeof(int), cudaMemcpyHostToDevice);
+        cudaMemcpy(&(device_opt->stop_idx), &(host_opts[i]->stop_idx), sizeof(int), cudaMemcpyHostToDevice);
         cudaMemcpy(&(device_opt->init_lr), &(host_opts[i]->scheduler->init_lr), sizeof(float), cudaMemcpyHostToDevice);
         
         schedulerFunc scheduler = host_opts[i]->scheduler->getType();
@@ -274,15 +274,20 @@ __global__ void predict_kernel_tree_wise(const float* __restrict__ obs, const ch
         }
         if (passed){
             if (n_opts == 1){
-                for (int i = opts[0]->start_idx; i < opts[0]->end_idx; ++i){
+                for (int i = opts[0]->start_idx; i < opts[0]->stop_idx; ++i){
                     atomicAdd(&preds[sample_idx*output_dim + i], -opts[0]->init_lr * __ldg(leaf_values + value_idx + i));
+                }
+            } else if (n_opts == 2) {
+                for (int i = opts[0]->start_idx; i < opts[0]->stop_idx; ++i){
+                    atomicAdd(&preds[sample_idx*output_dim + i], -opts[0]->init_lr * __ldg(leaf_values + value_idx + i));
+                }
+                for (int i = opts[1]->start_idx; i < opts[1]->stop_idx; ++i){
+                    atomicAdd(&preds[sample_idx*output_dim + i], -opts[1]->init_lr * __ldg(leaf_values + value_idx + i));
                 }
             } else {
-                for (int i = opts[0]->start_idx; i < opts[0]->end_idx; ++i){
-                    atomicAdd(&preds[sample_idx*output_dim + i], -opts[0]->init_lr * __ldg(leaf_values + value_idx + i));
-                }
-                for (int i = opts[1]->start_idx; i < opts[1]->end_idx; ++i){
-                    atomicAdd(&preds[sample_idx*output_dim + i], -opts[1]->init_lr * __ldg(leaf_values + value_idx + i));
+                for (int opt_idx = 0; opt_idx < n_opts; ++opt_idx){
+                    for (int i = opts[opt_idx]->start_idx; i < opts[opt_idx]->stop_idx; ++i)
+                        atomicAdd(&preds[sample_idx*output_dim + i], -__ldg(&opts[opt_idx]->init_lr) * __ldg(leaf_values + value_idx + i));
                 }
             }
         }
@@ -318,15 +323,20 @@ __global__ void predict_sample_wise_kernel_tree_wise(const float* __restrict__ o
         value_idx = (leaf_idx + leaf_offset) * output_dim;
         if (passed){
             if (n_opts == 1){
-                for (int i = opts[0]->start_idx; i < opts[0]->end_idx; ++i){
+                for (int i = opts[0]->start_idx; i < opts[0]->stop_idx; ++i){
                     atomicAdd(&preds[blockIdx.x*output_dim + i], -opts[0]->init_lr * __ldg(leaf_values + value_idx + i));
+                }
+            } else if (n_opts == 2) {
+                for (int i = opts[0]->start_idx; i < opts[0]->stop_idx; ++i){
+                    atomicAdd(&preds[blockIdx.x*output_dim + i], -opts[0]->init_lr * __ldg(leaf_values + value_idx + i));
+                }
+                for (int i = opts[1]->start_idx; i < opts[1]->stop_idx; ++i){
+                    atomicAdd(&preds[blockIdx.x*output_dim + i], -opts[1]->init_lr * __ldg(leaf_values + value_idx + i));
                 }
             } else {
-                for (int i = opts[0]->start_idx; i < opts[0]->end_idx; ++i){
-                    atomicAdd(&preds[blockIdx.x*output_dim + i], -opts[0]->init_lr * __ldg(leaf_values + value_idx + i));
-                }
-                for (int i = opts[1]->start_idx; i < opts[1]->end_idx; ++i){
-                    atomicAdd(&preds[blockIdx.x*output_dim + i], -opts[1]->init_lr * __ldg(leaf_values + value_idx + i));
+                for (int opt_idx = 0; opt_idx < n_opts; ++opt_idx){
+                    for (int i = opts[opt_idx]->start_idx; i < opts[opt_idx]->stop_idx; ++i)
+                        atomicAdd(&preds[blockIdx.x*output_dim + i], -__ldg(&opts[opt_idx]->init_lr) * __ldg(leaf_values + value_idx + i));
                 }
             }
         }
@@ -349,15 +359,20 @@ __global__ void predict_kernel_numerical_only(const float* __restrict__ obs, flo
         }
         if (passed){
             if (n_opts == 1){
-                for (int i = opts[0]->start_idx; i < opts[0]->end_idx; ++i){
+                for (int i = opts[0]->start_idx; i < opts[0]->stop_idx; ++i){
                     atomicAdd(&preds[sample_idx*output_dim + i], -__ldg(&opts[0]->init_lr) * __ldg(leaf_values + value_idx + i));
+                }
+            } else if (n_opts == 2) {
+                for (int i = opts[0]->start_idx; i < opts[0]->stop_idx; ++i){
+                    atomicAdd(&preds[sample_idx*output_dim + i], -__ldg(&opts[0]->init_lr) * __ldg(leaf_values + value_idx + i));
+                }
+                for (int i = opts[1]->start_idx; i < opts[1]->stop_idx; ++i){
+                    atomicAdd(&preds[sample_idx*output_dim + i], -__ldg(&opts[1]->init_lr) * __ldg(leaf_values + value_idx + i));
                 }
             } else {
-                for (int i = opts[0]->start_idx; i < opts[0]->end_idx; ++i){
-                    atomicAdd(&preds[sample_idx*output_dim + i], -__ldg(&opts[0]->init_lr) * __ldg(leaf_values + value_idx + i));
-                }
-                for (int i = opts[1]->start_idx; i < opts[1]->end_idx; ++i){
-                    atomicAdd(&preds[sample_idx*output_dim + i], -__ldg(&opts[1]->init_lr) * __ldg(leaf_values + value_idx + i));
+                for (int opt_idx = 0; opt_idx < n_opts; ++opt_idx){
+                    for (int i = opts[opt_idx]->start_idx; i < opts[opt_idx]->stop_idx; ++i)
+                        atomicAdd(&preds[sample_idx*output_dim + i], -__ldg(&opts[opt_idx]->init_lr) * __ldg(leaf_values + value_idx + i));
                 }
             }
         }
@@ -375,15 +390,20 @@ __global__ void predict_oblivious_kernel_numerical_only(const float* __restrict_
             leaf_idx |= (decision <<  (__ldg(depths + blockIdx.x + tree_offset) - 1 - depth_idx));
         }
         if (n_opts == 1){
-            for (int i = opts[0]->start_idx; i < opts[0]->end_idx; ++i){
+            for (int i = opts[0]->start_idx; i < opts[0]->stop_idx; ++i){
                 atomicAdd(&preds[sample_idx*output_dim + i], -__ldg(&opts[0]->init_lr) * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
+            }
+        } else if (n_opts == 2){
+            for (int i = opts[0]->start_idx; i < opts[0]->stop_idx; ++i){
+                atomicAdd(&preds[sample_idx*output_dim + i], -__ldg(&opts[0]->init_lr) * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
+            }
+            for (int i = opts[1]->start_idx; i < opts[1]->stop_idx; ++i){
+                atomicAdd(&preds[sample_idx*output_dim + i], -__ldg(&opts[1]->init_lr) * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
             }
         } else {
-            for (int i = opts[0]->start_idx; i < opts[0]->end_idx; ++i){
-                atomicAdd(&preds[sample_idx*output_dim + i], -__ldg(&opts[0]->init_lr) * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
-            }
-            for (int i = opts[1]->start_idx; i < opts[1]->end_idx; ++i){
-                atomicAdd(&preds[sample_idx*output_dim + i], -__ldg(&opts[1]->init_lr) * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
+            for (int opt_idx=0; opt_idx < n_opts; ++opt_idx){
+                for (int i = opts[opt_idx]->start_idx; i < opts[opt_idx]->stop_idx; ++i)
+                    atomicAdd(&preds[sample_idx*output_dim + i], -__ldg(&opts[opt_idx]->init_lr) * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
             }
         }
     }
@@ -415,15 +435,20 @@ __global__ void predict_oblivious_kernel_tree_wise(const float* __restrict__ obs
         }
 
         if (n_opts == 1){
-            for (int i = opts[0]->start_idx; i < opts[0]->end_idx; ++i){
+            for (int i = opts[0]->start_idx; i < opts[0]->stop_idx; ++i){
                 atomicAdd(&preds[sample_idx*output_dim + i], -opts[0]->init_lr * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
+            }
+        } else if (n_opts == 2) {
+            for (int i = opts[0]->start_idx; i < opts[0]->stop_idx; ++i){
+                atomicAdd(&preds[sample_idx*output_dim + i], -opts[0]->init_lr * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
+            }
+            for (int i = opts[1]->start_idx; i < opts[1]->stop_idx; ++i){
+                atomicAdd(&preds[sample_idx*output_dim + i], -opts[1]->init_lr * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
             }
         } else {
-            for (int i = opts[0]->start_idx; i < opts[0]->end_idx; ++i){
-                atomicAdd(&preds[sample_idx*output_dim + i], -opts[0]->init_lr * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
-            }
-            for (int i = opts[1]->start_idx; i < opts[1]->end_idx; ++i){
-                atomicAdd(&preds[sample_idx*output_dim + i], -opts[1]->init_lr * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
+            for (int opt_idx = 0; opt_idx < n_opts; ++opt_idx){
+                for (int i = opts[opt_idx]->start_idx; i < opts[opt_idx]->stop_idx; ++i)
+                    atomicAdd(&preds[sample_idx*output_dim + i], -__ldg(&opts[opt_idx]->init_lr) * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
             }
         }
     }

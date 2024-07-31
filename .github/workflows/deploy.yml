@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - master  # Or the branch you want to deploy from
+    paths:
+      - 'docs/**'   # Trigger on changes to files in the src directory
+      - 'gbrl/**'   # Trigger on changes to files in the src directory
 
 jobs:
   deploy:
@@ -25,6 +28,7 @@ jobs:
           pip install sphinx-rtd-theme
           pip install numpy
           pip install torch
+          pip install .
 
       - name: Build documentation
         run: |

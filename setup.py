@@ -42,6 +42,8 @@ class CMakeBuild(build_ext):
             '-DPYTHON_INCLUDE_DIR=' + sysconfig.get_path('include'),
             '-DCMAKE_BUILD_TYPE=' + cfg,
         ]   
+        if os.environ.get('COVERAGE', '0') == '1':
+             cmake_args.append('-DCOVERAGE=ON')
         if sysconfig.get_config_var('LIBRARY') is not None:
             cmake_args.append('-DPYTHON_LIBRARY=' + sysconfig.get_config_var('LIBRARY'))
         if 'CC' in os.environ:
@@ -96,6 +98,6 @@ setup(
     name="gbrl",
     ext_modules=[CMakeExtension('gbrl/gbrl_cpp', sourcedir='.')],
     cmdclass=dict(build_ext=CMakeBuild),
-    packages=find_packages(),  # List of all packages to include
+    packages=find_packages(include=["gbrl"]),  # List of all packages to include
     include_package_data=True,
 )

@@ -25,10 +25,10 @@
 
 class GBRL {
     public:
-        GBRL(int output_dim, int policy_dim, int max_depth, int min_data_in_leaf, 
+        GBRL(int output_dim, int max_depth, int min_data_in_leaf, 
              int n_bins, int par_th, float cv_beta, scoreFunc split_score_func, generatorType generator_type, bool use_control_variates, 
              int batch_size, growPolicy grow_policy, int verbose, deviceType device);
-        GBRL(int output_dim, int policy_dim, int max_depth, int min_data_in_leaf, 
+        GBRL(int output_dim, int max_depth, int min_data_in_leaf, 
              int n_bins, int par_th, float cv_beta, std::string split_score_func, std::string generator_type, bool use_control_variates, 
              int batch_size, std::string grow_policy, int verbose, std::string device);
         GBRL(const std::string& filename);
@@ -57,13 +57,12 @@ class GBRL {
         
         matrixRepresentation* get_matrix_representation(const float *obs, const char *categorical_obs, const int n_samples, const int n_num_features, const int n_cat_features);
         void compress_ensemble(const int n_compressed_leaves, const int n_compressed_trees, const int *leaf_indices, const int *tree_indices, const int *new_tree_indices, const float *W);
-        std::tuple<float, float> get_scheduler_lrs();
+        float* get_scheduler_lrs();
 
         int get_num_trees();
         int get_iteration();
 
-        void set_optimizer(optimizerAlgo algo, schedulerFunc scheduler_func, float init_lr, float stop_lr, int T, 
-                           float beta_1, float beta_2, float eps, float shrinkage);
+        void set_optimizer(optimizerAlgo algo, schedulerFunc scheduler_func, float init_lr, int start_idx, int stop_idx, float stop_lr, int T, float beta_1, float beta_2, float eps, float shrinkage);
 
         void print_tree(int tree_idx);
         void plot_tree(int tree_idx, const std::string &filename);

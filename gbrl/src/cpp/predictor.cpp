@@ -109,8 +109,10 @@ void Predictor::predict_cpu(dataSet *dataset, float *preds, const ensembleData *
     add_vec_to_mat(preds, edata->bias, n_samples, output_dim, par_th);
     
     int n_trees = metadata->n_trees;
+    if (n_trees == 0)
+        return;
     if (stop_tree_idx > n_trees){
-        std::cerr << "Given stop_tree_idx idx: " << stop_tree_idx << " greater than number of trees in model: " << n_trees << std::endl;
+        std::cerr << "Given stop_tree_idx: " << stop_tree_idx << " greater than number of trees in model: " << n_trees << std::endl;
         return;
     } 
     if (n_trees == 0)

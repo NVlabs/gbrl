@@ -13,28 +13,11 @@ from typing import Dict, List, Union, Tuple
 import numpy as np
 import torch as th
 
-# Define custom dtypes
-numerical_dtype = np.dtype('float32')
-categorical_dtype = np.dtype('S128')  
+from .gbrl_cpp import GBRL as GBRL_CPP
+from .utils import get_input_dim, get_poly_vectors, process_array, to_numpy, numerical_dtype
 
 
-from typing import Dict, Optional, Any
-
-from .gbrl_cpp import GBRL
-from .utils import get_input_dim, get_poly_vectors
-from .compression import TreeCompression, SharedActorCriticCompression, ParametricActorCompression
-
-
-def process_array(arr: np.array)-> Tuple[np.array, np.array]:
-    """ Formats numpy array for C++ GBRL.
-    """
-    if np.issubdtype(arr.dtype, np.floating) or np.issubdtype(arr.dtype, np.integer):
-        return np.ascontiguousarray(arr, dtype=numerical_dtype), None 
-    else:
-        fixed_str = np.char.encode(arr.astype(str), 'utf-8').astype(categorical_dtype)
-        return None, np.ascontiguousarray(fixed_str)
-    
-def obs_to_numpy(arr: Union[np.array, th.Tensor]) -> Tuple[np.array, np.array]:
+def features_to_numpy(arr: Union[np.array, th.Tensor]) -> Tuple[np.array, np.array]:
     if isinstance(arr, th.Tensor):
         arr = arr.detach().cpu().numpy()
         return np.ascontiguousarray(arr, dtype=numerical_dtype), None 
@@ -50,12 +33,7 @@ def obs_to_numpy(arr: Union[np.array, th.Tensor]) -> Tuple[np.array, np.array]:
         return num_arr, cat_arr
     else:
         return process_array(arr)
-    
-def to_numpy(arr: Union[np.array, th.Tensor]) -> Tuple[np.array, np.array]:
-    if isinstance(arr, th.Tensor):
-        arr = arr.detach().cpu().numpy()
-        return np.ascontiguousarray(arr, dtype=numerical_dtype)
-       
+
 def preprocess_features(arr: Union[np.array, th.Tensor]) -> Tuple[np.array, np.array]:
     """Preprocess array such that the dimensions and the data type match.
     Returns numerical and categorical features. 
@@ -66,7 +44,7 @@ def preprocess_features(arr: Union[np.array, th.Tensor]) -> Tuple[np.array, np.a
         Tuple[np.array, np.array]
     """
     input_dim = get_input_dim(arr)
-    num_arr, cat_arr = obs_to_numpy(arr)
+    num_arr, cat_arr = features_to_numpy(arr)
     if num_arr is not None and len(num_arr.shape) == 1:
         if input_dim == 1:
             num_arr = num_arr[np.newaxis, :]
@@ -85,21 +63,18 @@ def preprocess_features(arr: Union[np.array, th.Tensor]) -> Tuple[np.array, np.a
 
 
 class GBTWrapper:
-    def __init__(self, output_dim: int, policy_dim: int, tree_struct: Dict, optimizer: Union[Dict, List], gbrl_params: Dict, verbose: int = 0, device: str = 'cpu'):
+    def __init__(self, output_dim: int, tree_struct: Dict, optimizer: Union[Dict, List], gbrl_params: Dict, verbose: int = 0, device: str = 'cpu'):
         if 'T' in gbrl_params:
             del gbrl_params['T']
-        self.params = {'output_dim': output_dim, 'policy_dim': policy_dim, 
+        self.params = {'output_dim': output_dim,
                        'split_score_func': gbrl_params.get('split_score_func', 'Cosine'), 
                        'generator_type': gbrl_params.get('generator_type', 'Quantile'), 
                        'use_control_variates': gbrl_params.get('control_variates', False), 
                        'verbose': verbose, 'device': device, **tree_struct}
         self.tree_struct = tree_struct
         self.output_dim = output_dim
-        self.policy_dim = policy_dim
-        
         self.device = device
-        self.optimizer = optimizer if isinstance(optimizer, list) else [optimizer]
-        self.optimizer = [opt for opt in self.optimizer if opt is not None]
+        self.optimizer = optimizer if isinstance(optimizer, list) or optimizer is None else [optimizer]
         self.student_model = None
         self.cpp_model = None
         self.iteration = 0
@@ -116,15 +91,14 @@ class GBTWrapper:
 
     def reset(self) -> None:
         if self.cpp_model is not None:
-            policy_lr, value_lr = self.cpp_model.get_scheduler_lrs()
-            self.optimizer[0]['init_lr'] = policy_lr
-            if len(self.optimizer) > 1:
-                self.optimizer[1]['init_lr'] = value_lr
-        self.cpp_model = GBRL(**self.params)
+            lrs = self.cpp_model.get_scheduler_lrs()
+            for i in range(len(self.optimizer)):
+                self.optimizer[i]['init_lr'] = lrs[i]
+
+        self.cpp_model = GBRL_CPP(**self.params)
         if self.student_model is not None:
-            self.optimizer[0]['T'] -= self.total_iterations
-            if len(self.optimizer) > 1:
-                self.optimizer[1]['T'] -= self.total_iterations
+            for i in range(len(self.optimizer)):
+                self.optimizer[i]['T'] -= self.total_iterations
         else:
             self.total_iterations = 0
         try:
@@ -195,7 +169,7 @@ class GBTWrapper:
         assert os.path.isfile(filename), "filename doesn't exist!"
         try:
             instance = cls.__new__(cls)
-            instance.cpp_model = GBRL.load(filename)
+            instance.cpp_model = GBRL_CPP.load(filename)
             metadata =  instance.cpp_model.get_metadata()
             instance.tree_struct = {'max_depth': metadata['max_depth'], 
                             'min_data_in_leaf': metadata['min_data_in_leaf'],
@@ -204,7 +178,6 @@ class GBTWrapper:
                             'batch_size': metadata['batch_size'], 
                             'grow_policy': metadata['grow_policy']}
             instance.params = {'output_dim': metadata['output_dim'],
-                            'policy_dim': metadata['policy_dim'], 
                             'split_score_func': metadata['split_score_func'], 
                             'generator_type': metadata['generator_type'], 
                             'use_control_variates': metadata['use_control_variates'], 
@@ -213,7 +186,6 @@ class GBTWrapper:
                             **instance.tree_struct
                             }
             instance.output_dim = metadata['output_dim']
-            instance.policy_dim = metadata['policy_dim']
             instance.verbose = metadata['verbose']
             instance.gbrl_params = {'split_score_func': metadata['split_score_func'], 
                                     'generator_type': metadata['generator_type'], 
@@ -333,10 +305,10 @@ class GBTWrapper:
     
     def distil(self, obs: Union[np.array, th.Tensor], targets: np.array, params: Dict, verbose: int=0) -> Tuple[int, Dict]:
         num_obs, cat_obs = preprocess_features(obs)
-        distil_params = {'output_dim': self.params['output_dim'], 'policy_dim': self.params['output_dim'], 'split_score_func': 'L2',
+        distil_params = {'output_dim': self.params['output_dim'], 'split_score_func': 'L2',
                          'generator_type': 'Quantile',  'use_control_variates': False, 'device': self.device,
                         'max_depth': params.get('distil_max_depth', 6), 'verbose': verbose, 'batch_size': self.params.get('distil_batch_size', 2048)}
-        self.student_model = GBRL(**distil_params)
+        self.student_model = GBRL_CPP(**distil_params)
         distil_optimizer = {'algo': 'SGD', 'init_lr': params.get('distil_lr', 0.1)}
         try:
             self.student_model.set_optimizer(**distil_optimizer)
@@ -391,13 +363,13 @@ class GBTWrapper:
         return self.__copy__()
     
     def __copy__(self):
-        copy_ = GBTWrapper(self.output_dim, self.policy_dim, self.tree_struct.copy(), [opt.copy() if opt is not None else opt for opt in self.optimizer], self.gbrl_params, self.verbose, self.device)
+        copy_ = GBTWrapper(self.output_dim, self.tree_struct.copy(), [opt.copy() if opt is not None else opt for opt in self.optimizer], self.gbrl_params, self.verbose, self.device)
         copy_.iteration = self.iteration 
         copy_.total_iterations = self.total_iterations
         if self.cpp_model is not None:
-            copy_.cpp_model = GBRL(self.cpp_model)
+            copy_.cpp_model = GBRL_CPP(self.cpp_model)
         if self.student_model is not None:
-            copy_.student_model = GBRL(self.student_model)
+            copy_.student_model = GBRL_CPP(self.student_model)
         return copy_
 
 class SeparateActorCriticWrapper:
@@ -405,12 +377,11 @@ class SeparateActorCriticWrapper:
         print('****************************************')
         print(f'Separate GBRL Tree with output dim: {output_dim}, tree_struct: {tree_struct} policy_optimizer: {policy_optimizer} value_optimizer: {value_optimizer}')
         print('****************************************')
-        self.policy_model = GBTWrapper(output_dim, output_dim, tree_struct,  policy_optimizer, gbrl_params, verbose, device)
-        self.value_model = GBTWrapper(1, 1, tree_struct, value_optimizer, gbrl_params, verbose, device)
+        self.policy_model = GBTWrapper(output_dim - 1, tree_struct, policy_optimizer, gbrl_params, verbose, device)
+        self.value_model = GBTWrapper(1, tree_struct, value_optimizer, gbrl_params, verbose, device)
         self.tree_struct = tree_struct
         self.total_iterations = 0
         self.output_dim = output_dim
-        self.policy_dim = output_dim
         self.policy_optimizer = policy_optimizer
         self.value_optimizer = value_optimizer
         self.gbrl_params = gbrl_params
@@ -494,7 +465,6 @@ class SeparateActorCriticWrapper:
         instance.tree_struct = instance.policy_model.tree_struct
         instance.total_iterations = instance.policy_model.iteration + instance.value_model.iteration
         instance.output_dim = instance.policy_model.output_dim
-        instance.policy_dim = instance.policy_model.output_dim
         instance.policy_optimizer = instance.policy_model.optimizer[0]
         instance.value_optimizer = instance.value_model.optimizer[0]
         instance.gbrl_params = instance.policy_model.gbrl_params
@@ -531,11 +501,11 @@ class SeparateActorCriticWrapper:
 class SharedActorCriticWrapper(GBTWrapper):
     def __init__(self, output_dim: int, tree_struct: Dict, policy_optimizer: Dict, value_optimizer: Dict=None, gbrl_params: Dict=dict(), verbose: int = 0, device: str = 'cpu'):
         print('****************************************')
-        print(f'Shared GBRL Tree with output dim: {output_dim}, policy_dim: {output_dim - 1}, tree_struct: {tree_struct} policy_optimizer: {policy_optimizer} value_optimizer: {value_optimizer}')
+        print(f'Shared GBRL Tree with output dim: {output_dim}, tree_struct: {tree_struct} policy_optimizer: {policy_optimizer} value_optimizer: {value_optimizer}')
         print('****************************************')
         self.value_optimizer = value_optimizer
         self.policy_optimizer = policy_optimizer
-        super().__init__(output_dim, output_dim - 1 if self.value_optimizer else output_dim, tree_struct, policy_optimizer, gbrl_params, verbose, device)
+        super().__init__(output_dim, tree_struct, policy_optimizer, gbrl_params, verbose, device)
 
     def reset(self) -> None:
         if self.cpp_model is not None:
@@ -543,7 +513,7 @@ class SharedActorCriticWrapper(GBTWrapper):
             self.policy_optimizer['init_lr'] = policy_lr
             if self.value_optimizer:
                 self.value_optimizer['init_lr'] = value_lr
-        self.cpp_model = GBRL(**self.params)
+        self.cpp_model = GBRL_CPP(**self.params)
         if self.student_model is not None:
             self.policy_optimizer['T'] -= self.total_iterations
         else:
@@ -618,9 +588,9 @@ class SharedActorCriticWrapper(GBTWrapper):
         copy_.iteration = self.iteration 
         copy_.total_iterations = self.total_iterations
         if self.cpp_model is not None:
-            copy_.model = GBRL(self.cpp_model)
+            copy_.model = GBRL_CPP(self.cpp_model)
         if self.student_model is not None:
-            copy_.student_model = GBRL(self.student_model)
+            copy_.student_model = GBRL_CPP(self.student_model)
         return copy_
 
 

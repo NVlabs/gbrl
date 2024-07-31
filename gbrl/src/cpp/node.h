@@ -18,7 +18,7 @@
 
 class TreeNode {
     public:
-        TreeNode(int *sample_indices, const int n_samples, const int n_num_features, const int n_cat_features, const int output_dim, const int policy_dim, const int depth, const int node_idx);
+        TreeNode(int *sample_indices, const int n_samples, const int n_num_features, const int n_cat_features, const int output_dim, const int depth, const int node_idx);
         ~TreeNode();
         int splitNode(const float *obs, const char *categorical_obs, const int node_idx, const splitCandidate &split_candidate);
         float getSplitScore(dataSet *dataset, scoreFunc split_score_func, const splitCandidate &split_candidate, const int min_data_in_leaf);
@@ -35,7 +35,6 @@ class TreeNode {
         int n_num_features;
         int n_cat_features;
         int output_dim;
-        int policy_dim;
         int depth;
         int node_idx;
 

@@ -28,7 +28,7 @@ Optimizer::Optimizer(schedulerFunc schedule_func, float init_lr, float stop_lr, 
 }
 
 Optimizer::Optimizer(const Optimizer& other):
-    start_idx(other.start_idx), end_idx(other.end_idx){
+    start_idx(other.start_idx), stop_idx(other.stop_idx){
     schedulerFunc sched_type = other.scheduler->getType();
     switch (sched_type) {
         case Const: {
@@ -65,9 +65,9 @@ optimizerAlgo Optimizer::getAlgo() const {
 }
 
 
-void Optimizer::set_indices(int start_idx, int end_idx){
+void Optimizer::set_indices(int start_idx, int stop_idx){
     this->start_idx = start_idx;
-    this->end_idx = end_idx;
+    this->stop_idx = stop_idx;
 }
 
 Optimizer* Optimizer::loadFromFile(std::ifstream& file){
@@ -132,12 +132,12 @@ SGDOptimizer::SGDOptimizer(schedulerFunc schedule_func, float init_lr, float sto
 }
 
 void SGDOptimizer::step(float *theta, const float *raw_grad_theta, int t, int sample_idx){
-    int start_idx = this->start_idx, end_idx = this->end_idx;
+    int start_idx = this->start_idx, stop_idx = this->stop_idx;
     float lr = this->scheduler->get_lr(t);
 #ifndef _MSC_VER
     #pragma omp simd
 #endif
-    for (int i = start_idx; i < end_idx; i++){
+    for (int i = start_idx; i < stop_idx; i++){
         theta[sample_idx + i] -= lr * raw_grad_theta[i];
     }
 }
@@ -150,7 +150,7 @@ int SGDOptimizer::saveToFile(std::ofstream& file){
     optimizerAlgo algo = SGD;
     file.write(reinterpret_cast<char*>(&algo), sizeof(optimizerAlgo));
     file.write(reinterpret_cast<char*>(&this->start_idx), sizeof(int));
-    file.write(reinterpret_cast<char*>(&this->end_idx), sizeof(int));
+    file.write(reinterpret_cast<char*>(&this->stop_idx), sizeof(int));
     this->scheduler->saveToFile(file);
     return 0;
 }
@@ -193,6 +193,8 @@ optimizerConfig* SGDOptimizer::getConfig() {
     }
     conf->beta_1 = 0.99f;
     conf->beta_2 = 0.999f;
+    conf->start_idx = this->start_idx;
+    conf->stop_idx = this->stop_idx;
     conf->eps = 1e-8f;
     return conf;
 }
@@ -237,6 +239,8 @@ optimizerConfig* AdamOptimizer::getConfig() {
     }
     conf->beta_1 = this->beta_1;
     conf->beta_2 = this->beta_2;
+    conf->start_idx = this->start_idx;
+    conf->stop_idx = this->stop_idx;
     conf->eps = this->eps;
     return conf;
 }
@@ -249,7 +253,7 @@ int AdamOptimizer::saveToFile(std::ofstream& file){
     optimizerAlgo algo = Adam;
     file.write(reinterpret_cast<char*>(&algo), sizeof(optimizerAlgo));
     file.write(reinterpret_cast<char*>(&this->start_idx), sizeof(int));
-    file.write(reinterpret_cast<char*>(&this->end_idx), sizeof(int));
+    file.write(reinterpret_cast<char*>(&this->stop_idx), sizeof(int));
     file.write(reinterpret_cast<char*>(&this->beta_1), sizeof(float));
     file.write(reinterpret_cast<char*>(&this->beta_2), sizeof(float));
     file.write(reinterpret_cast<char*>(&this->eps), sizeof(float));
@@ -285,14 +289,14 @@ void AdamOptimizer::step(float *theta, const float *raw_grad_theta, int t, int s
 
     float lr = this->scheduler->get_lr(t);
     float t_float = static_cast<float>(t) + 1;
-    start_idx = this->start_idx, end_idx = this->end_idx;
+    start_idx = this->start_idx, stop_idx = this->stop_idx;
     float *raw_m = this->m, *raw_v = this->v;
     float alpha = lr*sqrt(1 - pow(this->beta_2, t_float)) / (1 - pow(this->beta_1, t_float));
 
 #ifndef _MSC_VER
     #pragma omp simd
 #endif
-    for (int i = start_idx; i < end_idx; ++i){
+    for (int i = start_idx; i < stop_idx; ++i){
         int index = sample_idx + i;
         raw_m[index] *= this->beta_1; 
         raw_v[index] *= this->beta_2; 

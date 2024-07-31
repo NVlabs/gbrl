@@ -19,7 +19,6 @@ py::dict metadataToDict(const ensembleMetaData* metadata){
     py::dict d;
     if (metadata != nullptr){
         d["output_dim"] = metadata->output_dim;
-        d["policy_dim"] = metadata->policy_dim;
         d["split_score_func"] = scoreFuncToString(metadata->split_score_func);
         d["generator_type"] = generatorTypeToString(metadata->generator_type);
         d["use_control_variates"] = metadata->use_cv;
@@ -40,6 +39,8 @@ py::dict optimizerToDict(const optimizerConfig* conf){
     if (conf != nullptr){
         d["algo"] = conf->algo;
         d["init_lr"] = conf->init_lr;
+        d["start_idx"] = conf->start_idx;
+        d["stop_idx"] = conf->stop_idx;
         d["scheduler_func"] = conf->scheduler_func;
         d["stop_lr"] = conf->stop_lr;
         d["T"] = conf->T;
@@ -63,9 +64,8 @@ py::list getOptimizerConfigs(const std::vector<Optimizer*>& opts) {
 
 PYBIND11_MODULE(gbrl_cpp, m) {
     py::class_<GBRL> gbrl(m, "GBRL");
-    gbrl.def(py::init<int, int, int, int, int, int, float, std::string, std::string, bool, int, std::string, int, std::string>(),
+    gbrl.def(py::init<int, int, int, int, int, float, std::string, std::string, bool, int, std::string, int, std::string>(),
          py::arg("output_dim")=1, 
-         py::arg("policy_dim")=1, 
          py::arg("max_depth")=4, 
          py::arg("min_data_in_leaf")=0, 
          py::arg("n_bins")=256, 
@@ -202,12 +202,12 @@ PYBIND11_MODULE(gbrl_cpp, m) {
     gbrl.def("get_optimizers", [](GBRL &self) -> py::list {
         return getOptimizerConfigs(self.opts);
     }, "Get GBRL optimizers");
-    gbrl.def("set_optimizer", [](GBRL &self, const std::string& algo, const std::string& scheduler_func, float init_lr, 
+    gbrl.def("set_optimizer", [](GBRL &self, const std::string& algo, const std::string& scheduler_func, float init_lr, int start_idx, int stop_idx,
                                 float stop_lr, int T, float beta_1, float beta_2, float eps, float shrinkage) {
         py::gil_scoped_release release; 
-        self.set_optimizer(stringToAlgoType(algo), stringToSchedulerType(scheduler_func), init_lr, stop_lr, T, beta_1, beta_2, eps, shrinkage); 
-    }, py::arg("algo")="SGD", py::arg("scheduler")="const", py::arg("init_lr")=1.0,
-       py::arg("stop_lr")=1.0e-8, py::arg("T")=1000, py::arg("beta_1")=0.9, py::arg("beta_2")=0.999, 
+        self.set_optimizer(stringToAlgoType(algo), stringToSchedulerType(scheduler_func), init_lr, start_idx, stop_idx, stop_lr, T, beta_1, beta_2, eps, shrinkage); 
+    }, py::arg("algo")="SGD", py::arg("scheduler")="const", py::arg("init_lr")=1.0, py::arg("start_idx")=0, py::arg("stop_idx")=0,
+       py::arg("stop_lr")=1.0e-8, py::arg("T")=10000, py::arg("beta_1")=0.9, py::arg("beta_2")=0.999, 
        py::arg("eps")=1.0e-8, py::arg("shrinkage")=0.0,
        "Set optimizer!");
    // predict method
@@ -370,9 +370,14 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         py::gil_scoped_release release; 
         return self.exportModel(filename, modelname); 
     }, py::arg("filename"), py::arg("modelname") = "", "Export model as a C-header file");
-    gbrl.def("get_scheduler_lrs", [](GBRL &self) ->  std::tuple<float, float> {
+    gbrl.def("get_scheduler_lrs", [](GBRL &self) ->  py::array_t<float> {
         py::gil_scoped_release release; 
-        return self.get_scheduler_lrs(); 
+        float* lrs = self.get_scheduler_lrs(); 
+        py::gil_scoped_acquire acquire;
+        auto capsule = py::capsule(lrs, [](void* ptr) {
+        delete[] reinterpret_cast<float*>(ptr);
+        });
+        return py::array({static_cast<long int>(self.opts.size())}, lrs, capsule);
     }, "Return current scheduler lrs");  
     gbrl.def("get_num_trees", [](GBRL &self) ->  int {
         py::gil_scoped_release release; 

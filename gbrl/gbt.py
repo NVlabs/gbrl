@@ -6,7 +6,7 @@
 # https://nvlabs.github.io/gbrl/license.html
 #
 ##############################################################################
-from typing import Dict, List, Union, Tuple
+from typing import Dict, List, Union, Tuple, Optional
 
 import numpy as np
 import torch as th
@@ -16,7 +16,7 @@ from .gbrl_wrapper import GBTWrapper
 from .utils import setup_optimizer, clip_grad_norm
 
 
-class GradientBoostingTrees:
+class GBRL:
     def __init__(self, 
                  tree_struct: Dict,
                  output_dim: int,
@@ -44,6 +44,9 @@ class GradientBoostingTrees:
                     'beta_1' (float): 0.99
                     'beta_2' (float): 0.999
                     'eps' (float): 1.0e-8
+                All optimizers must contain:
+                    'start_idx' 
+                    'stop_idx'
                 Setting scheduler type: 
                 Available schedulers are Constant and Linear. Constant is default, Linear is CPU only.
                 To specify a linear scheduler, 3 additional arguments must be added to an optimizer dict.
@@ -62,14 +65,11 @@ class GradientBoostingTrees:
             device (str, optional): GBRL device 'cpu' or 'cuda/gpu'. Defaults to 'cpu'.
         """
         if optimizer is not None:
-            if isinstance(optimizer, list):
-                optimizer = optimizer[0]
-            assert isinstance(optimizer, dict), 'optimization must be a dictionary'
-            
-            optimizer = setup_optimizer(optimizer)
-            optimizer['T'] = gbrl_params.get('T', 10000)
+            if isinstance(optimizer, dict):
+                    optimizer = [optimizer]
+            optimizer = [setup_optimizer(opt) for opt in optimizer]
 
-        self.optimizer =  optimizer
+        self.optimizer = optimizer
         self.output_dim = output_dim
         self.verbose = verbose
         self.tree_struct = tree_struct
@@ -77,9 +77,10 @@ class GradientBoostingTrees:
         self.gbrl_params = gbrl_params
         self.device = device
         self.params = None
-        if type(self) is GradientBoostingTrees:
-            self._model = GBTWrapper(self.output_dim, self.output_dim, self.tree_struct, self.optimizer, self.gbrl_params, self.verbose, self.device)
+        if type(self) is GBRL:
+            self._model = GBTWrapper(self.output_dim, self.tree_struct, self.optimizer, self.gbrl_params, self.verbose, self.device)
             self._model.reset()
+        self.grad = None
 
     def reset_params(self):
         """Resets param attributes
@@ -143,24 +144,35 @@ class GradientBoostingTrees:
         """
         return self._model.get_schedule_learning_rates()
 
-    def step(self,  X: Union[np.array, th.Tensor], max_grad_norm: float = None) -> float:
+    def step(self,  X: Union[np.array, th.Tensor], max_grad_norm: float = None, grad: Optional[Union[np.array, th.tensor]] = None) -> None:
         """Perform a boosting step (fits a single tree on the gradients)
 
         Args:
-            X Union[np.array, th.Tensor]: inputs
-            max_grad_norm float: perform gradient clipping by norm
-
-        Returns:
-            Tuple[np.array, np.array]: predicted model parameters and their respective gradients
+            X (Union[np.array, th.Tensor]): inputs
+            max_grad_norm (float, optional): perform gradient clipping by norm. Defaults to None.
+            grad (Optional[Union[np.array, th.tensor]], optional): manually calculated gradients. Defaults to None.
         """
-        assert self.params is not None, "must call "
-        n_samples = len(X)
-        grad = self.params.grad.detach().cpu().numpy() * n_samples
+        if grad is None:
+            assert self.params is not None, "must run a forward pass first"
+            n_samples = len(X)
+            grad = self.params.grad.detach().cpu().numpy() * n_samples
+
         grad = clip_grad_norm(grad, max_grad_norm)
         self._model.step(X, grad)
-        return self.params.detach().cpu().numpy(), grad
-
+        self.grad = grad
         
+    def get_params(self) -> Tuple[np.array, np.array]:
+        """Returns predicted model parameters and their respective gradients
+
+        Returns:
+            Tuple[np.array, np.array]
+        """
+        assert self.params is not None, "must run a forward pass first"
+        params = self.params
+        if isinstance(self.params, tuple):
+            params = (params[0].detach().cpu().numpy(), params[1].detach().cpu().numpy()) 
+        return params, self.grad
+
     def predict(self, X: np.array, start_idx:int =0, stop_idx: int=None) -> np.array:
         """Predict 
 
@@ -216,12 +228,14 @@ class GradientBoostingTrees:
         """Calculates SHAP values for the entire ensemble
             Implementation based on - https://github.com/yupbank/linear_tree_shap
             See Linear TreeShap, Yu et al, 2023, https://arxiv.org/pdf/2209.08192 
+            
         Args:
             features (Union[np.array, th.Tensor])
 
         Returns:
             Union[np.array, Tuple[np.array, np.array]]: SHAP values of shap [n_samples, number of input features, number of outputs]. The output is a tuple of SHAP values per model only in the case of a separate actor-critic model.
         """
+
         return self._model.shap(features)
 
     def save_model(self, save_path: str) -> None:
@@ -243,14 +257,14 @@ class GradientBoostingTrees:
         self._model.export(filename, modelname) 
 
     @classmethod
-    def load_model(cls, load_name: str) -> "GradientBoostingTrees":
+    def load_model(cls, load_name: str) -> "GBRL":
         """Loads GBRL model from a file
 
         Args:
             load_name (str): full path to file name
 
         Returns:
-            GradientBoostingTrees: _description_
+            GBRL instance 
         """
         instance = cls.__new__(cls)
         instance._model = GBTWrapper.load(load_name)
@@ -280,13 +294,13 @@ class GradientBoostingTrees:
         """
         return self._model.get_device()
 
-    def __call__(self, X: np.array, requires_grad: bool = False) -> th.Tensor:
+    def __call__(self, X: np.array, requires_grad: bool = True) -> th.Tensor:
         """Returns GBRL's output as Tensor. if `requires_grad=True` then stores 
-           differentiable parameters in self.params 
+           differentiable parameters in self.params. 
 
         Args:
             X (np.array): Input
-            requires_grad (bool, optional). Defaults to False.
+            requires_grad (bool, optional). Defaults to True.
 
         Returns:
             th.Tensor: _description_
@@ -294,6 +308,7 @@ class GradientBoostingTrees:
         y_pred = self.predict(X)
         params = th.tensor(y_pred, requires_grad=requires_grad)
         if requires_grad:
+            self.grad = None
             self.params = params
         return params
 
@@ -314,7 +329,7 @@ class GradientBoostingTrees:
         """
         self._model.plot_tree(tree_idx, filename)
     
-    def copy(self) -> "GradientBoostingTrees":
+    def copy(self) -> "GBRL":
         """Copy class instance 
 
         Returns:
@@ -323,8 +338,8 @@ class GradientBoostingTrees:
         """
         return self.__copy__()
     
-    def __copy__(self) -> "GradientBoostingTrees":
-        copy_ = GradientBoostingTrees(self.tree_struct.copy(), self.output_dim, self.optimizer.copy(), self.gbrl_params, self.verbose)
+    def __copy__(self) -> "GBRL":
+        copy_ = GBRL(self.tree_struct.copy(), self.output_dim, self.optimizer.copy(), self.gbrl_params, self.verbose)
         if self._model is not None:
             copy_._model = self._model.copy()
         return copy_

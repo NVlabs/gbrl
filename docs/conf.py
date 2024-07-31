@@ -11,6 +11,7 @@ import os
 
 ROOT_PATH = os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, ROOT_PATH) 
+sys.path.insert(0, ROOT_PATH + '/gbrl') 
 
 with open(ROOT_PATH + '/gbrl/__init__.py') as file_handler:
     __version__ = file_handler.readlines()[8].split('"')[1]
