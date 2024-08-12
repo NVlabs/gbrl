@@ -217,8 +217,10 @@ ensembleData* ensemble_compressed_data_alloc_cuda(ensembleMetaData *metadata, co
     trace += edge_size * sizeof(bool);
     edata->categorical_values = (char *)(data + trace);
 
-    metadata->max_trees = metadata->n_trees;
-    metadata->max_leaves = metadata->n_leaves;
+    metadata->max_trees = n_compressed_trees;
+    metadata->max_leaves = n_compressed_leaves;
+    metadata->n_trees = n_compressed_trees; 
+    metadata->n_leaves = n_compressed_leaves; 
     return edata;
 }
 
@@ -251,7 +253,7 @@ ensembleData* ensemble_data_copy_gpu_gpu(ensembleMetaData *metadata, ensembleDat
 ensembleData* ensemble_compressed_data_copy_gpu_gpu(ensembleMetaData *metadata, ensembleData *other_edata, const int n_compressed_leaves, const int n_compressed_trees, const int *leaf_indices, const int *tree_indices, const int *new_tree_indices){
     ensembleData *edata = ensemble_compressed_data_alloc_cuda(metadata, n_compressed_leaves, n_compressed_trees);
     size_t bias_size = metadata->output_dim * sizeof(float);
-    size_t tree_size = metadata->n_trees * sizeof(int);
+    size_t tree_size = n_compressed_trees * sizeof(int);
     size_t split_sizes = (metadata->grow_policy == OBLIVIOUS) ? n_compressed_trees : n_compressed_leaves;
     size_t data_size = sizeof(int)*(n_compressed_leaves + n_compressed_trees); 
     int *data;
@@ -275,6 +277,8 @@ ensembleData* ensemble_compressed_data_copy_gpu_gpu(ensembleMetaData *metadata, 
     leaf_indices_gpu = (int *)(data + trace);
     trace += n_compressed_leaves;
     tree_indices_gpu = (int *)(data + trace);
+    cudaMemcpy(leaf_indices_gpu, leaf_indices, sizeof(int)*(n_compressed_leaves), cudaMemcpyHostToDevice);
+    cudaMemcpy(tree_indices_gpu, tree_indices, sizeof(int)*(n_compressed_trees), cudaMemcpyHostToDevice);
     const int *split_indices = (metadata->grow_policy == OBLIVIOUS) ? tree_indices_gpu : leaf_indices_gpu;
     cudaMemcpy(edata->bias, other_edata->bias, bias_size, cudaMemcpyDeviceToDevice);
 #ifdef DEBUG 

@@ -909,6 +909,19 @@ int GBRL::loadFromFile(const std::string& filename){
     return 0;  // Success
 }
 
+void GBRL::print_ensemble_metadata(){
+    std::cout << "######## GBRL model ########" << std::endl;
+    std::cout << "output_dim: " << this->metadata->output_dim;
+    std::cout << " max_depth: " << this->metadata->max_depth << " min_data_in_leaf: " << this->metadata->min_data_in_leaf << std::endl;
+    std::cout << "generator_type: " << generatorTypeToString(this->metadata->generator_type) << " n_bins: " << this->metadata->n_bins;
+    std::cout << " cv_beta: " << this->metadata->cv_beta << " split_score_func: " << scoreFuncToString(this->metadata->split_score_func) << std::endl;
+    std::cout << "grow_policy: " << growPolicyToString(this->metadata->grow_policy);
+    std::cout << " verbose: " << this->metadata->verbose << " device: "<< deviceTypeToString(this->device);
+    std::cout << " use_cv: " << this->metadata->use_cv << " batch_size: " << this->metadata->batch_size << std::endl;
+    std::cout << "Loaded: " << this->metadata->n_leaves << " leaves from " << this->metadata->n_trees << " trees" <<  std::endl;
+    std::cout << "Model has: " << this->opts.size() << " optimizers " <<  std::endl;
+}
+
 float* GBRL::tree_shap(const int tree_idx, const float *obs, const char *categorical_obs, const int n_samples, float *norm, float *base_poly, float *offset){
     valid_tree_idx(tree_idx, this->metadata);
 ensembleData *edata_cpu = nullptr;

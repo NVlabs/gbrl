@@ -8,16 +8,17 @@
 #
 ##############################################################################
 import os
-from typing import Dict, List, Union, Tuple
+from typing import Dict, List, Union, Tuple, Optional, Any
 
 import numpy as np
 import torch as th
 
 from .gbrl_cpp import GBRL as GBRL_CPP
 from .utils import get_input_dim, get_poly_vectors, process_array, to_numpy, numerical_dtype
+from .compression import ParametricActorCompression, TreeCompression, SharedActorCriticCompression
 
 
-def features_to_numpy(arr: Union[np.array, th.Tensor]) -> Tuple[np.array, np.array]:
+def features_to_numpy(arr: Union[np.ndarray, th.Tensor]) -> Tuple[np.ndarray, np.ndarray]:
     if isinstance(arr, th.Tensor):
         arr = arr.detach().cpu().numpy()
         return np.ascontiguousarray(arr, dtype=numerical_dtype), None 
@@ -26,7 +27,7 @@ def features_to_numpy(arr: Union[np.array, th.Tensor]) -> Tuple[np.array, np.arr
         _, cat_arr = process_array(arr[1])
         return num_arr, cat_arr
     elif isinstance(arr, list):
-        return process_array(np.array(arr))
+        return process_array(np.ndarray(arr))
     elif isinstance(arr, dict):
         num_arr, _ = process_array(arr['numerical_data'])
         _, cat_arr = process_array(arr['categorical_data'])
@@ -34,14 +35,14 @@ def features_to_numpy(arr: Union[np.array, th.Tensor]) -> Tuple[np.array, np.arr
     else:
         return process_array(arr)
 
-def preprocess_features(arr: Union[np.array, th.Tensor]) -> Tuple[np.array, np.array]:
+def preprocess_features(arr: Union[np.ndarray, th.Tensor]) -> Tuple[np.ndarray, np.ndarray]:
     """Preprocess array such that the dimensions and the data type match.
     Returns numerical and categorical features. 
     May return None for each if purely numerical or purely categorical.
     Args:
 
     Returns:
-        Tuple[np.array, np.array]
+        Tuple[np.ndarray, np.ndarray]
     """
     input_dim = get_input_dim(arr)
     num_arr, cat_arr = features_to_numpy(arr)
@@ -113,7 +114,7 @@ class GBTWrapper:
             assert np.all(feature_weights >= 0), "feature weights contains non-positive values"
         self.feature_weights = feature_weights
 
-    def step(self, features: Union[np.array, th.Tensor, Tuple], grads: Union[np.array, th.Tensor]) -> None:
+    def step(self, features: Union[np.ndarray, th.Tensor, Tuple], grads: Union[np.ndarray, th.Tensor]) -> None:
         num_features, cat_features = preprocess_features(features)
         grads = to_numpy(grads)
         grads = grads.reshape((len(grads), self.params['output_dim']))
@@ -127,7 +128,7 @@ class GBTWrapper:
         self.iteration = self.cpp_model.get_iteration()
         self.total_iterations += 1
 
-    def fit(self, features: Union[np.array, th.Tensor], targets: Union[np.array, th.Tensor], iterations: int, shuffle: bool=True, loss_type: str='MultiRMSE') -> float:
+    def fit(self, features: Union[np.ndarray, th.Tensor], targets: Union[np.ndarray, th.Tensor], iterations: int, shuffle: bool=True, loss_type: str='MultiRMSE') -> float:
         num_features, cat_features = preprocess_features(features)
         targets = to_numpy(targets)
         targets = targets.reshape((len(targets), self.params['output_dim'])).astype(numerical_dtype)
@@ -214,23 +215,23 @@ class GBTWrapper:
             return self.cpp_model.get_num_trees() + self.student_model.get_num_trees()
         return self.cpp_model.get_num_trees()
     
-    def set_bias(self, bias: Union[np.array, float]) -> None:
+    def set_bias(self, bias: Union[np.ndarray, float]) -> None:
         if not isinstance(bias, np.ndarray) and not isinstance(bias, float):
             raise TypeError("Input should be a numpy array or float")
 
         if isinstance(bias, float):
-            bias = np.array([float])
+            bias = np.ndarray([float])
 
         if bias.ndim > 1:
             bias = bias.ravel()
         elif bias.ndim == 0:
-            bias = np.array([bias.item()])  # Converts 0D arrays to 1D
+            bias = np.ndarray([bias.item()])  # Converts 0D arrays to 1D
         try:
             self.cpp_model.set_bias(bias)
         except RuntimeError as e:
             print(f"Caught an exception in GBRL: {e}")
 
-    def get_bias(self) -> np.array:
+    def get_bias(self) -> np.ndarray:
         return self.cpp_model.get_bias()
 
     def get_device(self) -> str:
@@ -245,31 +246,31 @@ class GBTWrapper:
         except RuntimeError as e:
             print(f"Caught an exception in GBRL: {e}")
 
-    def tree_shap(self, tree_idx: int, features: Union[np.array, th.Tensor]) -> np.array:
+    def tree_shap(self, tree_idx: int, features: Union[np.ndarray, th.Tensor]) -> np.ndarray:
         """  
         Implementation based on - https://github.com/yupbank/linear_tree_shap
         See Linear TreeShap, Yu et al, 2023, https://arxiv.org/pdf/2209.08192 
         Args:
             tree_idx (int): tree index
-            features (Union[np.array, th.Tensor]):
+            features (Union[np.ndarray, th.Tensor]):
 
         Returns:
-            np.array: shap values
+            np.ndarray: shap values
         """
         num_features, cat_features = preprocess_features(features)
         base_poly, norm_values, offset = get_poly_vectors(self.params['max_depth'], numerical_dtype)
         return self.cpp_model.tree_shap(tree_idx, num_features, cat_features, np.ascontiguousarray(norm_values), np.ascontiguousarray(base_poly), np.ascontiguousarray(offset)) 
     
-    def shap(self, features: Union[np.array, th.Tensor]) -> np.array:
+    def shap(self, features: Union[np.ndarray, th.Tensor]) -> np.ndarray:
         """  
         Uses Linear tree shap for each tree in the ensemble (sequentially)
         Implementation based on - https://github.com/yupbank/linear_tree_shap
         See Linear TreeShap, Yu et al, 2023, https://arxiv.org/pdf/2209.08192 
         Args:
-            features (Union[np.array, th.Tensor]):
+            features (Union[np.ndarray, th.Tensor]):
 
         Returns:
-            np.array: shap values
+            np.ndarray: shap values
         """
         num_features, cat_features = preprocess_features(features)
         base_poly, norm_values, offset = get_poly_vectors(self.params['max_depth'], numerical_dtype)
@@ -282,7 +283,7 @@ class GBTWrapper:
         except RuntimeError as e:
             print(f"Caught an exception in GBRL: {e}")
     
-    def predict(self, features: Union[np.array, th.Tensor], start_idx: int=0, stop_idx: int=None) -> np.array:
+    def predict(self, features: Union[np.ndarray, th.Tensor], start_idx: int=0, stop_idx: int=None) -> np.ndarray:
         num_features, cat_features = preprocess_features(features)
         if stop_idx is None:
             stop_idx = 0
@@ -298,12 +299,12 @@ class GBTWrapper:
             preds = self.cpp_model.predict(num_features, cat_features, start_idx, stop_idx)
         return preds
     
-    def get_matrix_representation(self, features: Union[np.array, th.Tensor]) -> np.array:
+    def get_matrix_representation(self, features: Union[np.ndarray, th.Tensor]) -> np.ndarray:
         num_features, cat_features = preprocess_features(features)
         A, V, n_leaves_per_tree, n_leaves, n_trees = self.cpp_model.get_matrix_representation(num_features, cat_features)
         return A, V, n_leaves_per_tree, n_leaves, n_trees
     
-    def distil(self, obs: Union[np.array, th.Tensor], targets: np.array, params: Dict, verbose: int=0) -> Tuple[int, Dict]:
+    def distil(self, obs: Union[np.ndarray, th.Tensor], targets: np.ndarray, params: Dict, verbose: int=0) -> Tuple[int, Dict]:
         num_obs, cat_obs = preprocess_features(obs)
         distil_params = {'output_dim': self.params['output_dim'], 'split_score_func': 'L2',
                          'generator_type': 'Quantile',  'use_control_variates': False, 'device': self.device,
@@ -317,7 +318,7 @@ class GBTWrapper:
 
         bias = np.mean(targets, axis=0)
         if isinstance(bias, float):
-            bias = np.array([bias])
+            bias = np.ndarray([bias])
         self.student_model.set_bias(bias.astype(numerical_dtype))
         tr_loss = self.student_model.fit(num_obs, cat_obs, targets, params['min_steps'])
         while tr_loss> params.get('min_distillation_loss', 0.1):
@@ -330,20 +331,22 @@ class GBTWrapper:
         self.reset()
         return tr_loss, params
 
-    def compress(self, k: int, gradient_steps: int, features: Union[np.array, th.Tensor], actions: th.Tensor = None, log_std: th.Tensor = None,
+    def compress(self, k: int, gradient_steps: int, features: Union[np.ndarray, th.Tensor], actions: th.Tensor = None, log_std: th.Tensor = None,
                  method: str = 'first_k', dist_type: str = 'supervised_learning', optimizer_kwargs: Optional[Dict[str, Any]] = None, 
-                 least_squares_W: bool = True, temperature: float = 1.0):
-        assert actions is not None or dist_type != 'supervised_learning', "Cannot compress a policy using supervised learning compression methods"
+                 least_squares_W: bool = True, temperature: float = 1.0, lambda_reg: float = 1.0):
+        assert actions is not None or dist_type == 'supervised_learning', "Cannot compress a policy using supervised learning compression methods"
         A, V, n_leaves_per_tree, n_leaves, n_trees = self.get_matrix_representation(features) 
-        A, V, n_leaves_per_tree = th.tensor(A), th.tensor(V), th.tensor(n_leaves_per_tree)
+        A, V, n_leaves_per_tree = th.tensor(A, dtype=th.float32, device=self.device), th.tensor(V, dtype=th.float32, device=self.device), th.tensor(n_leaves_per_tree, device=self.device)
         compression_params = {'k': k, 'gradient_steps': gradient_steps, 'method': method, 
-                              'dist_type': dist_type, 'optimizer_kwargs': optimizer_kwargs, 
+                              'optimizer_kwargs': optimizer_kwargs, 
                               'temperature': temperature, 'n_leaves': n_leaves, 'n_trees': n_trees, 
                               'n_leaves_per_tree': n_leaves_per_tree,
-                              'output_dim': self.output_dim}
+                              'lambda_reg': lambda_reg,
+                              'output_dim': self.output_dim,
+                              'device': self.device}
         
         if actions is not None:
-            compression_params['policy_dim'] = self.policy_dim
+            compression_params['dist_type'] = dist_type
             compressor = ParametricActorCompression(**compression_params)
             leaves_selection, tree_selection, W, n_compressed_trees, n_compressed_leaves = compressor.compress(A, V, actions, log_std)
         else:
@@ -351,16 +354,19 @@ class GBTWrapper:
             compressor = TreeCompression(**compression_params)
             leaves_selection, tree_selection, W, n_compressed_trees, n_compressed_leaves = compressor.compress(A, V)
         # indices of selected leaves / trees in original indexing
-        compressed_leaf_indices = np.where(leaves_selection > 0)[0].astype(int)
-        compressed_tree_indices = np.where(tree_selection > 0)[0].astype(int)
-        #TODO FIX THIS
+        compressed_leaf_indices = np.where(leaves_selection > 0)[0].astype(np.int32)
+        compressed_tree_indices = np.where(tree_selection > 0)[0].astype(np.int32)
         # indices of the start of each leaf according to the compressed model
         new_tree_indices = np.zeros(n_compressed_trees)
-        new_tree_indices[1:] = np.cumsum(n_leaves_per_tree[tree_selection])[:-1]
-        self.cpp_model.compress(n_compressed_leaves, n_compressed_trees, compressed_leaf_indices, compressed_tree_indices, new_tree_indices.astype(int), W)
+        new_tree_indices[1:] = np.cumsum(n_leaves_per_tree[compressed_tree_indices].detach().cpu().numpy())[:-1]
+        # W = np.zeros_like(W, dtype=np.single)
+        self.cpp_model.compress(n_compressed_leaves, n_compressed_trees, compressed_leaf_indices, compressed_tree_indices, new_tree_indices.astype(np.int32), W)
 
     def copy(self):
         return self.__copy__()
+    
+    def print_ensemble_metadata(self):
+        self.cpp_model.print_ensemble_metadata()
     
     def __copy__(self):
         copy_ = GBTWrapper(self.output_dim, self.tree_struct.copy(), [opt.copy() if opt is not None else opt for opt in self.optimizer], self.gbrl_params, self.verbose, self.device)
@@ -388,15 +394,15 @@ class SeparateActorCriticWrapper:
         self.verbose = verbose
         self.device = device
  
-    def step(self, observations: Union[np.array, th.Tensor], theta_grad: Union[np.array, th.Tensor], value_grad: Union[np.array, th.Tensor]):
+    def step(self, observations: Union[np.ndarray, th.Tensor], theta_grad: Union[np.ndarray, th.Tensor], value_grad: Union[np.ndarray, th.Tensor]):
         self.step_policy(observations, theta_grad)
         self.step_critic(observations, value_grad)
         self.total_iterations += 1
         
-    def step_policy(self, observations: Union[np.array, th.Tensor], theta_grad: Union[np.array, th.Tensor]):
+    def step_policy(self, observations: Union[np.ndarray, th.Tensor], theta_grad: Union[np.ndarray, th.Tensor]):
         self.policy_model.step(observations, theta_grad)
     
-    def step_critic(self, observations: Union[np.array, th.Tensor], value_grad: Union[np.array, th.Tensor]):
+    def step_critic(self, observations: Union[np.ndarray, th.Tensor], value_grad: Union[np.ndarray, th.Tensor]):
         self.value_model.step(observations, value_grad)
 
     def set_device(self, device:str) -> None:
@@ -404,13 +410,13 @@ class SeparateActorCriticWrapper:
         self.value_model.set_device(device)
         self.device = device
     
-    def compress(self, k: int, gradients_steps: int, observations: Union[np.array, th.Tensor], actions: th.Tensor, log_std: th.Tensor = None, method: str = 'first_k', dist_type: str = 'supervised_learning', optimizer_kwargs: Optional[Dict[str, Any]] = None, 
-                 least_squares_W: bool = True, temperature: float = 1.0) -> None:
+    def compress(self, k: int, gradients_steps: int, observations: Union[np.ndarray, th.Tensor], actions: th.Tensor, log_std: th.Tensor = None, method: str = 'first_k', dist_type: str = 'supervised_learning', optimizer_kwargs: Optional[Dict[str, Any]] = None, 
+                 least_squares_W: bool = True, temperature: float = 1.0, lambda_reg: float = 1.0) -> None:
         assert dist_type != 'supervised_learning', 'Cannot use supervised learning as a dist_type for an actor'
-        self.policy_model.compress(k, gradients_steps, observations, actions, log_std, method, dist_type, optimizer_kwargs, least_squares_W, temperature)
-        self.value_model.compress(k, gradients_steps, observations, actions, log_std, method, 'supervised_learning', optimizer_kwargs, True, temperature)
+        self.policy_model.compress(k, gradients_steps, observations, actions, log_std, method, dist_type, optimizer_kwargs, least_squares_W, temperature, lambda_reg)
+        self.value_model.compress(k, gradients_steps, observations, actions, log_std, method, 'supervised_learning', optimizer_kwargs, True, temperature, lambda_reg)
 
-    def tree_shap(self, tree_idx: int, observations: Union[np.array, th.Tensor]) -> Tuple[np.array, np.array]:
+    def tree_shap(self, tree_idx: int, observations: Union[np.ndarray, th.Tensor]) -> Tuple[np.ndarray, np.ndarray]:
         policy_shap = self.policy_model.tree_shap(tree_idx, observations)
         value_shap = self.value_model.tree_shap(tree_idx, observations)
         return policy_shap, value_shap
@@ -426,7 +432,7 @@ class SeparateActorCriticWrapper:
         value_lr, _ = self.value_model.get_schedule_learning_rates()
         return policy_lr, value_lr
     
-    def predict(self, observations: Union[np.array, th.Tensor], start_idx: int=0, stop_idx: int=None) -> Tuple[np.array, np.array]:
+    def predict(self, observations: Union[np.ndarray, th.Tensor], start_idx: int=0, stop_idx: int=None) -> Tuple[np.ndarray, np.ndarray]:
         preds = self.policy_model.predict(observations, start_idx, stop_idx)
         pred_values = self.value_model.predict(observations, start_idx, stop_idx).squeeze()
         if len(preds.shape) == 1:
@@ -472,10 +478,10 @@ class SeparateActorCriticWrapper:
         instance.device = instance.policy_model.get_device()
         return instance
 
-    def distil_policy(self, obs: Union[np.array, th.Tensor], targets: np.array, params: Dict) -> Tuple[int, Dict]:
+    def distil_policy(self, obs: Union[np.ndarray, th.Tensor], targets: np.ndarray, params: Dict) -> Tuple[int, Dict]:
         return self.policy_model.distil(obs, targets, params)
 
-    def distil_value(self, obs: Union[np.array, th.Tensor], targets: np.array, params: Dict) -> Tuple[int, Dict]:
+    def distil_value(self, obs: Union[np.ndarray, th.Tensor], targets: np.ndarray, params: Dict) -> Tuple[int, Dict]:
         return self.value_model.distil(obs, targets, params)
 
     def get_iteration(self) -> Tuple[int, int]:
@@ -484,7 +490,7 @@ class SeparateActorCriticWrapper:
     def get_num_trees(self) -> Tuple[int, int]:
         return self.policy_model.get_num_trees(), self.value_model.get_num_trees()
     
-    def set_bias(self, bias: np.array) -> None:
+    def set_bias(self, bias: np.ndarray) -> None:
         self.policy_model.set_bias(bias)
 
     def copy(self) -> "SeparateActorCriticWrapper":
@@ -530,7 +536,7 @@ class SharedActorCriticWrapper(GBTWrapper):
             except RuntimeError as e:
                 print(f"Caught an exception in GBRL: {e}")
         
-    def step(self, observations: Union[np.array, th.Tensor], theta_grad: np.array, value_grad: np.array=None) -> None:
+    def step(self, observations: Union[np.ndarray, th.Tensor], theta_grad: np.ndarray, value_grad: np.ndarray=None) -> None:
         num_observations, cat_observations = preprocess_features(observations)
         target_grads = theta_grad 
         if value_grad is not None:
@@ -548,13 +554,13 @@ class SharedActorCriticWrapper(GBTWrapper):
         self.iteration = self.cpp_model.get_iteration()
         self.total_iterations += 1
 
-    def distil(self, obs: Union[np.array, th.Tensor], policy_targets: np.array, value_targets: np.array, params: Dict, verbose: int) -> Tuple[float, Dict]:
+    def distil(self, obs: Union[np.ndarray, th.Tensor], policy_targets: np.ndarray, value_targets: np.ndarray, params: Dict, verbose: int) -> Tuple[float, Dict]:
         targets = policy_targets.squeeze() 
         if self.value_optimizer is not None:
             targets = np.concatenate([policy_targets, value_targets[:, np.newaxis]], axis=1)
         return super().distil(obs, targets, params, verbose)
                                      
-    def predict(self, observations: Union[np.array, th.Tensor], start_idx: int=0, stop_idx: int=None) -> Tuple[np.array, np.array]:
+    def predict(self, observations: Union[np.ndarray, th.Tensor], start_idx: int=0, stop_idx: int=None) -> Tuple[np.ndarray, np.ndarray]:
         if stop_idx is None:
             stop_idx = 0
         num_observations, cat_observations = preprocess_features(observations)
@@ -572,6 +578,34 @@ class SharedActorCriticWrapper(GBTWrapper):
             pred_values = preds[:, -1]
             preds = preds[:, :-1]
         return preds, pred_values
+
+    def compress(self, k: int, gradient_steps: int, features: Union[np.ndarray, th.Tensor], actions: th.Tensor = None, log_std: th.Tensor = None,
+                 method: str = 'first_k', dist_type: str = 'deterministic', optimizer_kwargs: Optional[Dict[str, Any]] = None, 
+                 least_squares_W: bool = True, temperature: float = 1.0, lambda_reg: float = 1.0) -> None:
+        assert actions is not None, "Cannot compress a shared actor-critic policy without actions"
+        assert dist_type != 'supervised_learning', "Cannot compress a shared actor-critic policy using supervised learning compression methods"
+        A, V, n_leaves_per_tree, n_leaves, n_trees = self.get_matrix_representation(features) 
+        A, V, n_leaves_per_tree = th.tensor(A, dtype=th.float32, device=self.device), th.tensor(V, dtype=th.float32, device=self.device), th.tensor(n_leaves_per_tree, device=self.device)
+        compression_params = {'k': k, 'gradient_steps': gradient_steps, 'method': method, 
+                              'optimizer_kwargs': optimizer_kwargs, 
+                              'temperature': temperature, 'n_leaves': n_leaves, 'n_trees': n_trees, 
+                              'n_leaves_per_tree': n_leaves_per_tree,
+                              'lambda_reg': lambda_reg,
+                              'output_dim': self.output_dim,
+                              'device': self.device}
+        
+        compression_params['dist_type'] = dist_type
+        compressor = SharedActorCriticCompression(**compression_params)
+        leaves_selection, tree_selection, W, n_compressed_trees, n_compressed_leaves = compressor.compress(A, V, actions, log_std)
+
+        # indices of selected leaves / trees in original indexing
+        compressed_leaf_indices = np.where(leaves_selection > 0)[0].astype(np.int32)
+        compressed_tree_indices = np.where(tree_selection > 0)[0].astype(np.int32)
+        # indices of the start of each leaf according to the compressed model
+        new_tree_indices = np.zeros(n_compressed_trees)
+        new_tree_indices[1:] = np.cumsum(n_leaves_per_tree[compressed_tree_indices].detach().cpu().numpy())[:-1]
+        # W = np.zeros_like(W, dtype=np.single)
+        self.cpp_model.compress(n_compressed_leaves, n_compressed_trees, compressed_leaf_indices, compressed_tree_indices, new_tree_indices.astype(np.int32), W)
     
     @classmethod
     def load(cls, filename: str) -> "SharedActorCriticWrapper":

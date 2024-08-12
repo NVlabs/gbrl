@@ -275,14 +275,14 @@ __global__ void predict_kernel_tree_wise(const float* __restrict__ obs, const ch
         if (passed){
             if (n_opts == 1){
                 for (int i = opts[0]->start_idx; i < opts[0]->stop_idx; ++i){
-                    atomicAdd(&preds[sample_idx*output_dim + i], -opts[0]->init_lr * __ldg(leaf_values + value_idx + i));
+                    atomicAdd(&preds[sample_idx*output_dim + i], -__ldg(&opts[0]->init_lr) * __ldg(leaf_values + value_idx + i));
                 }
             } else if (n_opts == 2) {
                 for (int i = opts[0]->start_idx; i < opts[0]->stop_idx; ++i){
-                    atomicAdd(&preds[sample_idx*output_dim + i], -opts[0]->init_lr * __ldg(leaf_values + value_idx + i));
+                    atomicAdd(&preds[sample_idx*output_dim + i], -__ldg(&opts[0]->init_lr) * __ldg(leaf_values + value_idx + i));
                 }
                 for (int i = opts[1]->start_idx; i < opts[1]->stop_idx; ++i){
-                    atomicAdd(&preds[sample_idx*output_dim + i], -opts[1]->init_lr * __ldg(leaf_values + value_idx + i));
+                    atomicAdd(&preds[sample_idx*output_dim + i], -__ldg(&opts[1]->init_lr) * __ldg(leaf_values + value_idx + i));
                 }
             } else {
                 for (int opt_idx = 0; opt_idx < n_opts; ++opt_idx){
@@ -324,14 +324,14 @@ __global__ void predict_sample_wise_kernel_tree_wise(const float* __restrict__ o
         if (passed){
             if (n_opts == 1){
                 for (int i = opts[0]->start_idx; i < opts[0]->stop_idx; ++i){
-                    atomicAdd(&preds[blockIdx.x*output_dim + i], -opts[0]->init_lr * __ldg(leaf_values + value_idx + i));
+                    atomicAdd(&preds[blockIdx.x*output_dim + i], -__ldg(&opts[0]->init_lr) * __ldg(leaf_values + value_idx + i));
                 }
             } else if (n_opts == 2) {
                 for (int i = opts[0]->start_idx; i < opts[0]->stop_idx; ++i){
-                    atomicAdd(&preds[blockIdx.x*output_dim + i], -opts[0]->init_lr * __ldg(leaf_values + value_idx + i));
+                    atomicAdd(&preds[blockIdx.x*output_dim + i], -__ldg(&opts[0]->init_lr) * __ldg(leaf_values + value_idx + i));
                 }
                 for (int i = opts[1]->start_idx; i < opts[1]->stop_idx; ++i){
-                    atomicAdd(&preds[blockIdx.x*output_dim + i], -opts[1]->init_lr * __ldg(leaf_values + value_idx + i));
+                    atomicAdd(&preds[blockIdx.x*output_dim + i], -__ldg(&opts[1]->init_lr) * __ldg(leaf_values + value_idx + i));
                 }
             } else {
                 for (int opt_idx = 0; opt_idx < n_opts; ++opt_idx){
@@ -436,14 +436,14 @@ __global__ void predict_oblivious_kernel_tree_wise(const float* __restrict__ obs
 
         if (n_opts == 1){
             for (int i = opts[0]->start_idx; i < opts[0]->stop_idx; ++i){
-                atomicAdd(&preds[sample_idx*output_dim + i], -opts[0]->init_lr * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
+                atomicAdd(&preds[sample_idx*output_dim + i], -__ldg(&opts[0]->init_lr) * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
             }
         } else if (n_opts == 2) {
             for (int i = opts[0]->start_idx; i < opts[0]->stop_idx; ++i){
-                atomicAdd(&preds[sample_idx*output_dim + i], -opts[0]->init_lr * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
+                atomicAdd(&preds[sample_idx*output_dim + i], -__ldg(&opts[0]->init_lr) * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
             }
             for (int i = opts[1]->start_idx; i < opts[1]->stop_idx; ++i){
-                atomicAdd(&preds[sample_idx*output_dim + i], -opts[1]->init_lr * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
+                atomicAdd(&preds[sample_idx*output_dim + i], -__ldg(&opts[1]->init_lr) * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
             }
         } else {
             for (int opt_idx = 0; opt_idx < n_opts; ++opt_idx){

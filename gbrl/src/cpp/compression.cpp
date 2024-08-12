@@ -162,8 +162,7 @@ void Compressor::add_W_matrix_to_values(const float *W, const ensembleData *edat
                 for (size_t opt_idx = 0; opt_idx < opts.size(); ++opt_idx){
                     opts[opt_idx]->add_scaled(edata->values + leaf_idx*metadata->output_dim, W + (leaf_idx + 1) * metadata->output_dim, 0);
                 }
-            }
-                
+            }     
         }
      } else {
         for (int leaf_idx = 0; leaf_idx < size; ++leaf_idx){

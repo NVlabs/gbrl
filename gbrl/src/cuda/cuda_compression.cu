@@ -119,7 +119,7 @@ void get_matrix_representation_cuda(dataSet *dataset, ensembleMetaData *metadata
 
 ensembleData* compress_ensemble_cuda(ensembleMetaData *metadata, ensembleData *edata, SGDOptimizerGPU** opts, const int n_opts, const int n_compressed_leaves, const int n_compressed_trees, const int *leaf_indices, const int *tree_indices, const int *new_tree_indices, const float *W){
     float *device_W;
-    size_t W_size = metadata->n_leaves * metadata->output_dim * sizeof(float);
+    size_t W_size = (metadata->n_leaves + 1) * metadata->output_dim * sizeof(float);
     cudaError_t alloc_error = cudaMalloc((void**)&device_W, W_size);
     if (alloc_error != cudaSuccess) {
         size_t free_mem, total_mem;
@@ -134,7 +134,7 @@ ensembleData* compress_ensemble_cuda(ensembleMetaData *metadata, ensembleData *e
         return nullptr;
     }
     cudaMemcpy(device_W, W, W_size, cudaMemcpyHostToDevice);
-    int n_blocks = metadata->n_leaves / THREADS_PER_BLOCK + 1;
+    int n_blocks = (metadata->n_leaves + 1) / THREADS_PER_BLOCK + 1;
     add_W_matrix_to_values_kernel<<<n_blocks, THREADS_PER_BLOCK>>>(device_W, edata->values, edata->bias, opts, n_opts, metadata->n_leaves, metadata->output_dim);
     cudaDeviceSynchronize();
 
@@ -253,32 +253,28 @@ __global__ void add_W_matrix_to_values_kernel(const float * __restrict__ W, floa
         int value_idx = idx*output_dim;
         int offset_value = (idx + 1)*output_dim;
         if (n_opts == 1){
-                for (int i = opts[0]->start_idx; i < opts[0]->end_idx; ++i){
-                    leaf_values[value_idx + i] -= __ldg(W + offset_value + i)  / opts[0]->init_lr;
-                }
-            } 
-            else {
-                for (int i = opts[0]->start_idx; i < opts[0]->end_idx; ++i){
-                    leaf_values[value_idx + i] -= __ldg(W + offset_value + i)  / opts[0]->init_lr;
-                }
-                for (int i = opts[1]->start_idx; i < opts[1]->end_idx; ++i){
-                    leaf_values[value_idx + i] -= __ldg(W + offset_value + i)  / opts[1]->init_lr;
-                }
+            for (int i = opts[0]->start_idx; i < opts[0]->stop_idx; ++i){
+                leaf_values[value_idx + i] -= __ldg(W + offset_value + i)  / opts[0]->init_lr;
+            }
+        } 
+        else if (n_opts == 2) {
+            for (int i = opts[0]->start_idx; i < opts[0]->stop_idx; ++i){
+                leaf_values[value_idx + i] -= __ldg(W + offset_value + i)  / opts[0]->init_lr;
+            }
+            for (int i = opts[1]->start_idx; i < opts[1]->stop_idx; ++i){
+                leaf_values[value_idx + i] -= __ldg(W + offset_value + i)  / opts[1]->init_lr;
+            }
         }
+        else {
+            for (int opt_idx = 0; opt_idx < n_opts; ++opt_idx){
+                for (int i = opts[opt_idx]->start_idx; i < opts[opt_idx]->stop_idx; ++i)
+                    leaf_values[value_idx + i] -= __ldg(W + offset_value + i)  / opts[opt_idx]->init_lr;
+            }
+            }
         if (idx == 0){
-            if (n_opts == 1){
-                for (int i = opts[0]->start_idx; i < opts[0]->end_idx; ++i){
-                    bias[value_idx + i] += __ldg(W + value_idx + i);
-                }
-            } 
-            else {
-                for (int i = opts[0]->start_idx; i < opts[0]->end_idx; ++i){
-                    bias[value_idx + i] += __ldg(W + value_idx + i);
-                }
-                for (int i = opts[1]->start_idx; i < opts[1]->end_idx; ++i){
-                    bias[value_idx + i] += __ldg(W + value_idx + i);
-                }
-        }
+            for (int i = 0; i < output_dim; ++i){
+                bias[value_idx + i] += __ldg(W + value_idx + i);
+            }
         }
     }
 }
@@ -288,15 +284,21 @@ __global__  void get_V_kernel(float* __restrict__ V, const float* __restrict__ l
     int leaf_idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (leaf_idx < n_leaves){
         if (n_opts == 1){
-            for (int i = opts[0]->start_idx; i < opts[0]->end_idx; ++i)
-                V[(leaf_idx + 1)*output_dim + i] = -opts[0]->init_lr * __ldg(leaf_values + leaf_idx*output_dim + i);
+            for (int i = opts[0]->start_idx; i < opts[0]->stop_idx; ++i)
+                V[(leaf_idx + 1)*output_dim + i] = -__ldg(&opts[0]->init_lr) * __ldg(leaf_values + leaf_idx*output_dim + i);
+        } 
+        else if (n_opts == 2) {
+            for (int i = opts[0]->start_idx; i < opts[0]->stop_idx; ++i)
+                 V[(leaf_idx + 1)*output_dim + i] = -__ldg(&opts[0]->init_lr) * __ldg(leaf_values + leaf_idx*output_dim + i);
+
+            for (int i = opts[1]->start_idx; i < opts[1]->stop_idx; ++i)
+                 V[(leaf_idx + 1)*output_dim + i] = -__ldg(&opts[1]->init_lr) * __ldg(leaf_values + leaf_idx*output_dim + i);
         } 
         else {
-            for (int i = opts[0]->start_idx; i < opts[0]->end_idx; ++i)
-                 V[(leaf_idx + 1)*output_dim + i] = -opts[0]->init_lr * __ldg(leaf_values + leaf_idx*output_dim + i);
-            for (int i = opts[1]->start_idx; i < opts[1]->end_idx; ++i)
-                 V[(leaf_idx + 1)*output_dim + i] = -opts[1]->init_lr * __ldg(leaf_values + leaf_idx*output_dim + i);
-            
+            for (int opt_idx = 0; opt_idx < n_opts; ++opt_idx){
+                for (int i = opts[opt_idx]->start_idx; i < opts[opt_idx]->stop_idx; ++i)
+                    V[(leaf_idx + 1)*output_dim + i] = -__ldg(&opts[opt_idx]->init_lr) * __ldg(leaf_values + leaf_idx*output_dim + i);
+            }
         }
     }
 }

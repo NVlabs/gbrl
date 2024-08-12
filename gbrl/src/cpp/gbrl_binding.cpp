@@ -323,37 +323,36 @@ PYBIND11_MODULE(gbrl_cpp, m) {
     }, py::arg("obs"), py::arg("categorical_obs"), "Get matrix representation of model given an input");
     gbrl.def("compress", [](GBRL &self, const int n_compressed_leaves, const int n_compressed_trees, py::object &leaf_indices, py::object &tree_indices, py::object &new_tree_indices, py::object &W){
         const int* leaf_indices_ptr = nullptr;
-        py::buffer_info info;
          if (!leaf_indices.is_none()) {
             py::array_t<int> leaf_indices_array = py::cast<py::array_t<int>>(leaf_indices);
             if (!leaf_indices_array.attr("flags").attr("c_contiguous").cast<bool>())
                 throw std::runtime_error("Arrays must be C-contiguous");
-            info = leaf_indices_array.request();
-            leaf_indices_ptr = static_cast<const int*>(info.ptr);
+            py::buffer_info leaf_info = leaf_indices_array.request();
+            leaf_indices_ptr = static_cast<const int*>(leaf_info.ptr);
         }
         const int* tree_indices_ptr = nullptr;
          if (!tree_indices.is_none()) {
             py::array_t<int> tree_indices_array = py::cast<py::array_t<int>>(tree_indices);
             if (!tree_indices_array.attr("flags").attr("c_contiguous").cast<bool>())
                 throw std::runtime_error("Arrays must be C-contiguous");
-            info = tree_indices_array.request();
-            tree_indices_ptr = static_cast<const int*>(info.ptr);
+            py::buffer_info tree_info = tree_indices_array.request();
+            tree_indices_ptr = static_cast<const int*>(tree_info.ptr);
         }
         const int* new_tree_indices_ptr = nullptr;
          if (!new_tree_indices.is_none()) {
             py::array_t<int> new_tree_indices_array = py::cast<py::array_t<int>>(new_tree_indices);
             if (!new_tree_indices_array.attr("flags").attr("c_contiguous").cast<bool>())
                 throw std::runtime_error("Arrays must be C-contiguous");
-            info = new_tree_indices_array.request();
-            new_tree_indices_ptr = static_cast<const int*>(info.ptr);
+            py::buffer_info indices_info = new_tree_indices_array.request();
+            new_tree_indices_ptr = static_cast<const int*>(indices_info.ptr);
         }
         const float* W_ptr = nullptr;
          if (!W.is_none()) {
             py::array_t<float> W_array = py::cast<py::array_t<float>>(W);
             if (!W_array.attr("flags").attr("c_contiguous").cast<bool>())
                 throw std::runtime_error("Arrays must be C-contiguous");
-            info = W_array.request();
-            W_ptr = static_cast<const float*>(info.ptr);
+            py::buffer_info w_info = W_array.request();
+            W_ptr = static_cast<const float*>(w_info.ptr);
         }
         
         
@@ -398,6 +397,10 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         py::gil_scoped_release release; 
         self.print_tree(tree_idx); 
     }, "Print specified tree index");
+    gbrl.def("print_ensemble_metadata", [](GBRL &self) {
+        py::gil_scoped_release release; 
+        self.print_ensemble_metadata(); 
+    }, "Print ensemble's metadata");
     gbrl.def("tree_shap", [](GBRL &self, const int tree_idx, py::object &obs, py::object &categorical_obs, 
                             py::object &norm_values, py::object &base_poly, py::object &offset) -> py::array_t<float> {
         const float* obs_ptr = nullptr;

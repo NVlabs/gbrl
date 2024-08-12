@@ -37,6 +37,7 @@ __global__ void selective_copyi(const int num_indices, const int* indices, int* 
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < num_indices) {
         int start_idx = indices[idx];
+        // printf("copying for idx %d from start_idx %d\n", idx, start_idx);
         for (int j = 0; j < elements_dim; ++j) {
             dest[idx*elements_dim + j] = src[start_idx*elements_dim + j];
         }

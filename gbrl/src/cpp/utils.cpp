@@ -106,6 +106,25 @@ void selective_copy(const int num_indices, const int* indices, T* dest, const T*
     }
 }
 
+// template <typename T>
+// void selective_copy(const int num_indices, const int* indices, T* dest, const T* src, const int elements_dim, const int par_th){
+//     int n_threads = calculate_num_threads(num_indices, par_th);
+//     omp_set_num_threads(n_tree_threads);
+//     int indices_per_thread = num_indices / n_threads;
+//     #pragma omp parallel
+//     {
+//         int thread_id = omp_get_thread_num();
+//         int thread_start_idx = thread_id * indices_per_thread;
+//         int thread_stop_idx = (thread_id == indices_per_thread - 1) ? num_indices : thread_start_idx + indices_per_thread;
+//         for (int i = thread_start_idx; i < thread_stop_idx; ++i) {
+//             int start_idx = indices[i];
+//             for (int j = 0; j < elements_dim; ++j) {
+//                 dest[i*elements_dim + j] = src[start_idx*elements_dim + j];
+//             }
+//         }
+//     }
+// }
+
 template void selective_copy<float>(const int num_indices, const int* indices, float* dest, const float* src, const int elements_dim);
 template void selective_copy<int>(const int num_indices, const int* indices, int* dest, const int* src, const int elements_dim);
 template void selective_copy<bool>(const int num_indices, const int* indices, bool* dest, const bool* src, const int elements_dim);

@@ -65,6 +65,7 @@ class GBRL {
         void set_optimizer(optimizerAlgo algo, schedulerFunc scheduler_func, float init_lr, int start_idx, int stop_idx, float stop_lr, int T, float beta_1, float beta_2, float eps, float shrinkage);
 
         void print_tree(int tree_idx);
+        void print_ensemble_metadata();
         void plot_tree(int tree_idx, const std::string &filename);
 
         ensembleData *edata;

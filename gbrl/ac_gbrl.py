@@ -25,8 +25,7 @@ class ActorCritic(GBRL):
                  value_optimizer: Dict= None,
                  shared_tree_struct: bool=True,
                  gbrl_params: Dict=dict(),
-                 compression_params: Dict=None,
-                 bias: np.array = None,
+                 bias: np.ndarray = None,
                  verbose: int=0,
                  device: str='cpu'):
         
@@ -48,7 +47,7 @@ class ActorCritic(GBRL):
             split_score_func (str): "cosine" or "l2"
             generator_type- (str): candidate generation method "Quantile" or "Uniform".
             feature_weights - (list[float]): Per-feature multiplication weights used when choosing the best split. Weights should be >= 0
-        bias (np.array, optional): manually set a bias. Defaults to None = np.zeros.
+        bias (np.ndarray, optional): manually set a bias. Defaults to None = np.zeros.
         verbose (int, optional): verbosity level. Defaults to 0.
         device (str, optional): GBRL device 'cpu' or 'cuda/gpu'. Defaults to 'cpu'.
         """
@@ -109,13 +108,13 @@ class ActorCritic(GBRL):
         instance.device = instance._model.get_device()
         return instance
     
-    def predict(self, observations: Union[np.array, th.Tensor]) -> Tuple[np.array, np.array]:
+    def predict(self, observations: Union[np.ndarray, th.Tensor]) -> Tuple[np.ndarray, np.ndarray]:
         """Predict method
         Args:
-            observations (Union[np.array, th.Tensor])
+            observations (Union[np.ndarray, th.Tensor])
 
         Returns:
-            Tuple[np.array, np.array]: actor and value predictions.
+            Tuple[np.ndarray, np.ndarray]: actor and value predictions.
         """
         return self._model.predict(observations)
     
@@ -127,11 +126,11 @@ class ActorCritic(GBRL):
         """
         return self._model.get_num_trees()
      
-    def predict_values(self, observations: Union[np.array, th.Tensor], requires_grad: bool=True) -> th.Tensor:
+    def predict_values(self, observations: Union[np.ndarray, th.Tensor], requires_grad: bool=True) -> th.Tensor:
         """Predict only values
 
         Args:
-            observations (Union[np.array, th.Tensor])
+            observations (Union[np.ndarray, th.Tensor])
 
         Returns:
             th.Tensor: values
@@ -142,11 +141,11 @@ class ActorCritic(GBRL):
         self.params = th.tensor(values, requires_grad=requires_grad)
         return self.params
 
-    def __call__(self, observations: Union[np.array, th.Tensor], requires_grad: bool = True) -> Tuple[th.Tensor, th.Tensor]:
+    def __call__(self, observations: Union[np.ndarray, th.Tensor], requires_grad: bool = True) -> Tuple[th.Tensor, th.Tensor]:
         """ Predicts  and returns actor and critic outputs as tensors. If `requires_grad=True` then stores 
            differentiable parameters in self.params 
         Args:
-            observations (Union[np.array, th.Tensor])
+            observations (Union[np.ndarray, th.Tensor])
 
         Returns:
             Tuple[th.Tensor, th.Tensor]: actor and critic output
@@ -159,15 +158,15 @@ class ActorCritic(GBRL):
             self.params = params
         return params
     
-    def step(self, observations: Union[np.array, th.Tensor], policy_grad_clip: float = None, value_grad_clip : float = None, policy_grad: Optional[Union[np.array, th.tensor]] = None, value_grad: Optional[Union[np.array, th.tensor]] = None) -> None:
+    def step(self, observations: Union[np.ndarray, th.Tensor], policy_grad_clip: float = None, value_grad_clip : float = None, policy_grad: Optional[Union[np.ndarray, th.tensor]] = None, value_grad: Optional[Union[np.ndarray, th.tensor]] = None) -> None:
         """Performs a boosting step for both actor and critic
 
         Args:
-            observations (Union[np.array, th.Tensor]):
+            observations (Union[np.ndarray, th.Tensor]):
             policy_grad_clip (float, optional): . Defaults to None.
             value_grad_clip (float, optional):. Defaults to None.
-            policy_grad (Optional[Union[np.array, th.tensor]], optional): manually calculated gradients. Defaults to None.
-            value_grad (Optional[Union[np.array, th.tensor]], optional): manually calculated gradients. Defaults to None.
+            policy_grad (Optional[Union[np.ndarray, th.tensor]], optional): manually calculated gradients. Defaults to None.
+            value_grad (Optional[Union[np.ndarray, th.tensor]], optional): manually calculated gradients. Defaults to None.
         """
         n_samples = len(observations)
         if policy_grad is None:
@@ -187,16 +186,16 @@ class ActorCritic(GBRL):
         self.policy_grad = policy_grad
         self.value_grad = value_grad
     
-    def actor_step(self, observations: Union[np.array, th.Tensor], policy_grad_clip: float = None, policy_grad: Optional[Union[np.array, th.tensor]] = None) -> None:
+    def actor_step(self, observations: Union[np.ndarray, th.Tensor], policy_grad_clip: float = None, policy_grad: Optional[Union[np.ndarray, th.tensor]] = None) -> None:
         """Performs a single boosting step for the actor (should only be used if actor and critic use separate models)
 
         Args:
-            observations (Union[np.array, th.Tensor]):
+            observations (Union[np.ndarray, th.Tensor]):
             policy_grad_clip (float, optional): Defaults to None.
-            policy_grad (Optional[Union[np.array, th.tensor]], optional): manually calculated gradients. Defaults to None.
+            policy_grad (Optional[Union[np.ndarray, th.tensor]], optional): manually calculated gradients. Defaults to None.
 
         Returns:
-            np.array: policy gradient
+            np.ndarray: policy gradient
         """
         assert not self.shared_tree_struct, "Cannot separate boosting steps for actor and critic when using separate tree architectures!"
         n_samples = len(observations)
@@ -209,16 +208,16 @@ class ActorCritic(GBRL):
         self._model.step_policy(observations, policy_grad)
         self.policy_grad = policy_grad
     
-    def critic_step(self, observations: Union[np.array, th.Tensor], value_grad_clip : float = None, value_grad: Optional[Union[np.array, th.tensor]] = None) -> None:
+    def critic_step(self, observations: Union[np.ndarray, th.Tensor], value_grad_clip : float = None, value_grad: Optional[Union[np.ndarray, th.tensor]] = None) -> None:
         """Performs a single boosting step for the critic (should only be used if actor and critic use separate models)
 
         Args:
-            observations (Union[np.array, th.Tensor]):
+            observations (Union[np.ndarray, th.Tensor]):
             value_grad_clip (float, optional): Defaults to None.
-            value_grad (Optional[Union[np.array, th.tensor]], optional): manually calculated gradients. Defaults to None.
+            value_grad (Optional[Union[np.ndarray, th.tensor]], optional): manually calculated gradients. Defaults to None.
 
         Returns:
-            np.array: value gradient
+            np.ndarray: value gradient
         """
         assert not self.shared_tree_struct, "Cannot separate boosting steps for actor and critic when using separate tree architectures!"
         if value_grad is None:
@@ -231,11 +230,11 @@ class ActorCritic(GBRL):
         self._model.step_critic(observations, value_grad)
         self.value_grad = value_grad
 
-    def get_params(self) -> Tuple[np.array, np.array]:
+    def get_params(self) -> Tuple[np.ndarray, np.ndarray]:
         """Returns predicted actor and critic parameters and their respective gradients
 
         Returns:
-            Tuple[np.array, np.array]
+            Tuple[np.ndarray, np.ndarray]
         """
         assert self.params is not None, "must run a forward pass first"
         if isinstance(self.params, tuple):
@@ -263,7 +262,7 @@ class ParametricActor(GBRL):
                  output_dim: int, 
                  policy_optimizer: Dict,
                  gbrl_params: Dict=dict(),
-                 bias: np.array = None,
+                 bias: np.ndarray = None,
                  verbose: int=0,
                  device: str='cpu'):
         """ GBRL model for a ParametricActor ensemble. ParametricActor outputs a single parameter per action dimension.
@@ -283,7 +282,7 @@ class ParametricActor(GBRL):
             split_score_func (str): "cosine" or "l2"
             generator_type- (str): candidate generation method "Quantile" or "Uniform".
             feature_weights - (list[float]): Per-feature multiplication weights used when choosing the best split. Weights should be >= 0
-        bias (np.array, optional): manually set a bias. Defaults to None = np.zeros.
+        bias (np.ndarray, optional): manually set a bias. Defaults to None = np.zeros.
         verbose (int, optional): verbosity level. Defaults to 0.
         device (str, optional): GBRL device 'cpu' or 'cuda/gpu'. Defaults to 'cpu'.
         """
@@ -301,13 +300,13 @@ class ParametricActor(GBRL):
         self._model.reset()
         self._model.set_bias(self.bias)
 
-    def step(self, observations: Union[np.array, th.Tensor], policy_grad_clip: float = None, policy_grad: Optional[Union[np.array, th.tensor]] = None) -> None:
+    def step(self, observations: Union[np.ndarray, th.Tensor], policy_grad_clip: float = None, policy_grad: Optional[Union[np.ndarray, th.tensor]] = None) -> None:
         """Performs a single boosting iteration.
 
         Args:
-            observations (Union[np.array, th.Tensor]):
+            observations (Union[np.ndarray, th.Tensor]):
             policy_grad_clip (float, optional): . Defaults to None.
-            policy_grad (Optional[Union[np.array, th.tensor]], optional): manually calculated gradients. Defaults to None.
+            policy_grad (Optional[Union[np.ndarray, th.tensor]], optional): manually calculated gradients. Defaults to None.
         """
         if policy_grad is None:
             n_samples = len(observations)
@@ -340,13 +339,13 @@ class ParametricActor(GBRL):
         instance.device = instance._model.get_device()
         return GBTWrapper.load(load_name)
     
-    def predict(self, observations: Union[np.array, th.Tensor]) -> np.array:
+    def predict(self, observations: Union[np.ndarray, th.Tensor]) -> np.ndarray:
         """Predicts and returns GBRL output as a numpy array.
         Args:
-            observations (Union[np.array, th.Tensor])
+            observations (Union[np.ndarray, th.Tensor])
 
         Returns:
-            np.array: GBRL outputs - a single parameter per action dimension.
+            np.ndarray: GBRL outputs - a single parameter per action dimension.
         """
         return self._model.predict(observations)
     
@@ -357,11 +356,11 @@ class ParametricActor(GBRL):
         """
         return self._model.get_num_trees()
      
-    def __call__(self, observations: Union[np.array, th.Tensor], requires_grad : bool = True) -> th.Tensor:
+    def __call__(self, observations: Union[np.ndarray, th.Tensor], requires_grad : bool = True) -> th.Tensor:
         """ Returns actor output as Tensor. If `requires_grad=True` then stores 
            differentiable parameters in self.params 
         Args:
-            observations (Union[np.array, th.Tensor])
+            observations (Union[np.ndarray, th.Tensor])
             requires_grad bool: Defaults to None.
 
         Returns:
@@ -388,7 +387,7 @@ class GaussianActor(GBRL):
                  std_optimizer: Dict = None,
                  log_std_init: float = -2,
                  gbrl_params: Dict = dict(),
-                 bias: np.array = None,
+                 bias: np.ndarray = None,
                  verbose: int=0,
                  device: str='cpu'):
         """ GBRL model for a Actor ensemble used in algorithms such as: SAC.
@@ -411,7 +410,7 @@ class GaussianActor(GBRL):
             split_score_func (str): "cosine" or "l2"
             generator_type- (str): candidate generation method "Quantile" or "Uniform".
             feature_weights - (list[float]): Per-feature multiplication weights used when choosing the best split. Weights should be >= 0
-        bias (np.array, optional): manually set a bias. Defaults to None = np.zeros.
+        bias (np.ndarray, optional): manually set a bias. Defaults to None = np.zeros.
         verbose (int, optional): verbosity level. Defaults to 0.
         device (str, optional): GBRL device 'cpu' or 'cuda/gpu'. Defaults to 'cpu'.
         """
@@ -443,15 +442,15 @@ class GaussianActor(GBRL):
         self._model.reset()
         self._model.set_bias(self.bias)
         
-    def step(self, observations: Union[np.array, th.Tensor], mu_grad_clip: float = None, log_std_grad_clip: float = None, mu_grad: Optional[Union[np.array, th.tensor]] = None, log_std_grad: Optional[Union[np.array, th.tensor]] = None) -> None:
+    def step(self, observations: Union[np.ndarray, th.Tensor], mu_grad_clip: float = None, log_std_grad_clip: float = None, mu_grad: Optional[Union[np.ndarray, th.tensor]] = None, log_std_grad: Optional[Union[np.ndarray, th.tensor]] = None) -> None:
         """Performs a single boosting iteration.
 
         Args:
-            observations (Union[np.array, th.Tensor])
+            observations (Union[np.ndarray, th.Tensor])
             mu_grad_clip (float, optional). Defaults to None.
             log_std_grad_clip (float, optional). Defaults to None.
-            mu_grad (Optional[Union[np.array, th.tensor]], optional): manually calculated gradients. Defaults to None.
-            log_std_grad (Optional[Union[np.array, th.tensor]], optional): manually calculated gradients. Defaults to None.
+            mu_grad (Optional[Union[np.ndarray, th.tensor]], optional): manually calculated gradients. Defaults to None.
+            log_std_grad (Optional[Union[np.ndarray, th.tensor]], optional): manually calculated gradients. Defaults to None.
         """
 
 
@@ -475,14 +474,14 @@ class GaussianActor(GBRL):
         if self.std_optimizer is not None:
             self.grad = (mu_grad, log_std_grad)
         
-    def predict(self, observations: Union[np.array, th.Tensor]) -> Tuple[np.array, np.array]:
+    def predict(self, observations: Union[np.ndarray, th.Tensor]) -> Tuple[np.ndarray, np.ndarray]:
         """Predict the parameters of a Gaussian Distrbution as numpy arrays.
 
         Args:
-            observations (Union[np.array, th.Tensor]):
+            observations (Union[np.ndarray, th.Tensor]):
 
         Returns:
-            Tuple[np.array, np.array]: mu and sigma
+            Tuple[np.ndarray, np.ndarray]: mu and sigma
         """
         theta = self._model.predict(observations)
         if self.std_optimizer is not None:
@@ -497,12 +496,12 @@ class GaussianActor(GBRL):
         """
         return self._model.get_num_trees()
 
-    def __call__(self, observations: Union[np.array, th.Tensor], requires_grad : bool = True) -> th.Tensor:
+    def __call__(self, observations: Union[np.ndarray, th.Tensor], requires_grad : bool = True) -> th.Tensor:
         """Returns actor's outputs as tensor. If `requires_grad=True` then stores 
            differentiable parameters in self.params 
 
         Args:
-            observations (Union[np.array, th.Tensor]):
+            observations (Union[np.ndarray, th.Tensor]):
             requires_grad (bool, optional):. Defaults to True.
 
         Returns:
@@ -531,7 +530,7 @@ class ContinuousCritic(GBRL):
                  bias_optimizer: Dict =  None,
                  gbrl_params: Dict=dict(),
                  target_update_interval: int = 100,
-                 bias: np.array = None,
+                 bias: np.ndarray = None,
                  verbose: int=0,
                  device: str='cpu'):         
         """ GBRL model for a Continuous Critic ensemble.
@@ -559,7 +558,7 @@ class ContinuousCritic(GBRL):
             generator_type- (str): candidate generation method "Quantile" or "Uniform".
             feature_weights - (list[float]): Per-feature multiplication weights used when choosing the best split. Weights should be >= 0
         target_update_interval (int): target update interval
-        bias (np.array, optional): manually set a bias. Defaults to None = np.zeros.
+        bias (np.ndarray, optional): manually set a bias. Defaults to None = np.zeros.
         verbose (int, optional): verbosity level. Defaults to 0.
         device (str, optional): GBRL device 'cpu' or 'cuda/gpu'. Defaults to 'cpu'.
         """
@@ -583,14 +582,14 @@ class ContinuousCritic(GBRL):
         self._model.reset()
         self._model.set_bias(self.bias)
         
-    def step(self, observations: Union[np.array, th.Tensor], q_grad_clip: float = None, weight_grad: Optional[Union[np.array, th.tensor]] = None, bias_grad: Optional[Union[np.array, th.tensor]] = None) -> None:
+    def step(self, observations: Union[np.ndarray, th.Tensor], q_grad_clip: float = None, weight_grad: Optional[Union[np.ndarray, th.tensor]] = None, bias_grad: Optional[Union[np.ndarray, th.tensor]] = None) -> None:
         """Performs a single boosting step
 
         Args:
-            observations (Union[np.array, th.Tensor]):
+            observations (Union[np.ndarray, th.Tensor]):
             q_grad_clip (float, optional):. Defaults to None.
-        weight_grad (Optional[Union[np.array, th.tensor]], optional): manually calculated gradients. Defaults to None.
-            bias_grad (Optional[Union[np.array, th.tensor]], optional): manually calculated gradients. Defaults to None.           
+        weight_grad (Optional[Union[np.ndarray, th.tensor]], optional): manually calculated gradients. Defaults to None.
+            bias_grad (Optional[Union[np.ndarray, th.tensor]], optional): manually calculated gradients. Defaults to None.           
         """
 
         n_samples = len(observations)
@@ -609,26 +608,26 @@ class ContinuousCritic(GBRL):
         self._model.step(observations, theta_grad)
         self.grad = (weight_grad, bias_grad)
         
-    def predict(self, observations: Union[np.array, th.Tensor]) -> Tuple[np.array, np.array]:
+    def predict(self, observations: Union[np.ndarray, th.Tensor]) -> Tuple[np.ndarray, np.ndarray]:
         """Predict the parameters of a Continuous Critic as numpy arrays.
 
         Args:
-            observations (Union[np.array, th.Tensor]):
+            observations (Union[np.ndarray, th.Tensor]):
 
         Returns:
-            np.array: _description_
+            np.ndarray: _description_
         """
         theta = self._model.predict(observations)
         policy_dim = self.output_dim // 2
         weights, bias = theta[:, :policy_dim], theta[:, policy_dim:]
         return weights, bias
 
-    def predict_target(self, observations: Union[np.array, th.Tensor]) -> Tuple[th.Tensor, th.Tensor]:
+    def predict_target(self, observations: Union[np.ndarray, th.Tensor]) -> Tuple[th.Tensor, th.Tensor]:
         """Predict the parameters of a Target Continuous Critic as Tensors.
         Prediction is made by summing the outputs the trees from Continuous Critic model up to `n_trees - target_update_interval`.
 
         Args:
-            observations (Union[np.array, th.Tensor]):
+            observations (Union[np.ndarray, th.Tensor]):
 
         Returns:
             Tuple[th.Tensor, th.Tensor]: weights and bias vectors
@@ -647,12 +646,12 @@ class ContinuousCritic(GBRL):
         """
         return self._model.get_num_trees()
 
-    def __call__(self, observations: Union[np.array, th.Tensor], requires_grad: bool =  False) -> Tuple[th.Tensor, th.Tensor]:
+    def __call__(self, observations: Union[np.ndarray, th.Tensor], requires_grad: bool =  False) -> Tuple[th.Tensor, th.Tensor]:
         """Predict the parameters of a Continuous Critic as Tensors. if `requires_grad=True` then stores 
            differentiable parameters in self.params 
 
         Args:
-            observations (Union[np.array, th.Tensor])
+            observations (Union[np.ndarray, th.Tensor])
             requires_grad (bool, optional): Defaults to False.
 
         Returns:
@@ -679,7 +678,7 @@ class DiscreteCritic(GBRL):
                  critic_optimizer: Dict,
                  gbrl_params: Dict=dict(),
                  target_update_interval: int = 100,
-                 bias: np.array = None,
+                 bias: np.ndarray = None,
                  verbose: int=0,
                  device: str='cpu'):  
         """ GBRL model for a Discrete Critic ensemble.
@@ -717,13 +716,13 @@ class DiscreteCritic(GBRL):
         self._model.reset()
         self._model.set_bias(self.bias)
 
-    def step(self, observations: Union[np.array, th.Tensor], max_q_grad_norm: np.array = None, q_grad: Optional[Union[np.array, th.tensor]] = None) -> None:
+    def step(self, observations: Union[np.ndarray, th.Tensor], max_q_grad_norm: np.ndarray = None, q_grad: Optional[Union[np.ndarray, th.tensor]] = None) -> None:
         """Performs a single boosting iterations.
 
         Args:
-            observations (Union[np.array, th.Tensor]):
-            max_q_grad_norm (np.array, optional). Defaults to None.
-            q_grad (Optional[Union[np.array, th.tensor]], optional): manually calculated gradients. Defaults to None.
+            observations (Union[np.ndarray, th.Tensor]):
+            max_q_grad_norm (np.ndarray, optional). Defaults to None.
+            q_grad (Optional[Union[np.ndarray, th.tensor]], optional): manually calculated gradients. Defaults to None.
         """
         if q_grad is None:
             n_samples = len(observations)
@@ -733,23 +732,23 @@ class DiscreteCritic(GBRL):
         self._model.step(observations, q_grad)
         self.grad = q_grad
 
-    def predict(self, observations: Union[np.array, th.Tensor]) -> np.array:
+    def predict(self, observations: Union[np.ndarray, th.Tensor]) -> np.ndarray:
         """Predict and return Critic's outputs as numpy array.
 
         Args:
-            observations (Union[np.array, th.Tensor])
+            observations (Union[np.ndarray, th.Tensor])
 
         Returns:
-            np.array: Critic outputs
+            np.ndarray: Critic outputs
         """
         return self._model.predict(observations)
 
-    def __call__(self, observations: Union[np.array, th.Tensor], requires_grad: bool=False) -> th.Tensor:
+    def __call__(self, observations: Union[np.ndarray, th.Tensor], requires_grad: bool=False) -> th.Tensor:
         """Predict and return Critic's outputs as Tensors. If `requires_grad=True` then stores 
            differentiable parameters in self.params 
 
         Args:
-            observations (Union[np.array, th.Tensor])
+            observations (Union[np.ndarray, th.Tensor])
             requires_grad (bool, optional). Defaults to False.
 
         Returns:
@@ -762,12 +761,12 @@ class DiscreteCritic(GBRL):
             self.params = params
         return params
 
-    def predict_target(self, observations: Union[np.array, th.Tensor]) -> th.Tensor:
+    def predict_target(self, observations: Union[np.ndarray, th.Tensor]) -> th.Tensor:
         """Predict and return Target Critic's outputs as Tensors.
            Prediction is made by summing the outputs the trees from Continuous Critic model up to `n_trees - target_update_interval`.
         
         Args:
-            observations (Union[np.array, th.Tensor])
+            observations (Union[np.ndarray, th.Tensor])
         
         Returns:
             th.Tensor: Target Critic's outputs.
