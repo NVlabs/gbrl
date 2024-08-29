@@ -413,8 +413,8 @@ class SeparateActorCriticWrapper:
     def compress(self, k: int, gradients_steps: int, observations: Union[np.ndarray, th.Tensor], actions: th.Tensor, log_std: th.Tensor = None, method: str = 'first_k', dist_type: str = 'supervised_learning', optimizer_kwargs: Optional[Dict[str, Any]] = None, 
                  least_squares_W: bool = True, temperature: float = 1.0, lambda_reg: float = 1.0) -> None:
         assert dist_type != 'supervised_learning', 'Cannot use supervised learning as a dist_type for an actor'
-        self.policy_model.compress(k, gradients_steps, observations, actions, log_std, method, dist_type, optimizer_kwargs, least_squares_W, temperature, lambda_reg)
-        self.value_model.compress(k, gradients_steps, observations, actions, log_std, method, 'supervised_learning', optimizer_kwargs, True, temperature, lambda_reg)
+        self.policy_model.compress(k, gradients_steps, observations, actions, log_std, method, dist_type, optimizer_kwargs, least_squares_W, temperature)
+        # self.value_model.compress(k, gradients_steps, observations, actions, log_std, method, 'supervised_learning', optimizer_kwargs, True, temperature, lambda_reg)
 
     def tree_shap(self, tree_idx: int, observations: Union[np.ndarray, th.Tensor]) -> Tuple[np.ndarray, np.ndarray]:
         policy_shap = self.policy_model.tree_shap(tree_idx, observations)

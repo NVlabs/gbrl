@@ -134,13 +134,13 @@ class SharedActorCriticCompression(TreeCompression):
 
 class ParametricActorCompression(TreeCompression):
     def __init__(self, k: int, gradient_steps: int, dist_type: str, n_trees: int, n_leaves_per_tree: Union[np.ndarray, th.Tensor], n_leaves: int, output_dim: int, method: str, optimizer_class: Type[th.optim.Optimizer] = th.optim.Adam,
-        optimizer_kwargs: Optional[Dict[str, Any]] = None, temperature: float = 1.0, device: str = 'cpu'):
+        optimizer_kwargs: Optional[Dict[str, Any]] = None, temperature: float = 1.0, lambda_reg: float = 1.0, device: str = 'cpu'):
         assert dist_type in DIST_TYPES, f"Distribution type: {dist_type} is not supported! Supported distributions are: {DIST_TYPES}"
-        super(ParametricActorCompression, self).__init__(k, gradient_steps, n_trees, n_leaves_per_tree, n_leaves, output_dim, method, optimizer_class, optimizer_kwargs, dist_type in ['deterministic', 'supervised_learning'] , temperature, device, actor_critic=False)
+        super(ParametricActorCompression, self).__init__(k, gradient_steps, n_trees, n_leaves_per_tree, n_leaves, output_dim, method, optimizer_class, optimizer_kwargs, dist_type in ['deterministic', 'supervised_learning'] , temperature, lambda_reg, device, actor_critic=False)
         self.dist_type = dist_type 
     
     def compress(self, A: th.Tensor, V: th.Tensor, actions: th.Tensor, log_std: th.Tensor = None) ->  Tuple[np.ndarray, np.ndarray]:
-        assert log_std is not None or self.dist_Type != 'gaussian', "Cannot compress using a Gaussian distribution without log std values!"
+        assert log_std is not None or self.dist_type != 'gaussian', "Cannot compress using a Gaussian distribution without log std values!"
         targets = A @ V 
         actions = actions.to(self.device)
         if log_std is not None:
