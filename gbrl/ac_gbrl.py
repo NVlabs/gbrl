@@ -106,6 +106,8 @@ class ActorCritic(GBRL):
         instance.tree_struct = instance._model.tree_struct
         instance.gbrl_params = instance._model.gbrl_params
         instance.device = instance._model.get_device()
+        if isinstance(instance.device, tuple):
+            instance.device = instance.device[0]
         return instance
     
     def predict(self, observations: Union[np.ndarray, th.Tensor]) -> Tuple[np.ndarray, np.ndarray]:
@@ -138,7 +140,7 @@ class ActorCritic(GBRL):
         _, values = self._model.predict(observations)
         if len(values.shape) == 0:
             values = values[np.newaxis]
-        self.params = th.tensor(values, requires_grad=requires_grad)
+        self.params = th.tensor(values, requires_grad=requires_grad, device=self.device)
         return self.params
 
     def __call__(self, observations: Union[np.ndarray, th.Tensor], requires_grad: bool = True) -> Tuple[th.Tensor, th.Tensor]:
@@ -151,22 +153,22 @@ class ActorCritic(GBRL):
             Tuple[th.Tensor, th.Tensor]: actor and critic output
         """
         theta, values = self.predict(observations)
-        params = (th.tensor(theta.astype(np.single), requires_grad=requires_grad), th.tensor(values.astype(np.single), requires_grad=requires_grad))
+        params = (th.tensor(theta.astype(np.single), requires_grad=requires_grad, device=self.device), th.tensor(values.astype(np.single), requires_grad=requires_grad, device=self.device))
         if requires_grad:
             self.policy_grad = None
             self.value_grad = None
             self.params = params
         return params
     
-    def step(self, observations: Union[np.ndarray, th.Tensor], policy_grad_clip: float = None, value_grad_clip : float = None, policy_grad: Optional[Union[np.ndarray, th.tensor]] = None, value_grad: Optional[Union[np.ndarray, th.tensor]] = None) -> None:
+    def step(self, observations: Union[np.ndarray, th.Tensor], policy_grad_clip: float = None, value_grad_clip : float = None, policy_grad: Optional[Union[np.ndarray, th.Tensor]] = None, value_grad: Optional[Union[np.ndarray, th.Tensor]] = None) -> None:
         """Performs a boosting step for both actor and critic
 
         Args:
             observations (Union[np.ndarray, th.Tensor]):
             policy_grad_clip (float, optional): . Defaults to None.
             value_grad_clip (float, optional):. Defaults to None.
-            policy_grad (Optional[Union[np.ndarray, th.tensor]], optional): manually calculated gradients. Defaults to None.
-            value_grad (Optional[Union[np.ndarray, th.tensor]], optional): manually calculated gradients. Defaults to None.
+            policy_grad (Optional[Union[np.ndarray, th.Tensor]], optional): manually calculated gradients. Defaults to None.
+            value_grad (Optional[Union[np.ndarray, th.Tensor]], optional): manually calculated gradients. Defaults to None.
         """
         n_samples = len(observations)
         if policy_grad is None:
@@ -186,13 +188,13 @@ class ActorCritic(GBRL):
         self.policy_grad = policy_grad
         self.value_grad = value_grad
     
-    def actor_step(self, observations: Union[np.ndarray, th.Tensor], policy_grad_clip: float = None, policy_grad: Optional[Union[np.ndarray, th.tensor]] = None) -> None:
+    def actor_step(self, observations: Union[np.ndarray, th.Tensor], policy_grad_clip: float = None, policy_grad: Optional[Union[np.ndarray, th.Tensor]] = None) -> None:
         """Performs a single boosting step for the actor (should only be used if actor and critic use separate models)
 
         Args:
             observations (Union[np.ndarray, th.Tensor]):
             policy_grad_clip (float, optional): Defaults to None.
-            policy_grad (Optional[Union[np.ndarray, th.tensor]], optional): manually calculated gradients. Defaults to None.
+            policy_grad (Optional[Union[np.ndarray, th.Tensor]], optional): manually calculated gradients. Defaults to None.
 
         Returns:
             np.ndarray: policy gradient
@@ -208,13 +210,13 @@ class ActorCritic(GBRL):
         self._model.step_policy(observations, policy_grad)
         self.policy_grad = policy_grad
     
-    def critic_step(self, observations: Union[np.ndarray, th.Tensor], value_grad_clip : float = None, value_grad: Optional[Union[np.ndarray, th.tensor]] = None) -> None:
+    def critic_step(self, observations: Union[np.ndarray, th.Tensor], value_grad_clip : float = None, value_grad: Optional[Union[np.ndarray, th.Tensor]] = None) -> None:
         """Performs a single boosting step for the critic (should only be used if actor and critic use separate models)
 
         Args:
             observations (Union[np.ndarray, th.Tensor]):
             value_grad_clip (float, optional): Defaults to None.
-            value_grad (Optional[Union[np.ndarray, th.tensor]], optional): manually calculated gradients. Defaults to None.
+            value_grad (Optional[Union[np.ndarray, th.Tensor]], optional): manually calculated gradients. Defaults to None.
 
         Returns:
             np.ndarray: value gradient
@@ -300,13 +302,13 @@ class ParametricActor(GBRL):
         self._model.reset()
         self._model.set_bias(self.bias)
 
-    def step(self, observations: Union[np.ndarray, th.Tensor], policy_grad_clip: float = None, policy_grad: Optional[Union[np.ndarray, th.tensor]] = None) -> None:
+    def step(self, observations: Union[np.ndarray, th.Tensor], policy_grad_clip: float = None, policy_grad: Optional[Union[np.ndarray, th.Tensor]] = None) -> None:
         """Performs a single boosting iteration.
 
         Args:
             observations (Union[np.ndarray, th.Tensor]):
             policy_grad_clip (float, optional): . Defaults to None.
-            policy_grad (Optional[Union[np.ndarray, th.tensor]], optional): manually calculated gradients. Defaults to None.
+            policy_grad (Optional[Union[np.ndarray, th.Tensor]], optional): manually calculated gradients. Defaults to None.
         """
         if policy_grad is None:
             n_samples = len(observations)
@@ -337,7 +339,7 @@ class ParametricActor(GBRL):
         instance.tree_struct = instance._model.tree_struct
         instance.gbrl_params = instance._model.gbrl_params
         instance.device = instance._model.get_device()
-        return GBTWrapper.load(load_name)
+        return instance
     
     def predict(self, observations: Union[np.ndarray, th.Tensor]) -> np.ndarray:
         """Predicts and returns GBRL output as a numpy array.
@@ -367,7 +369,7 @@ class ParametricActor(GBRL):
             th.Tensor: GBRL outputs - a single parameter per action dimension.
         """
         theta = self._model.predict(observations)
-        params = th.tensor(theta, requires_grad=requires_grad)
+        params = th.tensor(theta, requires_grad=requires_grad, device=self.device)
         if requires_grad:
             self.grads = None
             self.params = params
@@ -442,15 +444,15 @@ class GaussianActor(GBRL):
         self._model.reset()
         self._model.set_bias(self.bias)
         
-    def step(self, observations: Union[np.ndarray, th.Tensor], mu_grad_clip: float = None, log_std_grad_clip: float = None, mu_grad: Optional[Union[np.ndarray, th.tensor]] = None, log_std_grad: Optional[Union[np.ndarray, th.tensor]] = None) -> None:
+    def step(self, observations: Union[np.ndarray, th.Tensor], mu_grad_clip: float = None, log_std_grad_clip: float = None, mu_grad: Optional[Union[np.ndarray, th.Tensor]] = None, log_std_grad: Optional[Union[np.ndarray, th.Tensor]] = None) -> None:
         """Performs a single boosting iteration.
 
         Args:
             observations (Union[np.ndarray, th.Tensor])
             mu_grad_clip (float, optional). Defaults to None.
             log_std_grad_clip (float, optional). Defaults to None.
-            mu_grad (Optional[Union[np.ndarray, th.tensor]], optional): manually calculated gradients. Defaults to None.
-            log_std_grad (Optional[Union[np.ndarray, th.tensor]], optional): manually calculated gradients. Defaults to None.
+            mu_grad (Optional[Union[np.ndarray, th.Tensor]], optional): manually calculated gradients. Defaults to None.
+            log_std_grad (Optional[Union[np.ndarray, th.Tensor]], optional): manually calculated gradients. Defaults to None.
         """
 
 
@@ -508,7 +510,7 @@ class GaussianActor(GBRL):
             th.Tensor: Gaussian parameters
         """
         mean_actions, log_std = self.predict(observations)
-        gaussian_params = (th.tensor(mean_actions, requires_grad=requires_grad), th.tensor(log_std, requires_grad=requires_grad if self.std_optimizer is not None else False))
+        gaussian_params = (th.tensor(mean_actions, requires_grad=requires_grad, device=self.device), th.tensor(log_std, requires_grad=requires_grad if self.std_optimizer is not None else False, device=self.device))
         if requires_grad:
             self.grad = None
             self.params = gaussian_params
@@ -582,14 +584,14 @@ class ContinuousCritic(GBRL):
         self._model.reset()
         self._model.set_bias(self.bias)
         
-    def step(self, observations: Union[np.ndarray, th.Tensor], q_grad_clip: float = None, weight_grad: Optional[Union[np.ndarray, th.tensor]] = None, bias_grad: Optional[Union[np.ndarray, th.tensor]] = None) -> None:
+    def step(self, observations: Union[np.ndarray, th.Tensor], q_grad_clip: float = None, weight_grad: Optional[Union[np.ndarray, th.Tensor]] = None, bias_grad: Optional[Union[np.ndarray, th.Tensor]] = None) -> None:
         """Performs a single boosting step
 
         Args:
             observations (Union[np.ndarray, th.Tensor]):
             q_grad_clip (float, optional):. Defaults to None.
-        weight_grad (Optional[Union[np.ndarray, th.tensor]], optional): manually calculated gradients. Defaults to None.
-            bias_grad (Optional[Union[np.ndarray, th.tensor]], optional): manually calculated gradients. Defaults to None.           
+        weight_grad (Optional[Union[np.ndarray, th.Tensor]], optional): manually calculated gradients. Defaults to None.
+            bias_grad (Optional[Union[np.ndarray, th.Tensor]], optional): manually calculated gradients. Defaults to None.           
         """
 
         n_samples = len(observations)
@@ -636,7 +638,7 @@ class ContinuousCritic(GBRL):
         theta = self._model.predict(observations, stop_idx=max(n_trees - self.target_update_interval, 1))
         policy_dim = self.output_dim // 2
         weights, bias = theta[:, :policy_dim], theta[:, policy_dim:]
-        return th.tensor(weights), th.tensor(bias)
+        return th.tensor(weights, device=self.device), th.tensor(bias, device=self.device)
 
     def get_num_trees(self) -> int:
         """Get number of  trees in model.
@@ -658,7 +660,7 @@ class ContinuousCritic(GBRL):
             Tuple[th.Tensor, th.Tensor]: weights, bias
         """
         weights, bias = self.predict(observations)
-        params = (th.tensor(weights, requires_grad=requires_grad), th.tensor(bias, requires_grad=requires_grad))
+        params = (th.tensor(weights, requires_grad=requires_grad, device=self.device), th.tensor(bias, requires_grad=requires_grad, device=self.device))
         if requires_grad:
             self.grad = None
             self.params = params
@@ -716,13 +718,13 @@ class DiscreteCritic(GBRL):
         self._model.reset()
         self._model.set_bias(self.bias)
 
-    def step(self, observations: Union[np.ndarray, th.Tensor], max_q_grad_norm: np.ndarray = None, q_grad: Optional[Union[np.ndarray, th.tensor]] = None) -> None:
+    def step(self, observations: Union[np.ndarray, th.Tensor], max_q_grad_norm: np.ndarray = None, q_grad: Optional[Union[np.ndarray, th.Tensor]] = None) -> None:
         """Performs a single boosting iterations.
 
         Args:
             observations (Union[np.ndarray, th.Tensor]):
             max_q_grad_norm (np.ndarray, optional). Defaults to None.
-            q_grad (Optional[Union[np.ndarray, th.tensor]], optional): manually calculated gradients. Defaults to None.
+            q_grad (Optional[Union[np.ndarray, th.Tensor]], optional): manually calculated gradients. Defaults to None.
         """
         if q_grad is None:
             n_samples = len(observations)
@@ -755,7 +757,7 @@ class DiscreteCritic(GBRL):
             th.Tensor: Critic's outputs.
         """
         q_values = self.predict(observations)
-        params = th.tensor(q_values, requires_grad=requires_grad)
+        params = th.tensor(q_values, requires_grad=requires_grad, device=self.device)
         if requires_grad:
             self.grad = None
             self.params = params
@@ -773,7 +775,7 @@ class DiscreteCritic(GBRL):
         """
         n_trees = self._model.get_num_trees()
         q_values = self._model.predict(observations, stop_idx=max(n_trees - self.target_update_interval, 1))
-        return th.tensor(q_values)
+        return th.tensor(q_values, device=self.device)
 
     def __copy__(self) -> "DiscreteCritic":
         copy_ = DiscreteCritic(self.tree_struct.copy(), self.output_dim, self.critic_optimizer.copy(), self.gbrl_params, self.target_update_interval, self.bias, self.verbose, self.device)

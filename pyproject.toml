@@ -10,7 +10,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gbrl"
-version = "1.1.0dev1"
+version = "1.1.0dev2"
 description = "Gradient Boosted Trees for RL"
 readme = { file = "README.md", content-type = "text/markdown" }
 authors = [
@@ -22,7 +22,7 @@ dependencies = [
     "pybind11[global]==2.13.1",
     "numpy>=1.21.0",
     "cmake>=3.18",
-    "torch>=1.10.0",
+    "torch>=1.13.1",
     "scikit-learn>=1.5.0",
     "scipy>=1.7.0",
     "shap>=0.40.0",
@@ -43,7 +43,7 @@ requires-python = ">=3.9"
 
 [tool.poetry]
 name = "gbrl"
-version = "1.0.2"
+version = "1.0.3.dev"
 description = "Gradient Boosted Trees for RL"
 authors = ["Benjamin Fuhrer <bfuhrer@nvidia.com>", "Chen Tessler <ctessler@nvidia.com>", "Gal Dalal <galal@nvidia.com>"]
 readme = "README.md"
@@ -54,7 +54,7 @@ python = ">=3.9"
 pybind11 = {version = "2.13.1", extras = ["global"]}
 numpy = ">=1.21.0"
 cmake = ">=3.18"
-torch = ">=1.10.0"
+torch = ">=1.13.1"
 scikit-learn = ">=1.5.0"
 scipy = ">=1.7.0"
 shap = ">=0.40.0"
