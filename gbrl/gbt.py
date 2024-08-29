@@ -144,13 +144,13 @@ class GBRL:
         """
         return self._model.get_schedule_learning_rates()
 
-    def step(self,  X: Union[np.array, th.Tensor], max_grad_norm: float = None, grad: Optional[Union[np.array, th.tensor]] = None) -> None:
+    def step(self,  X: Union[np.array, th.Tensor], max_grad_norm: float = None, grad: Optional[Union[np.array, th.Tensor]] = None) -> None:
         """Perform a boosting step (fits a single tree on the gradients)
 
         Args:
             X (Union[np.array, th.Tensor]): inputs
             max_grad_norm (float, optional): perform gradient clipping by norm. Defaults to None.
-            grad (Optional[Union[np.array, th.tensor]], optional): manually calculated gradients. Defaults to None.
+            grad (Optional[Union[np.array, th.Tensor]], optional): manually calculated gradients. Defaults to None.
         """
         if grad is None:
             assert self.params is not None, "must run a forward pass first"
@@ -186,12 +186,12 @@ class GBRL:
         """
         return self._model.predict(X, start_idx, stop_idx)
     
-    def fit(self, X: Union[np.array, th.tensor], targets: Union[np.array, th.tensor], iterations: int, shuffle: bool=True, loss_type: str='MultiRMSE') -> float:
+    def fit(self, X: Union[np.array, th.Tensor], targets: Union[np.array, th.Tensor], iterations: int, shuffle: bool=True, loss_type: str='MultiRMSE') -> float:
         """Fit multiple iterations (as in supervised learning)
 
         Args:
-            x (np.array): inputs
-            targets (np.array): targets
+            X (Union[np.array, th.Tensor]): inputs
+            targets (Union[np.array, th.Tensor]): targets
             iterations (int): number of boosting iterations
             shuffle (bool, optional): Shuffle dataset. Defaults to True.
             loss_type (str, optional): Loss to use (only MultiRMSE is currently implemented ). Defaults to 'MultiRMSE'.
@@ -306,7 +306,7 @@ class GBRL:
             th.Tensor: _description_
         """
         y_pred = self.predict(X)
-        params = th.tensor(y_pred, requires_grad=requires_grad)
+        params = th.tensor(y_pred, requires_grad=requires_grad, device=self.device)
         if requires_grad:
             self.grad = None
             self.params = params

@@ -381,8 +381,8 @@ class SeparateActorCriticWrapper:
         return self.policy_model.get_device(), self.value_model.get_device()
 
     def get_schedule_learning_rates(self) -> Tuple[int, int]:
-        policy_lr, _ = self.policy_model.get_schedule_learning_rates()
-        value_lr, _ = self.value_model.get_schedule_learning_rates()
+        policy_lr = self.policy_model.get_schedule_learning_rates()
+        value_lr = self.value_model.get_schedule_learning_rates()
         return policy_lr, value_lr
     
     def predict(self, observations: Union[np.array, th.Tensor], start_idx: int=0, stop_idx: int=None) -> Tuple[np.array, np.array]:
