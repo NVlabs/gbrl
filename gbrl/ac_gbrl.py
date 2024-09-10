@@ -494,7 +494,7 @@ class GaussianActor(GBRL):
         """Returns the number of trees in the ensemble
 
         Returns:
-            int
+            int: number of trees
         """
         return self._model.get_num_trees()
 
@@ -617,48 +617,52 @@ class ContinuousCritic(GBRL):
             observations (Union[np.ndarray, th.Tensor]):
 
         Returns:
-            np.ndarray: _description_
+            Tuple[np.ndarray, np.ndarray]: weights and bias parameters to the type of Q-functions
         """
         theta = self._model.predict(observations)
-        policy_dim = self.output_dim // 2
-        weights, bias = theta[:, :policy_dim], theta[:, policy_dim:]
+        weights, bias = theta[:, self.weights_optimizer['start_idx']:self.weights_optimizer['stop_idx']], theta[:, self.bias_optimizer['start_idx']:self.bias_optimizer['stop_idx']]
         return weights, bias
 
+    def predict_target(self, observations: Union[np.ndarray, th.Tensor]) -> Tuple[th.Tensor, th.Tensor]:
     def predict_target(self, observations: Union[np.ndarray, th.Tensor]) -> Tuple[th.Tensor, th.Tensor]:
         """Predict the parameters of a Target Continuous Critic as Tensors.
         Prediction is made by summing the outputs the trees from Continuous Critic model up to `n_trees - target_update_interval`.
 
         Args:
             observations (Union[np.ndarray, th.Tensor]):
+            observations (Union[np.ndarray, th.Tensor]):
 
         Returns:
-            Tuple[th.Tensor, th.Tensor]: weights and bias vectors
+            Tuple[th.Tensor, th.Tensor]: weights and bias parameters to the type of Q-functions
         """
         n_trees = self._model.get_num_trees()
         theta = self._model.predict(observations, stop_idx=max(n_trees - self.target_update_interval, 1))
-        policy_dim = self.output_dim // 2
-        weights, bias = theta[:, :policy_dim], theta[:, policy_dim:]
+        weights, bias = theta[:, self.weights_optimizer['start_idx']:self.weights_optimizer['stop_idx']], theta[:, self.bias_optimizer['start_idx']:self.bias_optimizer['stop_idx']]
         return th.tensor(weights, device=self.device), th.tensor(bias, device=self.device)
 
     def get_num_trees(self) -> int:
-        """Get number of  trees in model.
+        """Get number of trees in model.
 
         Returns:
-            int
+            int: return number of trees
         """
         return self._model.get_num_trees()
 
-    def __call__(self, observations: Union[np.ndarray, th.Tensor], requires_grad: bool =  False) -> Tuple[th.Tensor, th.Tensor]:
+    def __call__(self, observations: Union[np.ndarray, th.Tensor], requires_grad: bool =  False, target: bool = False) -> Tuple[th.Tensor, th.Tensor]:
         """Predict the parameters of a Continuous Critic as Tensors. if `requires_grad=True` then stores 
            differentiable parameters in self.params 
 
         Args:
             observations (Union[np.ndarray, th.Tensor])
+            observations (Union[np.ndarray, th.Tensor])
             requires_grad (bool, optional): Defaults to False.
 
         Returns:
-            Tuple[th.Tensor, th.Tensor]: weights, bias
+            Tuple[th.Tensor, th.Tensor]: weights and bias parameters to the type of Q-functions
         """
+        if target: 
+            return self.predict_target(observations)
+        
         weights, bias = self.predict(observations)
         params = (th.tensor(weights, requires_grad=requires_grad, device=self.device), th.tensor(bias, requires_grad=requires_grad, device=self.device))
         if requires_grad:
