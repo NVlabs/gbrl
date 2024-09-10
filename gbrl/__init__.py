@@ -3,7 +3,7 @@
 #
 # This work is made available under the Nvidia Source Code License-NC.
 # To view a copy of this license, visit
-# https://nvlabs.github.io/gbrl/license.html
+# https://nvlabs.github.io/gbrl/license.html 
 #
 ##############################################################################
 __version__ = "1.0.3"
