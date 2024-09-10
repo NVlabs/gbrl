@@ -42,13 +42,13 @@ def rmse_model(model, X, y, n_epochs):
     epoch = 0
     while epoch < n_epochs:
         y_pred = model(X_, requires_grad=True)
-        loss = 0.5*mse_loss(y_pred, y_) * y_.shape[1]
+        loss = 0.5*mse_loss(y_pred.cpu(), y_) * y_.shape[1]
         loss.backward() 
         model.step(X_)
         print(f"epoch: {epoch} loss: {(loss / y_.shape[1]).sqrt()}")
         epoch += 1
     y_pred = model(X_)
-    loss = (0.5*mse_loss(y_pred, y_)).sqrt().item()
+    loss = (0.5*mse_loss(y_pred.cpu(), y_)).sqrt().item()
     return loss
 
 def ac_rmse_model(model, X, y, n_epochs):
@@ -58,16 +58,16 @@ def ac_rmse_model(model, X, y, n_epochs):
     epoch = 0
     while epoch < n_epochs:
         theta, value = model(X_)
-        loss_theta = 0.5*mse_loss(theta, y_ac) * y_ac.shape[1]
+        loss_theta = 0.5*mse_loss(theta.cpu(), y_ac) * y_ac.shape[1]
         loss_theta.backward()
-        loss_value = 0.5*mse_loss(value, y_value)
+        loss_value = 0.5*mse_loss(value.cpu(), y_value)
         loss_value.backward()
         model.step(X_)
         print(f"epoch: {epoch} loss_theta: {loss_theta.sqrt():.5f} loss_value: {(loss_value).sqrt():.5f}")
         epoch += 1
     theta, value = model(X_)
-    loss_theta = (0.5*mse_loss(theta, y_ac)).sqrt().item()
-    loss_value = (0.5*mse_loss(value, y_value)).sqrt().item()
+    loss_theta = (0.5*mse_loss(theta.cpu(), y_ac)).sqrt().item()
+    loss_value = (0.5*mse_loss(value.cpu(), y_value)).sqrt().item()
     return loss_theta, loss_value
 
 class TestGBTMulti(unittest.TestCase):
@@ -370,7 +370,7 @@ class TestGBTMulti(unittest.TestCase):
                             value_optimizer=value_optimizer,
                             gbrl_params=gbrl_params,
                             verbose=0,
-                            device='gpu')
+                            device='cuda')
         policy_loss, value_loss = ac_rmse_model(model, X, y, self.n_epochs)
         policy_value = 2.0
         value_value = 30

@@ -29,13 +29,13 @@ def rmse_model(model, X, y, n_epochs):
     epoch = 0
     while epoch < n_epochs:
         y_pred = model(X_, requires_grad=True)
-        loss = 0.5*mse_loss(y_pred, y_)
+        loss = 0.5*mse_loss(y_pred.cpu(), y_)
         loss.backward()
         model.step(X_)
         print(f"epoch: {epoch} loss: {loss.sqrt()}")
         epoch += 1
     y_pred = model(X_)
-    loss = (0.5*mse_loss(y_pred, y_)).sqrt().item()
+    loss = (0.5*mse_loss(y_pred.cpu(), y_)).sqrt().item()
     return loss
 
 def to_utf8(s):
