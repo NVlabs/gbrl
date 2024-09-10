@@ -319,7 +319,7 @@ class TestGBTSingle(unittest.TestCase):
                             optimizer=self.sgd_optimizer,
                             gbrl_params=gbrl_params,
                             verbose=0,
-                            device='cuda')
+                            device='cpu')
         model.set_bias_from_targets(y)
         loss = rmse_model(model, X, y, self.n_epochs)
         self.assertTrue(loss < 10.0, f'Expected loss = {loss} < 10.0')
