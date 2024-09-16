@@ -624,7 +624,6 @@ class ContinuousCritic(GBRL):
         return weights, bias
 
     def predict_target(self, observations: Union[np.ndarray, th.Tensor]) -> Tuple[th.Tensor, th.Tensor]:
-    def predict_target(self, observations: Union[np.ndarray, th.Tensor]) -> Tuple[th.Tensor, th.Tensor]:
         """Predict the parameters of a Target Continuous Critic as Tensors.
         Prediction is made by summing the outputs the trees from Continuous Critic model up to `n_trees - target_update_interval`.
 
