@@ -18,6 +18,22 @@ import numpy as np
 numerical_dtype = np.dtype('float32')
 categorical_dtype = np.dtype('S128')  
 
+def get_tensor_info(tensor: th.Tensor) -> Tuple[int, Tuple[int, ...], str, str]:
+    """Extracts pytorch tensor information for usage in C++
+
+    Args:
+        tensor (th.Tensor): input tensor
+
+    Returns:
+        Tuple[int, Tuple[int, ...], str, str]: raw data pointer, tensor shape, tensor dtype, device
+    """
+    if not tensor.is_contiguous():
+        tensor = tensor.contiguous()
+    data_ptr = tensor.data_ptr()
+    shape = tuple(tensor.size())  # Convert torch.Size to tuple
+    dtype = str(tensor.dtype)
+    device = 'cuda' if tensor.is_cuda else 'cpu'
+    return (data_ptr, shape, dtype, device)
 
 def process_array(arr: np.array)-> Tuple[np.array, np.array]:
     """ Formats numpy array for C++ GBRL.

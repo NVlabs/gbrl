@@ -15,7 +15,7 @@
 #include <cstdint>
 #include <iostream>
 
-#define STRINGIFY(x)
+#define STRINGIFY(x) #x
 #define TOSTRING(x) STRINGIFY(x)
 
 #define INITAL_MAX_TREES 50000 //50k
@@ -134,6 +134,7 @@ struct dataSet {
     const float *build_grads;
     const float *norm_grads;
     int n_samples;
+    deviceType device;
 };
 
 struct ensembleData {

@@ -155,9 +155,10 @@ class GBRL:
         if grad is None:
             assert self.params is not None, "must run a forward pass first"
             n_samples = len(X)
-            grad = self.params.grad.detach().cpu().numpy() * n_samples
+            # grad = self.params.grad.detach().cpu().numpy() * n_samples
+            grad = self.params.grad.detach() * n_samples
 
-        grad = clip_grad_norm(grad, max_grad_norm)
+        # grad = clip_grad_norm(grad, max_grad_norm)
         self._model.step(X, grad)
         self.grad = grad
         

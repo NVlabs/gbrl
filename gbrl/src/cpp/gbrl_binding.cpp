@@ -16,14 +16,14 @@
 namespace py = pybind11;
 
 template <typename T>
-void get_numpy_array_info(py::object obj,T*& ptr,std::vector<size_t>& shape,size_t& itemsize,const std::string& expected_format = ""){
+void get_numpy_array_info(py::object obj, T*& ptr, std::vector<size_t>& shape, const std::string& expected_format = ""){
     // Check if the object is a NumPy array
     if (!py::isinstance<py::array>(obj)) {
         throw std::runtime_error("Expected a NumPy array");
     }
-    py::array arr = py::cast<py::array>(obj);
-    if (!(arr.flags() & py::array::c_style)) {
-        throw std::runtime_error("Array must be C-contiguous");
+    py::array arr = py::array::ensure(obj, py::array::c_style | py::array::forcecast);
+        if (!arr) {
+        throw std::runtime_error("Could not convert object to a contiguous NumPy array");
     }
     py::buffer_info info = arr.request();
     // Determine the expected format
@@ -42,7 +42,40 @@ void get_numpy_array_info(py::object obj,T*& ptr,std::vector<size_t>& shape,size
     // Extract the data pointer, shape, and item size
     ptr = static_cast<T*>(info.ptr);
     shape.assign(info.shape.begin(), info.shape.end());
-    itemsize = static_cast<size_t>(info.itemsize);
+}
+
+template <typename T>
+void get_tensor_info(py::tuple tensor_info, T*& ptr, std::vector<size_t>& shape, std::string& device) {
+    if (tensor_info.size() != 4) {
+        throw std::runtime_error("Expected a tuple of size 4: (data_ptr, shape, dtype, device)");
+    }
+
+    // Cast data_ptr directly
+    ptr = reinterpret_cast<T*>(tensor_info[0].cast<size_t>());
+    // Extract shape
+    py::tuple shape_tuple = tensor_info[1].cast<py::tuple>();
+    shape.clear();
+    for (py::handle dim : shape_tuple) {
+        shape.push_back(dim.cast<size_t>());
+    }
+
+    // Extract and verify dtype
+    std::string dtype = tensor_info[2].cast<std::string>();
+    std::string expected_dtype;
+    if (std::is_same<T, float>::value || std::is_same<T, const float>::value) {
+        expected_dtype = "torch.float32";
+    } else if (std::is_same<T, double>::value || std::is_same<T, const double>::value) {
+        expected_dtype = "torch.float64";
+    } else if (std::is_same<T, int>::value || std::is_same<T, const int>::value) {
+        expected_dtype = "torch.int32";
+    } else {
+        throw std::runtime_error("Unsupported data type: " + dtype) ;
+    }
+    if (dtype != expected_dtype) {
+        throw std::runtime_error("Expected dtype " + expected_dtype + ", but got " + dtype);
+    }
+    // Extract device
+    device = tensor_info[3].cast<std::string>();
 }
 
 py::dict metadataToDict(const ensembleMetaData* metadata){
@@ -120,30 +153,99 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         self.to_device(stringTodeviceType(str_device)); 
     },  py::arg("device"),
     "Set GBRL device ['cpu', 'cuda']");
-    gbrl.def("step", [](GBRL &self, py::object &obs, py::object &categorical_obs, py::object &grads, py::object &feature_weights) {
+    gbrl.def("step_numpy", [](GBRL &self, py::object &obs, py::object &categorical_obs, py::object &grads, py::object &feature_weights) {
         const float* obs_ptr = nullptr;
         const float*feature_weights_ptr = nullptr;
         const char* cat_obs_ptr= nullptr;
         float* grads_ptr = nullptr;
         std::vector<size_t> obs_shape, cat_obs_shape, grads_shape, feature_weights_shape;
-        size_t obs_itemsize, cat_obs_itemsize, grads_itemsize, feature_weights_itemsize;
         int n_samples, n_num_features = 0, n_cat_features = 0;
         if (grads.is_none()){
             throw std::runtime_error("Cannot call step without grads!");
         }
         else if (py::isinstance<py::array>(grads)){
-            get_numpy_array_info<float>(grads, grads_ptr, grads_shape, grads_itemsize);
+            get_numpy_array_info<float>(grads, grads_ptr, grads_shape);
             if (grads_shape.size() == 1){
                 n_samples = 1;
             } else if (grads_shape.size() > 1){
                 n_samples  = static_cast<int>(grads_shape[0]);
             }
         } else{
-            throw std::runtime_error("Unknown grads type!");
+            throw std::runtime_error("Unknown grads type! Must be a numpy array");
         }
         
-        if (!obs.is_none() && py::isinstance<py::array>(obs)) {
-            get_numpy_array_info<const float>(obs, obs_ptr, obs_shape, obs_itemsize);
+        if (!obs.is_none()){
+            if (py::isinstance<py::array>(obs)) {
+                get_numpy_array_info<const float>(obs, obs_ptr, obs_shape);
+                int n_obs_samples = 0;
+                if (obs_shape.size() == 1){
+                    n_obs_samples = 1;
+                    n_num_features = static_cast<int>(obs_shape[0]);
+                } else if (obs_shape.size() > 1){
+                    n_obs_samples  = static_cast<int>(obs_shape[0]);
+                    n_num_features = static_cast<int>(obs_shape[1]);
+                }
+                if (n_obs_samples != n_samples){
+                    std::stringstream ss;
+                    ss << "Number of observations " << n_obs_samples << " != number of gradient samples " << n_samples;
+                    throw std::runtime_error(ss.str());
+                }
+            } else {
+                throw std::runtime_error("Unknown observations type! Must be a numpy array");
+            }
+        }
+
+        if (!categorical_obs.is_none()){
+            if (py::isinstance<py::array>(categorical_obs)) {
+                get_numpy_array_info<const char>(categorical_obs, cat_obs_ptr, cat_obs_shape, CAT_TYPE);
+                int n_cat_samples = 0;
+                if (cat_obs_shape.size() == 1){
+                    n_cat_samples = 1;
+                    n_cat_features = static_cast<int>(cat_obs_shape[0]);
+                } else if (cat_obs_shape.size() > 1){
+                    n_cat_samples  = static_cast<int>(cat_obs_shape[0]);
+                    n_cat_features = static_cast<int>(cat_obs_shape[1]);
+                }
+                if (n_cat_samples != n_samples){
+                    std::stringstream ss;
+                    ss << "Number of categorical observations " << n_cat_samples << " != number of gradient samples " << n_samples;
+                    throw std::runtime_error(ss.str());
+                }
+            } else {
+                throw std::runtime_error("Unknown categorical observations type! Must be a numpy array");
+            }
+        }
+
+        if (!feature_weights.is_none()){
+            if (py::isinstance<py::array>(feature_weights)) {
+                get_numpy_array_info<const float>(feature_weights, feature_weights_ptr, feature_weights_shape);
+            }
+        }
+        py::gil_scoped_release release; 
+        self.step(obs_ptr, cat_obs_ptr, grads_ptr, feature_weights_ptr, n_samples, n_num_features, n_cat_features, deviceType::cpu); 
+    },  py::arg("obs"),
+        py::arg("categorical_obs"),
+        py::arg("grads"),
+        py::arg("feature_weights"),
+    "Fit a decision tree with the given observations and gradients");
+    gbrl.def("step_torch", [](GBRL &self, py::tuple &obs, py::tuple &grads, py::tuple &feature_weights) {
+        const float* obs_ptr = nullptr;
+        const float*feature_weights_ptr = nullptr;
+        float* grads_ptr = nullptr;
+        std::vector<size_t> obs_shape, grads_shape, feature_weights_shape;
+        std::string obs_device, grads_device, feature_weights_device;
+        int n_samples, n_num_features = 0, n_cat_features = 0;
+        if (grads.is_none()){
+            throw std::runtime_error("Cannot call step without grads!");
+        }
+        get_tensor_info<float>(grads, grads_ptr, grads_shape, grads_device);
+        if (grads_shape.size() == 1){
+            n_samples = 1;
+        } else if (grads_shape.size() > 1){
+            n_samples  = static_cast<int>(grads_shape[0]);
+        }
+        if (!obs.is_none()){
+            get_tensor_info<const float>(obs, obs_ptr, obs_shape, obs_device);
             int n_obs_samples = 0;
             if (obs_shape.size() == 1){
                 n_obs_samples = 1;
@@ -157,32 +259,24 @@ PYBIND11_MODULE(gbrl_cpp, m) {
                 ss << "Number of observations " << n_obs_samples << " != number of gradient samples " << n_samples;
                 throw std::runtime_error(ss.str());
             }
-        }
-
-        if (!categorical_obs.is_none() && py::isinstance<py::array>(categorical_obs)) {
-            get_numpy_array_info<const char>(categorical_obs, cat_obs_ptr, cat_obs_shape, cat_obs_itemsize, CAT_TYPE);
-            int n_cat_samples = 0;
-            if (cat_obs_shape.size() == 1){
-                n_cat_samples = 1;
-                n_cat_features = static_cast<int>(cat_obs_shape[0]);
-            } else if (cat_obs_shape.size() > 1){
-                n_cat_samples  = static_cast<int>(cat_obs_shape[0]);
-                n_cat_features = static_cast<int>(cat_obs_shape[1]);
-            }
-            if (n_cat_samples != n_samples){
+            if (obs_device != grads_device){
                 std::stringstream ss;
-                ss << "Number of categorical observations " << n_cat_samples << " != number of gradient samples " << n_samples;
+                ss << "Observations device: " << obs_device << " != Gradient device " << grads_device;
                 throw std::runtime_error(ss.str());
             }
         }
 
-        if (!feature_weights.is_none() && py::isinstance<py::array>(feature_weights)) {
-            get_numpy_array_info<const float>(feature_weights, feature_weights_ptr, feature_weights_shape, feature_weights_itemsize);
-        }  
+        if (!feature_weights.is_none()){
+            get_tensor_info<const float>(feature_weights, feature_weights_ptr, feature_weights_shape, feature_weights_device);
+            if (obs_device != feature_weights_device){
+                std::stringstream ss;
+                ss << "Feature weights device: " << feature_weights_device << " != expected device " << grads_device;
+                throw std::runtime_error(ss.str());
+            }
+        }
         py::gil_scoped_release release; 
-        self.step(obs_ptr, cat_obs_ptr, grads_ptr, feature_weights_ptr, n_samples, n_num_features, n_cat_features); 
+        self.step(obs_ptr, nullptr, grads_ptr, feature_weights_ptr, n_samples, n_num_features, n_cat_features, stringTodeviceType(grads_device)); 
     },  py::arg("obs"),
-        py::arg("categorical_obs"),
         py::arg("grads"),
         py::arg("feature_weights"),
     "Fit a decision tree with the given observations and gradients");
@@ -216,6 +310,7 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         if (!feature_weights.attr("flags").attr("c_contiguous").cast<bool>()) {
             throw std::runtime_error("Arrays must be C-contiguous");
         }
+        
         py::buffer_info info_feature_weights = feature_weights.request();
         float* feature_weights_ptr = static_cast<float*>(info_feature_weights.ptr);
         
