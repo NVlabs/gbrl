@@ -15,6 +15,36 @@
 
 namespace py = pybind11;
 
+template <typename T>
+void get_numpy_array_info(py::object obj,T*& ptr,std::vector<size_t>& shape,size_t& itemsize,const std::string& expected_format = ""){
+    // Check if the object is a NumPy array
+    if (!py::isinstance<py::array>(obj)) {
+        throw std::runtime_error("Expected a NumPy array");
+    }
+    py::array arr = py::cast<py::array>(obj);
+    if (!(arr.flags() & py::array::c_style)) {
+        throw std::runtime_error("Array must be C-contiguous");
+    }
+    py::buffer_info info = arr.request();
+    // Determine the expected format
+    std::string expected;
+    if (expected_format.empty()) {
+        expected = py::format_descriptor<std::remove_cv_t<T>>::format();
+    } else {
+        expected = expected_format;
+    }
+    // Verify the data format
+    if (info.format != expected) {
+        std::stringstream ss;
+        ss << "Expected array of format '" << expected << "', but got '" << info.format << "'";
+        throw std::runtime_error(ss.str());
+    }
+    // Extract the data pointer, shape, and item size
+    ptr = static_cast<T*>(info.ptr);
+    shape.assign(info.shape.begin(), info.shape.end());
+    itemsize = static_cast<size_t>(info.itemsize);
+}
+
 py::dict metadataToDict(const ensembleMetaData* metadata){
     py::dict d;
     if (metadata != nullptr){
@@ -90,41 +120,65 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         self.to_device(stringTodeviceType(str_device)); 
     },  py::arg("device"),
     "Set GBRL device ['cpu', 'cuda']");
-    gbrl.def("step", [](GBRL &self, py::object &obs, py::object &categorical_obs, py::array_t<float> &grads, py::array_t<float> &feature_weights) {
-        if (!grads.attr("flags").attr("c_contiguous").cast<bool>()) {
-            throw std::runtime_error("Arrays must be C-contiguous");
-        }
-        py::buffer_info info_grads = grads.request();
-        float* grads_ptr = static_cast<float*>(info_grads.ptr);
-        int n_samples = static_cast<int>(info_grads.shape[0]);
-
+    gbrl.def("step", [](GBRL &self, py::object &obs, py::object &categorical_obs, py::object &grads, py::object &feature_weights) {
         const float* obs_ptr = nullptr;
-        int n_num_features = 0;
-        if (!obs.is_none()) {
-            py::array_t<float> obs_array = py::cast<py::array_t<float>>(obs);
-            if (!obs_array.attr("flags").attr("c_contiguous").cast<bool>())
-                throw std::runtime_error("Arrays must be C-contiguous");
-            py::buffer_info info_obs = obs_array.request();
-            obs_ptr = static_cast<const float*>(info_obs.ptr);
-            n_num_features = static_cast<int>(info_obs.shape[1]);
+        const float*feature_weights_ptr = nullptr;
+        const char* cat_obs_ptr= nullptr;
+        float* grads_ptr = nullptr;
+        std::vector<size_t> obs_shape, cat_obs_shape, grads_shape, feature_weights_shape;
+        size_t obs_itemsize, cat_obs_itemsize, grads_itemsize, feature_weights_itemsize;
+        int n_samples, n_num_features = 0, n_cat_features = 0;
+        if (grads.is_none()){
+            throw std::runtime_error("Cannot call step without grads!");
         }
-        const char* cat_obs_ptr = nullptr;
-        int n_cat_features = 0;
-        if (!categorical_obs.is_none()) {
-            py::array py_array = py::cast<py::array>(categorical_obs);
-            if (!py_array.attr("flags").attr("c_contiguous").cast<bool>())
-                throw std::runtime_error("Arrays must be C-contiguous");
-            py::buffer_info info_categorical_obs = py_array.request();
-            cat_obs_ptr = static_cast<const char*>(info_categorical_obs.ptr);
-            n_cat_features = static_cast<int>(info_categorical_obs.shape[1]);
+        else if (py::isinstance<py::array>(grads)){
+            get_numpy_array_info<float>(grads, grads_ptr, grads_shape, grads_itemsize);
+            if (grads_shape.size() == 1){
+                n_samples = 1;
+            } else if (grads_shape.size() > 1){
+                n_samples  = static_cast<int>(grads_shape[0]);
+            }
+        } else{
+            throw std::runtime_error("Unknown grads type!");
+        }
+        
+        if (!obs.is_none() && py::isinstance<py::array>(obs)) {
+            get_numpy_array_info<const float>(obs, obs_ptr, obs_shape, obs_itemsize);
+            int n_obs_samples = 0;
+            if (obs_shape.size() == 1){
+                n_obs_samples = 1;
+                n_num_features = static_cast<int>(obs_shape[0]);
+            } else if (obs_shape.size() > 1){
+                n_obs_samples  = static_cast<int>(obs_shape[0]);
+                n_num_features = static_cast<int>(obs_shape[1]);
+            }
+            if (n_obs_samples != n_samples){
+                std::stringstream ss;
+                ss << "Number of observations " << n_obs_samples << " != number of gradient samples " << n_samples;
+                throw std::runtime_error(ss.str());
+            }
         }
 
-        if (!feature_weights.attr("flags").attr("c_contiguous").cast<bool>()) {
-            throw std::runtime_error("Arrays must be C-contiguous");
+        if (!categorical_obs.is_none() && py::isinstance<py::array>(categorical_obs)) {
+            get_numpy_array_info<const char>(categorical_obs, cat_obs_ptr, cat_obs_shape, cat_obs_itemsize, CAT_TYPE);
+            int n_cat_samples = 0;
+            if (cat_obs_shape.size() == 1){
+                n_cat_samples = 1;
+                n_cat_features = static_cast<int>(cat_obs_shape[0]);
+            } else if (cat_obs_shape.size() > 1){
+                n_cat_samples  = static_cast<int>(cat_obs_shape[0]);
+                n_cat_features = static_cast<int>(cat_obs_shape[1]);
+            }
+            if (n_cat_samples != n_samples){
+                std::stringstream ss;
+                ss << "Number of categorical observations " << n_cat_samples << " != number of gradient samples " << n_samples;
+                throw std::runtime_error(ss.str());
+            }
         }
-        py::buffer_info info_feature_weights = feature_weights.request();
-        float* feature_weights_ptr = static_cast<float*>(info_feature_weights.ptr);
-                    
+
+        if (!feature_weights.is_none() && py::isinstance<py::array>(feature_weights)) {
+            get_numpy_array_info<const float>(feature_weights, feature_weights_ptr, feature_weights_shape, feature_weights_itemsize);
+        }  
         py::gil_scoped_release release; 
         self.step(obs_ptr, cat_obs_ptr, grads_ptr, feature_weights_ptr, n_samples, n_num_features, n_cat_features); 
     },  py::arg("obs"),
