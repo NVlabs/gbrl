@@ -361,6 +361,8 @@ class GBTWrapper:
         new_tree_indices[1:] = np.cumsum(n_leaves_per_tree[compressed_tree_indices].detach().cpu().numpy())[:-1]
         # W = np.zeros_like(W, dtype=np.single)
         self.cpp_model.compress(n_compressed_leaves, n_compressed_trees, compressed_leaf_indices, compressed_tree_indices, new_tree_indices.astype(np.int32), W)
+        del A, V, compressor
+        print(f"Finished compressing - compressed model has {self.get_num_trees()} trees")
 
     def copy(self):
         return self.__copy__()
