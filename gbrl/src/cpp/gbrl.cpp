@@ -391,7 +391,6 @@ void GBRL::_step_gpu(dataSet *dataset){
     size_t obs_size = sizeof(float)*n_num_features*n_samples;
     size_t cat_obs_size = sizeof(char)*n_cat_features*n_samples*MAX_CHAR_SIZE;
     size_t grads_size = sizeof(float)*output_dim*n_samples;
-    size_t feature_size = sizeof(float)*(n_num_features + n_cat_features);
     size_t grads_norm_size = sizeof(float)*n_samples;
 
     size_t cand_indices_size =  sizeof(int)*n_bins*(n_num_features + n_cat_features);
@@ -400,11 +399,6 @@ void GBRL::_step_gpu(dataSet *dataset){
     size_t cand_numerical_size =  sizeof(bool)*n_bins*(n_num_features + n_cat_features);
 
     size_t alloc_size = obs_size + cat_obs_size + grads_norm_size + cand_indices_size + cand_float_size + cand_cat_size + cand_numerical_size;
-    if (dataset->device == cpu){
-        alloc_size += obs_size;
-        alloc_size += 2*grads_size;
-        alloc_size += feature_size;
-    }
     char *device_memory_block; 
 
     err = cudaMalloc((void**)&device_memory_block, alloc_size);
@@ -425,26 +419,11 @@ void GBRL::_step_gpu(dataSet *dataset){
     float *gpu_build_grads = (float*)(device_memory_block + trace);
     trace += grads_size;
 
-    float *gpu_obs;
-    float *gpu_grads;
-    float *gpu_feature_weights;
-    if (dataset->device == cpu){
-        gpu_obs = (float*)(device_memory_block + trace);
-        trace += obs_size;
-        gpu_grads = (float*)(device_memory_block + trace);
-        trace += grads_size;
-        gpu_feature_weights = (float*)(device_memory_block + trace);
-        trace += feature_size;
-        cudaMemcpy(gpu_obs, dataset->obs, sizeof(float)*n_num_features*n_samples, cudaMemcpyHostToDevice);
-        cudaMemcpy(gpu_build_grads, dataset->grads, sizeof(float)*output_dim*n_samples, cudaMemcpyHostToDevice);
-        cudaMemcpy(gpu_grads, dataset->grads, sizeof(float)*output_dim*n_samples, cudaMemcpyHostToDevice);
-        cudaMemcpy(gpu_feature_weights, dataset->feature_weights, feature_size, cudaMemcpyHostToDevice);
-    } else {
-        gpu_obs = const_cast<float*>(dataset->obs);
-        gpu_grads = dataset->grads;
-        gpu_feature_weights = const_cast<float*>(dataset->feature_weights);
-        cudaMemcpy(gpu_build_grads, gpu_grads, sizeof(float)*output_dim*n_samples, cudaMemcpyDeviceToDevice);
-    }
+    float *gpu_obs = const_cast<float*>(dataset->obs);;
+    float *gpu_grads = dataset->grads;;
+    float *gpu_feature_weights = const_cast<float*>(dataset->feature_weights);; 
+    cudaMemcpy(gpu_build_grads, gpu_grads, sizeof(float)*output_dim*n_samples, cudaMemcpyDeviceToDevice);
+
     float *trans_obs = (float*)(device_memory_block + trace);
     trace += obs_size;
     float *gpu_grads_norm = (float*)(device_memory_block + trace);

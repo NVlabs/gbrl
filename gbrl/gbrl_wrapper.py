@@ -114,7 +114,7 @@ class GBTWrapper:
             assert isinstance(grads, th.Tensor), "grads must also be a Pytorch tensor"
             if self.feature_weights is None:
                 self.feature_weights = th.ones(get_input_dim(features), device=self.device).float()
-            self.cpp_model.step_torch(get_tensor_info(features.float()), get_tensor_info(grads.float()), get_tensor_info(self.feature_weights))
+            self.cpp_model.step(get_tensor_info(features.float()), None, get_tensor_info(grads.float()), get_tensor_info(self.feature_weights))
         else:
             num_features, cat_features = preprocess_features(features)
             grads = to_numpy(grads)
@@ -125,7 +125,7 @@ class GBTWrapper:
                 self.feature_weights = np.ones(input_dim, dtype=numerical_dtype)
             assert len(self.feature_weights) == input_dim, "feature weights has to have the same number of elements as features"
             assert np.all(self.feature_weights >= 0), "feature weights contains non-positive values"
-            self.cpp_model.step_numpy(num_features, cat_features, grads, self.feature_weights)
+            self.cpp_model.step(num_features, cat_features, grads, self.feature_weights)
         self.iteration = self.cpp_model.get_iteration()
         self.total_iterations += 1
 
@@ -506,7 +506,7 @@ class SharedActorCriticWrapper(GBTWrapper):
             self.feature_weights = np.ones(input_dim, dtype=numerical_dtype)
         assert len(self.feature_weights) == input_dim, "feature weights has to have the same number of elements as features"
         assert np.all(self.feature_weights >= 0), "feature weights contains non-positive values"
-        self.cpp_model.step_numpy(num_observations, cat_observations, target_grads, self.feature_weights)
+        self.cpp_model.step(num_observations, cat_observations, target_grads, self.feature_weights)
         self.iteration = self.cpp_model.get_iteration()
         self.total_iterations += 1
 

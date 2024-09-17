@@ -78,6 +78,24 @@ void get_tensor_info(py::tuple tensor_info, T*& ptr, std::vector<size_t>& shape,
     device = tensor_info[3].cast<std::string>();
 }
 
+template <typename T>
+void handle_input_info(py::object& input, T*& ptr, std::vector<size_t>& shape, std::string& device, const std::string& name, const bool none_allowed, const std::string& expected_format = ""){
+    if (input.is_none()) {
+        if (!none_allowed)
+            throw std::runtime_error("Cannot call step without " + name + "!");
+        else
+            return;
+    } 
+    if (py::isinstance<py::array>(input)) {
+        get_numpy_array_info<T>(input, ptr, shape, expected_format);  // Handle NumPy array input
+        device = "cpu";
+    } else if (py::isinstance<py::tuple>(input)) {
+        get_tensor_info<T>(input, ptr, shape, device);  // Handle tuple input
+    } else {
+        throw std::runtime_error("Unknown " + name + " type! Must be a NumPy array or tuple.");
+    }
+}
+
 py::dict metadataToDict(const ensembleMetaData* metadata){
     py::dict d;
     if (metadata != nullptr){
@@ -153,130 +171,67 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         self.to_device(stringTodeviceType(str_device)); 
     },  py::arg("device"),
     "Set GBRL device ['cpu', 'cuda']");
-    gbrl.def("step_numpy", [](GBRL &self, py::object &obs, py::object &categorical_obs, py::object &grads, py::object &feature_weights) {
+    gbrl.def("step", [](GBRL &self, py::object &obs, py::object &categorical_obs, py::object &grads, py::object &feature_weights) {
         const float* obs_ptr = nullptr;
         const float*feature_weights_ptr = nullptr;
         const char* cat_obs_ptr= nullptr;
         float* grads_ptr = nullptr;
         std::vector<size_t> obs_shape, cat_obs_shape, grads_shape, feature_weights_shape;
+        std::string obs_device, cat_obs_device, grads_device, feature_weights_device;
         int n_samples, n_num_features = 0, n_cat_features = 0;
-        if (grads.is_none()){
-            throw std::runtime_error("Cannot call step without grads!");
-        }
-        else if (py::isinstance<py::array>(grads)){
-            get_numpy_array_info<float>(grads, grads_ptr, grads_shape);
-            if (grads_shape.size() == 1){
-                n_samples = 1;
-            } else if (grads_shape.size() > 1){
-                n_samples  = static_cast<int>(grads_shape[0]);
-            }
-        } else{
-            throw std::runtime_error("Unknown grads type! Must be a numpy array");
-        }
-        
-        if (!obs.is_none()){
-            if (py::isinstance<py::array>(obs)) {
-                get_numpy_array_info<const float>(obs, obs_ptr, obs_shape);
-                int n_obs_samples = 0;
-                if (obs_shape.size() == 1){
-                    n_obs_samples = 1;
-                    n_num_features = static_cast<int>(obs_shape[0]);
-                } else if (obs_shape.size() > 1){
-                    n_obs_samples  = static_cast<int>(obs_shape[0]);
-                    n_num_features = static_cast<int>(obs_shape[1]);
-                }
-                if (n_obs_samples != n_samples){
-                    std::stringstream ss;
-                    ss << "Number of observations " << n_obs_samples << " != number of gradient samples " << n_samples;
-                    throw std::runtime_error(ss.str());
-                }
-            } else {
-                throw std::runtime_error("Unknown observations type! Must be a numpy array");
-            }
-        }
-
-        if (!categorical_obs.is_none()){
-            if (py::isinstance<py::array>(categorical_obs)) {
-                get_numpy_array_info<const char>(categorical_obs, cat_obs_ptr, cat_obs_shape, CAT_TYPE);
-                int n_cat_samples = 0;
-                if (cat_obs_shape.size() == 1){
-                    n_cat_samples = 1;
-                    n_cat_features = static_cast<int>(cat_obs_shape[0]);
-                } else if (cat_obs_shape.size() > 1){
-                    n_cat_samples  = static_cast<int>(cat_obs_shape[0]);
-                    n_cat_features = static_cast<int>(cat_obs_shape[1]);
-                }
-                if (n_cat_samples != n_samples){
-                    std::stringstream ss;
-                    ss << "Number of categorical observations " << n_cat_samples << " != number of gradient samples " << n_samples;
-                    throw std::runtime_error(ss.str());
-                }
-            } else {
-                throw std::runtime_error("Unknown categorical observations type! Must be a numpy array");
-            }
-        }
-
-        if (!feature_weights.is_none()){
-            if (py::isinstance<py::array>(feature_weights)) {
-                get_numpy_array_info<const float>(feature_weights, feature_weights_ptr, feature_weights_shape);
-            }
-        }
-        py::gil_scoped_release release; 
-        self.step(obs_ptr, cat_obs_ptr, grads_ptr, feature_weights_ptr, n_samples, n_num_features, n_cat_features, deviceType::cpu); 
-    },  py::arg("obs"),
-        py::arg("categorical_obs"),
-        py::arg("grads"),
-        py::arg("feature_weights"),
-    "Fit a decision tree with the given observations and gradients");
-    gbrl.def("step_torch", [](GBRL &self, py::tuple &obs, py::tuple &grads, py::tuple &feature_weights) {
-        const float* obs_ptr = nullptr;
-        const float*feature_weights_ptr = nullptr;
-        float* grads_ptr = nullptr;
-        std::vector<size_t> obs_shape, grads_shape, feature_weights_shape;
-        std::string obs_device, grads_device, feature_weights_device;
-        int n_samples, n_num_features = 0, n_cat_features = 0;
-        if (grads.is_none()){
-            throw std::runtime_error("Cannot call step without grads!");
-        }
-        get_tensor_info<float>(grads, grads_ptr, grads_shape, grads_device);
+        handle_input_info<float>(grads, grads_ptr, grads_shape, grads_device, "grads", false);
         if (grads_shape.size() == 1){
             n_samples = 1;
         } else if (grads_shape.size() > 1){
             n_samples  = static_cast<int>(grads_shape[0]);
         }
-        if (!obs.is_none()){
-            get_tensor_info<const float>(obs, obs_ptr, obs_shape, obs_device);
-            int n_obs_samples = 0;
-            if (obs_shape.size() == 1){
-                n_obs_samples = 1;
-                n_num_features = static_cast<int>(obs_shape[0]);
-            } else if (obs_shape.size() > 1){
-                n_obs_samples  = static_cast<int>(obs_shape[0]);
-                n_num_features = static_cast<int>(obs_shape[1]);
+        handle_input_info<const float>(obs, obs_ptr, obs_shape, obs_device, "obs", false); 
+        int n_obs_samples = 0;
+        if (obs_shape.size() == 1){
+            n_obs_samples = 1;
+            n_num_features = static_cast<int>(obs_shape[0]);
+        } else if (obs_shape.size() > 1){
+            n_obs_samples  = static_cast<int>(obs_shape[0]);
+            n_num_features = static_cast<int>(obs_shape[1]);
+        }
+        if (obs_device != grads_device){
+            std::stringstream ss;
+            ss << "Observations device: " << obs_device << " != Gradient device " << grads_device;
+            throw std::runtime_error(ss.str());
+        }
+        if (n_obs_samples != n_samples){
+            std::stringstream ss;
+            ss << "Number of observations " << n_obs_samples << " != number of gradient samples " << n_samples;
+            throw std::runtime_error(ss.str());
+        }
+        handle_input_info<const char>(categorical_obs, cat_obs_ptr, cat_obs_shape, cat_obs_device, "cat_obs", true, CAT_TYPE);
+        int n_cat_samples = 0;
+        if (cat_obs_ptr != nullptr)
+        {
+            if (cat_obs_shape.size() == 1){
+                n_cat_samples = 1;
+                n_cat_features = static_cast<int>(cat_obs_shape[0]);
+            } else if (cat_obs_shape.size() > 1){
+                n_cat_samples  = static_cast<int>(cat_obs_shape[0]);
+                n_cat_features = static_cast<int>(cat_obs_shape[1]);
             }
-            if (n_obs_samples != n_samples){
+            if (n_cat_samples != n_samples){
                 std::stringstream ss;
-                ss << "Number of observations " << n_obs_samples << " != number of gradient samples " << n_samples;
-                throw std::runtime_error(ss.str());
-            }
-            if (obs_device != grads_device){
-                std::stringstream ss;
-                ss << "Observations device: " << obs_device << " != Gradient device " << grads_device;
+                ss << "Number of categorical observations " << n_cat_samples << " != number of gradient samples " << n_samples;
                 throw std::runtime_error(ss.str());
             }
         }
-
-        if (!feature_weights.is_none()){
-            get_tensor_info<const float>(feature_weights, feature_weights_ptr, feature_weights_shape, feature_weights_device);
-            if (obs_device != feature_weights_device){
-                std::stringstream ss;
-                ss << "Feature weights device: " << feature_weights_device << " != expected device " << grads_device;
-                throw std::runtime_error(ss.str());
-            }
+        
+        handle_input_info<const float>(feature_weights, feature_weights_ptr, feature_weights_shape, feature_weights_device, "feature_weights", false);
+        if (obs_device != feature_weights_device){
+            std::stringstream ss;
+            ss << "Feature weights device: " << feature_weights_device << " != expected device " << grads_device;
+            throw std::runtime_error(ss.str());
         }
         py::gil_scoped_release release; 
-        self.step(obs_ptr, nullptr, grads_ptr, feature_weights_ptr, n_samples, n_num_features, n_cat_features, stringTodeviceType(grads_device)); 
+        self.step(obs_ptr, cat_obs_ptr, grads_ptr, feature_weights_ptr, n_samples, n_num_features, n_cat_features, stringTodeviceType(grads_device)); 
     },  py::arg("obs"),
+        py::arg("categorical_obs"),
         py::arg("grads"),
         py::arg("feature_weights"),
     "Fit a decision tree with the given observations and gradients");
