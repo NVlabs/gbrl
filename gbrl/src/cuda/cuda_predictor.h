@@ -21,7 +21,7 @@ SGDOptimizerGPU** deepCopySGDOptimizerVectorToGPU(const std::vector<Optimizer*>&
 #ifdef __cplusplus
 extern "C" {
 #endif
-void predict_cuda(dataSet *dataset, float *host_preds, ensembleMetaData *metadata, ensembleData *edata, SGDOptimizerGPU** opts, const int n_opts, int start_tree_idx, int stop_tree_idx);
+void predict_cuda(dataSet *dataset, float *&preds, ensembleMetaData *metadata, ensembleData *edata, SGDOptimizerGPU** opts, const int n_opts, int start_tree_idx, int stop_tree_idx);
 void predict_cuda_no_host(dataSet *dataset, float *device_preds, ensembleMetaData *metadata, ensembleData *edata, SGDOptimizerGPU** opts, const int n_opts, int start_tree_idx, int stop_tree_idx, const bool add_bias);
 void freeSGDOptimizer(SGDOptimizerGPU **device_ops, const int n_opts);
 #ifdef __CUDACC__  // This macro is defined by NVCC

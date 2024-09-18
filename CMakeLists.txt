@@ -202,11 +202,11 @@ endif()
 
 # Only include pybind11 in the binding file
 set(PYBIND_SOURCES
-    gbrl/src/cpp/gbrl_binding.cpp
+    gbrl/src/cpp/binding.cpp
 )
 
 pybind11_add_module(gbrl_cpp MODULE ${PYBIND_SOURCES})
-target_include_directories(gbrl_cpp PRIVATE ${Python3_INCLUDE_DIRS} ${pybind11_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/gbrl/src/cpp)
+target_include_directories(gbrl_cpp PRIVATE ${Python3_INCLUDE_DIRS} ${pybind11_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/gbrl/src/cpp ${CMAKE_SOURCE_DIR}/gbrl/include/)
 target_compile_definitions(gbrl_cpp PRIVATE MODULE_NAME="gbrl_cpp")
 target_link_libraries(gbrl_cpp PRIVATE ${Python3_LIBRARIES})
 target_link_libraries(gbrl_cpp PRIVATE gbrl_cpp_src)

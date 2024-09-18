@@ -307,11 +307,14 @@ class GBRL:
             th.Tensor: _description_
         """
         y_pred = self.predict(X)
-        params = th.tensor(y_pred, requires_grad=requires_grad, device=self.device)
+        if not isinstance(y_pred, th.Tensor):
+            y_pred = th.tensor(y_pred, requires_grad=requires_grad, device=self.device)
+        else:
+            y_pred.requires_grad_(requires_grad)
         if requires_grad:
             self.grad = None
-            self.params = params
-        return params
+            self.params = y_pred
+        return y_pred
 
     def print_tree(self, tree_idx: int) -> None:
         """Prints tree information

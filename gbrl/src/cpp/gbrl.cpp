@@ -215,8 +215,7 @@ float* GBRL::get_bias(){
 }
 
 
-float* GBRL::predict(const float *obs, const char *categorical_obs, const int n_samples, const int n_num_features, const int n_cat_features, int start_tree_idx, int stop_tree_idx){
-    float *preds = init_zero_mat(n_samples*this->metadata->output_dim);
+float* GBRL::predict(const float *obs, const char *categorical_obs, const int n_samples, const int n_num_features, const int n_cat_features, int start_tree_idx, int stop_tree_idx, deviceType device){
     for (size_t optIdx = 0; optIdx < this->opts.size(); ++optIdx){
         this->opts[optIdx]->set_memory(n_samples ,this->metadata->output_dim);
     }
@@ -225,13 +224,18 @@ float* GBRL::predict(const float *obs, const char *categorical_obs, const int n_
         this->metadata->n_cat_features = n_cat_features;
     }
     if (n_num_features != metadata->n_num_features || n_cat_features != metadata->n_cat_features){
-        delete[] preds;
         std::cerr << "Error. Cannot use ensemble with this dataset. Excepted input with " << metadata->n_num_features << " numerical features followed by " << metadata->n_cat_features << " categorical features, but received " << n_num_features << " numerical features and " << n_cat_features << " categorical features.";
         throw std::runtime_error("Incompatible dataset");
     }
+#ifndef USE_CUDA
+    if (device == deviceType::gpu){
+        throw std::runtime_error("GPU data detected! GBRL was compiled for CPU only!");
+        return;
+    }
+#endif
 
-    dataSet dataset{obs, categorical_obs, nullptr, nullptr, nullptr, nullptr, n_samples, this->device};
-
+    dataSet dataset{obs, categorical_obs, nullptr, nullptr, nullptr, nullptr, n_samples, device};
+    float *preds = nullptr;
     // int n_trees = this->get_num_trees();
 #ifdef USE_CUDA
     if (this->device == gpu){
@@ -240,17 +244,18 @@ float* GBRL::predict(const float *obs, const char *categorical_obs, const int n_
             this->n_cuda_opts = static_cast<int>(this->opts.size());
         }
         predict_cuda(&dataset, preds, this->metadata, this->edata, this->cuda_opt, this->n_cuda_opts, start_tree_idx, stop_tree_idx);
-    
     }
 #endif
-    if (this->device == cpu)
+    if (this->device == cpu){
+        preds = init_zero_mat(n_samples*this->metadata->output_dim);
         Predictor::predict_cpu(&dataset, preds, this->edata, this->metadata, start_tree_idx, stop_tree_idx, this->parallel_predict, this->opts);
-    
+    }
     return preds;
 
 }
 
 void GBRL::predict(const float *obs, const char *categorical_obs, float *start_preds, const int n_samples, const int n_num_features, const int n_cat_features, int start_tree_idx, int stop_tree_idx){
+    printf("wrong predict\n");
     for (size_t optIdx = 0; optIdx < this->opts.size(); ++optIdx){
         this->opts[optIdx]->set_memory(n_samples ,this->metadata->output_dim);
     }
@@ -391,6 +396,7 @@ void GBRL::_step_gpu(dataSet *dataset){
     size_t obs_size = sizeof(float)*n_num_features*n_samples;
     size_t cat_obs_size = sizeof(char)*n_cat_features*n_samples*MAX_CHAR_SIZE;
     size_t grads_size = sizeof(float)*output_dim*n_samples;
+    size_t feature_size = sizeof(float)*(n_num_features + n_cat_features);
     size_t grads_norm_size = sizeof(float)*n_samples;
 
     size_t cand_indices_size =  sizeof(int)*n_bins*(n_num_features + n_cat_features);
@@ -398,7 +404,12 @@ void GBRL::_step_gpu(dataSet *dataset){
     size_t cand_cat_size =  sizeof(char)*n_bins*(n_num_features + n_cat_features)*MAX_CHAR_SIZE;
     size_t cand_numerical_size =  sizeof(bool)*n_bins*(n_num_features + n_cat_features);
 
-    size_t alloc_size = obs_size + cat_obs_size + grads_norm_size + cand_indices_size + cand_float_size + cand_cat_size + cand_numerical_size;
+    size_t alloc_size = obs_size + grads_size + cat_obs_size + grads_norm_size + cand_indices_size + cand_float_size + cand_cat_size + cand_numerical_size;
+    if (dataset->device == cpu){
+        alloc_size += obs_size;
+        alloc_size += grads_size;
+        alloc_size += feature_size;
+    }
     char *device_memory_block; 
 
     err = cudaMalloc((void**)&device_memory_block, alloc_size);
@@ -419,11 +430,26 @@ void GBRL::_step_gpu(dataSet *dataset){
     float *gpu_build_grads = (float*)(device_memory_block + trace);
     trace += grads_size;
 
-    float *gpu_obs = const_cast<float*>(dataset->obs);;
-    float *gpu_grads = dataset->grads;;
-    float *gpu_feature_weights = const_cast<float*>(dataset->feature_weights);; 
-    cudaMemcpy(gpu_build_grads, gpu_grads, sizeof(float)*output_dim*n_samples, cudaMemcpyDeviceToDevice);
-
+    float *gpu_obs;
+    float *gpu_grads;
+    float *gpu_feature_weights;
+    if (dataset->device == cpu){
+        gpu_obs = (float*)(device_memory_block + trace);
+        trace += obs_size;
+        gpu_grads = (float*)(device_memory_block + trace);
+        trace += grads_size;
+        gpu_feature_weights = (float*)(device_memory_block + trace);
+        trace += feature_size;
+        cudaMemcpy(gpu_obs, dataset->obs, obs_size, cudaMemcpyHostToDevice);
+        cudaMemcpy(gpu_build_grads, dataset->grads, grads_size, cudaMemcpyHostToDevice);
+        cudaMemcpy(gpu_grads, dataset->grads, grads_size, cudaMemcpyHostToDevice);
+        cudaMemcpy(gpu_feature_weights, dataset->feature_weights, feature_size, cudaMemcpyHostToDevice);
+    } else {
+        gpu_obs = const_cast<float*>(dataset->obs);
+        gpu_grads = dataset->grads;
+        gpu_feature_weights = const_cast<float*>(dataset->feature_weights);
+        cudaMemcpy(gpu_build_grads, gpu_grads, grads_size, cudaMemcpyDeviceToDevice);
+    }
     float *trans_obs = (float*)(device_memory_block + trace);
     trace += obs_size;
     float *gpu_grads_norm = (float*)(device_memory_block + trace);
@@ -599,12 +625,12 @@ void GBRL::step(const float *obs, const char *categorical_obs, float *grads, con
         throw std::runtime_error("Incompatible dataset");
         return;
     }
-    if (device != this->device){
-        std::stringstream ss;
-        ss << "Data device: " << deviceTypeToString(device) << " != GBRL device: " << deviceTypeToString(this->device);
-        throw std::runtime_error(ss.str());
+#ifndef USE_CUDA
+    if (device == deviceType::gpu){
+        throw std::runtime_error("GPU data detected! GBRL was compiled for CPU only!");
         return;
     }
+#endif
     dataSet dataset{obs, categorical_obs, grads, feature_weights, nullptr, nullptr, n_samples, device};
 #ifdef USE_CUDA
     if (this->device == gpu)

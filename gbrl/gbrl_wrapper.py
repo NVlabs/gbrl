@@ -112,8 +112,9 @@ class GBTWrapper:
     def step(self, features: Union[np.ndarray, th.Tensor, Tuple], grads: Union[np.ndarray, th.Tensor]) -> None:
         if isinstance(features, th.Tensor):
             assert isinstance(grads, th.Tensor), "grads must also be a Pytorch tensor"
+            assert grads.device == features.device, "grads and features must be on the same device"
             if self.feature_weights is None:
-                self.feature_weights = th.ones(get_input_dim(features), device=self.device).float()
+                self.feature_weights = th.ones(get_input_dim(features), device=features.device).float()
             self.cpp_model.step(get_tensor_info(features.float()), None, get_tensor_info(grads.float()), get_tensor_info(self.feature_weights))
         else:
             num_features, cat_features = preprocess_features(features)
@@ -285,19 +286,22 @@ class GBTWrapper:
             print(f"Caught an exception in GBRL: {e}")
     
     def predict(self, features: Union[np.ndarray, th.Tensor], start_idx: int=0, stop_idx: int=None) -> np.ndarray:
-        num_features, cat_features = preprocess_features(features)
         if stop_idx is None:
             stop_idx = 0
-
-        if self.student_model is not None:
-            preds = self.student_model.predict(num_features, cat_features)
-            if num_features is not None and not num_features.flags['WRITEABLE']:
-                num_features = num_features.copy()
-            if cat_features is not None and not cat_features.flags['WRITEABLE']:
-                cat_features = cat_features.copy()
-            self.cpp_model.predict(num_features, cat_features, preds, start_idx, stop_idx) # modifies it inplace
+        if isinstance(features, th.Tensor):
+            preds_dlpack = self.cpp_model.predict(get_tensor_info(features.float()), None, start_idx, stop_idx)
+            preds = th.from_dlpack(preds_dlpack)
         else:
-            preds = self.cpp_model.predict(num_features, cat_features, start_idx, stop_idx)
+            num_features, cat_features = preprocess_features(features)
+            if self.student_model is not None:
+                preds = self.student_model.predict(num_features, cat_features)
+                if num_features is not None and not num_features.flags['WRITEABLE']:
+                    num_features = num_features.copy()
+                if cat_features is not None and not cat_features.flags['WRITEABLE']:
+                    cat_features = cat_features.copy()
+                self.cpp_model.predict(num_features, cat_features, preds, start_idx, stop_idx) # modifies it inplace
+            else:
+                preds = self.cpp_model.predict(num_features, cat_features, start_idx, stop_idx)
         return preds
     
     def distil(self, obs: Union[np.ndarray, th.Tensor], targets: np.ndarray, params: Dict, verbose: int=0) -> Tuple[int, Dict]:
