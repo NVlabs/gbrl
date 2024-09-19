@@ -155,10 +155,9 @@ class GBRL:
         if grad is None:
             assert self.params is not None, "must run a forward pass first"
             n_samples = len(X)
-            # grad = self.params.grad.detach().cpu().numpy() * n_samples
             grad = self.params.grad.detach() * n_samples
 
-        # grad = clip_grad_norm(grad, max_grad_norm)
+        grad = clip_grad_norm(grad, max_grad_norm)
         self._model.step(X, grad)
         self.grad = grad
         
@@ -295,7 +294,7 @@ class GBRL:
         """
         return self._model.get_device()
 
-    def __call__(self, X: np.array, requires_grad: bool = True) -> th.Tensor:
+    def __call__(self, X: Union[th.tensor, np.ndarray], requires_grad: bool = True) -> Union[th.tensor, np.ndarray]:
         """Returns GBRL's output as Tensor. if `requires_grad=True` then stores 
            differentiable parameters in self.params. 
 
@@ -306,7 +305,7 @@ class GBRL:
         Returns:
             th.Tensor: _description_
         """
-        y_pred = self.predict(X)
+        y_pred = self._model.predict(X, start_idx, stop_idx)
         if not isinstance(y_pred, th.Tensor):
             y_pred = th.tensor(y_pred, requires_grad=requires_grad, device=self.device)
         else:

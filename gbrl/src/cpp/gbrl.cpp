@@ -254,37 +254,6 @@ float* GBRL::predict(const float *obs, const char *categorical_obs, const int n_
 
 }
 
-void GBRL::predict(const float *obs, const char *categorical_obs, float *start_preds, const int n_samples, const int n_num_features, const int n_cat_features, int start_tree_idx, int stop_tree_idx){
-    printf("wrong predict\n");
-    for (size_t optIdx = 0; optIdx < this->opts.size(); ++optIdx){
-        this->opts[optIdx]->set_memory(n_samples ,this->metadata->output_dim);
-    }
-    if (this->metadata->iteration == 0){
-        this->metadata->n_num_features = n_num_features;
-        this->metadata->n_cat_features = n_cat_features;
-    }
-    if (n_num_features != metadata->n_num_features || n_cat_features != metadata->n_cat_features){
-        std::cerr << "Error. Cannot use ensemble with this dataset. Excepted input with " << metadata->n_num_features << " numerical features followed by " << metadata->n_cat_features << " categorical features, but received " << n_num_features << " numerical features and " << n_cat_features << " categorical features.";
-        throw std::runtime_error("Incompatible dataset");
-        return;
-    }
-    dataSet dataset{obs, categorical_obs, nullptr, nullptr, nullptr, nullptr, n_samples, this->device};
-
-    // int n_trees = this->get_num_trees();
-#ifdef USE_CUDA
-    if (this->device == gpu){
-        if (this->cuda_opt == nullptr){
-            this->cuda_opt = deepCopySGDOptimizerVectorToGPU(this->opts);
-            this->n_cuda_opts = static_cast<int>(this->opts.size());
-        }
-        predict_cuda(&dataset, start_preds, this->metadata, this->edata, this->cuda_opt, this->n_cuda_opts, start_tree_idx, stop_tree_idx);
-    }
-#endif
-    if (this->device == cpu)
-        Predictor::predict_cpu(&dataset, start_preds, this->edata, this->metadata, start_tree_idx, stop_tree_idx, this->parallel_predict, this->opts);
-
-}
-
 int GBRL::get_num_trees(){
     return this->metadata->n_trees;
 }

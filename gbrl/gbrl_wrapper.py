@@ -131,6 +131,8 @@ class GBTWrapper:
         self.total_iterations += 1
 
     def fit(self, features: Union[np.ndarray, th.Tensor], targets: Union[np.ndarray, th.Tensor], iterations: int, shuffle: bool=True, loss_type: str='MultiRMSE') -> float:
+        if isinstance(features, th.Tensor):
+            features = features.detach().cpu().numpy()
         num_features, cat_features = preprocess_features(features)
         targets = to_numpy(targets)
         targets = targets.reshape((len(targets), self.params['output_dim'])).astype(numerical_dtype)
@@ -259,6 +261,8 @@ class GBTWrapper:
         Returns:
             np.ndarray: shap values
         """
+        if isinstance(features, th.Tensor):
+            features = features.detach().cpu().numpy()
         num_features, cat_features = preprocess_features(features)
         base_poly, norm_values, offset = get_poly_vectors(self.params['max_depth'], numerical_dtype)
         return self.cpp_model.tree_shap(tree_idx, num_features, cat_features, np.ascontiguousarray(norm_values), np.ascontiguousarray(base_poly), np.ascontiguousarray(offset)) 
@@ -274,6 +278,8 @@ class GBTWrapper:
         Returns:
             np.ndarray: shap values
         """
+        if isinstance(features, th.Tensor):
+            features = features.detach().cpu().numpy()
         num_features, cat_features = preprocess_features(features)
         base_poly, norm_values, offset = get_poly_vectors(self.params['max_depth'], numerical_dtype)
         return self.cpp_model.ensemble_shap(num_features, cat_features, np.ascontiguousarray(norm_values), np.ascontiguousarray(base_poly), np.ascontiguousarray(offset)) 
@@ -291,17 +297,14 @@ class GBTWrapper:
         if isinstance(features, th.Tensor):
             preds_dlpack = self.cpp_model.predict(get_tensor_info(features.float()), None, start_idx, stop_idx)
             preds = th.from_dlpack(preds_dlpack)
+            if self.student_model is not None:
+                student_dlpack = self.student_model.predict(get_tensor_info(features.float()), None)   
+                preds += th.from_dlpack(student_dlpack)
         else:
             num_features, cat_features = preprocess_features(features)
+            preds = self.cpp_model.predict(num_features, cat_features, start_idx, stop_idx)
             if self.student_model is not None:
-                preds = self.student_model.predict(num_features, cat_features)
-                if num_features is not None and not num_features.flags['WRITEABLE']:
-                    num_features = num_features.copy()
-                if cat_features is not None and not cat_features.flags['WRITEABLE']:
-                    cat_features = cat_features.copy()
-                self.cpp_model.predict(num_features, cat_features, preds, start_idx, stop_idx) # modifies it inplace
-            else:
-                preds = self.cpp_model.predict(num_features, cat_features, start_idx, stop_idx)
+                preds += self.student_model.predict(num_features, cat_features)   
         return preds
     
     def distil(self, obs: Union[np.ndarray, th.Tensor], targets: np.ndarray, params: Dict, verbose: int=0) -> Tuple[int, Dict]:
@@ -396,7 +399,10 @@ class SeparateActorCriticWrapper:
         preds = self.policy_model.predict(observations, start_idx, stop_idx)
         pred_values = self.value_model.predict(observations, start_idx, stop_idx).squeeze()
         if len(preds.shape) == 1:
-            preds = preds[:, np.newaxis]
+            if isinstance(preds, th.Tensor):
+                preds = preds.unsqueeze(-1)
+            else:
+                preds = preds[:, np.newaxis]
         return preds, pred_values
     
     def reset(self) -> None:
@@ -521,19 +527,8 @@ class SharedActorCriticWrapper(GBTWrapper):
         return super().distil(obs, targets, params, verbose)
                                      
     def predict(self, observations: Union[np.ndarray, th.Tensor], start_idx: int=0, stop_idx: int=None) -> Tuple[np.ndarray, np.ndarray]:
-        if stop_idx is None:
-            stop_idx = 0
-        num_observations, cat_observations = preprocess_features(observations)
-        if self.student_model is not None:
-            preds = self.student_model.predict(num_observations, cat_observations)
-            if num_observations is not None and num_observations.flags['WRITEABLE']:
-                num_observations = num_observations.copy()
-            if cat_observations is not None and not cat_observations.flags['WRITEABLE']:
-                cat_observations = cat_observations.copy()
-            self.cpp_model.predict(num_observations, cat_observations, preds, start_idx, stop_idx)
-        else:
-            preds = self.cpp_model.predict(num_observations, cat_observations, start_idx, stop_idx)
-        pred_values = np.zeros(len(preds), dtype=np.single)
+        preds = super().predict(observations, start_idx, stop_idx)
+        pred_values = np.zeros(len(preds), dtype=numerical_dtype) if not isinstance(preds, th.Tensor) else th.zeros(len(preds), device=preds.device).float()
         if self.value_optimizer:
             pred_values = preds[:, -1]
             preds = preds[:, :-1]

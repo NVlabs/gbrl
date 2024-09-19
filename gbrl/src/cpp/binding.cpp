@@ -439,36 +439,6 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         bool is_torch = obs_ptr != nullptr && !py::isinstance<py::array>(obs) && cat_obs_ptr == nullptr;
         return return_tensor_info(n_samples, self.metadata->output_dim, result_ptr, stringTodeviceType(device), is_torch);
     }, py::arg("obs"), py::arg("categorical_obs"), py::arg("start_tree_idx")=0, py::arg("stop_tree_idx")=0, "Predict using the model");
-    gbrl.def("predict", [](GBRL &self, py::object &obs, py::object &categorical_obs, py::array_t<float> start_preds, int start_tree_idx, int stop_tree_idx){
-        if (!start_preds.attr("flags").attr("c_contiguous").cast<bool>()) {
-            throw std::runtime_error("Arrays must be C-contiguous");
-        }
-        const float* obs_ptr = nullptr;
-        int n_num_features = 0;
-         if (!obs.is_none()) {
-            py::array_t<float> obs_array = py::cast<py::array_t<float>>(obs);
-            if (!obs_array.attr("flags").attr("c_contiguous").cast<bool>())
-                throw std::runtime_error("Arrays must be C-contiguous");
-            py::buffer_info info_obs = obs_array.request();
-            obs_ptr = static_cast<const float*>(info_obs.ptr);
-            n_num_features = static_cast<int>(info_obs.shape[1]);
-        }
-        int n_cat_features = 0;
-        const char *cat_obs_ptr = nullptr;
-        if (!categorical_obs.is_none()) {
-            py::array py_array = py::cast<py::array>(categorical_obs);
-            if (!py_array.attr("flags").attr("c_contiguous").cast<bool>())
-                throw std::runtime_error("Arrays must be C-contiguous");
-            py::buffer_info info_categorical_obs = py_array.request();
-            cat_obs_ptr = static_cast<const char*>(info_categorical_obs.ptr);
-            n_cat_features = static_cast<int>(info_categorical_obs.shape[1]);
-        }
-        py::gil_scoped_release release; 
-        py::buffer_info info_preds = start_preds.request();
-        float* preds_ptr = static_cast<float*>(info_preds.ptr);
-        int n_samples = static_cast<int>(info_preds.shape[0]);
-        self.predict(obs_ptr, cat_obs_ptr, preds_ptr, n_samples, n_num_features, n_cat_features, start_tree_idx, stop_tree_idx);  
-    }, py::arg("obs"), py::arg("categorical_obs"), py::arg("start_preds"), py::arg("start_tree_idx")=0, py::arg("stop_tree_idx")=0, "Predict using the model");
         // saveToFile method
     gbrl.def("save", [](GBRL &self, const std::string& filename) -> int {
         py::gil_scoped_release release; 

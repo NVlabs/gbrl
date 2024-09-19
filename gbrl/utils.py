@@ -85,24 +85,30 @@ def setup_optimizer(optimizer: Dict, prefix: str='') -> Dict:
     return {k: v for k, v in optimizer.items() if k in VALID_OPTIMIZER_ARGS and v is not None}
 
 
-def clip_grad_norm(grads: np.array, grad_clip: float) -> np.array:
+def clip_grad_norm(grads: Union[np.ndarray, th.Tensor], grad_clip: float) -> Union[np.ndarray, th.Tensor]:
     """clip per sample gradients according to their norm
 
     Args:
-        grads (np.array): gradients
+        grads (Union[np.ndarray, th.Tensor]): gradients
         grad_clip (float): gradient clip value
 
     Returns:
-        np.array: clipped gradients
+        Union[np.ndarray, th.Tensor]: clipped gradients
     """
-    grads = to_numpy(grads)
     if grad_clip is None or grad_clip == 0.0:
         return grads
     if len(grads.shape) == 1:
-        grads = np.clip(grads, a_min=-grad_clip, a_max=grad_clip)
+        if isinstance(grads, th.Tensor):
+            grads = th.clamp(grads, min=-grad_clip, max=grad_clip)
+        else:
+            grads = np.clip(grads, a_min=-grad_clip, a_max=grad_clip)
         return grads 
-    grad_norms = np.linalg.norm(grads, axis=1)
-    grads[grad_norms > grad_clip] = grad_clip*grads[grad_norms > grad_clip] / grads[grad_norms > grad_clip]
+    if isinstance(grads, th.Tensor):
+        grad_norms = th.norm(grads, p=2, dim=1, keepdim=True)
+    else:
+        grad_norms = np.linalg.norm(grads, axis=1)
+    mask = grad_norms > grad_clip
+    grads[mask] = grad_clip * grads[mask] / grad_norms[mask]
     return grads
 
 
