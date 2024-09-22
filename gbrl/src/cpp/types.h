@@ -13,10 +13,15 @@
 #include <vector>
 #include <string>
 #include <cstdint>
+#include <iostream>
+
+#define STRINGIFY(x) #x
+#define TOSTRING(x) STRINGIFY(x)
 
 #define INITAL_MAX_TREES 50000 //50k
-#define TREES_BATCH  25000 // 100 K
+#define TREES_BATCH  25000 // 100K
 #define MAX_CHAR_SIZE 128
+#define CAT_TYPE TOSTRING(MAX_CHAR_SIZE) "s"
 
 class Optimizer;
 struct splitCondition {
@@ -129,6 +134,7 @@ struct dataSet {
     const float *build_grads;
     const float *norm_grads;
     int n_samples;
+    deviceType device;
 };
 
 struct ensembleData {

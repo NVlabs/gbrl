@@ -30,28 +30,21 @@ Basic imports and preprocessing
 
 Pre-process data
 ~~~~~~~~~~~~~~~~
-.. important::
-    
-    GBRL works with 2D arrays/Tensors. Hence, we need to reshape 1D arrays as in the example below. 
-
 .. code-block:: python
 
+    # CUDA is not deterministic
+    device = 'cuda' if cuda_available else 'cpu'
     # incremental learning dataset
     X_numpy, y_numpy = datasets.load_diabetes(return_X_y=True, as_frame=False, scaled=False)
     # Reshape target as GBRL works with 2D arrays
     out_dim = 1 if len(y_numpy.shape) == 1 else y_numpy.shape[1]
-    if out_dim == 1:
-        y_numpy = y_numpy[:, np.newaxis]
 
-    X, y = th.tensor(X_numpy, dtype=th.float32), th.tensor(y_numpy, dtype=th.float32)
+    X, y = th.tensor(X_numpy, dtype=th.float32, device=device), th.tensor(y_numpy, dtype=th.float32, device=device)
 
 Setting up a GBRL model
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
-
-    # CUDA is not deterministic
-    device = 'cuda' if cuda_available else 'cpu'
 
     # initializing model parameters
     tree_struct = {'max_depth': 4, 
@@ -87,7 +80,7 @@ Incremental learning
     n_epochs = 10
     for _ in range(n_epochs):
         # forward pass - setting requires_grad=True is mandatory for training
-        # y_pred is a torch tensor
+        # y_pred is a torch tensor by default
         y_pred = gbt_model(X, requires_grad=True)
         # calculate loss - we must scale pytorch's mse loss function by 0.5 to get the correct MSE gradient
         loss = 0.5 * mse_loss(y_pred, y)
@@ -196,7 +189,8 @@ Fitting manually calculated gradients is done using the `_model.step` method tha
     n_epochs = 10
     for _ in range(n_epochs):
         # y_pred is a numpy array
-        y_pred = gbt_model.predict(X_numpy)
+        # set tensor = False to output a numpy array instead of a tensor
+        y_pred = gbt_model(X_numpy, tensor=False)
         loss = np.sqrt(0.5 * ((y_pred - y_numpy)**2).mean())
         grads = y_pred - y_numpy
         # perform a boosting step
@@ -284,8 +278,8 @@ Let's start by training a simple Reinforce algorithm.
         rollout_buffer['returns'].extend(calculate_returns(rollout_buffer['rewards'], gamma))
 
         if episode % update_every == 0 and episode > 0:
-            returns = th.tensor(rollout_buffer['returns'])
-            actions = th.cat(rollout_buffer['actions'])
+            returns = th.tensor(rollout_buffer['returns'], device=device)
+            actions = th.cat(rollout_buffer['actions']).to(device)
             # input to model can be either a torch tensor or a numpy ndarray
             observations = np.stack(rollout_buffer['obs'])
             # model update

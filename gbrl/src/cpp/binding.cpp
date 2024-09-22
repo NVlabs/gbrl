@@ -9,11 +9,161 @@
 #define PYBIND11_DETAILED_ERROR_MESSAGES
 #include <pybind11/pybind11.h>
 #include <pybind11/numpy.h> 
+#ifdef USE_CUDA
+#include <cuda_runtime.h>  // For cudaMalloc, cudaFree
+#endif
 
 #include "gbrl.h"
 #include "types.h"
 
+#include "dlpack/dlpack.h"
+
 namespace py = pybind11;
+
+template <typename T>
+void get_numpy_array_info(py::object obj, T*& ptr, std::vector<size_t>& shape, const std::string& expected_format = ""){
+    // Check if the object is a NumPy array
+    if (!py::isinstance<py::array>(obj)) {
+        throw std::runtime_error("Expected a NumPy array");
+    }
+    py::array arr = py::array::ensure(obj, py::array::c_style | py::array::forcecast);
+        if (!arr) {
+        throw std::runtime_error("Could not convert object to a contiguous NumPy array");
+    }
+    py::buffer_info info = arr.request();
+    // Determine the expected format
+    std::string expected;
+    if (expected_format.empty()) {
+        expected = py::format_descriptor<std::remove_cv_t<T>>::format();
+    } else {
+        expected = expected_format;
+    }
+    // Verify the data format
+    if (info.format != expected) {
+        std::stringstream ss;
+        ss << "Expected array of format '" << expected << "', but got '" << info.format << "'";
+        throw std::runtime_error(ss.str());
+    }
+    // Extract the data pointer, shape, and item size
+    ptr = static_cast<T*>(info.ptr);
+    shape.assign(info.shape.begin(), info.shape.end());
+}
+
+template <typename T>
+void get_tensor_info(py::tuple tensor_info, T*& ptr, std::vector<size_t>& shape, std::string& device) {
+    if (tensor_info.size() != 4) {
+        throw std::runtime_error("Expected a tuple of size 4: (data_ptr, shape, dtype, device)");
+    }
+
+    // Cast data_ptr directly
+    ptr = reinterpret_cast<T*>(tensor_info[0].cast<size_t>());
+    // Extract shape
+    py::tuple shape_tuple = tensor_info[1].cast<py::tuple>();
+    shape.clear();
+    for (py::handle dim : shape_tuple) {
+        shape.push_back(dim.cast<size_t>());
+    }
+
+    // Extract and verify dtype
+    std::string dtype = tensor_info[2].cast<std::string>();
+    std::string expected_dtype;
+    if (std::is_same<T, float>::value || std::is_same<T, const float>::value) {
+        expected_dtype = "torch.float32";
+    } else if (std::is_same<T, double>::value || std::is_same<T, const double>::value) {
+        expected_dtype = "torch.float64";
+    } else if (std::is_same<T, int>::value || std::is_same<T, const int>::value) {
+        expected_dtype = "torch.int32";
+    } else {
+        throw std::runtime_error("Unsupported data type: " + dtype) ;
+    }
+    if (dtype != expected_dtype) {
+        throw std::runtime_error("Expected dtype " + expected_dtype + ", but got " + dtype);
+    }
+    // Extract device
+    device = tensor_info[3].cast<std::string>();
+}
+
+template <typename T>
+void handle_input_info(py::object& input, T*& ptr, std::vector<size_t>& shape, std::string& device, const std::string& name, const bool none_allowed, const std::string& function_name, const std::string& expected_format = ""){
+    if (input.is_none()) {
+        if (!none_allowed)
+            throw std::runtime_error("Cannot call " + function_name + " without " + name + "!");
+        else
+            return;
+    } 
+    if (py::isinstance<py::array>(input)) {
+        get_numpy_array_info<T>(input, ptr, shape, expected_format);  // Handle NumPy array input
+        device = "cpu";
+    } else if (py::isinstance<py::tuple>(input)) {
+        get_tensor_info<T>(input, ptr, shape, device);  // Handle tuple input
+    } else {
+        throw std::runtime_error("Unknown " + name + " type! Must be a NumPy array or tuple.");
+    }
+}
+
+void dlpack_deleter_function(DLManagedTensor* self) {
+#ifdef USE_CUDA
+    if (self->dl_tensor.device.device_type == kDLCUDA) {
+        cudaFree(static_cast<float*>(self->dl_tensor.data));  // GPU memory
+    }
+#endif 
+    if (self->dl_tensor.device.device_type == kDLCPU) {
+        delete[] static_cast<float*>(self->dl_tensor.data);  // CPU memory
+    }
+    delete[] self->dl_tensor.shape;
+    delete self;
+}
+
+
+py::capsule create_dlpack_tensor(void* raw_ptr, const std::vector<int64_t>& shape, DLDataType dtype, DLDevice device) {
+    // Allocate memory for DLTensor
+    DLManagedTensor* managed_tensor = new DLManagedTensor;
+    // Assign raw pointer and device
+    managed_tensor->dl_tensor.data = raw_ptr;
+    managed_tensor->dl_tensor.device = device;
+    
+    // Set shape
+    managed_tensor->dl_tensor.ndim = static_cast<int32_t>(shape.size());
+    managed_tensor->dl_tensor.shape = new int64_t[shape.size()];
+    std::copy(shape.begin(), shape.end(), managed_tensor->dl_tensor.shape);
+    // Set dtype
+    managed_tensor->dl_tensor.dtype = dtype;
+    // Strides are optional; set to nullptr for default behavior
+    managed_tensor->dl_tensor.strides = nullptr;
+    managed_tensor->dl_tensor.byte_offset = 0;
+    // Create a PyCapsule and pass the DLTensor to Python
+    managed_tensor->manager_ctx = nullptr;
+    // Set the deleter function
+    managed_tensor->deleter = dlpack_deleter_function;
+    // Return the PyCapsule containing the DLManagedTensor
+    return py::capsule(managed_tensor, "dltensor");
+}
+
+py::object return_tensor_info(int num_samples, int output_dim, float *ptr, deviceType device, bool is_torch) {
+    // Allocate memory
+    std::vector<int64_t> shape;
+    if (output_dim == 1) {
+        shape = {static_cast<int64_t>(num_samples)};  // 1D case
+    } else {
+        shape = {static_cast<int64_t>(num_samples), static_cast<int64_t>(output_dim)};  // 2D case
+    }
+    if (is_torch){
+        DLDevice device_dl = {kDLCPU, 0};
+        DLDataType dtype = {kDLFloat, 32, 1};
+#ifdef USE_CUDA
+    if (device == deviceType::gpu){
+        device_dl.device_type = kDLCUDA;
+    }
+#endif
+        return create_dlpack_tensor(static_cast<void*>(ptr), shape, dtype, device_dl);
+    }
+    else {
+    auto capsule = py::capsule(ptr, [](void* p) {
+            delete []reinterpret_cast<float*>(p);});
+            // Return a NumPy array for CPU case
+        return py::array_t<float>(shape, ptr, capsule);
+    }
+}
 
 py::dict metadataToDict(const ensembleMetaData* metadata){
     py::dict d;
@@ -90,43 +240,69 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         self.to_device(stringTodeviceType(str_device)); 
     },  py::arg("device"),
     "Set GBRL device ['cpu', 'cuda']");
-    gbrl.def("step", [](GBRL &self, py::object &obs, py::object &categorical_obs, py::array_t<float> &grads, py::array_t<float> &feature_weights) {
-        if (!grads.attr("flags").attr("c_contiguous").cast<bool>()) {
-            throw std::runtime_error("Arrays must be C-contiguous");
-        }
-        py::buffer_info info_grads = grads.request();
-        float* grads_ptr = static_cast<float*>(info_grads.ptr);
-        int n_samples = static_cast<int>(info_grads.shape[0]);
-
+    gbrl.def("step", [](GBRL &self, py::object &obs, py::object &categorical_obs, py::object &grads, py::object &feature_weights) {
         const float* obs_ptr = nullptr;
-        int n_num_features = 0;
-        if (!obs.is_none()) {
-            py::array_t<float> obs_array = py::cast<py::array_t<float>>(obs);
-            if (!obs_array.attr("flags").attr("c_contiguous").cast<bool>())
-                throw std::runtime_error("Arrays must be C-contiguous");
-            py::buffer_info info_obs = obs_array.request();
-            obs_ptr = static_cast<const float*>(info_obs.ptr);
-            n_num_features = static_cast<int>(info_obs.shape[1]);
+        const float*feature_weights_ptr = nullptr;
+        const char* cat_obs_ptr= nullptr;
+        float* grads_ptr = nullptr;
+        std::vector<size_t> obs_shape, cat_obs_shape, grads_shape, feature_weights_shape;
+        std::string obs_device, cat_obs_device, grads_device, feature_weights_device;
+        int n_samples, n_num_features = 0, n_cat_features = 0;
+        handle_input_info<float>(grads, grads_ptr, grads_shape, grads_device, "grads", false, "step");
+        if (grads_shape.size() == 1){
+            if (self.metadata->output_dim = 1)
+                n_samples  = static_cast<int>(grads_shape[0]);
+            else
+                n_samples = 1;
+        } else if (grads_shape.size() > 1){
+            n_samples  = static_cast<int>(grads_shape[0]);
         }
-        const char* cat_obs_ptr = nullptr;
-        int n_cat_features = 0;
-        if (!categorical_obs.is_none()) {
-            py::array py_array = py::cast<py::array>(categorical_obs);
-            if (!py_array.attr("flags").attr("c_contiguous").cast<bool>())
-                throw std::runtime_error("Arrays must be C-contiguous");
-            py::buffer_info info_categorical_obs = py_array.request();
-            cat_obs_ptr = static_cast<const char*>(info_categorical_obs.ptr);
-            n_cat_features = static_cast<int>(info_categorical_obs.shape[1]);
+        handle_input_info<const float>(obs, obs_ptr, obs_shape, obs_device, "obs", true, "step"); 
+        if (obs_ptr != nullptr){
+            int n_obs_samples = 0;
+            if (obs_shape.size() == 1){
+                n_obs_samples = 1;
+                n_num_features = static_cast<int>(obs_shape[0]);
+            } else if (obs_shape.size() > 1){
+                n_obs_samples  = static_cast<int>(obs_shape[0]);
+                n_num_features = static_cast<int>(obs_shape[1]);
+            }
+            if (obs_device != grads_device){
+                std::stringstream ss;
+                ss << "Observations device: " << obs_device << " != Gradient device " << grads_device;
+                throw std::runtime_error(ss.str());
+            }
+            if (n_obs_samples != n_samples){
+                std::stringstream ss;
+                ss << "Number of observations " << n_obs_samples << " != number of gradient samples " << n_samples;
+                throw std::runtime_error(ss.str());
+            }
         }
-
-        if (!feature_weights.attr("flags").attr("c_contiguous").cast<bool>()) {
-            throw std::runtime_error("Arrays must be C-contiguous");
+        handle_input_info<const char>(categorical_obs, cat_obs_ptr, cat_obs_shape, cat_obs_device, "cat_obs", true, "step", CAT_TYPE);
+        int n_cat_samples = 0;
+        if (cat_obs_ptr != nullptr)
+        {
+            if (cat_obs_shape.size() == 1){
+                n_cat_samples = 1;
+                n_cat_features = static_cast<int>(cat_obs_shape[0]);
+            } else if (cat_obs_shape.size() > 1){
+                n_cat_samples  = static_cast<int>(cat_obs_shape[0]);
+                n_cat_features = static_cast<int>(cat_obs_shape[1]);
+            }
+            if (n_cat_samples != n_samples){
+                std::stringstream ss;
+                ss << "Number of categorical observations " << n_cat_samples << " != number of gradient samples " << n_samples;
+                throw std::runtime_error(ss.str());
+            }
         }
-        py::buffer_info info_feature_weights = feature_weights.request();
-        float* feature_weights_ptr = static_cast<float*>(info_feature_weights.ptr);
-                    
+        handle_input_info<const float>(feature_weights, feature_weights_ptr, feature_weights_shape, feature_weights_device, "feature_weights", false, "step");
+        if (grads_device != feature_weights_device){
+            std::stringstream ss;
+            ss << "Feature weights device: " << feature_weights_device << " != expected device " << grads_device;
+            throw std::runtime_error(ss.str());
+        }
         py::gil_scoped_release release; 
-        self.step(obs_ptr, cat_obs_ptr, grads_ptr, feature_weights_ptr, n_samples, n_num_features, n_cat_features); 
+        self.step(obs_ptr, cat_obs_ptr, grads_ptr, feature_weights_ptr, n_samples, n_num_features, n_cat_features, stringTodeviceType(grads_device)); 
     },  py::arg("obs"),
         py::arg("categorical_obs"),
         py::arg("grads"),
@@ -162,6 +338,7 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         if (!feature_weights.attr("flags").attr("c_contiguous").cast<bool>()) {
             throw std::runtime_error("Arrays must be C-contiguous");
         }
+        
         py::buffer_info info_feature_weights = feature_weights.request();
         float* feature_weights_ptr = static_cast<float*>(info_feature_weights.ptr);
         
@@ -211,70 +388,57 @@ PYBIND11_MODULE(gbrl_cpp, m) {
        py::arg("eps")=1.0e-8, py::arg("shrinkage")=0.0,
        "Set optimizer!");
    // predict method
-    gbrl.def("predict", [](GBRL &self, py::object &obs, py::object &categorical_obs, int start_tree_idx, int stop_tree_idx) -> py::array_t<float> {
+    gbrl.def("predict", [](GBRL &self, py::object &obs, py::object &categorical_obs, int start_tree_idx, int stop_tree_idx) -> py::object {
         const float* obs_ptr = nullptr;
-        int n_num_features = 0;
-        int n_samples = 0;
-         if (!obs.is_none()) {
-            py::array_t<float> obs_array = py::cast<py::array_t<float>>(obs);
-            if (!obs_array.attr("flags").attr("c_contiguous").cast<bool>())
-                throw std::runtime_error("Arrays must be C-contiguous");
-            py::buffer_info info_obs = obs_array.request();
-            obs_ptr = static_cast<const float*>(info_obs.ptr);
-            n_num_features = static_cast<int>(info_obs.shape[1]);
-            n_samples = static_cast<int>(info_obs.shape[0]);
+        const char* cat_obs_ptr= nullptr;
+        std::vector<size_t> obs_shape, cat_obs_shape;
+        std::string obs_device, cat_obs_device, device;
+        int n_samples = 0, n_num_features = 0, n_cat_features = 0;
+        handle_input_info<const float>(obs, obs_ptr, obs_shape, obs_device, "obs", true, "predict");
+        if (obs_ptr != nullptr){
+            device = obs_device;
+            if (obs_shape.size() == 1){
+                n_samples = 1;
+                n_num_features = static_cast<int>(obs_shape[0]);
+            } else if (obs_shape.size() > 1){
+                n_samples  = static_cast<int>(obs_shape[0]);
+                n_num_features = static_cast<int>(obs_shape[1]);
+            }
         }
-        int n_cat_features = 0;
-        const char *cat_obs_ptr = nullptr;
-        if (!categorical_obs.is_none()) {
-            py::array py_array = py::cast<py::array>(categorical_obs);
-            if (!py_array.attr("flags").attr("c_contiguous").cast<bool>())
-                throw std::runtime_error("Arrays must be C-contiguous");
-
-            py::buffer_info info_categorical_obs = py_array.request();
-            cat_obs_ptr = static_cast<const char*>(info_categorical_obs.ptr);
-            n_cat_features = static_cast<int>(info_categorical_obs.shape[1]);
-            n_samples = static_cast<int>(info_categorical_obs.shape[0]);
+        handle_input_info<const char>(categorical_obs, cat_obs_ptr, cat_obs_shape, cat_obs_device, "cat_obs", true, "predict", CAT_TYPE); 
+        if (cat_obs_ptr != nullptr)
+        {
+            device = "cpu";
+            int n_cat_samples = 0;
+            if (cat_obs_shape.size() == 1){
+                n_cat_samples = 1;
+                n_cat_features = static_cast<int>(cat_obs_shape[0]);
+            } else if (cat_obs_shape.size() > 1){
+                n_cat_samples  = static_cast<int>(cat_obs_shape[0]);
+                n_cat_features = static_cast<int>(cat_obs_shape[1]);
+            }
+            if (obs_ptr != nullptr){
+                if (n_cat_samples != n_samples){
+                    std::stringstream ss;
+                    ss << "Number of categorical observations " << n_cat_samples << " != number of numerical observations " << n_samples;
+                    throw std::runtime_error(ss.str());
+                }
+                if (cat_obs_device != obs_device){
+                    std::stringstream ss;
+                    ss << "Categorical observations device: " << cat_obs_device << " != numerical observations device: " << obs_device;
+                    throw std::runtime_error(ss.str());
+                } 
+            } else {
+                n_samples = n_cat_samples;
+            }
         }
 
         py::gil_scoped_release release; 
-        float* result_ptr = self.predict(obs_ptr, cat_obs_ptr, n_samples, n_num_features, n_cat_features, start_tree_idx, stop_tree_idx);
+        float* result_ptr = self.predict(obs_ptr, cat_obs_ptr, n_samples, n_num_features, n_cat_features, start_tree_idx, stop_tree_idx, stringTodeviceType(device));
         py::gil_scoped_acquire acquire;
-        auto capsule = py::capsule(result_ptr, [](void* ptr) {
-        delete[] reinterpret_cast<float*>(ptr);
-        });
-        return py::array({n_samples, self.metadata->output_dim}, result_ptr, capsule);
+        bool is_torch = (obs_ptr != nullptr && !py::isinstance<py::array>(obs) && cat_obs_ptr == nullptr);
+        return return_tensor_info(n_samples, self.metadata->output_dim, result_ptr, stringTodeviceType(device), is_torch);
     }, py::arg("obs"), py::arg("categorical_obs"), py::arg("start_tree_idx")=0, py::arg("stop_tree_idx")=0, "Predict using the model");
-    gbrl.def("predict", [](GBRL &self, py::object &obs, py::object &categorical_obs, py::array_t<float> start_preds, int start_tree_idx, int stop_tree_idx){
-        if (!start_preds.attr("flags").attr("c_contiguous").cast<bool>()) {
-            throw std::runtime_error("Arrays must be C-contiguous");
-        }
-        const float* obs_ptr = nullptr;
-        int n_num_features = 0;
-         if (!obs.is_none()) {
-            py::array_t<float> obs_array = py::cast<py::array_t<float>>(obs);
-            if (!obs_array.attr("flags").attr("c_contiguous").cast<bool>())
-                throw std::runtime_error("Arrays must be C-contiguous");
-            py::buffer_info info_obs = obs_array.request();
-            obs_ptr = static_cast<const float*>(info_obs.ptr);
-            n_num_features = static_cast<int>(info_obs.shape[1]);
-        }
-        int n_cat_features = 0;
-        const char *cat_obs_ptr = nullptr;
-        if (!categorical_obs.is_none()) {
-            py::array py_array = py::cast<py::array>(categorical_obs);
-            if (!py_array.attr("flags").attr("c_contiguous").cast<bool>())
-                throw std::runtime_error("Arrays must be C-contiguous");
-            py::buffer_info info_categorical_obs = py_array.request();
-            cat_obs_ptr = static_cast<const char*>(info_categorical_obs.ptr);
-            n_cat_features = static_cast<int>(info_categorical_obs.shape[1]);
-        }
-        py::gil_scoped_release release; 
-        py::buffer_info info_preds = start_preds.request();
-        float* preds_ptr = static_cast<float*>(info_preds.ptr);
-        int n_samples = static_cast<int>(info_preds.shape[0]);
-        self.predict(obs_ptr, cat_obs_ptr, preds_ptr, n_samples, n_num_features, n_cat_features, start_tree_idx, stop_tree_idx);  
-    }, py::arg("obs"), py::arg("categorical_obs"), py::arg("start_preds"), py::arg("start_tree_idx")=0, py::arg("stop_tree_idx")=0, "Predict using the model");
         // saveToFile method
     gbrl.def("save", [](GBRL &self, const std::string& filename) -> int {
         py::gil_scoped_release release; 

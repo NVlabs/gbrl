@@ -14,53 +14,14 @@ import numpy as np
 import torch as th
 
 from .gbrl_cpp import GBRL as GBRL_CPP
-from .utils import get_input_dim, get_poly_vectors, process_array, to_numpy, numerical_dtype
-
-
-def features_to_numpy(arr: Union[np.array, th.Tensor]) -> Tuple[np.array, np.array]:
-    if isinstance(arr, th.Tensor):
-        arr = arr.detach().cpu().numpy()
-        return np.ascontiguousarray(arr, dtype=numerical_dtype), None 
-    elif isinstance(arr, tuple):
-        num_arr, _ = process_array(arr[0])
-        _, cat_arr = process_array(arr[1])
-        return num_arr, cat_arr
-    elif isinstance(arr, list):
-        return process_array(np.array(arr))
-    elif isinstance(arr, dict):
-        num_arr, _ = process_array(arr['numerical_data'])
-        _, cat_arr = process_array(arr['categorical_data'])
-        return num_arr, cat_arr
-    else:
-        return process_array(arr)
-       
-def preprocess_features(arr: Union[np.array, th.Tensor]) -> Tuple[np.array, np.array]:
-    """Preprocess array such that the dimensions and the data type match.
-    Returns numerical and categorical features. 
-    May return None for each if purely numerical or purely categorical.
-    Args:
-
-    Returns:
-        Tuple[np.array, np.array]
-    """
-    input_dim = get_input_dim(arr)
-    num_arr, cat_arr = features_to_numpy(arr)
-    if num_arr is not None and len(num_arr.shape) == 1:
-        if input_dim == 1:
-            num_arr = num_arr[np.newaxis, :]
-        else:
-            num_arr = num_arr[:, np.newaxis]
-    if num_arr is not None and len(num_arr.shape) > 2:
-        num_arr = num_arr.squeeze()
-    if cat_arr is not None and len(cat_arr.shape) == 1:
-        if input_dim == 1:
-            cat_arr = cat_arr[np.newaxis, :]
-        else:
-            cat_arr = cat_arr[:, np.newaxis]
-    if cat_arr is not None and len(cat_arr.shape) > 2:
-        cat_arr = cat_arr.squeeze()
-    return num_arr, cat_arr
-
+from .utils import (get_input_dim, get_poly_vectors, 
+                    to_numpy,
+                    numerical_dtype, 
+                    get_tensor_info,
+                    preprocess_features,
+                    ensure_same_type,
+                    concatenate_arrays,
+                    tensor_to_leaf)
 
 class GBTWrapper:
     def __init__(self, output_dim: int, tree_struct: Dict, optimizer: Union[Dict, List], gbrl_params: Dict, verbose: int = 0, device: str = 'cpu'):
@@ -112,21 +73,28 @@ class GBTWrapper:
             assert np.all(feature_weights >= 0), "feature weights contains non-positive values"
         self.feature_weights = feature_weights
 
-    def step(self, features: Union[np.array, th.Tensor, Tuple], grads: Union[np.array, th.Tensor]) -> None:
-        num_features, cat_features = preprocess_features(features)
-        grads = to_numpy(grads)
-        grads = grads.reshape((len(grads), self.params['output_dim']))
-        input_dim = 0 if num_features is None else num_features.shape[1]
-        input_dim += 0 if cat_features is None else cat_features.shape[1]
-        if self.feature_weights is None:
-            self.feature_weights = np.ones(input_dim, dtype=numerical_dtype)
-        assert len(self.feature_weights) == input_dim, "feature weights has to have the same number of elements as features"
-        assert np.all(self.feature_weights >= 0), "feature weights contains non-positive values"
-        self.cpp_model.step(num_features, cat_features, grads, self.feature_weights)
+    def step(self, features: Union[np.ndarray, th.Tensor, Tuple], grads: Union[np.ndarray, th.Tensor]) -> None:
+        features, grads = ensure_same_type(features, grads)
+        if isinstance(features, th.Tensor):
+            if self.feature_weights is None:
+                self.feature_weights = th.ones(get_input_dim(features), device=features.device).float()
+            self.cpp_model.step(get_tensor_info(features.float()), None, get_tensor_info(grads.float()), get_tensor_info(self.feature_weights))
+        else:
+            num_features, cat_features = preprocess_features(features)
+            grads = np.ascontiguousarray(grads.reshape((len(grads), self.params['output_dim']))).astype(numerical_dtype)
+            input_dim = 0 if num_features is None else num_features.shape[1]
+            input_dim += 0 if cat_features is None else cat_features.shape[1]
+            if self.feature_weights is None:
+                self.feature_weights = np.ones(input_dim, dtype=numerical_dtype)
+            assert len(self.feature_weights) == input_dim, "feature weights has to have the same number of elements as features"
+            assert np.all(self.feature_weights >= 0), "feature weights contains non-positive values"
+            self.cpp_model.step(num_features, cat_features, grads, self.feature_weights)
         self.iteration = self.cpp_model.get_iteration()
         self.total_iterations += 1
 
-    def fit(self, features: Union[np.array, th.Tensor], targets: Union[np.array, th.Tensor], iterations: int, shuffle: bool=True, loss_type: str='MultiRMSE') -> float:
+    def fit(self, features: Union[np.ndarray, th.Tensor], targets: Union[np.ndarray, th.Tensor], iterations: int, shuffle: bool = True, loss_type: str = 'MultiRMSE') -> float:
+        if isinstance(features, th.Tensor):
+            features = features.detach().cpu().numpy()
         num_features, cat_features = preprocess_features(features)
         targets = to_numpy(targets)
         targets = targets.reshape((len(targets), self.params['output_dim'])).astype(numerical_dtype)
@@ -213,7 +181,7 @@ class GBTWrapper:
             return self.cpp_model.get_num_trees() + self.student_model.get_num_trees()
         return self.cpp_model.get_num_trees()
     
-    def set_bias(self, bias: Union[np.array, float]) -> None:
+    def set_bias(self, bias: Union[np.ndarray, float]) -> None:
         if not isinstance(bias, np.ndarray) and not isinstance(bias, float):
             raise TypeError("Input should be a numpy array or float")
 
@@ -229,7 +197,7 @@ class GBTWrapper:
         except RuntimeError as e:
             print(f"Caught an exception in GBRL: {e}")
 
-    def get_bias(self) -> np.array:
+    def get_bias(self) -> np.ndarray:
         return self.cpp_model.get_bias()
 
     def get_device(self) -> str:
@@ -244,32 +212,36 @@ class GBTWrapper:
         except RuntimeError as e:
             print(f"Caught an exception in GBRL: {e}")
 
-    def tree_shap(self, tree_idx: int, features: Union[np.array, th.Tensor]) -> np.array:
+    def tree_shap(self, tree_idx: int, features: Union[np.ndarray, th.Tensor]) -> np.ndarray:
         """  
         Implementation based on - https://github.com/yupbank/linear_tree_shap
         See Linear TreeShap, Yu et al, 2023, https://arxiv.org/pdf/2209.08192 
         Args:
             tree_idx (int): tree index
-            features (Union[np.array, th.Tensor]):
+            features (Union[np.ndarray, th.Tensor]):
 
         Returns:
-            np.array: shap values
+            np.ndarray: shap values
         """
+        if isinstance(features, th.Tensor):
+            features = features.detach().cpu().numpy()
         num_features, cat_features = preprocess_features(features)
         base_poly, norm_values, offset = get_poly_vectors(self.params['max_depth'], numerical_dtype)
         return self.cpp_model.tree_shap(tree_idx, num_features, cat_features, np.ascontiguousarray(norm_values), np.ascontiguousarray(base_poly), np.ascontiguousarray(offset)) 
     
-    def shap(self, features: Union[np.array, th.Tensor]) -> np.array:
+    def shap(self, features: Union[np.ndarray, th.Tensor]) -> np.ndarray:
         """  
         Uses Linear tree shap for each tree in the ensemble (sequentially)
         Implementation based on - https://github.com/yupbank/linear_tree_shap
         See Linear TreeShap, Yu et al, 2023, https://arxiv.org/pdf/2209.08192 
         Args:
-            features (Union[np.array, th.Tensor]):
+            features (Union[np.ndarray, th.Tensor]):
 
         Returns:
-            np.array: shap values
+            np.ndarray: shap values
         """
+        if isinstance(features, th.Tensor):
+            features = features.detach().cpu().numpy()
         num_features, cat_features = preprocess_features(features)
         base_poly, norm_values, offset = get_poly_vectors(self.params['max_depth'], numerical_dtype)
         return self.cpp_model.ensemble_shap(num_features, cat_features, np.ascontiguousarray(norm_values), np.ascontiguousarray(base_poly), np.ascontiguousarray(offset)) 
@@ -281,23 +253,32 @@ class GBTWrapper:
         except RuntimeError as e:
             print(f"Caught an exception in GBRL: {e}")
     
-    def predict(self, features: Union[np.array, th.Tensor], start_idx: int=0, stop_idx: int=None) -> np.array:
-        num_features, cat_features = preprocess_features(features)
+    def predict(self, features: Union[np.ndarray, th.Tensor], requires_grad: bool = True, start_idx: int = 0, stop_idx: int = None, tensor: bool = True) -> np.ndarray:
         if stop_idx is None:
             stop_idx = 0
-
-        if self.student_model is not None:
-            preds = self.student_model.predict(num_features, cat_features)
-            if num_features is not None and not num_features.flags['WRITEABLE']:
-                num_features = num_features.copy()
-            if cat_features is not None and not cat_features.flags['WRITEABLE']:
-                cat_features = cat_features.copy()
-            self.cpp_model.predict(num_features, cat_features, preds, start_idx, stop_idx) # modifies it inplace
+        if isinstance(features, th.Tensor):
+            preds_dlpack = self.cpp_model.predict(get_tensor_info(features.float()), None, start_idx, stop_idx)
+            preds = th.from_dlpack(preds_dlpack)
+            if self.student_model is not None:
+                student_dlpack = self.student_model.predict(get_tensor_info(features.float()), None)   
+                preds += th.from_dlpack(student_dlpack)
+            preds.requires_grad_(requires_grad)
         else:
+            num_features, cat_features = preprocess_features(features)
             preds = self.cpp_model.predict(num_features, cat_features, start_idx, stop_idx)
+            if self.student_model is not None:
+                preds += self.student_model.predict(num_features, cat_features)   
+            if tensor: 
+                if isinstance(preds, np.ndarray):
+                    preds = th.tensor(preds, requires_grad=requires_grad, device=self.device).float()
+                else:
+                    preds = th.from_dlpack(preds)
+                    preds.requires_grad_(requires_grad)
+        if not tensor and isinstance(preds, th.Tensor):
+            preds = preds.detach().cpu().numpy()
         return preds
     
-    def distil(self, obs: Union[np.array, th.Tensor], targets: np.array, params: Dict, verbose: int=0) -> Tuple[int, Dict]:
+    def distil(self, obs: Union[np.ndarray, th.Tensor], targets: np.ndarray, params: Dict, verbose: int = 0) -> Tuple[int, Dict]:
         num_obs, cat_obs = preprocess_features(obs)
         distil_params = {'output_dim': self.params['output_dim'], 'split_score_func': 'L2',
                          'generator_type': 'Quantile',  'use_control_variates': False, 'device': self.device,
@@ -353,15 +334,15 @@ class SeparateActorCriticWrapper:
         self.verbose = verbose
         self.device = device
  
-    def step(self, observations: Union[np.array, th.Tensor], theta_grad: Union[np.array, th.Tensor], value_grad: Union[np.array, th.Tensor]):
+    def step(self, observations: Union[np.ndarray, th.Tensor], theta_grad: Union[np.ndarray, th.Tensor], value_grad: Union[np.ndarray, th.Tensor]):
         self.step_policy(observations, theta_grad)
         self.step_critic(observations, value_grad)
         self.total_iterations += 1
         
-    def step_policy(self, observations: Union[np.array, th.Tensor], theta_grad: Union[np.array, th.Tensor]):
+    def step_policy(self, observations: Union[np.ndarray, th.Tensor], theta_grad: Union[np.ndarray, th.Tensor]):
         self.policy_model.step(observations, theta_grad)
     
-    def step_critic(self, observations: Union[np.array, th.Tensor], value_grad: Union[np.array, th.Tensor]):
+    def step_critic(self, observations: Union[np.ndarray, th.Tensor], value_grad: Union[np.ndarray, th.Tensor]):
         self.value_model.step(observations, value_grad)
 
     def set_device(self, device:str) -> None:
@@ -369,7 +350,7 @@ class SeparateActorCriticWrapper:
         self.value_model.set_device(device)
         self.device = device
 
-    def tree_shap(self, tree_idx: int, observations: Union[np.array, th.Tensor]) -> Tuple[np.array, np.array]:
+    def tree_shap(self, tree_idx: int, observations: Union[np.ndarray, th.Tensor]) -> Tuple[np.ndarray, np.ndarray]:
         policy_shap = self.policy_model.tree_shap(tree_idx, observations)
         value_shap = self.value_model.tree_shap(tree_idx, observations)
         return policy_shap, value_shap
@@ -385,12 +366,27 @@ class SeparateActorCriticWrapper:
         value_lr = self.value_model.get_schedule_learning_rates()
         return policy_lr, value_lr
     
-    def predict(self, observations: Union[np.array, th.Tensor], start_idx: int=0, stop_idx: int=None) -> Tuple[np.array, np.array]:
-        preds = self.policy_model.predict(observations, start_idx, stop_idx)
-        pred_values = self.value_model.predict(observations, start_idx, stop_idx).squeeze()
+    def predict(self, observations: Union[np.ndarray, th.Tensor], requires_grad: bool = True, start_idx: int = 0, stop_idx: int = None, tensor: bool = True) -> Tuple[np.ndarray, np.ndarray]:
+        preds = self.policy_model.predict(observations, requires_grad, start_idx, stop_idx, tensor)
+        pred_values = self.value_model.predict(observations, requires_grad, start_idx, stop_idx, tensor).squeeze()
         if len(preds.shape) == 1:
-            preds = preds[:, np.newaxis]
-        return preds, pred_values
+            if isinstance(preds, th.Tensor):
+                preds = preds.unsqueeze(-1)
+            else:
+                preds = preds[:, np.newaxis]
+        return tensor_to_leaf(preds, requires_grad=requires_grad), tensor_to_leaf(pred_values, requires_grad=requires_grad)
+
+    def predict_policy(self, observations: Union[np.ndarray, th.Tensor], requires_grad: bool = True, start_idx: int = 0, stop_idx: int = None, tensor: bool = True):
+        preds = self.policy_model.predict(observations, requires_grad, start_idx, stop_idx, tensor)
+        if len(preds.shape) == 1:
+            if isinstance(preds, th.Tensor):
+                preds = preds.unsqueeze(-1)
+            else:
+                preds = preds[:, np.newaxis]
+        return preds 
+    
+    def predict_critic(self, observations: Union[np.ndarray, th.Tensor], requires_grad: bool = True, start_idx: int = 0, stop_idx: int = None, tensor: bool = True):
+        return self.value_model.predict(observations, requires_grad, start_idx, stop_idx, tensor)
     
     def reset(self) -> None:
         self.policy_model.reset()
@@ -431,10 +427,10 @@ class SeparateActorCriticWrapper:
         instance.device = instance.policy_model.get_device()
         return instance
 
-    def distil_policy(self, obs: Union[np.array, th.Tensor], targets: np.array, params: Dict) -> Tuple[int, Dict]:
+    def distil_policy(self, obs: Union[np.ndarray, th.Tensor], targets: np.ndarray, params: Dict) -> Tuple[int, Dict]:
         return self.policy_model.distil(obs, targets, params)
 
-    def distil_value(self, obs: Union[np.array, th.Tensor], targets: np.array, params: Dict) -> Tuple[int, Dict]:
+    def distil_value(self, obs: Union[np.ndarray, th.Tensor], targets: np.ndarray, params: Dict) -> Tuple[int, Dict]:
         return self.value_model.distil(obs, targets, params)
 
     def get_iteration(self) -> Tuple[int, int]:
@@ -443,7 +439,7 @@ class SeparateActorCriticWrapper:
     def get_num_trees(self) -> Tuple[int, int]:
         return self.policy_model.get_num_trees(), self.value_model.get_num_trees()
     
-    def set_bias(self, bias: np.array) -> None:
+    def set_bias(self, bias: np.ndarray) -> None:
         self.policy_model.set_bias(bias)
 
     def copy(self) -> "SeparateActorCriticWrapper":
@@ -458,7 +454,7 @@ class SeparateActorCriticWrapper:
     
 
 class SharedActorCriticWrapper(GBTWrapper):
-    def __init__(self, output_dim: int, tree_struct: Dict, policy_optimizer: Dict, value_optimizer: Dict=None, gbrl_params: Dict=dict(), verbose: int = 0, device: str = 'cpu'):
+    def __init__(self, output_dim: int, tree_struct: Dict, policy_optimizer: Dict, value_optimizer: Dict, gbrl_params: Dict=dict(), verbose: int = 0, device: str = 'cpu'):
         print('****************************************')
         print(f'Shared GBRL Tree with output dim: {output_dim}, tree_struct: {tree_struct} policy_optimizer: {policy_optimizer} value_optimizer: {value_optimizer}')
         print('****************************************')
@@ -489,48 +485,46 @@ class SharedActorCriticWrapper(GBTWrapper):
             except RuntimeError as e:
                 print(f"Caught an exception in GBRL: {e}")
         
-    def step(self, observations: Union[np.array, th.Tensor], theta_grad: np.array, value_grad: np.array=None) -> None:
-        num_observations, cat_observations = preprocess_features(observations)
-        target_grads = theta_grad 
-        if value_grad is not None:
-            value_grad = value_grad[:, np.newaxis]
-            target_grads = np.concatenate([theta_grad, value_grad], axis=-1)
-        target_grads = target_grads.astype(numerical_dtype)
-        target_grads = target_grads.reshape((len(theta_grad), self.params['output_dim']))
-        input_dim = 0 if num_observations is None else num_observations.shape[1]
-        input_dim += 0 if cat_observations is None else cat_observations.shape[1]
-        if self.feature_weights is None:
-            self.feature_weights = np.ones(input_dim, dtype=numerical_dtype)
-        assert len(self.feature_weights) == input_dim, "feature weights has to have the same number of elements as features"
-        assert np.all(self.feature_weights >= 0), "feature weights contains non-positive values"
-        self.cpp_model.step(num_observations, cat_observations, target_grads, self.feature_weights)
+    def step(self, observations: Union[np.ndarray, th.Tensor], theta_grad: np.ndarray, value_grad: np.ndarray=None) -> None:
+        grads = concatenate_arrays(theta_grad, value_grad)
+        observations, grads = ensure_same_type(observations, grads)
+        if isinstance(observations, th.Tensor):
+            if self.feature_weights is None:
+                self.feature_weights = th.ones(get_input_dim(observations), device=observations.device).float()
+            self.cpp_model.step(get_tensor_info(observations.float()), None, get_tensor_info(grads.float()), get_tensor_info(self.feature_weights))
+        else:
+            num_observations, cat_observations = preprocess_features(observations)
+            grads = np.ascontiguousarray(grads).astype(numerical_dtype)
+            input_dim = 0 if num_observations is None else num_observations.shape[1]
+            input_dim += 0 if cat_observations is None else cat_observations.shape[1]
+            if self.feature_weights is None:
+                self.feature_weights = np.ones(input_dim, dtype=numerical_dtype)
+            assert len(self.feature_weights) == input_dim, "feature weights has to have the same number of elements as features"
+            assert np.all(self.feature_weights >= 0), "feature weights contains non-positive values"
+            self.cpp_model.step(num_observations, cat_observations, grads, self.feature_weights)
+
         self.iteration = self.cpp_model.get_iteration()
         self.total_iterations += 1
 
-    def distil(self, obs: Union[np.array, th.Tensor], policy_targets: np.array, value_targets: np.array, params: Dict, verbose: int) -> Tuple[float, Dict]:
+    def distil(self, obs: Union[np.ndarray, th.Tensor], policy_targets: np.ndarray, value_targets: np.ndarray, params: Dict, verbose: int) -> Tuple[float, Dict]:
         targets = policy_targets.squeeze() 
         if self.value_optimizer is not None:
             targets = np.concatenate([policy_targets, value_targets[:, np.newaxis]], axis=1)
         return super().distil(obs, targets, params, verbose)
                                      
-    def predict(self, observations: Union[np.array, th.Tensor], start_idx: int=0, stop_idx: int=None) -> Tuple[np.array, np.array]:
-        if stop_idx is None:
-            stop_idx = 0
-        num_observations, cat_observations = preprocess_features(observations)
-        if self.student_model is not None:
-            preds = self.student_model.predict(num_observations, cat_observations)
-            if num_observations is not None and num_observations.flags['WRITEABLE']:
-                num_observations = num_observations.copy()
-            if cat_observations is not None and not cat_observations.flags['WRITEABLE']:
-                cat_observations = cat_observations.copy()
-            self.cpp_model.predict(num_observations, cat_observations, preds, start_idx, stop_idx)
-        else:
-            preds = self.cpp_model.predict(num_observations, cat_observations, start_idx, stop_idx)
-        pred_values = np.zeros(len(preds), dtype=np.single)
-        if self.value_optimizer:
-            pred_values = preds[:, -1]
-            preds = preds[:, :-1]
+    def predict(self, observations: Union[np.ndarray, th.Tensor], requires_grad: bool = True, start_idx: int = 0, stop_idx: int = None, tensor: bool = True) -> Tuple[np.ndarray, np.ndarray]:
+        preds = super().predict(observations, requires_grad, start_idx, stop_idx, tensor)
+        pred_values = tensor_to_leaf(preds[:, -1], requires_grad=requires_grad)
+        preds = tensor_to_leaf(preds[:, :-1], requires_grad=requires_grad)
         return preds, pred_values
+
+    def predict_policy(self, observations: Union[np.ndarray, th.Tensor], requires_grad: bool = True, start_idx: int = 0, stop_idx: int = None, tensor: bool = True):
+        preds, _ = self.predict(observations, requires_grad, start_idx, stop_idx, tensor)
+        return preds
+    
+    def predict_critic(self, observations: Union[np.ndarray, th.Tensor], requires_grad: bool = True, start_idx: int = 0, stop_idx: int = None, tensor: bool = True):
+        _, pred_values = self.predict(observations, requires_grad, start_idx, stop_idx, tensor)
+        return pred_values
     
     @classmethod
     def load(cls, filename: str) -> "SharedActorCriticWrapper":
