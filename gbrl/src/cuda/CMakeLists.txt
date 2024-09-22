@@ -17,7 +17,7 @@ set(CUDA_SOURCES
     cuda_preprocess.cu
 )
 
-include_directories(${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/gbrl/src/cpp)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/gbrl/src/cpp ${CMAKE_SOURCE_DIR}/gbrl/include)
 
 set(CMAKE_CUDA_STANDARD 14)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)

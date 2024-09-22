@@ -24,7 +24,7 @@ set(CPP_SOURCES
     math_ops.cpp
 )
 
-include_directories(${CMAKE_CURRENT_SOURCE_DIR})
+include_directories(${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/gbrl/include)
 
 if (CUDAToolkit_FOUND AND USE_CUDA AND NOT APPLE)
     include_directories(${CUDAToolkit_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/gbrl/src/cuda)

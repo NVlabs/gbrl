@@ -44,7 +44,7 @@ class GBRL {
         int loadFromFile(const std::string& filename);
         void ensemble_check();
 
-        void step(const float *obs, const char *categorical_obs, float *grads, const float *feature_weights, const int n_samples, const int n_num_features, const int n_cat_features);
+        void step(const float *obs, const char *categorical_obs, float *grads, const float *feature_weights, const int n_samples, const int n_num_features, const int n_cat_features, deviceType device);
 #ifdef USE_CUDA
         void _step_gpu(dataSet *dataset);
         float _fit_gpu(dataSet *dataset, float *targets, const int n_iterations);
@@ -52,8 +52,7 @@ class GBRL {
         float fit(float *obs, char *categorical_obs, float *targets, const float *feature_weights, int iterations, const int n_samples, const int n_num_features, const int n_cat_features, bool shuffle = true, std::string _loss_type = "MultiRMSE");
         void set_bias(float *bias, const int output_dim);
         float* get_bias();
-        float* predict(const float *obs, const char *categorical_obs, const int n_samples, const int n_num_features, const int n_cat_features, int start_tree_idx, int stop_tree_idx);
-        void predict(const float *obs, const char *categorical_obs, float *start_preds, const int n_samples, const int n_num_features, const int n_cat_features, int start_tree_idx = 0, int stop_tree_idx = 0);
+        float* predict(const float *obs, const char *categorical_obs, const int n_samples, const int n_num_features, const int n_cat_features, int start_tree_idx, int stop_tree_idx, deviceType device);
         
         matrixRepresentation* get_matrix_representation(const float *obs, const char *categorical_obs, const int n_samples, const int n_num_features, const int n_cat_features);
         void compress_ensemble(const int n_compressed_leaves, const int n_compressed_trees, const int *leaf_indices, const int *tree_indices, const int *new_tree_indices, const float *W);

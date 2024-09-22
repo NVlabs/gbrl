@@ -88,61 +88,89 @@ __global__ void add_vec_to_mat_kernel(const float *vec, float *mat, const int n_
     }
 }
 
-void predict_cuda(dataSet *dataset, float *host_preds, ensembleMetaData *metadata, ensembleData *edata, SGDOptimizerGPU** opts, const int n_opts, int start_tree_idx, int stop_tree_idx){
-
-    float *device_batch_obs, *device_preds;
-    char *device_batch_cat_obs;
+void predict_cuda(dataSet *dataset, float *&preds, ensembleMetaData *metadata, ensembleData *edata, SGDOptimizerGPU** opts, const int n_opts, int start_tree_idx, int stop_tree_idx){
+    const float *device_batch_obs;
+    float *device_preds;
+    char *device_batch_cat_obs = nullptr;
     char *device_data;
     // assuming row-major order
     size_t preds_matrix_size = dataset->n_samples * metadata->output_dim * sizeof(float);
     size_t obs_matrix_size = dataset->n_samples * metadata->n_num_features * sizeof(float);
     size_t cat_obs_matrix_size = dataset->n_samples * metadata->n_cat_features * sizeof(char) * MAX_CHAR_SIZE;
-    cudaError_t alloc_error = cudaMalloc((void**)&device_data, obs_matrix_size + preds_matrix_size + cat_obs_matrix_size);
-    if (alloc_error != cudaSuccess) {
-        size_t free_mem, total_mem;
-        cudaMemGetInfo(&free_mem, &total_mem);
-        std::cerr << "CUDA predict_cuda error: " << cudaGetErrorString(alloc_error)
-                << " when trying to allocate " << ((obs_matrix_size + preds_matrix_size + cat_obs_matrix_size) / (1024.0 * 1024.0)) << " MB."
-                << std::endl;
-        std::cerr << "Free memory: " << (free_mem / (1024.0 * 1024.0)) << " MB."
-                << std::endl;
-        std::cerr << "Total memory: " << (total_mem / (1024.0 * 1024.0)) << " MB."
-                << std::endl;
-        return;
+    size_t alloc_size = obs_matrix_size + cat_obs_matrix_size + preds_matrix_size;
+    if (dataset->device == deviceType::cpu){
+        cudaError_t alloc_error = cudaMalloc((void**)&device_data, alloc_size);
+        if (alloc_error != cudaSuccess) {
+            size_t free_mem, total_mem;
+            cudaMemGetInfo(&free_mem, &total_mem);
+            std::cerr << "CUDA predict_cuda error: " << cudaGetErrorString(alloc_error)
+                    << " when trying to allocate " << ((alloc_size) / (1024.0 * 1024.0)) << " MB."
+                    << std::endl;
+            std::cerr << "Free memory: " << (free_mem / (1024.0 * 1024.0)) << " MB."
+                    << std::endl;
+            std::cerr << "Total memory: " << (total_mem / (1024.0 * 1024.0)) << " MB."
+                    << std::endl;
+            return;
+        }
+        preds = new float[dataset->n_samples * metadata->output_dim];
+        memset(preds, 0, preds_matrix_size);
+        // Allocate host buffer
+        char* host_data = new char[preds_matrix_size + obs_matrix_size + cat_obs_matrix_size];
+        // Copy data into host buffer
+        std::memcpy(host_data, dataset->obs, obs_matrix_size);
+        std::memcpy(host_data + obs_matrix_size, preds, preds_matrix_size);
+        std::memcpy(host_data + obs_matrix_size + preds_matrix_size,  dataset->categorical_obs, cat_obs_matrix_size);
+        
+        cudaMemcpy(device_data, host_data, obs_matrix_size + cat_obs_matrix_size  + preds_matrix_size, cudaMemcpyHostToDevice);
+        delete[] host_data;
+        
+        size_t trace = 0;
+        device_batch_obs = (float*)device_data;
+        trace += obs_matrix_size;
+        device_preds = (float *)(device_data + trace);
+        trace += preds_matrix_size;
+        device_batch_cat_obs = (char *)(device_data + trace);
+    } else {
+        cudaError_t alloc_error_preds = cudaMalloc((void**)&device_preds, preds_matrix_size);
+            if (alloc_error_preds != cudaSuccess) {
+            size_t free_mem, total_mem;
+            cudaMemGetInfo(&free_mem, &total_mem);
+            std::cerr << "CUDA predict_cuda error: " << cudaGetErrorString(alloc_error_preds)
+                    << " when trying to allocate " << ((preds_matrix_size) / (1024.0 * 1024.0)) << " MB."
+                    << std::endl;
+            std::cerr << "Free memory: " << (free_mem / (1024.0 * 1024.0)) << " MB."
+                    << std::endl;
+            std::cerr << "Total memory: " << (total_mem / (1024.0 * 1024.0)) << " MB."
+                    << std::endl;
+            return;
+        }
+        cudaMemset(device_preds, 0, preds_matrix_size);
+        device_batch_obs = dataset->obs;
     }
-
-    // Allocate host buffer
-    char* host_data = new char[preds_matrix_size + obs_matrix_size + cat_obs_matrix_size];
-    // Copy data into host buffer
-    std::memcpy(host_data, dataset->obs, obs_matrix_size);
-    std::memcpy(host_data + obs_matrix_size, host_preds, preds_matrix_size);
-    std::memcpy(host_data + obs_matrix_size + preds_matrix_size,  dataset->categorical_obs, cat_obs_matrix_size);
-    
-    cudaMemcpy(device_data, host_data, obs_matrix_size + cat_obs_matrix_size  + preds_matrix_size, cudaMemcpyHostToDevice);
-    delete[] host_data;
-
-    size_t trace = 0;
-    device_batch_obs = (float*)device_data;
-    trace += obs_matrix_size;
-    device_preds = (float *)(device_data + trace);
-    trace += preds_matrix_size;
-    device_batch_cat_obs = (char *)(device_data + trace);
     
     int n_blocks, threads_per_block;
     get_grid_dimensions(dataset->n_samples, n_blocks, threads_per_block);
     size_t shared_n_cols_size = metadata->output_dim * sizeof(float);
     add_vec_to_mat_kernel<<<n_blocks, threads_per_block, shared_n_cols_size>>>(edata->bias, device_preds, dataset->n_samples, metadata->output_dim);
     cudaDeviceSynchronize();
-    
+
     if (stop_tree_idx > metadata->n_trees){
         std::cerr << "Given stop_tree_idx idx: " << stop_tree_idx << " greater than number of trees in model: " << metadata->n_trees << std::endl;
-        cudaMemcpy(host_preds, device_preds, preds_matrix_size, cudaMemcpyDeviceToHost);
-        cudaFree(device_data);
+        if (dataset->device == deviceType::cpu){
+            cudaMemcpy(preds, device_preds, preds_matrix_size, cudaMemcpyDeviceToHost);
+            cudaFree(device_data);
+        } else {
+            preds = device_preds;
+        }
         return;
     } 
     if (metadata->n_trees == 0){
-        cudaMemcpy(host_preds, device_preds, preds_matrix_size, cudaMemcpyDeviceToHost);
-        cudaFree(device_data);
+        if (dataset->device == deviceType::cpu){
+            cudaMemcpy(preds, device_preds, preds_matrix_size, cudaMemcpyDeviceToHost);
+            cudaFree(device_data);
+        } else {
+            preds = device_preds;
+        }
         return; 
     }
     
@@ -151,11 +179,14 @@ void predict_cuda(dataSet *dataset, float *host_preds, ensembleMetaData *metadat
 
     if (n_opts == 0){
         std::cerr << "No optimizers." << std::endl;
-        cudaMemcpy(host_preds, device_preds, preds_matrix_size, cudaMemcpyDeviceToHost);
-        cudaFree(device_data);
+        if (dataset->device == deviceType::cpu){
+            cudaMemcpy(preds, device_preds, preds_matrix_size, cudaMemcpyDeviceToHost);
+            cudaFree(device_data);
+        } else {
+            preds = device_preds;
+        }
         return;
     }
-
     cudaDeviceProp deviceProp;
     cudaGetDeviceProperties(&deviceProp, 0); // Replace 0 with your device ID if you have multiple devices
 
@@ -183,8 +214,12 @@ void predict_cuda(dataSet *dataset, float *host_preds, ensembleMetaData *metadat
     }
     cudaDeviceSynchronize();
     // Copy results back to CPU
-    cudaMemcpy(host_preds, device_preds, preds_matrix_size, cudaMemcpyDeviceToHost);
-    cudaFree(device_data);
+    if (dataset->device == deviceType::cpu){
+        cudaMemcpy(preds, device_preds, preds_matrix_size, cudaMemcpyDeviceToHost);
+        cudaFree(device_data);
+    } else {
+        preds = device_preds;
+    }
 }
 
 

@@ -13,7 +13,7 @@ import torch as th
 
 
 from .gbrl_wrapper import GBTWrapper
-from .utils import setup_optimizer, clip_grad_norm
+from .utils import setup_optimizer, clip_grad_norm, validate_array
 
 
 class GBRL:
@@ -152,12 +152,11 @@ class GBRL:
             max_grad_norm (float, optional): perform gradient clipping by norm. Defaults to None.
             grad (Optional[Union[np.ndarray, th.Tensor]], optional): manually calculated gradients. Defaults to None.
         """
-        if grad is None:
-            assert self.params is not None, "must run a forward pass first"
-            n_samples = len(X)
-            grad = self.params.grad.detach().cpu().numpy() * n_samples
+        n_samples = len(X)
+        grad = grad if grad is not None else self.params.grad.detach() * n_samples
 
         grad = clip_grad_norm(grad, max_grad_norm)
+        validate_array(grad)
         self._model.step(X, grad)
         self.grad = grad
         
@@ -172,21 +171,8 @@ class GBRL:
         if isinstance(self.params, tuple):
             params = (params[0].detach().cpu().numpy(), params[1].detach().cpu().numpy()) 
         return params, self.grad
-
-    def predict(self, X: np.ndarray, start_idx:int =0, stop_idx: int=None) -> np.ndarray:
-        """Predict 
-
-        Args:
-            x (np.ndarray): inputs
-            start_idx (int, optional): start tree index for prediction. Defaults to 0.
-            stop_idx (_type_, optional): stop tree index for prediction (uses all trees in the ensemble if set to 0). Defaults to None.
-
-        Returns:
-            np.narray: prediction
-        """
-        return self._model.predict(X, start_idx, stop_idx)
     
-    def fit(self, X: Union[np.ndarray, th.Tensor], targets: Union[np.ndarray, th.Tensor], iterations: int, shuffle: bool=True, loss_type: str='MultiRMSE') -> float:
+    def fit(self, X: Union[np.ndarray, th.Tensor], targets: Union[np.ndarray, th.Tensor], iterations: int, shuffle: bool = True, loss_type: str = 'MultiRMSE') -> float:
         """Fit multiple iterations (as in supervised learning)
 
         Args:
@@ -279,6 +265,7 @@ class GBRL:
         instance.tree_struct = instance._model.tree_struct
         instance.gbrl_params = instance._model.gbrl_params
         instance.device = instance._model.get_device()
+        instance._model.device = instance.device
         return instance
 
     def set_device(self, device: str):
@@ -299,23 +286,26 @@ class GBRL:
         """
         return self._model.get_device()
 
-    def __call__(self, X: np.ndarray, requires_grad: bool = True) -> th.Tensor:
-        """Returns GBRL's output as Tensor. if `requires_grad=True` then stores 
+    def __call__(self, X: Union[th.Tensor, np.ndarray], requires_grad: bool = True, start_idx: int = 0, stop_idx: int = None, tensor: bool = True) -> Union[th.Tensor, np.ndarray]:
+        """Returns GBRL's output as either a Tensor or a numpy array. if `requires_grad=True` then stores 
            differentiable parameters in self.params. 
+           Return type/device is identical to the input type/device.
 
         Args:
-            X (np.ndarray): Input
+            X (Union[th.Tensor, np.ndarray]): Input
             requires_grad (bool, optional). Defaults to True.
+            start_idx (int, optional): start tree index for prediction. Defaults to 0.
+            stop_idx (_type_, optional): stop tree index for prediction (uses all trees in the ensemble if set to 0). Defaults to None.
+            tensor (bool, optional): Return PyTorch Tensor, False returns a numpy array. Defaults to True.
 
         Returns:
-            th.Tensor: _description_
+            Union[th.Tensor, np.ndarray]: Returns model predictions
         """
-        y_pred = self.predict(X)
-        params = th.tensor(y_pred, requires_grad=requires_grad, device=self.device)
+        y_pred = self._model.predict(X, requires_grad, start_idx, stop_idx, tensor)
         if requires_grad:
             self.grad = None
-            self.params = params
-        return params
+            self.params = y_pred
+        return y_pred
 
     def print_tree(self, tree_idx: int) -> None:
         """Prints tree information
