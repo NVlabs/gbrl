@@ -124,7 +124,8 @@ class TestGBTMulti(unittest.TestCase):
         value = 2.0
         self.assertTrue(loss < value, f'Expected loss = {loss} < {value}')
         A, V, _, _, _ = model._model.get_matrix_representation(X)
-        self.assertTrue(np.allclose(A@V, model.predict(X)))
+        preds_representation = (A@V).squeeze()
+        self.assertTrue(np.allclose(preds_representation, model(X, tensor=False)))
         model.save_model(os.path.join(self.test_dir, 'test_cosine_cpu'))
 
     def test_shap_cpu(self):
@@ -189,7 +190,8 @@ class TestGBTMulti(unittest.TestCase):
         value = 2.0
         self.assertTrue(loss < value, f'Expected loss = {loss} < {value}')
         A, V, _, _, _ = model._model.get_matrix_representation(X)
-        self.assertTrue(np.allclose(A@V, model.predict(X)))
+        preds_representation = (A@V).squeeze()
+        self.assertTrue(np.allclose(preds_representation, model(X, tensor=False)))
         model.save_model(os.path.join(self.test_dir, 'test_cosine_gpu'))
 
     def test_cosine_oblivious_cpu(self):
@@ -211,7 +213,8 @@ class TestGBTMulti(unittest.TestCase):
         loss = rmse_model(model, X, y, self.n_epochs)
         self.assertTrue(loss < 12, f'Expected loss = {loss} < 12')
         A, V, _, _, _ = model._model.get_matrix_representation(X)
-        self.assertTrue(np.allclose(A@V, model.predict(X)))
+        preds_representation = (A@V).squeeze()
+        self.assertTrue(np.allclose(preds_representation, model(X, tensor=False)))
         model.save_model(os.path.join(self.test_dir, 'test_cosine_oblivious_cpu'))
     
     @unittest.skipIf(not cuda_available(), "cuda not available skipping over gpu tests")
@@ -235,7 +238,8 @@ class TestGBTMulti(unittest.TestCase):
         value = 12
         self.assertTrue(loss < value, f'Expected loss = {loss} < {value}')
         A, V, _, _, _ = model._model.get_matrix_representation(X)
-        self.assertTrue(np.allclose(A@V, model.predict(X)))
+        preds_representation = (A@V).squeeze()
+        self.assertTrue(np.allclose(preds_representation, model(X, tensor=False)))
         model.save_model(os.path.join(self.test_dir, 'test_cosine_oblivious_gpu'))
 
     def test_l2_cpu(self):

@@ -100,7 +100,8 @@ class TestGBTSingle(unittest.TestCase):
         self.assertTrue(loss < value, f'Expected loss = {loss} < {value}')
 
         A, V, _, _, _ = model._model.get_matrix_representation(X)
-        self.assertTrue(np.allclose(A@V, model.predict(X)))
+        preds_representation = (A@V).squeeze()
+        self.assertTrue(np.allclose(preds_representation, model(X, tensor=False)))
         model.save_model(os.path.join(self.test_dir, 'test_cosine_cpu'))
 
         model._model.reset()
@@ -176,7 +177,8 @@ class TestGBTSingle(unittest.TestCase):
         value = 2
         self.assertTrue(loss < value, f'Expected loss = {loss} < {value}')
         A, V, _, _, _ = model._model.get_matrix_representation(X)
-        self.assertTrue(np.allclose(A@V, model.predict(X)))
+        preds_representation = (A@V).squeeze()
+        self.assertTrue(np.allclose(preds_representation, model(X, tensor=False)))
         model.save_model(os.path.join(self.test_dir, 'test_cosine_gpu'))
 
         model._model.reset()
@@ -212,7 +214,8 @@ class TestGBTSingle(unittest.TestCase):
         value = 10
         self.assertTrue(loss < value, f'Expected loss = {loss} < {value}')
         A, V, _, _, _ = model._model.get_matrix_representation(X)
-        self.assertTrue(np.allclose(A@V, model.predict(X)))
+        preds_representation = (A@V).squeeze()
+        self.assertTrue(np.allclose(preds_representation, model(X, tensor=False)))
         model.save_model(os.path.join(self.test_dir, 'test_cosine_oblivious_gpu'))
         model._model.reset()
         model.set_bias_from_targets(y)
@@ -246,7 +249,8 @@ class TestGBTSingle(unittest.TestCase):
         value = 12
         self.assertTrue(loss < value, f'Expected loss = {loss} < {value}')
         A, V, _, _, _ = model._model.get_matrix_representation(X)
-        self.assertTrue(np.allclose(A@V, model.predict(X)))
+        preds_representation = (A@V).squeeze()
+        self.assertTrue(np.allclose(preds_representation, model(X, tensor=False)))
         model.save_model(os.path.join(self.test_dir, 'test_cosine_oblivious_gpu'))
         model._model.reset()
         model.set_bias_from_targets(y)
@@ -260,7 +264,8 @@ class TestGBTSingle(unittest.TestCase):
         value = 5000
         self.assertTrue(loss < value, f'Expected Categorical loss = {loss} < {value}')
         A, V, _, _, _ = model._model.get_matrix_representation(X_categorical)
-        self.assertTrue(np.allclose(A@V, model.predict(X_categorical)))
+        preds_representation = (A@V).squeeze()
+        self.assertTrue(np.allclose(preds_representation, model(X_categorical, tensor=False)))
 
     def test_l2_cpu(self):
         print("Running test_l2_cpu")
@@ -429,5 +434,5 @@ class TestGBTSingle(unittest.TestCase):
         self.assertTrue(loss < value, f'Expected loss = {loss} < {value}')
 
 if __name__ == '__main__':
-    unittest.main()
-    # unittest.main(argv=['first-arg-is-ignored', 'TestGBTSingle.test_cosine_gpu'])
+    # unittest.main()
+    unittest.main(argv=['first-arg-is-ignored', 'TestGBTSingle.test_cosine_gpu'])
