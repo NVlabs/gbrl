@@ -230,7 +230,7 @@ float* GBRL::predict(const float *obs, const char *categorical_obs, const int n_
 #ifndef USE_CUDA
     if (device == deviceType::gpu){
         throw std::runtime_error("GPU data detected! GBRL was compiled for CPU only!");
-        return;
+        return nullptr;
     }
 #endif
 
