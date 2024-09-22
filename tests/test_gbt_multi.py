@@ -36,38 +36,38 @@ def rmse(preds: Union[np.array, th.Tensor], targets: Union[np.array, th.Tensor])
 
 N_EPOCHS = 100
 
-def rmse_model(model, X, y, n_epochs):
-    y_ = th.tensor(y, dtype=th.float32)
+def rmse_model(model, X, y, n_epochs, device='cpu'):
+    y_ = th.tensor(y, dtype=th.float32, device=device)
     X_ = X.copy()
     epoch = 0
     while epoch < n_epochs:
         y_pred = model(X_, requires_grad=True)
-        loss = 0.5*mse_loss(y_pred.cpu(), y_) * y_.shape[1]
+        loss = 0.5*mse_loss(y_pred, y_) * y_.shape[1]
         loss.backward() 
         model.step(X_)
         print(f"epoch: {epoch} loss: {(loss / y_.shape[1]).sqrt()}")
         epoch += 1
     y_pred = model(X_)
-    loss = (0.5*mse_loss(y_pred.cpu(), y_)).sqrt().item()
+    loss = (0.5*mse_loss(y_pred, y_)).sqrt().item()
     return loss
 
-def ac_rmse_model(model, X, y, n_epochs):
-    y_ac = th.tensor(y[:, :-1], dtype=th.float32)
-    y_value = th.tensor(y[:, -1], dtype=th.float32)
+def ac_rmse_model(model, X, y, n_epochs, device='cpu'):
+    y_ac = th.tensor(y[:, :-1], dtype=th.float32, device=device)
+    y_value = th.tensor(y[:, -1], dtype=th.float32, device=device)
     X_ = X.copy()
     epoch = 0
     while epoch < n_epochs:
-        theta, value = model(X_)
-        loss_theta = 0.5*mse_loss(theta.cpu(), y_ac) * y_ac.shape[1]
+        theta, value = model(X_, requires_grad=True)
+        loss_theta = 0.5*mse_loss(theta, y_ac) * y_ac.shape[1]
         loss_theta.backward()
-        loss_value = 0.5*mse_loss(value.cpu(), y_value)
+        loss_value = 0.5*mse_loss(value, y_value)
         loss_value.backward()
         model.step(X_)
         print(f"epoch: {epoch} loss_theta: {loss_theta.sqrt():.5f} loss_value: {(loss_value).sqrt():.5f}")
         epoch += 1
     theta, value = model(X_)
-    loss_theta = (0.5*mse_loss(theta.cpu(), y_ac)).sqrt().item()
-    loss_value = (0.5*mse_loss(value.cpu(), y_value)).sqrt().item()
+    loss_theta = (0.5*mse_loss(theta, y_ac)).sqrt().item()
+    loss_value = (0.5*mse_loss(value, y_value)).sqrt().item()
     return loss_theta, loss_value
 
 class TestGBTMulti(unittest.TestCase):
@@ -121,8 +121,8 @@ class TestGBTMulti(unittest.TestCase):
                             device='cpu')
         model.set_bias_from_targets(y)
         loss = rmse_model(model, X, y, self.n_epochs)
-        value = 20.0
-        self.assertTrue(loss < 2.0, f'Expected loss = {loss} < 2.0')
+        value = 2.0
+        self.assertTrue(loss < value, f'Expected loss = {loss} < {value}')
         model.save_model(os.path.join(self.test_dir, 'test_cosine_cpu'))
 
     def test_shap_cpu(self):
@@ -136,12 +136,12 @@ class TestGBTMulti(unittest.TestCase):
         gbrl_params = dict({"control_variates": False, "split_score_func": "L2",
                             "generator_type": "Uniform"})
         model = GBRL(
-                            output_dim=self.out_dim,
-                            tree_struct=tree_struct,
-                            optimizer=self.sgd_optimizer,
-                            gbrl_params=gbrl_params,
-                            verbose=0,
-                            device='cpu')
+                    output_dim=self.out_dim,
+                    tree_struct=tree_struct,
+                    optimizer=self.sgd_optimizer,
+                    gbrl_params=gbrl_params,
+                    verbose=0,
+                    device='cpu')
         model._model.step(X, y)
         gbrl_shap = model.tree_shap(0, X[0, :])
         clf = DecisionTreeRegressor(max_depth=3).fit(X, y)
@@ -183,8 +183,9 @@ class TestGBTMulti(unittest.TestCase):
                             verbose=0,
                             device='cuda')
         model.set_bias_from_targets(y)
-        loss = rmse_model(model, X, y, self.n_epochs)
-        self.assertTrue(loss < 2.0, f'Expected loss = {loss} < 2.0')
+        loss = rmse_model(model, X, y, self.n_epochs, device='cuda')
+        value = 2.0
+        self.assertTrue(loss < value, f'Expected loss = {loss} < {value}')
         model.save_model(os.path.join(self.test_dir, 'test_cosine_gpu'))
 
     def test_cosine_oblivious_cpu(self):
@@ -224,8 +225,9 @@ class TestGBTMulti(unittest.TestCase):
                             verbose=0,
                             device='cuda')
         model.set_bias_from_targets(y)
-        loss = rmse_model(model, X, y, self.n_epochs)
-        self.assertTrue(loss < 12, f'Expected loss = {loss} < 12')
+        loss = rmse_model(model, X, y, self.n_epochs, device='cuda')
+        value = 12
+        self.assertTrue(loss < value, f'Expected loss = {loss} < {value}')
         model.save_model(os.path.join(self.test_dir, 'test_cosine_oblivious_gpu'))
 
     def test_l2_cpu(self):
@@ -241,7 +243,8 @@ class TestGBTMulti(unittest.TestCase):
                             device='cpu')
         model.set_bias_from_targets(y)
         loss = rmse_model(model, X, y, self.n_epochs)
-        self.assertTrue(loss < 0.5, f'Expected loss = {loss} < 0.5')
+        value = 0.5
+        self.assertTrue(loss < value, f'Expected loss = {loss} < {value}')
         model.save_model(os.path.join(self.test_dir, 'test_l2_cpu'))
 
     @unittest.skipIf(not cuda_available(), "cuda not available skipping over gpu tests")
@@ -257,8 +260,9 @@ class TestGBTMulti(unittest.TestCase):
                             verbose=0,
                             device='cuda')
         model.set_bias_from_targets(y)
-        loss = rmse_model(model, X, y, self.n_epochs)
-        self.assertTrue(loss < 0.5, f'Expected loss = {loss} < 0.5')
+        loss = rmse_model(model, X, y, self.n_epochs, device='cuda')
+        value = 0.5
+        self.assertTrue(loss < value, f'Expected loss = {loss} < {value}')
         model.save_model(os.path.join(self.test_dir, 'test_l2_gpu'))
 
     def test_l2_oblivious_cpu(self):
@@ -278,7 +282,8 @@ class TestGBTMulti(unittest.TestCase):
                             device='cpu')
         model.set_bias_from_targets(y)
         loss = rmse_model(model, X, y, self.n_epochs)
-        self.assertTrue(loss < 10.0, f'Expected loss = {loss} < 10.0')
+        value = 10.0
+        self.assertTrue(loss < value, f'Expected loss = {loss} < {value}')
         model.save_model(os.path.join(self.test_dir, 'test_l2_oblivious_cpu'))
 
     def test_1shared_cpu(self):
@@ -371,7 +376,7 @@ class TestGBTMulti(unittest.TestCase):
                             gbrl_params=gbrl_params,
                             verbose=0,
                             device='cuda')
-        policy_loss, value_loss = ac_rmse_model(model, X, y, self.n_epochs)
+        policy_loss, value_loss = ac_rmse_model(model, X, y, self.n_epochs, device='cuda')
         policy_value = 2.0
         value_value = 30
         self.assertTrue(policy_loss < policy_value, f'Expected loss = {policy_loss} < {policy_value}')
@@ -404,7 +409,7 @@ class TestGBTMulti(unittest.TestCase):
                             gbrl_params=gbrl_params,
                             verbose=0,
                             device='cuda')
-        policy_loss, value_loss = ac_rmse_model(model, X, y, self.n_epochs)
+        policy_loss, value_loss = ac_rmse_model(model, X, y, self.n_epochs, device='cuda')
         policy_value = 10.0
         value_value = 30
         self.assertTrue(policy_loss < policy_value, f'Expected loss = {policy_loss} < {policy_value}')
@@ -428,26 +433,27 @@ class TestGBTMulti(unittest.TestCase):
                             verbose=0,
                             device='cuda')
         model.set_bias_from_targets(y)
-        loss = rmse_model(model, X, y, self.n_epochs)
-        self.assertTrue(loss < 10.0, f'Expected loss = {loss} < 10.0')
+        loss = rmse_model(model, X, y, self.n_epochs, device='cuda')
+        value = 10.0
+        self.assertTrue(loss < value, f'Expected loss = {loss} < {value}')
         model.save_model(os.path.join(self.test_dir, 'test_l2_oblivious_gpu'))
 
     def test_loading(self):
         X, y = self.data
 
         model = GBRL.load_model(os.path.join(self.test_dir, 'test_cosine_cpu'))
-        y_pred = model.predict(X)
+        y_pred = model(X, requires_grad=False, tensor=False)
         loss = np.sqrt(np.mean((y_pred.squeeze() - y.squeeze())**2))
         self.assertTrue(loss < 2.0, f'Expected loss = {loss} < 2.0')
         
         
         model = GBRL.load_model(os.path.join(self.test_dir, 'test_l2_cpu'))
-        y_pred = model.predict(X)
+        y_pred = model(X, requires_grad=False, tensor=False)
         loss = np.sqrt(np.mean((y_pred.squeeze() - y.squeeze())**2))
         self.assertTrue(loss < 0.5, f'Expected loss = {loss} < 0.5')
 
         model = ActorCritic.load_model(os.path.join(self.test_dir, 'test_shared_cpu'))
-        policy_y, value_y = model.predict(X)
+        policy_y, value_y = model(X, requires_grad=False, tensor=False)
         policy_loss, _ = rmse(policy_y, y[:, :-1])
         value_loss, _ = rmse(value_y, y[:, -1])
         policy_value = 10.0
@@ -456,7 +462,7 @@ class TestGBTMulti(unittest.TestCase):
         self.assertTrue(value_loss < value_value, f'Expected loss = {value_loss} < {value_value}')
 
         model = ActorCritic.load_model(os.path.join(self.test_dir, 'test_separate_cpu'))
-        policy_y, value_y = model.predict(X)
+        policy_y, value_y = model(X, requires_grad=False, tensor=False)
         policy_loss, _ = rmse(policy_y, y[:, :-1])
         value_loss, _ = rmse(value_y, y[:, -1])
         policy_value = 2.0
@@ -466,27 +472,27 @@ class TestGBTMulti(unittest.TestCase):
         
         if (cuda_available()):
             model = GBRL.load_model(os.path.join(self.test_dir, 'test_cosine_gpu'))
-            y_pred = model.predict(X)
+            y_pred = model(X, requires_grad=False, tensor=False)
             loss = np.sqrt(np.mean((y_pred.squeeze() - y.squeeze())**2))
             self.assertTrue(loss < 2.0, f'Expected loss = {loss} < 2.0')
             
             model = GBRL.load_model(os.path.join(self.test_dir, 'test_cosine_oblivious_gpu'))
-            y_pred = model.predict(X)
+            y_pred = model(X, requires_grad=False, tensor=False)
             loss = np.sqrt(np.mean((y_pred.squeeze() - y.squeeze())**2))
             self.assertTrue(loss < 12.0, f'Expected loss = {loss} < 12.0')
             
             model = GBRL.load_model(os.path.join(self.test_dir, 'test_l2_gpu'))
-            y_pred = model.predict(X)
+            y_pred = model(X, requires_grad=False, tensor=False)
             loss = np.sqrt(np.mean((y_pred.squeeze() - y.squeeze())**2))
             self.assertTrue(loss < 0.5, f'Expected loss = {loss} < 0.5')
 
             model = GBRL.load_model(os.path.join(self.test_dir, 'test_l2_oblivious_gpu'))
-            y_pred = model.predict(X)
+            y_pred = model(X, requires_grad=False, tensor=False)
             loss = np.sqrt(np.mean((y_pred.squeeze() - y.squeeze())**2))
             self.assertTrue(loss < 10.0, f'Expected loss = {loss} < 10.0')
 
             model = ActorCritic.load_model(os.path.join(self.test_dir, 'test_shared_gpu'))
-            policy_y, value_y = model.predict(X)
+            policy_y, value_y = model(X, requires_grad=False, tensor=False)
             policy_loss, _ = rmse(policy_y, y[:, :-1])
             value_loss, _ = rmse(value_y, y[:, -1])
             policy_value = 10.0
@@ -495,7 +501,7 @@ class TestGBTMulti(unittest.TestCase):
             self.assertTrue(value_loss < value_value, f'Expected loss = {value_loss} < {value_value}')
 
             model = ActorCritic.load_model(os.path.join(self.test_dir, 'test_separate_gpu'))
-            policy_y, value_y = model.predict(X)
+            policy_y, value_y = model(X, requires_grad=False, tensor=False)
             policy_loss, _ = rmse(policy_y, y[:, :-1])
             value_loss, _ = rmse(value_y, y[:, -1])
             policy_value = 2.0
@@ -504,7 +510,7 @@ class TestGBTMulti(unittest.TestCase):
             self.assertTrue(value_loss < value_value, f'Expected loss = {value_loss} < {value_value}')
 
         model = GBRL.load_model(os.path.join(self.test_dir, 'test_cosine_adam_cpu'))
-        y_pred = model.predict(X)
+        y_pred = model(X, requires_grad=False, tensor=False)
         loss = np.sqrt(np.mean((y_pred.squeeze() - y.squeeze())**2))
         value = 50.0
         self.assertTrue(loss < value, f'Expected loss = {loss} < {value}')
@@ -512,3 +518,4 @@ class TestGBTMulti(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+    # unittest.main(argv=['first-arg-is-ignored', 'TestGBTMulti.test_1shared_cpu'])

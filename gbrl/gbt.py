@@ -13,7 +13,7 @@ import torch as th
 
 
 from .gbrl_wrapper import GBTWrapper
-from .utils import setup_optimizer, clip_grad_norm
+from .utils import setup_optimizer, clip_grad_norm, validate_array
 
 
 class GBRL:
@@ -87,11 +87,11 @@ class GBRL:
         """
         self.params = None
 
-    def set_bias(self, bias: Union[np.array, th.Tensor]):
+    def set_bias(self, bias: Union[np.ndarray, th.Tensor]):
         """Sets GBRL bias
 
         Args:
-            y (Union[np.array, th.Tensor]): _description_
+            y (Union[np.ndarray, th.Tensor]): _description_
         """
         if isinstance(bias, th.Tensor):
             bias = bias.clone().detach().cpu().numpy()
@@ -100,11 +100,11 @@ class GBRL:
             bias = bias[:, np.newaxis]
         self._model.set_bias(bias.astype(np.single))
     
-    def set_bias_from_targets(self, targets: Union[np.array, th.Tensor]):
+    def set_bias_from_targets(self, targets: Union[np.ndarray, th.Tensor]):
         """Sets bias as mean of targets
 
         Args:
-            targets (Union[np.array, th.Tensor]): Targets
+            targets (Union[np.ndarray, th.Tensor]): Targets
         """
         if isinstance(targets, th.Tensor):
             arr = targets.clone().detach().cpu().numpy()
@@ -144,54 +144,40 @@ class GBRL:
         """
         return self._model.get_schedule_learning_rates()
 
-    def step(self,  X: Union[np.array, th.Tensor], max_grad_norm: float = None, grad: Optional[Union[np.array, th.Tensor]] = None) -> None:
+    def step(self,  X: Union[np.ndarray, th.Tensor], max_grad_norm: float = None, grad: Optional[Union[np.ndarray, th.Tensor]] = None) -> None:
         """Perform a boosting step (fits a single tree on the gradients)
 
         Args:
-            X (Union[np.array, th.Tensor]): inputs
+            X (Union[np.ndarray, th.Tensor]): inputs
             max_grad_norm (float, optional): perform gradient clipping by norm. Defaults to None.
-            grad (Optional[Union[np.array, th.Tensor]], optional): manually calculated gradients. Defaults to None.
+            grad (Optional[Union[np.ndarray, th.Tensor]], optional): manually calculated gradients. Defaults to None.
         """
-        if grad is None:
-            assert self.params is not None, "must run a forward pass first"
-            n_samples = len(X)
-            grad = self.params.grad.detach() * n_samples
+        n_samples = len(X)
+        grad = grad if grad is not None else self.params.grad.detach() * n_samples
 
         grad = clip_grad_norm(grad, max_grad_norm)
+        validate_array(grad)
         self._model.step(X, grad)
         self.grad = grad
         
-    def get_params(self) -> Tuple[np.array, np.array]:
+    def get_params(self) -> Tuple[np.ndarray, np.ndarray]:
         """Returns predicted model parameters and their respective gradients
 
         Returns:
-            Tuple[np.array, np.array]
+            Tuple[np.ndarray, np.ndarray]
         """
         assert self.params is not None, "must run a forward pass first"
         params = self.params
         if isinstance(self.params, tuple):
             params = (params[0].detach().cpu().numpy(), params[1].detach().cpu().numpy()) 
         return params, self.grad
-
-    def predict(self, X: np.array, start_idx:int =0, stop_idx: int=None) -> np.array:
-        """Predict 
-
-        Args:
-            x (np.array): inputs
-            start_idx (int, optional): start tree index for prediction. Defaults to 0.
-            stop_idx (_type_, optional): stop tree index for prediction (uses all trees in the ensemble if set to 0). Defaults to None.
-
-        Returns:
-            np.narray: prediction
-        """
-        return self._model.predict(X, start_idx, stop_idx)
     
-    def fit(self, X: Union[np.array, th.Tensor], targets: Union[np.array, th.Tensor], iterations: int, shuffle: bool=True, loss_type: str='MultiRMSE') -> float:
+    def fit(self, X: Union[np.ndarray, th.Tensor], targets: Union[np.ndarray, th.Tensor], iterations: int, shuffle: bool=True, loss_type: str='MultiRMSE') -> float:
         """Fit multiple iterations (as in supervised learning)
 
         Args:
-            X (Union[np.array, th.Tensor]): inputs
-            targets (Union[np.array, th.Tensor]): targets
+            X (Union[np.ndarray, th.Tensor]): inputs
+            targets (Union[np.ndarray, th.Tensor]): targets
             iterations (int): number of boosting iterations
             shuffle (bool, optional): Shuffle dataset. Defaults to True.
             loss_type (str, optional): Loss to use (only MultiRMSE is currently implemented ). Defaults to 'MultiRMSE'.
@@ -210,30 +196,30 @@ class GBRL:
         """
         return self._model.get_num_trees()
     
-    def tree_shap(self, tree_idx: int, features: Union[np.array, th.Tensor]) -> Union[np.array, Tuple[np.array, np.array]]:
+    def tree_shap(self, tree_idx: int, features: Union[np.ndarray, th.Tensor]) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
         """Calculates SHAP values for a single tree
             Implementation based on - https://github.com/yupbank/linear_tree_shap
             See Linear TreeShap, Yu et al, 2023, https://arxiv.org/pdf/2209.08192 
 
         Args:
             tree_idx (int): tree index
-            features (Union[np.array, th.Tensor])
+            features (Union[np.ndarray, th.Tensor])
 
         Returns:
-            Union[np.array, Tuple[np.array, np.array]]: SHAP values of shap [n_samples, number of input features, number of outputs]. The output is a tuple of SHAP values per model only in the case of a separate actor-critic model.
+            Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]: SHAP values of shap [n_samples, number of input features, number of outputs]. The output is a tuple of SHAP values per model only in the case of a separate actor-critic model.
         """
         return self._model.tree_shap(tree_idx, features)
     
-    def shap(self, features: Union[np.array, th.Tensor]) -> Union[np.array, Tuple[np.array, np.array]]:
+    def shap(self, features: Union[np.ndarray, th.Tensor]) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
         """Calculates SHAP values for the entire ensemble
             Implementation based on - https://github.com/yupbank/linear_tree_shap
             See Linear TreeShap, Yu et al, 2023, https://arxiv.org/pdf/2209.08192 
             
         Args:
-            features (Union[np.array, th.Tensor])
+            features (Union[np.ndarray, th.Tensor])
 
         Returns:
-            Union[np.array, Tuple[np.array, np.array]]: SHAP values of shap [n_samples, number of input features, number of outputs]. The output is a tuple of SHAP values per model only in the case of a separate actor-critic model.
+            Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]: SHAP values of shap [n_samples, number of input features, number of outputs]. The output is a tuple of SHAP values per model only in the case of a separate actor-critic model.
         """
 
         return self._model.shap(features)
@@ -274,6 +260,7 @@ class GBRL:
         instance.tree_struct = instance._model.tree_struct
         instance.gbrl_params = instance._model.gbrl_params
         instance.device = instance._model.get_device()
+        instance._model.device = instance.device
         return instance
 
     def set_device(self, device: str):
@@ -294,22 +281,22 @@ class GBRL:
         """
         return self._model.get_device()
 
-    def __call__(self, X: Union[th.tensor, np.ndarray], requires_grad: bool = True) -> Union[th.tensor, np.ndarray]:
-        """Returns GBRL's output as Tensor. if `requires_grad=True` then stores 
+    def __call__(self, X: Union[th.Tensor, np.ndarray], requires_grad: bool = True, start_idx: int = 0, stop_idx: int = None, tensor: bool = True) -> Union[th.Tensor, np.ndarray]:
+        """Returns GBRL's output as either a Tensor or a numpy array. if `requires_grad=True` then stores 
            differentiable parameters in self.params. 
+           Return type/device is identical to the input type/device.
 
         Args:
-            X (np.array): Input
+            X (Union[th.Tensor, np.ndarray]): Input
             requires_grad (bool, optional). Defaults to True.
+            start_idx (int, optional): start tree index for prediction. Defaults to 0.
+            stop_idx (_type_, optional): stop tree index for prediction (uses all trees in the ensemble if set to 0). Defaults to None.
+            tensor (bool, optional): Return PyTorch Tensor, False returns a numpy array. Defaults to True.
 
         Returns:
-            th.Tensor: _description_
+            Union[th.Tensor, np.ndarray]: Returns model predictions
         """
-        y_pred = self._model.predict(X, start_idx, stop_idx)
-        if not isinstance(y_pred, th.Tensor):
-            y_pred = th.tensor(y_pred, requires_grad=requires_grad, device=self.device)
-        else:
-            y_pred.requires_grad_(requires_grad)
+        y_pred = self._model.predict(X, requires_grad, start_idx, stop_idx, tensor)
         if requires_grad:
             self.grad = None
             self.params = y_pred

@@ -14,7 +14,9 @@ import torch as th
 from .gbrl_wrapper import (GBTWrapper, SeparateActorCriticWrapper,
                            SharedActorCriticWrapper, )
 from .gbt import GBRL
-from .utils import setup_optimizer, clip_grad_norm, numerical_dtype
+from .utils import (setup_optimizer, clip_grad_norm, numerical_dtype, 
+                    concatenate_arrays, validate_array, constant_like,
+                    tensor_to_leaf)
 
 
 class ActorCritic(GBRL):
@@ -108,16 +110,6 @@ class ActorCritic(GBRL):
             instance.device = instance.device[0]
         return instance
     
-    def predict(self, observations: Union[np.ndarray, th.Tensor]) -> Tuple[np.ndarray, np.ndarray]:
-        """Predict method
-        Args:
-            observations (Union[np.ndarray, th.Tensor])
-
-        Returns:
-            Tuple[np.ndarray, np.ndarray]: actor and value predictions.
-        """
-        return self._model.predict(observations)
-    
     def get_num_trees(self) -> Union[int, Tuple[int, int]]:
         """ Returns number of trees in the ensemble.
         If separate actor and critic return number of trees per ensemble.
@@ -126,32 +118,42 @@ class ActorCritic(GBRL):
         """
         return self._model.get_num_trees()
      
-    def predict_values(self, observations: Union[np.ndarray, th.Tensor], requires_grad: bool=True) -> th.Tensor:
-        """Predict only values
+    def predict_values(self, observations: Union[np.ndarray, th.Tensor], requires_grad: bool = True, start_idx: int = 0, stop_idx: int = None, tensor: bool = True) -> Union[np.ndarray, th.Tensor]:
+        """Predict only values. If `requires_grad=True` then stores 
+           differentiable parameters in self.params 
+           Return type/device is identical to the input type/device.
 
         Args:
             observations (Union[np.ndarray, th.Tensor])
+            requires_grad (bool, optional). Defaults to True. Ignored if input is a numpy array.
+            start_idx (int, optional): start tree index for prediction. Defaults to 0.
+            stop_idx (_type_, optional): stop tree index for prediction (uses all trees in the ensemble if set to 0). Defaults to None.
+            tensor (bool, optional): Return PyTorch Tensor, False returns a numpy array. Defaults to True.
 
         Returns:
-            th.Tensor: values
+            Union[np.ndarray, th.Tensor]: values
         """
-        _, values = self._model.predict(observations)
-        if len(values.shape) == 0:
-            values = values[np.newaxis]
-        self.params = th.tensor(values, requires_grad=requires_grad, device=self.device)
-        return self.params
+        values = self._model.predict_critic(observations, requires_grad, start_idx, stop_idx, tensor)
+        if requires_grad:
+            self.value_grad = None
+            self.params = values
+        return values
 
-    def __call__(self, observations: Union[np.ndarray, th.Tensor], requires_grad: bool = True) -> Tuple[th.Tensor, th.Tensor]:
+    def __call__(self, observations: Union[np.ndarray, th.Tensor], requires_grad: bool = True, start_idx: int = 0, stop_idx: int = None, tensor: bool = True) -> Tuple[Union[np.ndarray, th.Tensor], Union[np.ndarray, th.Tensor]]:
         """ Predicts  and returns actor and critic outputs as tensors. If `requires_grad=True` then stores 
            differentiable parameters in self.params 
+           Return type/device is identical to the input type/device.
         Args:
             observations (Union[np.ndarray, th.Tensor])
+            requires_grad (bool, optional). Defaults to True. Ignored if input is a numpy array.
+            start_idx (int, optional): start tree index for prediction. Defaults to 0.
+            stop_idx (_type_, optional): stop tree index for prediction (uses all trees in the ensemble if set to 0). Defaults to None.
+            tensor (bool, optional): Return PyTorch Tensor, False returns a numpy array. Defaults to True.
 
         Returns:
-            Tuple[th.Tensor, th.Tensor]: actor and critic output
+            Tuple[Union[np.ndarray, th.Tensor], Union[np.ndarray, th.Tensor]]: actor and critic output
         """
-        theta, values = self.predict(observations)
-        params = (th.tensor(theta.astype(np.single), requires_grad=requires_grad, device=self.device), th.tensor(values.astype(np.single), requires_grad=requires_grad, device=self.device))
+        params = self._model.predict(observations, requires_grad, start_idx, stop_idx, tensor)
         if requires_grad:
             self.policy_grad = None
             self.value_grad = None
@@ -169,19 +171,16 @@ class ActorCritic(GBRL):
             value_grad (Optional[Union[np.ndarray, th.Tensor]], optional): manually calculated gradients. Defaults to None.
         """
         n_samples = len(observations)
-        if policy_grad is None:
-            policy_grad = self.params[0].grad.detach().cpu().numpy() * n_samples
 
-        if value_grad is None:
-            value_grad = self.params[1].grad.detach().cpu().numpy() * n_samples
+        policy_grad = policy_grad if policy_grad is not None else self.params[0].grad.detach() * n_samples
+        value_grad = value_grad if value_grad is not None else self.params[1].grad.detach() * n_samples
 
         policy_grad = clip_grad_norm(policy_grad, policy_grad_clip)
         value_grad = clip_grad_norm(value_grad, value_grad_clip)
 
-        assert ~np.isnan(policy_grad).any(), "nan in assigned grads"
-        assert ~np.isinf(policy_grad).any(), "infinity in assigned grads"
-        assert ~np.isnan(value_grad).any(), "nan in assigned grads"
-        assert ~np.isinf(value_grad).any(), "infinity in assigned grads"
+        validate_array(policy_grad)
+        validate_array(value_grad)
+
         self._model.step(observations, policy_grad, value_grad)
         self.policy_grad = policy_grad
         self.value_grad = value_grad
@@ -199,11 +198,9 @@ class ActorCritic(GBRL):
         """
         assert not self.shared_tree_struct, "Cannot separate boosting steps for actor and critic when using separate tree architectures!"
         n_samples = len(observations)
-        if policy_grad is None:
-            policy_grad = self.params[0].grad.detach().cpu().numpy() * n_samples
+        policy_grad = policy_grad if policy_grad is not None else self.params[0].grad.detach() * n_samples
         policy_grad = clip_grad_norm(policy_grad, policy_grad_clip)
-        assert ~np.isnan(policy_grad).any(), "nan in assigned grads"
-        assert ~np.isinf(policy_grad).any(), "infinity in assigned grads"
+        validate_array(policy_grad)
 
         self._model.step_policy(observations, policy_grad)
         self.policy_grad = policy_grad
@@ -220,13 +217,12 @@ class ActorCritic(GBRL):
             np.ndarray: value gradient
         """
         assert not self.shared_tree_struct, "Cannot separate boosting steps for actor and critic when using separate tree architectures!"
-        if value_grad is None:
-            n_samples = len(observations)
-            value_grad = self.params[1].grad.detach().cpu().numpy() * n_samples
+        n_samples = len(observations)
+        
+        value_grad = value_grad if value_grad is not None else self.params[1].grad.detach() * n_samples
         value_grad = clip_grad_norm(value_grad, value_grad_clip)
 
-        assert ~np.isnan(value_grad).any(), "nan in assigned grads"
-        assert ~np.isinf(value_grad).any(), "infinity in assigned grads"
+        validate_array(value_grad)
         self._model.step_critic(observations, value_grad)
         self.value_grad = value_grad
 
@@ -238,7 +234,7 @@ class ActorCritic(GBRL):
         """
         assert self.params is not None, "must run a forward pass first"
         if isinstance(self.params, tuple):
-            (self.params[0].detach().cpu().numpy(),self.params[1].detach().cpu().numpy()) , (self.policy_grad, self.value_grad)
+            return (self.params[0].detach().cpu().numpy(),self.params[1].detach().cpu().numpy()) , (self.policy_grad, self.value_grad)
         return self.params, (self.policy_grad, self.value_grad)
     
     def copy(self) -> "ActorCritic":
@@ -308,12 +304,11 @@ class ParametricActor(GBRL):
             policy_grad_clip (float, optional): . Defaults to None.
             policy_grad (Optional[Union[np.ndarray, th.Tensor]], optional): manually calculated gradients. Defaults to None.
         """
-        if policy_grad is None:
-            n_samples = len(observations)
-            policy_grad = self.params.grad.detach().cpu().numpy() * n_samples
+        n_samples = len(observations)
+            
+        policy_grad = policy_grad if policy_grad is not None else self.params.grad.detach() * n_samples
         policy_grad = clip_grad_norm(policy_grad, policy_grad_clip)
-        assert ~np.isnan(policy_grad).any(), "nan in assigned grads"
-        assert ~np.isinf(policy_grad).any(), "infinity in assigned grads"
+        validate_array(policy_grad)
 
         self._model.step(observations, policy_grad)
         self.grad = policy_grad
@@ -339,16 +334,6 @@ class ParametricActor(GBRL):
         instance.device = instance._model.get_device()
         return instance
     
-    def predict(self, observations: Union[np.ndarray, th.Tensor]) -> np.ndarray:
-        """Predicts and returns GBRL output as a numpy array.
-        Args:
-            observations (Union[np.ndarray, th.Tensor])
-
-        Returns:
-            np.ndarray: GBRL outputs - a single parameter per action dimension.
-        """
-        return self._model.predict(observations)
-    
     def get_num_trees(self) -> int:
         """ Returns number of trees in the ensemble.
         Returns:
@@ -356,18 +341,22 @@ class ParametricActor(GBRL):
         """
         return self._model.get_num_trees()
      
-    def __call__(self, observations: Union[np.ndarray, th.Tensor], requires_grad : bool = True) -> th.Tensor:
+    def __call__(self, observations: Union[np.ndarray, th.Tensor], requires_grad : bool = True, start_idx: int = 0, stop_idx: int = None, tensor: bool = True) -> Union[np.ndarray, th.Tensor]:
         """ Returns actor output as Tensor. If `requires_grad=True` then stores 
            differentiable parameters in self.params 
+           Return type/device is identical to the input type/device.
+           Requires_grad is ignored if input is a numpy array.
         Args:
             observations (Union[np.ndarray, th.Tensor])
             requires_grad bool: Defaults to None.
+            start_idx (int, optional): start tree index for prediction. Defaults to 0.
+            stop_idx (_type_, optional): stop tree index for prediction (uses all trees in the ensemble if set to 0). Defaults to None.
+            tensor (bool, optional): Return PyTorch Tensor, False returns a numpy array. Defaults to True.
 
         Returns:
-            th.Tensor: GBRL outputs - a single parameter per action dimension.
+            Union[np.ndarray, th.Tensor]: GBRL outputs - a single parameter per action dimension.
         """
-        theta = self._model.predict(observations)
-        params = th.tensor(theta, requires_grad=requires_grad, device=self.device)
+        params = self._model.predict(observations, requires_grad, start_idx, stop_idx, tensor)
         if requires_grad:
             self.grads = None
             self.params = params
@@ -452,41 +441,23 @@ class GaussianActor(GBRL):
             mu_grad (Optional[Union[np.ndarray, th.Tensor]], optional): manually calculated gradients. Defaults to None.
             log_std_grad (Optional[Union[np.ndarray, th.Tensor]], optional): manually calculated gradients. Defaults to None.
         """
-
-
         n_samples = len(observations)
-        if mu_grad is None:
-            mu_grad = self.params[0].grad.detach().cpu().numpy() * n_samples
+        mu_grad = mu_grad if mu_grad is not None else self.params[0].grad.detach() * n_samples
         mu_grad = clip_grad_norm(mu_grad, mu_grad_clip)
   
         if self.std_optimizer is not None:
-            if log_std_grad is None:
-                log_std_grad = self.params[1].grad.detach().cpu().numpy() * n_samples
+            log_std_grad = log_std_grad if log_std_grad is not None else self.params[1].grad.detach() * n_samples
             log_std_grad = clip_grad_norm(log_std_grad, log_std_grad_clip)
-            theta_grad = np.concatenate([mu_grad, log_std_grad], axis=1)
+            theta_grad = concatenate_arrays(mu_grad, log_std_grad)
         else:
             theta_grad = mu_grad
-        assert ~np.isnan(theta_grad).any(), "nan in assigned grads"
-        assert ~np.isinf(theta_grad).any(), "infinity in assigned grads"
+        
+        validate_array(theta_grad)
 
         self._model.step(observations, theta_grad)
         self.grad = mu_grad
         if self.std_optimizer is not None:
             self.grad = (mu_grad, log_std_grad)
-        
-    def predict(self, observations: Union[np.ndarray, th.Tensor]) -> Tuple[np.ndarray, np.ndarray]:
-        """Predict the parameters of a Gaussian Distrbution as numpy arrays.
-
-        Args:
-            observations (Union[np.ndarray, th.Tensor]):
-
-        Returns:
-            Tuple[np.ndarray, np.ndarray]: mu and sigma
-        """
-        theta = self._model.predict(observations)
-        if self.std_optimizer is not None:
-            return theta[:, :self.policy_dim], theta[:, self.policy_dim:]
-        return theta, np.ones_like(theta) * self.log_std_init
     
     def get_num_trees(self) -> int:
         """Returns the number of trees in the ensemble
@@ -496,23 +467,29 @@ class GaussianActor(GBRL):
         """
         return self._model.get_num_trees()
 
-    def __call__(self, observations: Union[np.ndarray, th.Tensor], requires_grad : bool = True) -> th.Tensor:
+    def __call__(self, observations: Union[np.ndarray, th.Tensor], requires_grad : bool = True, start_idx: int = 0, stop_idx: int = None, tensor: bool = True) -> Union[np.ndarray, th.Tensor]:
         """Returns actor's outputs as tensor. If `requires_grad=True` then stores 
-           differentiable parameters in self.params 
-
+           differentiable parameters in self.params. Return type/device is identical to the input type/device.
+           Requires_grad is ignored if input is a numpy array.
         Args:
-            observations (Union[np.ndarray, th.Tensor]):
-            requires_grad (bool, optional):. Defaults to True.
+            observations (Union[np.ndarray, th.Tensor])
+            requires_grad bool: Defaults to None.
+            start_idx (int, optional): start tree index for prediction. Defaults to 0.
+            stop_idx (_type_, optional): stop tree index for prediction (uses all trees in the ensemble if set to 0). Defaults to None.
+            tensor (bool, optional): Return PyTorch Tensor, False returns a numpy array. Defaults to True.
 
         Returns:
-            th.Tensor: Gaussian parameters
+            Union[np.ndarray, th.Tensor]: Gaussian parameters
         """
-        mean_actions, log_std = self.predict(observations)
-        gaussian_params = (th.tensor(mean_actions, requires_grad=requires_grad, device=self.device), th.tensor(log_std, requires_grad=requires_grad if self.std_optimizer is not None else False, device=self.device))
+        theta = self._model.predict(observations, requires_grad, start_idx, stop_idx, tensor)
+        mean_actions = theta if self.std_optimizer is None else theta[:, :self.policy_dim]
+        log_std = constant_like(theta, self.log_std_init) if self.std_optimizer is None else theta[:, self.policy_dim:]
+        mean_actions = tensor_to_leaf(mean_actions, requires_grad)
+        log_std = tensor_to_leaf(log_std, requires_grad = False if self.std_optimizer is None else requires_grad)
         if requires_grad:
             self.grad = None
-            self.params = gaussian_params
-        return gaussian_params
+            self.params = mean_actions, log_std
+        return mean_actions, log_std
     
     def __copy__(self) -> "GaussianActor":
         std_optimizer = None if self.std_optimizer is None else self.std_optimizer.copy()
@@ -593,48 +570,34 @@ class ContinuousCritic(GBRL):
         """
 
         n_samples = len(observations)
-        if weight_grad is None:
-            weight_grad = self.params[0].grad.detach().cpu().numpy() * n_samples
-        if bias_grad is None:
-            bias_grad = self.params[1].grad.detach().cpu().numpy() * n_samples
+        weight_grad = weight_grad if weight_grad is not None else self.params[0].grad.detach() * n_samples
+        bias_grad = bias_grad if bias_grad is not None else self.params[1].grad.detach() * n_samples
+
         weight_grad = clip_grad_norm(weight_grad, q_grad_clip)
         bias_grad = clip_grad_norm(bias_grad, q_grad_clip)
 
-        assert ~np.isnan(weight_grad).any(), "nan in assigned grads"
-        assert ~np.isinf(weight_grad).any(), "infinity in assigned grads"
-        assert ~np.isnan(bias_grad).any(), "nan in assigned grads"
-        assert ~np.isinf(bias_grad).any(), "infinity in assigned grads"
-        theta_grad = np.concatenate([weight_grad, bias_grad], axis=1)
+        validate_array(weight_grad)
+        validate_array(bias_grad)
+        theta_grad = concatenate_arrays(weight_grad, bias_grad)
+
         self._model.step(observations, theta_grad)
         self.grad = (weight_grad, bias_grad)
-        
-    def predict(self, observations: Union[np.ndarray, th.Tensor]) -> Tuple[np.ndarray, np.ndarray]:
-        """Predict the parameters of a Continuous Critic as numpy arrays.
 
-        Args:
-            observations (Union[np.ndarray, th.Tensor]):
-
-        Returns:
-            Tuple[np.ndarray, np.ndarray]: weights and bias parameters to the type of Q-functions
-        """
-        theta = self._model.predict(observations)
-        weights, bias = theta[:, self.weights_optimizer['start_idx']:self.weights_optimizer['stop_idx']], theta[:, self.bias_optimizer['start_idx']:self.bias_optimizer['stop_idx']]
-        return weights, bias
-
-    def predict_target(self, observations: Union[np.ndarray, th.Tensor]) -> Tuple[th.Tensor, th.Tensor]:
+    def predict_target(self, observations: Union[np.ndarray, th.Tensor], tensor: bool = True) -> Tuple[Union[np.ndarray, th.Tensor], Union[np.ndarray, th.Tensor]]:
         """Predict the parameters of a Target Continuous Critic as Tensors.
         Prediction is made by summing the outputs the trees from Continuous Critic model up to `n_trees - target_update_interval`.
 
         Args:
             observations (Union[np.ndarray, th.Tensor]):
+            tensor (bool, optional): Return PyTorch Tensor, False returns a numpy array. Defaults to True.
 
         Returns:
             Tuple[th.Tensor, th.Tensor]: weights and bias parameters to the type of Q-functions
         """
         n_trees = self._model.get_num_trees()
-        theta = self._model.predict(observations, stop_idx=max(n_trees - self.target_update_interval, 1))
+        theta = self._model.predict(observations, requires_grad=False, stop_idx=max(n_trees - self.target_update_interval, 1), tensor=tensor)
         weights, bias = theta[:, self.weights_optimizer['start_idx']:self.weights_optimizer['stop_idx']], theta[:, self.bias_optimizer['start_idx']:self.bias_optimizer['stop_idx']]
-        return th.tensor(weights, device=self.device), th.tensor(bias, device=self.device)
+        return weights, bias
 
     def get_num_trees(self) -> int:
         """Get number of trees in model.
@@ -644,26 +607,30 @@ class ContinuousCritic(GBRL):
         """
         return self._model.get_num_trees()
 
-    def __call__(self, observations: Union[np.ndarray, th.Tensor], requires_grad: bool =  False, target: bool = False) -> Tuple[th.Tensor, th.Tensor]:
+    def __call__(self, observations: Union[np.ndarray, th.Tensor], requires_grad: bool =  True, target: bool = False, start_idx: int = 0, stop_idx: int = None, tensor: bool = True) -> Tuple[Union[np.ndarray, th.Tensor], Union[np.ndarray, th.Tensor]]:
         """Predict the parameters of a Continuous Critic as Tensors. if `requires_grad=True` then stores 
-           differentiable parameters in self.params 
+           differentiable parameters in self.params. 
+           Return type/device is identical to the input type/device.
 
         Args:
             observations (Union[np.ndarray, th.Tensor])
-            requires_grad (bool, optional): Defaults to False.
+            requires_grad (bool, optional). Defaults to True.
+            start_idx (int, optional): start tree index for prediction. Defaults to 0.
+            stop_idx (_type_, optional): stop tree index for prediction (uses all trees in the ensemble if set to 0). Defaults to None.
+            tensor (bool, optional): Return PyTorch Tensor, False returns a numpy array. Defaults to True.
 
         Returns:
-            Tuple[th.Tensor, th.Tensor]: weights and bias parameters to the type of Q-functions
+            Tuple[Union[np.ndarray, th.Tensor], Union[np.ndarray, th.Tensor]]: weights and bias parameters to the type of Q-functions
         """
         if target: 
-            return self.predict_target(observations)
-        
-        weights, bias = self.predict(observations)
-        params = (th.tensor(weights, requires_grad=requires_grad, device=self.device), th.tensor(bias, requires_grad=requires_grad, device=self.device))
+            return self.predict_target(observations, tensor)
+
+        theta = self._model.predict(observations, requires_grad, start_idx, stop_idx, tensor)
+        weights, bias = theta[:, self.weights_optimizer['start_idx']:self.weights_optimizer['stop_idx']], theta[:, self.bias_optimizer['start_idx']:self.bias_optimizer['stop_idx']]
         if requires_grad:
             self.grad = None
-            self.params = params
-        return params
+            self.params = weights, bias
+        return weights, bias
     
     def __copy__(self) -> "ContinuousCritic":
         copy_ = ContinuousCritic(self.tree_struct.copy(), self.output_dim, self.weights_optimizer.copy(), self.bias_optimizer.copy() if isinstance(self.critic_optimizer, dict) else {'weights_optimizer': self.critic_optimizer[0], 'bias_optimizer': self.critic_optimizer[1]}, self.gbrl_params, self.target_update_interval, self.bias, self.verbose, self.device)
@@ -733,36 +700,28 @@ class DiscreteCritic(GBRL):
         self._model.step(observations, q_grad)
         self.grad = q_grad
 
-    def predict(self, observations: Union[np.ndarray, th.Tensor]) -> np.ndarray:
-        """Predict and return Critic's outputs as numpy array.
+    def __call__(self, observations: Union[np.ndarray, th.Tensor], requires_grad: bool = True, start_idx: int = 0, stop_idx: int = None, tensor: bool = True) -> Union[np.ndarray, th.Tensor]:
+        """Predict and return Critic's outputs as Tensors. if `requires_grad=True` then stores 
+           differentiable parameters in self.params. 
+           Return type/device is identical to the input type/device.
 
         Args:
             observations (Union[np.ndarray, th.Tensor])
+            requires_grad (bool, optional). Defaults to True.
+            start_idx (int, optional): start tree index for prediction. Defaults to 0.
+            stop_idx (_type_, optional): stop tree index for prediction (uses all trees in the ensemble if set to 0). Defaults to None.
+            tensor (bool, optional): Return PyTorch Tensor, False returns a numpy array. Defaults to True.
 
         Returns:
-            np.ndarray: Critic outputs
+            Union[np.ndarray, th.Tensor]: Critic's outputs.
         """
-        return self._model.predict(observations)
-
-    def __call__(self, observations: Union[np.ndarray, th.Tensor], requires_grad: bool=False) -> th.Tensor:
-        """Predict and return Critic's outputs as Tensors. If `requires_grad=True` then stores 
-           differentiable parameters in self.params 
-
-        Args:
-            observations (Union[np.ndarray, th.Tensor])
-            requires_grad (bool, optional). Defaults to False.
-
-        Returns:
-            th.Tensor: Critic's outputs.
-        """
-        q_values = self.predict(observations)
-        params = th.tensor(q_values, requires_grad=requires_grad, device=self.device)
+        q_values =self._model.predict(observations, requires_grad, start_idx, stop_idx, tensor)
         if requires_grad:
             self.grad = None
-            self.params = params
-        return params
+            self.params = q_values
+        return q_values
 
-    def predict_target(self, observations: Union[np.ndarray, th.Tensor]) -> th.Tensor:
+    def predict_target(self, observations: Union[np.ndarray, th.Tensor], tensor: bool = True) -> th.Tensor:
         """Predict and return Target Critic's outputs as Tensors.
            Prediction is made by summing the outputs the trees from Continuous Critic model up to `n_trees - target_update_interval`.
         
@@ -773,8 +732,7 @@ class DiscreteCritic(GBRL):
             th.Tensor: Target Critic's outputs.
         """
         n_trees = self._model.get_num_trees()
-        q_values = self._model.predict(observations, stop_idx=max(n_trees - self.target_update_interval, 1))
-        return th.tensor(q_values, device=self.device)
+        return self._model.predict(observations, requires_grad=False, stop_idx=max(n_trees - self.target_update_interval, 1), tensor=tensor)
 
     def __copy__(self) -> "DiscreteCritic":
         copy_ = DiscreteCritic(self.tree_struct.copy(), self.output_dim, self.critic_optimizer.copy(), self.gbrl_params, self.target_update_interval, self.bias, self.verbose, self.device)

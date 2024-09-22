@@ -23,19 +23,19 @@ from tests import CATEGORICAL_INPUTS, CATEGORICAL_OUTPUTS
 
 N_EPOCHS = 100
 
-def rmse_model(model, X, y, n_epochs):
-    y_ = th.tensor(y, dtype=th.float32)
+def rmse_model(model, X, y, n_epochs, device='cpu'):
+    y_ = th.tensor(y, dtype=th.float32, device=device).squeeze()
     X_ = X.copy()
     epoch = 0
     while epoch < n_epochs:
         y_pred = model(X_, requires_grad=True)
-        loss = 0.5*mse_loss(y_pred.cpu(), y_)
+        loss = 0.5*mse_loss(y_pred, y_)
         loss.backward()
         model.step(X_)
         print(f"epoch: {epoch} loss: {loss.sqrt()}")
         epoch += 1
     y_pred = model(X_)
-    loss = (0.5*mse_loss(y_pred.cpu(), y_)).sqrt().item()
+    loss = (0.5*mse_loss(y_pred, y_)).sqrt().item()
     return loss
 
 def to_utf8(s):
@@ -120,12 +120,12 @@ class TestGBTSingle(unittest.TestCase):
         gbrl_params = dict({"control_variates": False, "split_score_func": "L2",
                             "generator_type": "Uniform"})
         model = GBRL(
-                            output_dim=self.out_dim,
-                            tree_struct=tree_struct,
-                            optimizer=self.sgd_optimizer,
-                            gbrl_params=gbrl_params,
-                            verbose=0,
-                            device='cpu')
+                        output_dim=self.out_dim,
+                        tree_struct=tree_struct,
+                        optimizer=self.sgd_optimizer,
+                        gbrl_params=gbrl_params,
+                        verbose=0,
+                        device='cpu')
         model._model.step(X, y)
         gbrl_shap = model.tree_shap(0, X[0, :]).flatten()
         clf = DecisionTreeRegressor(max_depth=3).fit(X, y)
@@ -167,7 +167,7 @@ class TestGBTSingle(unittest.TestCase):
                     verbose=0,
                     device='cuda')
         model.set_bias_from_targets(y)
-        loss = rmse_model(model, X, y, self.n_epochs)
+        loss = rmse_model(model, X, y, self.n_epochs, device='cuda')
         value = 2
         self.assertTrue(loss < value, f'Expected loss = {loss} < {value}')
         model.save_model(os.path.join(self.test_dir, 'test_cosine_gpu'))
@@ -181,7 +181,7 @@ class TestGBTSingle(unittest.TestCase):
         X_categorical, y_categorical = self.cat_data
         model._model.reset()
         model.set_bias_from_targets(y_categorical)
-        loss = rmse_model(model, X_categorical, y_categorical, self.n_epochs)
+        loss = rmse_model(model, X_categorical, y_categorical, self.n_epochs, device='cuda')
         value = 5000
         self.assertTrue(loss < value, f'Expected Categorical loss = {loss} < {value}')
 
@@ -233,7 +233,7 @@ class TestGBTSingle(unittest.TestCase):
                             verbose=0,
                             device='cuda')
         model.set_bias_from_targets(y)
-        loss = rmse_model(model, X, y, self.n_epochs)
+        loss = rmse_model(model, X, y, self.n_epochs, device='cuda')
         value = 12
         self.assertTrue(loss < value, f'Expected loss = {loss} < {value}')
         model.save_model(os.path.join(self.test_dir, 'test_cosine_oblivious_gpu'))
@@ -245,7 +245,7 @@ class TestGBTSingle(unittest.TestCase):
         X_categorical, y_categorical = self.cat_data
         model._model.reset()
         model.set_bias_from_targets(y_categorical)
-        loss = rmse_model(model, X_categorical, y_categorical, self.n_epochs)
+        loss = rmse_model(model, X_categorical, y_categorical, self.n_epochs, device='cuda')
         value = 5000
         self.assertTrue(loss < value, f'Expected Categorical loss = {loss} < {value}')
 
@@ -289,7 +289,7 @@ class TestGBTSingle(unittest.TestCase):
                             verbose=0,
                             device='cuda')
         model.set_bias_from_targets(y)
-        loss = rmse_model(model, X, y, self.n_epochs)
+        loss = rmse_model(model, X, y, self.n_epochs, device='cuda')
 
         self.assertTrue(loss < 0.5, f'Expected loss = {loss} < 0.5')
         model.save_model(os.path.join(self.test_dir, 'test_l2_gpu'))
@@ -301,7 +301,7 @@ class TestGBTSingle(unittest.TestCase):
         X_categorical, y_categorical = self.cat_data
         model._model.reset()
         model.set_bias_from_targets(y_categorical)
-        loss = rmse_model(model, X_categorical, y_categorical, self.n_epochs)
+        loss = rmse_model(model, X_categorical, y_categorical, self.n_epochs, device='cuda')
         value = 5000
         self.assertTrue(loss < value, f'Expected Categorical loss = {loss} < {value}')
 
@@ -354,7 +354,7 @@ class TestGBTSingle(unittest.TestCase):
                             verbose=0,
                             device='cuda')
         model.set_bias_from_targets(y)
-        loss = rmse_model(model, X, y, self.n_epochs)
+        loss = rmse_model(model, X, y, self.n_epochs, device='cuda')
         self.assertTrue(loss < 10.0, f'Expected loss = {loss} < 10.0')
         model.save_model(os.path.join(self.test_dir, 'test_l2_oblivious_gpu'))
         model._model.reset()
@@ -365,7 +365,7 @@ class TestGBTSingle(unittest.TestCase):
         X_categorical, y_categorical = self.cat_data
         model._model.reset()
         model.set_bias_from_targets(y_categorical)
-        loss = rmse_model(model, X_categorical, y_categorical, self.n_epochs)
+        loss = rmse_model(model, X_categorical, y_categorical, self.n_epochs, device='cuda')
         value = 5000
         self.assertTrue(loss < value, f'Expected Categorical loss = {loss} < {value}')
 
@@ -384,36 +384,37 @@ class TestGBTSingle(unittest.TestCase):
                             verbose=0,
                             device='cpu')
         model = GBRL.load_model(os.path.join(self.test_dir, 'test_cosine_cpu'))
-        y_pred = model.predict(X)
+        y_pred = model(X, requires_grad=False, tensor=False)
         loss = np.sqrt(np.mean((y_pred.squeeze() - y.squeeze())**2))
         self.assertTrue(loss < 2.0, f'Expected loss = {loss} < 2.0')
         
         model = GBRL.load_model(os.path.join(self.test_dir, 'test_l2_cpu'))
-        y_pred = model.predict(X)
+        y_pred = model(X, requires_grad=False, tensor=False)
         loss = np.sqrt(np.mean((y_pred.squeeze() - y.squeeze())**2))
         self.assertTrue(loss < 0.5, f'Expected loss = {loss} < 0.5')
         if (cuda_available()):
             model = GBRL.load_model(os.path.join(self.test_dir, 'test_cosine_gpu'))
-            y_pred = model.predict(X)
+            y_pred = model(X, requires_grad=False, tensor=False)
             loss = np.sqrt(np.mean((y_pred.squeeze() - y.squeeze())**2))
             self.assertTrue(loss < 2.0, f'Expected loss = {loss} < 2.0')
             model = GBRL.load_model(os.path.join(self.test_dir, 'test_cosine_oblivious_gpu'))
-            y_pred = model.predict(X)
+            y_pred = model(X, requires_grad=False, tensor=False)
             loss = np.sqrt(np.mean((y_pred.squeeze() - y.squeeze())**2))
             self.assertTrue(loss < 12.0, f'Expected loss = {loss} < 12.0')
             model = GBRL.load_model(os.path.join(self.test_dir, 'test_l2_gpu'))
-            y_pred = model.predict(X)
+            y_pred = model(X, requires_grad=False, tensor=False)
             loss = np.sqrt(np.mean((y_pred.squeeze() - y.squeeze())**2))
             self.assertTrue(loss < 0.5, f'Expected loss = {loss} < 0.5')
             model = GBRL.load_model(os.path.join(self.test_dir, 'test_l2_oblivious_gpu'))
-            y_pred = model.predict(X)
+            y_pred = model(X, requires_grad=False, tensor=False)
             loss = np.sqrt(np.mean((y_pred.squeeze() - y.squeeze())**2))
             self.assertTrue(loss < 10.0, f'Expected loss = {loss} < 10.0')
         model = GBRL.load_model(os.path.join(self.test_dir, 'test_cosine_adam_cpu'))
-        y_pred = model.predict(X)
+        y_pred = model(X, requires_grad=False, tensor=False)
         loss = np.sqrt(np.mean((y_pred.squeeze() - y.squeeze())**2))
         value = 50.0
         self.assertTrue(loss < value, f'Expected loss = {loss} < {value}')
 
 if __name__ == '__main__':
     unittest.main()
+    # unittest.main(argv=['first-arg-is-ignored', 'TestGBTSingle.test_cosine_gpu'])

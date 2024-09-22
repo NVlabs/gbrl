@@ -6,7 +6,7 @@
 # https://nvlabs.github.io/gbrl/license.html 
 #
 ##############################################################################
-__version__ = "1.0.3"
+__version__ = "1.0.4"
 
 from .ac_gbrl import (ActorCritic, GaussianActor, ContinuousCritic,
                    DiscreteCritic, ParametricActor)

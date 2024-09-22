@@ -84,10 +84,10 @@ void get_tensor_info(py::tuple tensor_info, T*& ptr, std::vector<size_t>& shape,
 }
 
 template <typename T>
-void handle_input_info(py::object& input, T*& ptr, std::vector<size_t>& shape, std::string& device, const std::string& name, const bool none_allowed, const std::string& expected_format = ""){
+void handle_input_info(py::object& input, T*& ptr, std::vector<size_t>& shape, std::string& device, const std::string& name, const bool none_allowed, const std::string& function_name, const std::string& expected_format = ""){
     if (input.is_none()) {
         if (!none_allowed)
-            throw std::runtime_error("Cannot call step without " + name + "!");
+            throw std::runtime_error("Cannot call " + function_name + " without " + name + "!");
         else
             return;
     } 
@@ -248,7 +248,7 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         std::vector<size_t> obs_shape, cat_obs_shape, grads_shape, feature_weights_shape;
         std::string obs_device, cat_obs_device, grads_device, feature_weights_device;
         int n_samples, n_num_features = 0, n_cat_features = 0;
-        handle_input_info<float>(grads, grads_ptr, grads_shape, grads_device, "grads", false);
+        handle_input_info<float>(grads, grads_ptr, grads_shape, grads_device, "grads", false, "step");
         if (grads_shape.size() == 1){
             if (self.metadata->output_dim = 1)
                 n_samples  = static_cast<int>(grads_shape[0]);
@@ -257,7 +257,7 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         } else if (grads_shape.size() > 1){
             n_samples  = static_cast<int>(grads_shape[0]);
         }
-        handle_input_info<const float>(obs, obs_ptr, obs_shape, obs_device, "obs", true); 
+        handle_input_info<const float>(obs, obs_ptr, obs_shape, obs_device, "obs", true, "step"); 
         if (obs_ptr != nullptr){
             int n_obs_samples = 0;
             if (obs_shape.size() == 1){
@@ -278,7 +278,7 @@ PYBIND11_MODULE(gbrl_cpp, m) {
                 throw std::runtime_error(ss.str());
             }
         }
-        handle_input_info<const char>(categorical_obs, cat_obs_ptr, cat_obs_shape, cat_obs_device, "cat_obs", true, CAT_TYPE);
+        handle_input_info<const char>(categorical_obs, cat_obs_ptr, cat_obs_shape, cat_obs_device, "cat_obs", true, "step", CAT_TYPE);
         int n_cat_samples = 0;
         if (cat_obs_ptr != nullptr)
         {
@@ -295,8 +295,8 @@ PYBIND11_MODULE(gbrl_cpp, m) {
                 throw std::runtime_error(ss.str());
             }
         }
-        handle_input_info<const float>(feature_weights, feature_weights_ptr, feature_weights_shape, feature_weights_device, "feature_weights", false);
-        if (obs_device != feature_weights_device){
+        handle_input_info<const float>(feature_weights, feature_weights_ptr, feature_weights_shape, feature_weights_device, "feature_weights", false, "step");
+        if (grads_device != feature_weights_device){
             std::stringstream ss;
             ss << "Feature weights device: " << feature_weights_device << " != expected device " << grads_device;
             throw std::runtime_error(ss.str());
@@ -394,7 +394,7 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         std::vector<size_t> obs_shape, cat_obs_shape;
         std::string obs_device, cat_obs_device, device;
         int n_samples = 0, n_num_features = 0, n_cat_features = 0;
-        handle_input_info<const float>(obs, obs_ptr, obs_shape, obs_device, "obs", false);
+        handle_input_info<const float>(obs, obs_ptr, obs_shape, obs_device, "obs", true, "predict");
         if (obs_ptr != nullptr){
             device = obs_device;
             if (obs_shape.size() == 1){
@@ -405,7 +405,7 @@ PYBIND11_MODULE(gbrl_cpp, m) {
                 n_num_features = static_cast<int>(obs_shape[1]);
             }
         }
-        handle_input_info<const char>(categorical_obs, cat_obs_ptr, cat_obs_shape, cat_obs_device, "cat_obs", true, CAT_TYPE); 
+        handle_input_info<const char>(categorical_obs, cat_obs_ptr, cat_obs_shape, cat_obs_device, "cat_obs", true, "predict", CAT_TYPE); 
         if (cat_obs_ptr != nullptr)
         {
             device = "cpu";
@@ -436,7 +436,7 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         py::gil_scoped_release release; 
         float* result_ptr = self.predict(obs_ptr, cat_obs_ptr, n_samples, n_num_features, n_cat_features, start_tree_idx, stop_tree_idx, stringTodeviceType(device));
         py::gil_scoped_acquire acquire;
-        bool is_torch = obs_ptr != nullptr && !py::isinstance<py::array>(obs) && cat_obs_ptr == nullptr;
+        bool is_torch = (obs_ptr != nullptr && !py::isinstance<py::array>(obs) && cat_obs_ptr == nullptr);
         return return_tensor_info(n_samples, self.metadata->output_dim, result_ptr, stringTodeviceType(device), is_torch);
     }, py::arg("obs"), py::arg("categorical_obs"), py::arg("start_tree_idx")=0, py::arg("stop_tree_idx")=0, "Predict using the model");
         // saveToFile method
