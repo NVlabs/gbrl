@@ -912,7 +912,7 @@ void add_leaf_node(const TreeNodeGPU *node, const int depth, ensembleMetaData *m
     int leaf_idx = metadata->n_leaves, tree_idx = metadata->n_trees; 
     float *count_f;
     cudaMalloc((void**)&count_f, sizeof(float));
-    cudaMemset(count_f, 0, sizeof(float));
+    // cudaMemset(count_f, 0, sizeof(float));
     int n_blocks, threads_per_block;
     get_grid_dimensions(dataset->n_samples, n_blocks, threads_per_block);
     int n_threads = WARP_SIZE*((MAX_CHAR_SIZE + WARP_SIZE - 1) / WARP_SIZE);

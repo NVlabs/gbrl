@@ -62,11 +62,16 @@ def construct_compression_matrix(tree_selection: th.Tensor, n_leaves_per_tree: t
 def get_least_squares_W(C: th.Tensor, A: th.Tensor, V: th.Tensor, epsilon: float = 1e-5):
     CCT = C @ C.T 
     ATA = A.T @ A
-    inv_mat = (CCT @ ATA @ CCT)
+    CCTATA = CCT @ ATA
+    del ATA
+    inv_mat = (CCTATA @ CCT)
     # inv_mat += epsilon * th.eye(inv_mat.size()[0]) 
     inv_mat += th.eye(inv_mat.size()[0], device=A.device) 
+    inv_mat = th.inverse(inv_mat)
     I  = th.eye(CCT.size()[0], device=A.device)
-    return th.inverse(inv_mat) @ CCT @ ATA @ (I - CCT) @ V 
+    res = inv_mat @ CCTATA
+    res = res @ (I - CCT)
+    return res @ V 
 
 
 

@@ -98,8 +98,8 @@ def clip_grad_norm(grads: Union[np.ndarray, th.Tensor], grad_clip: float) -> Uni
     if isinstance(grads, th.Tensor):
         grad_norms = th.norm(grads, p=2, dim=1, keepdim=True)
     else:
-        grad_norms = np.linalg.norm(grads, axis=1)
-    mask = grad_norms > grad_clip
+        grad_norms = np.linalg.norm(grads, axis=1, ord=2, keepdims=True)
+    mask = (grad_norms > grad_clip).squeeze()
     grads[mask] = grad_clip * grads[mask] / grad_norms[mask]
     return grads
 

@@ -12,3 +12,4 @@ builds/
 *.json
 dist/
 docs/_build/
+*.ncu-rep

@@ -359,12 +359,13 @@ class GBTWrapper:
         self.reset()
         return tr_loss, params
 
-    def compress(self, k: int, gradient_steps: int, features: Union[np.ndarray, th.Tensor], actions: th.Tensor = None, log_std: th.Tensor = None,
+    def compress(self, trees_to_keep: int, gradient_steps: int, features: Union[np.ndarray, th.Tensor], actions: th.Tensor = None, log_std: th.Tensor = None,
                  method: str = 'first_k', dist_type: str = 'supervised_learning', optimizer_kwargs: Optional[Dict[str, Any]] = None, 
                  least_squares_W: bool = True, temperature: float = 1.0, lambda_reg: float = 1.0):
         assert actions is not None or dist_type == 'supervised_learning', "Cannot compress a policy using supervised learning compression methods"
         A, V, n_leaves_per_tree, n_leaves, n_trees = self.get_matrix_representation(features) 
         A, V, n_leaves_per_tree = th.tensor(A, dtype=th.float32, device=self.device), th.tensor(V, dtype=th.float32, device=self.device), th.tensor(n_leaves_per_tree, device=self.device)
+        k = self.get_num_trees() - trees_to_keep
         compression_params = {'k': k, 'gradient_steps': gradient_steps, 'method': method, 
                               'optimizer_kwargs': optimizer_kwargs, 
                               'temperature': temperature, 'n_leaves': n_leaves, 'n_trees': n_trees, 
@@ -389,7 +390,6 @@ class GBTWrapper:
         new_tree_indices[1:] = np.cumsum(n_leaves_per_tree[compressed_tree_indices].detach().cpu().numpy())[:-1]
         # W = np.zeros_like(W, dtype=np.single)
         self.cpp_model.compress(n_compressed_leaves, n_compressed_trees, compressed_leaf_indices, compressed_tree_indices, new_tree_indices.astype(np.int32), W)
-        del A, V, compressor
         print(f"Finished compressing - compressed model has {self.get_num_trees()} trees")
 
     def copy(self):
@@ -440,10 +440,10 @@ class SeparateActorCriticWrapper:
         self.value_model.set_device(device)
         self.device = device
     
-    def compress(self, k: int, gradients_steps: int, observations: Union[np.ndarray, th.Tensor], actions: th.Tensor, log_std: th.Tensor = None, method: str = 'first_k', dist_type: str = 'supervised_learning', optimizer_kwargs: Optional[Dict[str, Any]] = None, 
+    def compress(self, trees_to_keep: int, gradients_steps: int, observations: Union[np.ndarray, th.Tensor], actions: th.Tensor, log_std: th.Tensor = None, method: str = 'first_k', dist_type: str = 'supervised_learning', optimizer_kwargs: Optional[Dict[str, Any]] = None, 
                  least_squares_W: bool = True, temperature: float = 1.0, lambda_reg: float = 1.0) -> None:
         assert dist_type != 'supervised_learning', 'Cannot use supervised learning as a dist_type for an actor'
-        self.policy_model.compress(k, gradients_steps, observations, actions, log_std, method, dist_type, optimizer_kwargs, least_squares_W, temperature)
+        self.policy_model.compress(trees_to_keep, gradients_steps, observations, actions, log_std, method, dist_type, optimizer_kwargs, least_squares_W, temperature)
         # self.value_model.compress(k, gradients_steps, observations, actions, log_std, method, 'supervised_learning', optimizer_kwargs, True, temperature, lambda_reg)
 
     def tree_shap(self, tree_idx: int, observations: Union[np.ndarray, th.Tensor]) -> Tuple[np.ndarray, np.ndarray]:
@@ -614,13 +614,14 @@ class SharedActorCriticWrapper(GBTWrapper):
         preds = tensor_to_leaf(preds[:, :-1], requires_grad=requires_grad)
         return preds, pred_values
 
-    def compress(self, k: int, gradient_steps: int, features: Union[np.ndarray, th.Tensor], actions: th.Tensor = None, log_std: th.Tensor = None,
+    def compress(self, trees_to_keep: int, gradient_steps: int, features: Union[np.ndarray, th.Tensor], actions: th.Tensor = None, log_std: th.Tensor = None,
                  method: str = 'first_k', dist_type: str = 'deterministic', optimizer_kwargs: Optional[Dict[str, Any]] = None, 
                  least_squares_W: bool = True, temperature: float = 1.0, lambda_reg: float = 1.0) -> None:
         assert actions is not None, "Cannot compress a shared actor-critic policy without actions"
         assert dist_type != 'supervised_learning', "Cannot compress a shared actor-critic policy using supervised learning compression methods"
         A, V, n_leaves_per_tree, n_leaves, n_trees = self.get_matrix_representation(features) 
         A, V, n_leaves_per_tree = th.tensor(A, dtype=th.float32, device=self.device), th.tensor(V, dtype=th.float32, device=self.device), th.tensor(n_leaves_per_tree, device=self.device)
+        k = self.get_num_trees() - trees_to_keep
         compression_params = {'k': k, 'gradient_steps': gradient_steps, 'method': method, 
                               'optimizer_kwargs': optimizer_kwargs, 
                               'temperature': temperature, 'n_leaves': n_leaves, 'n_trees': n_trees, 

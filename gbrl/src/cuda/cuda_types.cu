@@ -132,7 +132,7 @@ ensembleData* ensemble_copy_data_alloc_cuda(ensembleMetaData *metadata){
     edata->tree_indices = (int *)(data + trace);
     trace += tree_size;
     edata->depths = (int *)(data + trace);
-    trace += split_sizes*sizeof(int);
+    trace += split_sizes * sizeof(int);
     edata->values = (float *)(data + trace);
     trace += value_sizes;
     edata->feature_indices = (int *)(data + trace);
@@ -202,7 +202,7 @@ ensembleData* ensemble_compressed_data_alloc_cuda(ensembleMetaData *metadata, co
     edata->tree_indices = (int *)(data + trace);
     trace += tree_size;
     edata->depths = (int *)(data + trace);
-    trace += split_sizes*sizeof(int);
+    trace += split_sizes * sizeof(int);
     edata->values = (float *)(data + trace);
     trace += value_sizes;
     edata->feature_indices = (int *)(data + trace);
