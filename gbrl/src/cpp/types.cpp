@@ -177,32 +177,45 @@ ensembleData* ensemble_data_alloc(ensembleMetaData *metadata){
         throw std::runtime_error("Error invalid pointer");
         return nullptr;
     }
+    size_t data_size = 0;
     edata->bias = new float[metadata->output_dim];
+    data_size += sizeof(float) * metadata->output_dim;
     memset(edata->bias, 0, metadata->output_dim * sizeof(float));
     int split_sizes = (metadata->grow_policy == OBLIVIOUS) ? metadata->max_trees : metadata->max_leaves;
 #ifdef DEBUG
     edata->n_samples = new int[metadata->max_leaves]; // debugging
     memset(edata->n_samples, 0, metadata->max_leaves * sizeof(int));
+    data_size += sizeof(int) * metadata->max_leaves;
 #endif
     edata->tree_indices = new int[metadata->max_trees];
+    data_size += sizeof(int) * metadata->max_trees;
     memset(edata->tree_indices, 0, metadata->max_trees * sizeof(int));
     edata->depths = new int[split_sizes];
+    data_size += sizeof(int) * split_sizes;
     memset(edata->depths, 0, split_sizes * sizeof(int));
-    edata->values = new float[metadata->max_leaves*metadata->output_dim];
+    edata->values = new float[metadata->max_leaves * metadata->output_dim];
+    data_size += sizeof(float) * metadata->max_leaves * metadata->output_dim;
     memset(edata->values, 0, metadata->max_leaves*metadata->output_dim * sizeof(float));
     // leaf data
-    edata->feature_indices = new int[split_sizes*metadata->max_depth];
-    memset(edata->feature_indices, 0, split_sizes*metadata->max_depth * sizeof(int));
-    edata->feature_values = new float[split_sizes*metadata->max_depth];
-    memset(edata->feature_values, 0, split_sizes*metadata->max_depth * sizeof(float));
-    edata->edge_weights = new float[metadata->max_leaves*metadata->max_depth];
-    memset(edata->edge_weights, 0, metadata->max_leaves*metadata->max_depth * sizeof(float));
-    edata->is_numerics = new bool[split_sizes*metadata->max_depth];
-    memset(edata->is_numerics, 0, split_sizes*metadata->max_depth * sizeof(bool));
-    edata->inequality_directions = new bool[metadata->max_leaves*metadata->max_depth]; 
-    memset(edata->inequality_directions, 0, metadata->max_leaves*metadata->max_depth * sizeof(bool));
-    edata->categorical_values = new char[split_sizes*metadata->max_depth*MAX_CHAR_SIZE];
-    memset(edata->categorical_values, 0, split_sizes*metadata->max_depth * sizeof(char)*MAX_CHAR_SIZE);
+    edata->feature_indices = new int[split_sizes * metadata->max_depth];
+    data_size += sizeof(int) * split_sizes * metadata->max_depth;
+    memset(edata->feature_indices, 0, split_sizes * metadata->max_depth * sizeof(int));
+    edata->feature_values = new float[split_sizes * metadata->max_depth];
+    data_size += sizeof(float) * split_sizes * metadata->max_depth;
+    memset(edata->feature_values, 0, split_sizes * metadata->max_depth * sizeof(float));
+    edata->edge_weights = new float[metadata->max_leaves * metadata->max_depth];
+    data_size += sizeof(float) * metadata->max_leaves * metadata->max_depth;
+    memset(edata->edge_weights, 0, metadata->max_leaves * metadata->max_depth * sizeof(float));
+    edata->is_numerics = new bool[split_sizes * metadata->max_depth];
+    data_size += sizeof(bool) * split_sizes * metadata->max_depth;
+    memset(edata->is_numerics, 0, split_sizes * metadata->max_depth * sizeof(bool));
+    edata->inequality_directions = new bool[metadata->max_leaves * metadata->max_depth]; 
+    data_size += sizeof(bool) * metadata->max_leaves * metadata->max_depth;
+    memset(edata->inequality_directions, 0, metadata->max_leaves * metadata->max_depth * sizeof(bool));
+    edata->categorical_values = new char[split_sizes*metadata->max_depth * MAX_CHAR_SIZE];
+    data_size += sizeof(char) * split_sizes*metadata->max_depth*MAX_CHAR_SIZE;
+    memset(edata->categorical_values, 0, split_sizes * metadata->max_depth * sizeof(char)*MAX_CHAR_SIZE);
+    edata->alloc_data_size = data_size;
     return edata;
 }
 
@@ -214,32 +227,45 @@ ensembleData* ensemble_copy_data_alloc(ensembleMetaData *metadata){
         throw std::runtime_error("Error invalid pointer");
         return nullptr;
     }
+    size_t data_size = 0;
     edata->bias = new float[metadata->output_dim];
+    data_size += sizeof(float) * metadata->output_dim;
     memset(edata->bias, 0, metadata->output_dim * sizeof(float));
     int split_sizes = (metadata->grow_policy == OBLIVIOUS) ? metadata->n_trees : metadata->n_leaves;
 #ifdef DEBUG
     edata->n_samples = new int[metadata->n_leaves]; // debugging
     memset(edata->n_samples, 0, metadata->n_leaves * sizeof(int));
+    data_size += sizeof(int) * metadata->n_leaves;
 #endif
     edata->tree_indices = new int[metadata->n_trees];
+    data_size += sizeof(int) * metadata->n_trees;
     memset(edata->tree_indices, 0, metadata->n_trees * sizeof(int));
     edata->depths = new int[split_sizes];
+    data_size += sizeof(int) * split_sizes;
     memset(edata->depths, 0, split_sizes * sizeof(int));
-    edata->values = new float[metadata->n_leaves*metadata->output_dim];
-    memset(edata->values, 0, metadata->n_leaves*metadata->output_dim * sizeof(float));
+    edata->values = new float[metadata->n_leaves * metadata->output_dim];
+    data_size += sizeof(float) * metadata->n_leaves * metadata->output_dim;
+    memset(edata->values, 0, metadata->n_leaves * metadata->output_dim * sizeof(float));
     // leaf data
-    edata->feature_indices = new int[split_sizes*metadata->max_depth];
-    memset(edata->feature_indices, 0, split_sizes*metadata->max_depth * sizeof(int));
-    edata->feature_values = new float[split_sizes*metadata->max_depth];
-    memset(edata->feature_values, 0, split_sizes*metadata->max_depth * sizeof(float));
-    edata->edge_weights = new float[metadata->n_leaves*metadata->max_depth];
-    memset(edata->edge_weights, 0, metadata->n_leaves*metadata->max_depth * sizeof(float));
-    edata->is_numerics = new bool[split_sizes*metadata->max_depth];
-    memset(edata->is_numerics, 0, split_sizes*metadata->max_depth * sizeof(bool));
-    edata->inequality_directions = new bool[metadata->n_leaves*metadata->max_depth]; 
-    memset(edata->inequality_directions, 0, metadata->n_leaves*metadata->max_depth * sizeof(bool));
-    edata->categorical_values = new char[split_sizes*metadata->max_depth*MAX_CHAR_SIZE];
-    memset(edata->categorical_values, 0, split_sizes*metadata->max_depth * sizeof(char)*MAX_CHAR_SIZE);
+    edata->feature_indices = new int[split_sizes * metadata->max_depth];
+    data_size += sizeof(int) * split_sizes * metadata->max_depth;
+    memset(edata->feature_indices, 0, split_sizes * metadata->max_depth * sizeof(int));
+    edata->feature_values = new float[split_sizes * metadata->max_depth];
+    data_size += sizeof(float) * split_sizes * metadata->max_depth;
+    memset(edata->feature_values, 0, split_sizes * metadata->max_depth * sizeof(float));
+    edata->edge_weights = new float[metadata->n_leaves * metadata->max_depth];
+    data_size += sizeof(float) * metadata->n_leaves * metadata->max_depth;
+    memset(edata->edge_weights, 0, metadata->n_leaves * metadata->max_depth * sizeof(float));
+    edata->is_numerics = new bool[split_sizes * metadata->max_depth];
+    data_size += sizeof(bool) * split_sizes * metadata->max_depth;
+    memset(edata->is_numerics, 0, split_sizes * metadata->max_depth * sizeof(bool));
+    edata->inequality_directions = new bool[metadata->n_leaves * metadata->max_depth]; 
+    data_size += sizeof(bool) * metadata->n_leaves * metadata->max_depth;
+    memset(edata->inequality_directions, 0, metadata->n_leaves * metadata->max_depth * sizeof(bool));
+    edata->categorical_values = new char[split_sizes * metadata->max_depth * MAX_CHAR_SIZE];
+    data_size += sizeof(char) * split_sizes * metadata->max_depth * MAX_CHAR_SIZE;
+    memset(edata->categorical_values, 0, split_sizes * metadata->max_depth * sizeof(char)*MAX_CHAR_SIZE);
+    edata->alloc_data_size = data_size;
     return edata;
 }
 
@@ -250,34 +276,47 @@ ensembleData* copy_ensemble_data(ensembleData *other_edata, ensembleMetaData *me
         throw std::runtime_error("Error invalid pointer");
         return nullptr;
     }
+    size_t data_size = 0;
     edata->bias = new float[metadata->output_dim];
+    data_size += sizeof(float) * metadata->output_dim;
     memcpy(edata->bias, other_edata->bias, metadata->output_dim * sizeof(float));
     int split_sizes = (metadata->grow_policy == OBLIVIOUS) ? metadata->n_trees : metadata->n_leaves;
 #ifdef DEBUG
     edata->n_samples = new int[metadata->n_leaves]; // debugging
     memcpy(edata->n_samples, other_edata->n_samples, metadata->n_leaves * sizeof(int));
+    data_size += sizeof(float) * metadata->n_leaves;
 #endif
     edata->tree_indices = new int[metadata->n_trees];
+    data_size += sizeof(int) * metadata->n_trees;
     memcpy(edata->tree_indices, other_edata->tree_indices, metadata->n_trees * sizeof(int));
     edata->depths = new int[split_sizes];
+    data_size += sizeof(int) * split_sizes;
     memcpy(edata->depths, other_edata->depths, split_sizes * sizeof(int));
-    edata->values = new float[metadata->n_leaves*metadata->output_dim];
-    memcpy(edata->values, other_edata->values, metadata->n_leaves*metadata->output_dim * sizeof(float));
+    edata->values = new float[metadata->n_leaves * metadata->output_dim];
+    data_size += sizeof(float) * metadata->n_leaves * metadata->output_dim;
+    memcpy(edata->values, other_edata->values, metadata->n_leaves * metadata->output_dim * sizeof(float));
     // leaf data
-    edata->feature_indices = new int[split_sizes*metadata->max_depth];
-    memcpy(edata->feature_indices, other_edata->feature_indices, split_sizes*metadata->max_depth * sizeof(int));
-    edata->feature_values = new float[split_sizes*metadata->max_depth];
-    memcpy(edata->feature_values, other_edata->feature_values, split_sizes*metadata->max_depth * sizeof(float));
-    edata->edge_weights = new float[metadata->n_leaves*metadata->max_depth];
-    memcpy(edata->edge_weights, other_edata->edge_weights, metadata->n_leaves*metadata->max_depth * sizeof(float));
-    edata->is_numerics = new bool[split_sizes*metadata->max_depth];
-    memcpy(edata->is_numerics, other_edata->is_numerics, split_sizes*metadata->max_depth * sizeof(bool));
-    edata->categorical_values = new char[split_sizes*metadata->max_depth*MAX_CHAR_SIZE];
-    memcpy(edata->categorical_values, other_edata->categorical_values, split_sizes*metadata->max_depth * sizeof(char)*MAX_CHAR_SIZE);
-    edata->inequality_directions = new bool[metadata->n_leaves*metadata->max_depth]; 
-    memcpy(edata->inequality_directions, other_edata->inequality_directions, metadata->n_leaves*metadata->max_depth * sizeof(bool));
+    edata->feature_indices = new int[split_sizes * metadata->max_depth];
+    data_size += sizeof(int) * split_sizes * metadata->max_depth;
+    memcpy(edata->feature_indices, other_edata->feature_indices, split_sizes * metadata->max_depth * sizeof(int));
+    edata->feature_values = new float[split_sizes * metadata->max_depth];
+    data_size += sizeof(float) * split_sizes * metadata->max_depth;
+    memcpy(edata->feature_values, other_edata->feature_values, split_sizes * metadata->max_depth * sizeof(float));
+    edata->edge_weights = new float[metadata->n_leaves * metadata->max_depth];
+    data_size += sizeof(float) * metadata->n_leaves * metadata->max_depth;
+    memcpy(edata->edge_weights, other_edata->edge_weights, metadata->n_leaves * metadata->max_depth * sizeof(float));
+    edata->is_numerics = new bool[split_sizes * metadata->max_depth];
+    data_size += sizeof(bool) * split_sizes * metadata->max_depth;
+    memcpy(edata->is_numerics, other_edata->is_numerics, split_sizes * metadata->max_depth * sizeof(bool));
+    edata->categorical_values = new char[split_sizes * metadata->max_depth * MAX_CHAR_SIZE];
+    data_size += sizeof(char) * split_sizes * metadata->max_depth * MAX_CHAR_SIZE;
+    memcpy(edata->categorical_values, other_edata->categorical_values, split_sizes * metadata->max_depth * sizeof(char) * MAX_CHAR_SIZE);
+    edata->inequality_directions = new bool[metadata->n_leaves * metadata->max_depth]; 
+    data_size += sizeof(bool) * metadata->n_leaves * metadata->max_depth;
+    memcpy(edata->inequality_directions, other_edata->inequality_directions, metadata->n_leaves * metadata->max_depth * sizeof(bool));
     metadata->max_trees = metadata->n_trees;
     metadata->max_leaves = metadata->n_leaves;
+    edata->alloc_data_size = data_size;
     return edata;
 }
 
@@ -288,47 +327,60 @@ ensembleData* copy_compressed_ensemble_data(ensembleData *other_edata, ensembleM
         throw std::runtime_error("Error invalid pointer");
         return nullptr;
     }
+    size_t data_size = 0;
     edata->bias = new float[metadata->output_dim];
+    data_size += sizeof(float) * metadata->output_dim;
     memcpy(edata->bias, other_edata->bias, metadata->output_dim * sizeof(float));
     int split_sizes = (metadata->grow_policy == OBLIVIOUS) ? n_compressed_trees : n_compressed_leaves;
     const int *split_indices = (metadata->grow_policy == OBLIVIOUS) ? tree_indices : leaf_indices;
 #ifdef DEBUG
     edata->n_samples = new int[n_compressed_leaves]; // debugging
+    data_size += sizeof(int) * n_compressed_leaves;
     memset(edata->n_samples, 0, n_compressed_leaves * sizeof(int));
     selective_copy(n_compressed_leaves, leaf_indices, edata->n_samples, other_edata->n_samples, 1);
 #endif
     edata->tree_indices = new int[n_compressed_trees];
+    data_size += sizeof(int) * n_compressed_trees;
     memcpy(edata->tree_indices, new_tree_indices, n_compressed_trees * sizeof(int));
     edata->depths = new int[split_sizes];
+    data_size += sizeof(int) * split_sizes;
     memset(edata->depths, 0, split_sizes * sizeof(int));
     selective_copy(split_sizes, split_indices, edata->depths, other_edata->depths, 1);
-    edata->values = new float[n_compressed_leaves*metadata->output_dim];
+    edata->values = new float[n_compressed_leaves * metadata->output_dim];
+    data_size += sizeof(float) * n_compressed_leaves * metadata->output_dim;
     memset(edata->values, 0, n_compressed_leaves*metadata->output_dim * sizeof(float));
     selective_copy(n_compressed_leaves, leaf_indices, edata->values, other_edata->values, metadata->output_dim);
     // leaf data
-    edata->feature_indices = new int[split_sizes*metadata->max_depth];
+    edata->feature_indices = new int[split_sizes * metadata->max_depth];
+    data_size += sizeof(int) * split_sizes * metadata->max_depth;
     memset(edata->feature_indices, 0, split_sizes*metadata->max_depth * sizeof(int));
     selective_copy(split_sizes, split_indices, edata->feature_indices, other_edata->feature_indices, metadata->max_depth);
-    edata->feature_values = new float[split_sizes*metadata->max_depth];
-    memset(edata->feature_values, 0, split_sizes*metadata->max_depth * sizeof(float));
+    edata->feature_values = new float[split_sizes * metadata->max_depth];
+    data_size += sizeof(float) * split_sizes * metadata->max_depth;
+    memset(edata->feature_values, 0, split_sizes * metadata->max_depth * sizeof(float));
     selective_copy(split_sizes, split_indices, edata->feature_values, other_edata->feature_values, metadata->max_depth);
-    edata->edge_weights = new float[n_compressed_leaves*metadata->max_depth];
-    memset(edata->edge_weights, 0, n_compressed_leaves*metadata->max_depth * sizeof(float));
+    edata->edge_weights = new float[n_compressed_leaves * metadata->max_depth];
+    data_size += sizeof(float) * n_compressed_leaves * metadata->max_depth;
+    memset(edata->edge_weights, 0, n_compressed_leaves * metadata->max_depth * sizeof(float));
     selective_copy(n_compressed_leaves, leaf_indices, edata->edge_weights, other_edata->edge_weights, metadata->max_depth);
-    edata->is_numerics = new bool[split_sizes*metadata->max_depth];
-    memset(edata->is_numerics, 0, split_sizes*metadata->max_depth * sizeof(bool));
+    edata->is_numerics = new bool[split_sizes * metadata->max_depth];
+    data_size += sizeof(bool) * split_sizes * metadata->max_depth;
+    memset(edata->is_numerics, 0, split_sizes * metadata->max_depth * sizeof(bool));
     selective_copy(split_sizes, split_indices, edata->is_numerics, other_edata->is_numerics, metadata->max_depth);
-    edata->categorical_values = new char[split_sizes*metadata->max_depth*MAX_CHAR_SIZE];
-    memset(edata->categorical_values, 0, split_sizes*metadata->max_depth * sizeof(char) * MAX_CHAR_SIZE);
+    edata->categorical_values = new char[split_sizes * metadata->max_depth * MAX_CHAR_SIZE];
+    data_size += sizeof(char) * split_sizes * metadata->max_depth * MAX_CHAR_SIZE;
+    memset(edata->categorical_values, 0, split_sizes * metadata->max_depth * sizeof(char) * MAX_CHAR_SIZE);
     selective_copy(split_sizes, split_indices, edata->is_numerics, other_edata->is_numerics, metadata->max_depth);
     selective_copy_char(split_sizes, split_indices, edata->categorical_values, other_edata->categorical_values, metadata->max_depth);
-    edata->inequality_directions = new bool[n_compressed_leaves*metadata->max_depth]; 
-    memset(edata->inequality_directions, 0, n_compressed_leaves*metadata->max_depth * sizeof(bool));
+    edata->inequality_directions = new bool[n_compressed_leaves * metadata->max_depth]; 
+    data_size += sizeof(bool) * n_compressed_leaves * metadata->max_depth;
+    memset(edata->inequality_directions, 0, n_compressed_leaves * metadata->max_depth * sizeof(bool));
     selective_copy(n_compressed_leaves, leaf_indices, edata->inequality_directions, other_edata->inequality_directions, metadata->max_depth);
     metadata->max_trees = n_compressed_trees;
     metadata->max_leaves = n_compressed_leaves;
     metadata->n_leaves = n_compressed_leaves;
     metadata->n_trees = n_compressed_trees;
+    edata->alloc_data_size = data_size;
     return edata;
 }
 
@@ -354,7 +406,7 @@ void export_ensemble_data(std::ofstream& header_file, const std::string& model_n
     ensembleData *edata_cpu = nullptr;
 #ifdef USE_CUDA
     if (device == gpu){
-        edata_cpu = ensemble_data_copy_gpu_cpu(metadata, edata);
+        edata_cpu = ensemble_data_copy_gpu_cpu(metadata, edata, nullptr);
     }
 #endif 
     if (device == cpu)
@@ -407,6 +459,7 @@ void export_ensemble_data(std::ofstream& header_file, const std::string& model_n
     header_file << "n_num_features: " << metadata->n_num_features << ", ";
     header_file << "n_cat_features: " << metadata->n_cat_features << ", ";
     header_file << "iteration: " << metadata->iteration;
+    header_file << "alloc_data_size: " << edata->alloc_data_size;
     header_file << "\n*/\n";
 
     header_file << "#define N_TREES " << metadata->n_trees << "\n";
@@ -503,7 +556,7 @@ void save_ensemble_data(std::ofstream& file, ensembleData *edata, ensembleMetaDa
     ensembleData *edata_cpu = nullptr;
 #ifdef USE_CUDA
     if (device == gpu){
-        edata_cpu = ensemble_data_copy_gpu_cpu(metadata, edata);
+        edata_cpu = ensemble_data_copy_gpu_cpu(metadata, edata, nullptr);
     }
 #endif 
     if (device == cpu)

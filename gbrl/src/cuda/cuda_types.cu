@@ -79,6 +79,7 @@ ensembleData* ensemble_data_alloc_cuda(ensembleMetaData *metadata){
     edata->inequality_directions = (bool *)(data + trace);
     trace += edge_size * sizeof(bool);
     edata->categorical_values = (char *)(data + trace);
+    edata->alloc_data_size = data_size;
     return edata;
 }
 
@@ -149,6 +150,7 @@ ensembleData* ensemble_copy_data_alloc_cuda(ensembleMetaData *metadata){
 
     metadata->max_trees = metadata->n_trees;
     metadata->max_leaves = metadata->n_leaves;
+    edata->alloc_data_size = data_size;
     return edata;
 }
 
@@ -221,11 +223,13 @@ ensembleData* ensemble_compressed_data_alloc_cuda(ensembleMetaData *metadata, co
     metadata->max_leaves = n_compressed_leaves;
     metadata->n_trees = n_compressed_trees; 
     metadata->n_leaves = n_compressed_leaves; 
+    edata->alloc_data_size = data_size;
     return edata;
 }
 
-ensembleData* ensemble_data_copy_gpu_gpu(ensembleMetaData *metadata, ensembleData *other_edata){
-    ensembleData *edata = ensemble_copy_data_alloc_cuda(metadata);
+ensembleData* ensemble_data_copy_gpu_gpu(ensembleMetaData *metadata, ensembleData *other_edata, ensembleData *edata){
+    if (edata == nullptr)
+        edata = ensemble_copy_data_alloc_cuda(metadata);
     size_t bias_size = metadata->output_dim * sizeof(float);
     size_t tree_size = metadata->n_trees * sizeof(int);
     size_t split_sizes = (metadata->grow_policy == OBLIVIOUS) ? metadata->n_trees : metadata->n_leaves;
@@ -250,8 +254,9 @@ ensembleData* ensemble_data_copy_gpu_gpu(ensembleMetaData *metadata, ensembleDat
     return edata;
 }
 
-ensembleData* ensemble_compressed_data_copy_gpu_gpu(ensembleMetaData *metadata, ensembleData *other_edata, const int n_compressed_leaves, const int n_compressed_trees, const int *leaf_indices, const int *tree_indices, const int *new_tree_indices){
-    ensembleData *edata = ensemble_compressed_data_alloc_cuda(metadata, n_compressed_leaves, n_compressed_trees);
+ensembleData* ensemble_compressed_data_copy_gpu_gpu(ensembleMetaData *metadata, ensembleData *other_edata, ensembleData *edata, const int n_compressed_leaves, const int n_compressed_trees, const int *leaf_indices, const int *tree_indices, const int *new_tree_indices){
+    if (edata == nullptr)
+        edata = ensemble_compressed_data_alloc_cuda(metadata, n_compressed_leaves, n_compressed_trees);
     size_t bias_size = metadata->output_dim * sizeof(float);
     size_t tree_size = n_compressed_trees * sizeof(int);
     size_t split_sizes = (metadata->grow_policy == OBLIVIOUS) ? n_compressed_trees : n_compressed_leaves;
@@ -300,11 +305,13 @@ ensembleData* ensemble_compressed_data_copy_gpu_gpu(ensembleMetaData *metadata, 
     selective_copyb<<<n_blocks, THREADS_PER_BLOCK>>>(n_compressed_leaves, leaf_indices_gpu, edata->inequality_directions, other_edata->inequality_directions, metadata->max_depth);
     cudaDeviceSynchronize();
     cudaFree(data);
+    edata->alloc_data_size = data_size;
     return edata;
 }
 
-ensembleData* ensemble_data_copy_gpu_cpu(ensembleMetaData *metadata, ensembleData *other_edata){
-    ensembleData *edata = ensemble_copy_data_alloc(metadata);
+ensembleData* ensemble_data_copy_gpu_cpu(ensembleMetaData *metadata, ensembleData *other_edata, ensembleData *edata){
+    if (edata == nullptr)
+        edata = ensemble_copy_data_alloc(metadata);
     size_t bias_size = metadata->output_dim * sizeof(float);
     size_t tree_size = metadata->n_trees * sizeof(int);
     size_t split_sizes = (metadata->grow_policy == OBLIVIOUS) ? metadata->n_trees : metadata->n_leaves;
@@ -329,8 +336,9 @@ ensembleData* ensemble_data_copy_gpu_cpu(ensembleMetaData *metadata, ensembleDat
     return edata;
 }
 
-ensembleData* ensemble_data_copy_cpu_gpu(ensembleMetaData *metadata, ensembleData *other_edata){
-    ensembleData *edata = ensemble_copy_data_alloc_cuda(metadata);
+ensembleData* ensemble_data_copy_cpu_gpu(ensembleMetaData *metadata, ensembleData *other_edata, ensembleData *edata){
+    if (edata == nullptr)
+        edata = ensemble_copy_data_alloc_cuda(metadata);
     size_t bias_size = metadata->output_dim * sizeof(float);
     size_t tree_size = metadata->n_trees * sizeof(int);
     size_t split_sizes = (metadata->grow_policy == OBLIVIOUS) ? metadata->n_trees : metadata->n_leaves;

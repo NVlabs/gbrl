@@ -106,7 +106,7 @@ GBRL::GBRL(GBRL& other):
         this->device= other.device;
 #ifdef USE_CUDA
         if (this->device == gpu)
-            this->edata = ensemble_data_copy_gpu_gpu(this->metadata, other.edata);
+            this->edata = ensemble_data_copy_gpu_gpu(this->metadata, other.edata, nullptr);
 #endif
         if (this->device == cpu)
             this->edata = copy_ensemble_data(other.edata, this->metadata);
@@ -167,12 +167,12 @@ void GBRL::to_device(deviceType device){
             this->device = gpu;
         }
     } else if (this->device == cpu && device == gpu){
-        ensembleData* edata_gpu = ensemble_data_copy_cpu_gpu(this->metadata, this->edata);
+        ensembleData* edata_gpu = ensemble_data_copy_cpu_gpu(this->metadata, this->edata, nullptr);
         ensemble_data_dealloc(this->edata);
         this->edata = edata_gpu;
         this->device = gpu;
     } else {
-        ensembleData* edata_cpu = ensemble_data_copy_gpu_cpu(this->metadata, this->edata);
+        ensembleData* edata_cpu = ensemble_data_copy_gpu_cpu(this->metadata, this->edata, nullptr);
         ensemble_data_dealloc_cuda(this->edata);
         this->edata = edata_cpu;
         this->device = cpu;
@@ -923,7 +923,7 @@ float* GBRL::tree_shap(const int tree_idx, const float *obs, const char *categor
 ensembleData *edata_cpu = nullptr;
 #ifdef USE_CUDA
     if (this->device == gpu){
-        edata_cpu = ensemble_data_copy_gpu_cpu(this->metadata, this->edata);
+        edata_cpu = ensemble_data_copy_gpu_cpu(this->metadata, this->edata, nullptr);
     }
 #endif 
     if (this->device == cpu)
@@ -952,7 +952,7 @@ float* GBRL::ensemble_shap(const float *obs, const char *categorical_obs, const 
     ensembleData *edata_cpu = nullptr;
 #ifdef USE_CUDA
     if (this->device == gpu){
-        edata_cpu = ensemble_data_copy_gpu_cpu(this->metadata, this->edata);
+        edata_cpu = ensemble_data_copy_gpu_cpu(this->metadata, this->edata, nullptr);
     }
 #endif 
     if (this->device == cpu)
@@ -980,7 +980,7 @@ void GBRL::print_tree(int tree_idx){
     ensembleData *edata_cpu = nullptr;
 #ifdef USE_CUDA
     if (this->device == gpu){
-        edata_cpu = ensemble_data_copy_gpu_cpu(this->metadata, this->edata);
+        edata_cpu = ensemble_data_copy_gpu_cpu(this->metadata, this->edata, nullptr);
     }
 #endif 
     if (this->device == cpu)
@@ -1027,7 +1027,7 @@ void GBRL::plot_tree(int tree_idx, const std::string &filename){
     ensembleData *edata_cpu = this->edata; 
 #ifdef USE_CUDA
     if (this->device == gpu){
-        edata_cpu = ensemble_data_copy_gpu_cpu(this->metadata, this->edata);
+        edata_cpu = ensemble_data_copy_gpu_cpu(this->metadata, this->edata, nullptr);
     }
 #endif 
     valid_tree_idx(tree_idx, this->metadata);

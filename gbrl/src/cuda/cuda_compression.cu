@@ -117,7 +117,7 @@ void get_matrix_representation_cuda(dataSet *dataset, ensembleMetaData *metadata
 }
 
 
-ensembleData* compress_ensemble_cuda(ensembleMetaData *metadata, ensembleData *edata, SGDOptimizerGPU** opts, const int n_opts, const int n_compressed_leaves, const int n_compressed_trees, const int *leaf_indices, const int *tree_indices, const int *new_tree_indices, const float *W){
+ensembleData * compress_ensemble_cuda(ensembleMetaData *metadata, ensembleData *edata, SGDOptimizerGPU** opts, const int n_opts, const int n_compressed_leaves, const int n_compressed_trees, const int *leaf_indices, const int *tree_indices, const int *new_tree_indices, const float *W){
     float *device_W;
     size_t W_size = (metadata->n_leaves + 1) * metadata->output_dim * sizeof(float);
     cudaError_t alloc_error = cudaMalloc((void**)&device_W, W_size);
@@ -138,13 +138,14 @@ ensembleData* compress_ensemble_cuda(ensembleMetaData *metadata, ensembleData *e
     add_W_matrix_to_values_kernel<<<n_blocks, THREADS_PER_BLOCK>>>(device_W, edata->values, edata->bias, opts, n_opts, metadata->n_leaves, metadata->output_dim);
     cudaDeviceSynchronize();
 
-    ensembleData* compressed_edata = ensemble_compressed_data_copy_gpu_gpu(metadata, edata, n_compressed_leaves, n_compressed_trees, leaf_indices, tree_indices, new_tree_indices);
-
+    ensembleData* compressed_edata = ensemble_compressed_data_copy_gpu_gpu(metadata, edata, nullptr, n_compressed_leaves, n_compressed_trees, leaf_indices, tree_indices, new_tree_indices);
+    // reset existing data and copy compressed data into it
+    // This strategy avoids memory fragmentation
+    cudaMemset(edata->bias, 0, edata->alloc_data_size);
+    edata = ensemble_data_copy_gpu_gpu(metadata, compressed_edata, edata);
+    ensemble_data_dealloc_cuda(compressed_edata);
     cudaFree(device_W);
-    ensemble_data_dealloc_cuda(edata);
-    return compressed_edata;
-
-
+    return edata;
 }
 
 __global__ void get_representation_oblivious_kernel_tree_wise(const float* __restrict__ obs, const char* __restrict__ categorical_obs, const int n_samples, const int n_num_features, const int n_cat_features, 

@@ -111,6 +111,7 @@ class TestGBTMulti(unittest.TestCase):
     def test_cosine_cpu(self):
         print("Running Multi test_cosine_cpu")
         X, y = self.data
+        k = 50
         gbrl_params = dict({"control_variates": False, "split_score_func": "Cosine"})
         model = GBRL(
                             output_dim=self.out_dim,
@@ -123,10 +124,29 @@ class TestGBTMulti(unittest.TestCase):
         loss = rmse_model(model, X, y, self.n_epochs)
         value = 2.0
         self.assertTrue(loss < value, f'Expected loss = {loss} < {value}')
-        A, V, _, _, _ = model._model.get_matrix_representation(X)
+        A, V, n_leaves_per_tree, n_leaves, n_trees = model._model.get_matrix_representation(X)
         preds_representation = (A@V).squeeze()
         self.assertTrue(np.allclose(preds_representation, model(X, tensor=False)))
         model.save_model(os.path.join(self.test_dir, 'test_cosine_cpu'))
+        y_pred_k = model(X, tensor=False, start_idx=k)
+        W = np.zeros((n_leaves + 1, self.out_dim), dtype=np.single)
+        tree_selection = th.zeros(n_trees, dtype=th.float32, device='cpu')
+        tree_selection[k:] = 1.0
+        n_compressed_trees = int(tree_selection.sum())
+        selection_mask = th.repeat_interleave(tree_selection, th.tensor(n_leaves_per_tree, device='cpu'))
+        n_compressed_leaves = int(selection_mask.sum())
+        
+        selection_mask = selection_mask.detach().cpu().numpy()
+        tree_selection = tree_selection.detach().cpu().numpy()
+        compressed_leaf_indices = np.where(selection_mask > 0)[0].astype(np.int32)
+        compressed_tree_indices = np.where(tree_selection > 0)[0].astype(np.int32)
+        # indices of the start of each leaf according to the compressed model
+        new_tree_indices = np.zeros(n_compressed_trees)
+        new_tree_indices[1:] = np.cumsum(n_leaves_per_tree[compressed_tree_indices])[:-1]
+        model._model.cpp_model.compress(n_compressed_leaves, n_compressed_trees, compressed_leaf_indices, compressed_tree_indices, new_tree_indices.astype(np.int32), W)
+        compressed_y = model(X, tensor=False)
+        self.assertTrue(np.allclose(compressed_y, y_pred_k), "Discarding trees should be equal to prediction without them")
+        
 
     def test_shap_cpu(self):
         print("Running test_shap_cpu")
@@ -177,6 +197,7 @@ class TestGBTMulti(unittest.TestCase):
     def test_cosine_gpu(self):
         print("Running Multi test_cosine_gpu")
         X, y = self.data
+        k = 50
         gbrl_params = dict({"control_variates": False, "split_score_func": "Cosine"})
         model = GBRL(
                             output_dim=self.out_dim,
@@ -189,10 +210,29 @@ class TestGBTMulti(unittest.TestCase):
         loss = rmse_model(model, X, y, self.n_epochs, device='cuda')
         value = 2.0
         self.assertTrue(loss < value, f'Expected loss = {loss} < {value}')
-        A, V, _, _, _ = model._model.get_matrix_representation(X)
+        A, V, n_leaves_per_tree, n_leaves, n_trees = model._model.get_matrix_representation(X)
         preds_representation = (A@V).squeeze()
         self.assertTrue(np.allclose(preds_representation, model(X, tensor=False)))
         model.save_model(os.path.join(self.test_dir, 'test_cosine_gpu'))
+        y_pred_k = model(X, tensor=False, start_idx=k)
+        W = np.zeros((n_leaves + 1, self.out_dim), dtype=np.single)
+        tree_selection = th.zeros(n_trees, dtype=th.float32, device='cuda')
+        tree_selection[k:] = 1.0
+        n_compressed_trees = int(tree_selection.sum())
+        selection_mask = th.repeat_interleave(tree_selection, th.tensor(n_leaves_per_tree, device='cuda'))
+        n_compressed_leaves = int(selection_mask.sum())
+        
+        selection_mask = selection_mask.detach().cpu().numpy()
+        tree_selection = tree_selection.detach().cpu().numpy()
+        compressed_leaf_indices = np.where(selection_mask > 0)[0].astype(np.int32)
+        compressed_tree_indices = np.where(tree_selection > 0)[0].astype(np.int32)
+        # indices of the start of each leaf according to the compressed model
+        new_tree_indices = np.zeros(n_compressed_trees)
+        new_tree_indices[1:] = np.cumsum(n_leaves_per_tree[compressed_tree_indices])[:-1]
+        model._model.cpp_model.compress(n_compressed_leaves, n_compressed_trees, compressed_leaf_indices, compressed_tree_indices, new_tree_indices.astype(np.int32), W)
+        compressed_y = model(X, tensor=False)
+        self.assertTrue(np.allclose(compressed_y, y_pred_k), "Discarding trees should be equal to prediction without them")
+        
 
     def test_cosine_oblivious_cpu(self):
         print("Running Multi test_cosine_oblivious_cpu")
