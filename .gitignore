@@ -13,3 +13,4 @@ builds/
 dist/
 docs/_build/
 *.ncu-rep
+*.nfs*
