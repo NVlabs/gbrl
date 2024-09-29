@@ -219,8 +219,8 @@ ensembleData* ensemble_compressed_data_alloc_cuda(ensembleMetaData *metadata, co
     trace += edge_size * sizeof(bool);
     edata->categorical_values = (char *)(data + trace);
 
-    metadata->max_trees = n_compressed_trees;
-    metadata->max_leaves = n_compressed_leaves;
+    // metadata->max_trees = n_compressed_trees;
+    // metadata->max_leaves = n_compressed_leaves;
     metadata->n_trees = n_compressed_trees; 
     metadata->n_leaves = n_compressed_leaves; 
     edata->alloc_data_size = data_size;

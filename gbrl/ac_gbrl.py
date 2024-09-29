@@ -108,6 +108,7 @@ class ActorCritic(GBRL):
         instance.tree_struct = instance._model.tree_struct
         instance.gbrl_params = instance._model.gbrl_params
         instance.device = instance._model.get_device()
+        print(instance.device)
         if isinstance(instance.device, tuple):
             instance.device = instance.device[0]
         return instance

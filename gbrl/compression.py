@@ -125,7 +125,7 @@ class SharedActorCriticCompression(TreeCompression):
             predictions = self.compression(A, V)
             compressed_theta = predictions[:, :-1]
             compressed_critic = predictions[:, -1]
-            critic_loss = nn.functional.mse_loss(compressed_critic, critic_targets)
+            critic_loss = 0.5*nn.functional.mse_loss(compressed_critic, critic_targets)
             dist = categorical_dist(compressed_theta) if self.dist_type == 'categorical' else gaussian_dist(compressed_theta, log_std)
             log_prob = dist.log_prob(actions)
             actor_loss = -log_prob.mean()
@@ -205,7 +205,7 @@ class CompressionMethod(nn.Module):
         selection_mask = th.repeat_interleave(tree_selection, self.n_leaves_per_tree)
         n_compressed_leaves = int(selection_mask.sum())
         W = self.W 
-        if self.actor_critic:
+        if self.least_squares_W:
             C = construct_compression_matrix(tree_selection, self.n_leaves_per_tree)
             W_critic = get_least_squares_W(C, A , V[:, -1])
             W  = th.cat([self.W, W_critic.unsqueeze(-1)], dim=1)
@@ -244,12 +244,8 @@ class BestK(CompressionMethod):
         mask[sorted_indices[:self.n_trees - self.k]] = 1.0
         masked_probs = probs * mask
         # Binarize using straight through estimator
-        # tree_selection = BinarizeSTE.apply(probs)
         tree_selection = BinarizeSTE.apply(masked_probs)
         self.reg_loss = self.lambda_reg * th.abs(probs).sum() 
-        # print(self.reg_loss)
-        # self.reg_loss = 0
-        # print(np.where(tree_selection.clone().detach().cpu().numpy() == 0), self.n_trees - tree_selection.sum())
         return tree_selection
     
         
