@@ -36,7 +36,7 @@ jobs:
         sudo apt-get install -y lcov g++ gcc
 
     - name: Install dependencies on MacOs
-      if: matrix.os == 'ubuntu-latest'
+      if: matrix.os == 'macos-latest'
       run: |
         brew install libomp llvm
         # Dynamic paths for Homebrew-installed tools
