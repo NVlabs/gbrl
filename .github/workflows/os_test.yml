@@ -76,15 +76,12 @@ jobs:
         # Inspect the linked libraries
         otool -L $module_file
 
-    # - name: Run tests
-    #   run: |
-    #     # python -m unittest discover tests
-    #     lldb -- python -m unittest discover tests
-    - name: Run tests under lldb
+    - name: Run tests
       run: |
-        lldb --batch -o "target create python" \
-            -o "settings set target.run-args -m unittest discover tests" \
-            -o "run" \
-            -o "bt"
+        python -m unittest discover tests
+        # lldb -- python -m unittest discover tests
+    # - name: Run tests under lldb
+    #   run: |
+    #     lldb python -m unittest discover tests
 
 
