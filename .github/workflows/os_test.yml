@@ -61,7 +61,7 @@ jobs:
 
         # Ensure the correct architecture is being targeted for macOS on Apple Silicon (arm64)
         export CMAKE_OSX_ARCHITECTURES="arm64"
-        pip install .
+        DEBUG=1 pip install .
 
     - name: Run tests
       run: |
