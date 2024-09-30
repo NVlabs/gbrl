@@ -61,6 +61,10 @@ jobs:
         export DYLD_LIBRARY_PATH="${LLVM_PREFIX}/lib:${BREW_PREFIX}/libomp/lib:$DYLD_LIBRARY_PATH"
         DEBUG=1 pip install . -v
 
+    - name: Check linked libraries
+      run: |
+        otool -L gbrl/gbrl_cpp.so
+
     - name: Run tests
       run: |
         export LDFLAGS="-L${BREW_PREFIX}/libomp/lib -L${LLVM_PREFIX}/lib -L${LLVM_PREFIX}/lib/c++ -Wl,-rpath,${LLVM_PREFIX}/lib/c++ -lunwind"
@@ -69,6 +73,7 @@ jobs:
         export CXX="$(brew --prefix llvm)/bin/clang++"
         export PATH="${LLVM_PREFIX}/bin:$PATH"
         export DYLD_LIBRARY_PATH="${LLVM_PREFIX}/lib:${BREW_PREFIX}/libomp/lib:$DYLD_LIBRARY_PATH"
-        python -m unittest discover tests
+        # python -m unittest discover tests
+        lldb -- python -m unittest discover tests
 
 
