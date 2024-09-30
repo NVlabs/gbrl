@@ -47,6 +47,12 @@ jobs:
         which clang
         which clang++
 
+    - name: Check LLVM architecture
+      run: |
+        echo "Checking LLVM compiler architecture..."
+        file /opt/homebrew/opt/llvm/bin/clang
+        file /opt/homebrew/opt/llvm/bin/clang++
+
     - name: Install Python dependencies and build the project with coverage
       run: |
         python -m pip install --upgrade pip
