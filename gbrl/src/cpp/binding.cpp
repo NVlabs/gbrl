@@ -250,10 +250,12 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         int n_samples, n_num_features = 0, n_cat_features = 0;
         handle_input_info<float>(grads, grads_ptr, grads_shape, grads_device, "grads", false, "step");
         if (grads_shape.size() == 1){
-            if (self.metadata->output_dim = 1)
+            if (self.metadata->output_dim == 1){
                 n_samples  = static_cast<int>(grads_shape[0]);
-            else
+            }
+            else{
                 n_samples = 1;
+            }
         } else if (grads_shape.size() > 1){
             n_samples  = static_cast<int>(grads_shape[0]);
         }
@@ -455,7 +457,7 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         auto capsule = py::capsule(lrs, [](void* ptr) {
         delete[] reinterpret_cast<float*>(ptr);
         });
-        return py::array({static_cast<long int>(self.opts.size())}, lrs, capsule);
+        return py::array(static_cast<long int>(self.opts.size()), lrs, capsule);
     }, "Return current scheduler lrs");  
     gbrl.def("get_num_trees", [](GBRL &self) ->  int {
         py::gil_scoped_release release; 
