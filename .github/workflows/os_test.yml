@@ -53,7 +53,7 @@ jobs:
         export CPPFLAGS="-I${LIBOMP_PREFIX}/include -I${LLVM_PREFIX}/include"
         export CC="$(brew --prefix llvm)/bin/clang"
         export CXX="$(brew --prefix llvm)/bin/clang++"
-        export PATH="${BREW_PREFIX}/bin:${LLVM_PREFIX}/bin:$PATH"
+        export PATH="${BREW_PREFIX}/bin:${LLVM_PREFIX}/bin:/usr/local/bin:/usr/local/sbin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
         export DYLD_LIBRARY_PATH="${LLVM_PREFIX}/lib:${LIBOMP_PREFIX}/lib:$DYLD_LIBRARY_PATH"
         DEBUG=1 pip install . -v
 
@@ -87,7 +87,7 @@ jobs:
         export CPPFLAGS="-I${LIBOMP_PREFIX}/include -I${LLVM_PREFIX}/include"
         export CC="$(brew --prefix llvm)/bin/clang"
         export CXX="$(brew --prefix llvm)/bin/clang++"
-        export PATH="${BREW_PREFIX}/bin:${LLVM_PREFIX}/bin:$PATH"
+        export PATH="${BREW_PREFIX}/bin:${LLVM_PREFIX}/bin:/usr/local/bin:/usr/local/sbin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
         export DYLD_LIBRARY_PATH="${LLVM_PREFIX}/lib:${LIBOMP_PREFIX}/lib:$DYLD_LIBRARY_PATH"
         DYLD_PRINT_LIBRARIES=1 python -m unittest discover tests
         # lldb -- python -m unittest discover tests
