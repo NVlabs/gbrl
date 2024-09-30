@@ -50,6 +50,8 @@ class CMakeBuild(build_ext):
             cmake_args.append('-DCMAKE_C_COMPILER=' + os.environ['CC'])
         if 'CXX' in os.environ:
             cmake_args.append('-DCMAKE_CXX_COMPILER=' + os.environ['CXX'])
+        if 'CPPFLAGS' in os.environ:
+            cmake_args.append('-DCMAKE_CXX_FLAGS=' + os.environ['CPPFLAGS'])
         build_args = ['--config', cfg]
         if self.cmake_verbose:
             cmake_args.append('-DCMAKE_VERBOSE_MAKEFILE:BOOL=ON')
