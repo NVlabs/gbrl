@@ -53,6 +53,7 @@ jobs:
         # Ensure LLVM bin is in PATH
         export PATH="$(brew --prefix llvm)/bin:$PATH"
         export DYLD_LIBRARY_PATH=/opt/homebrew/opt/llvm/lib:/opt/homebrew/opt/libomp/lib
+        export CMAKE_PREFIX_PATH=$(brew --prefix llvm)
         
 
     - name: Set environment variable for coverage
