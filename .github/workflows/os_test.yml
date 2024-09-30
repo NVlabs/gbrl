@@ -78,6 +78,17 @@ jobs:
 
     - name: Run tests
       run: |
+        BREW_PREFIX=$(brew --prefix)
+        LLVM_PREFIX=$(brew --prefix llvm)
+        LIBOMP_PREFIX=$(brew --prefix libomp)
+        echo $LIBOMP_PREFIX
+
+        export LDFLAGS="-L${LIBOMP_PREFIX}/lib -L${LLVM_PREFIX}/lib -L${LLVM_PREFIX}/lib/c++ -Wl,-rpath,${LLVM_PREFIX}/lib/c++ -lunwind"
+        export CPPFLAGS="-I${LIBOMP_PREFIX}/include -I${LLVM_PREFIX}/include"
+        export CC="$(brew --prefix llvm)/bin/clang"
+        export CXX="$(brew --prefix llvm)/bin/clang++"
+        export PATH="${LLVM_PREFIX}/bin:$PATH"
+        export DYLD_LIBRARY_PATH="${LLVM_PREFIX}/lib:${LIBOMP_PREFIX}/lib:$DYLD_LIBRARY_PATH"
         python -m unittest discover tests
         # lldb -- python -m unittest discover tests
     # - name: Run tests under lldb
