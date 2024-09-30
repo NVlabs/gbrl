@@ -53,6 +53,7 @@ class CMakeBuild(build_ext):
         build_args = ['--config', cfg]
         if self.cmake_verbose:
             cmake_args.append('-DCMAKE_VERBOSE_MAKEFILE:BOOL=ON')
+            cmake_args.append('--debug-trycompile')
             build_args.append('--verbose')
 
         if ('CPU_ONLY' not in os.environ and platform.system() != 'Darwin') or ('CPU_ONLY' in os.environ and os.environ['CPU_ONLY'] != '1'):
