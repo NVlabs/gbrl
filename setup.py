@@ -59,12 +59,12 @@ class CMakeBuild(build_ext):
             cmake_args.append('-DUSE_CUDA=ON')
             if 'CUDACXX' in os.environ:
                 cmake_args.append('-DCMAKE_CUDA_COMPILER=' + os.environ['CUDACXX'])
-        # Set CMAKE_PREFIX_PATH for LLVM
-        if platform.system() == 'Darwin':  # MacOS specific logic
-            brew_prefix = subprocess.check_output(['brew', '--prefix', 'llvm']).decode().strip()
-            print(brew_prefix)
-            cmake_args.append(f'-DCMAKE_PREFIX_PATH={brew_prefix}')
-            cmake_args.append(f'-DLLVM_DIR={brew_prefix}/lib/cmake/llvm')
+        # # Set CMAKE_PREFIX_PATH for LLVM
+        # if platform.system() == 'Darwin':  # MacOS specific logic
+        #     brew_prefix = subprocess.check_output(['brew', '--prefix', 'llvm']).decode().strip()
+        #     print(brew_prefix)
+        #     cmake_args.append(f'-DCMAKE_PREFIX_PATH={brew_prefix}')
+        #     cmake_args.append(f'-DLLVM_DIR={brew_prefix}/lib/cmake/llvm')
             
         build_temp = self.build_temp
         if not os.path.exists(build_temp):
