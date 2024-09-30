@@ -47,7 +47,7 @@ jobs:
         which clang
         which clang++
 
-    - name: Install Python dependencies and build the project with coverage
+    - name: Install Python dependencies and build the project
       run: |
         python -m pip install --upgrade pip
         BREW_PREFIX=$(brew --prefix)
@@ -90,10 +90,12 @@ jobs:
         export PATH="${LLVM_PREFIX}/bin:$PATH"
         export DYLD_LIBRARY_PATH="${LLVM_PREFIX}/lib:${LIBOMP_PREFIX}/lib:$DYLD_LIBRARY_PATH"
         lldb python << EOF
-        run -m unittest discover tests
+        run -m unittest discover tests > test_output.log 2>&1
         EOF
+        cat test_output.log
     - name: Run tests
       run: |
+        export UNWIND_NO_UNWIND=1
         BREW_PREFIX=$(brew --prefix)
         LLVM_PREFIX=$(brew --prefix llvm)
         LIBOMP_PREFIX=$(brew --prefix libomp)
