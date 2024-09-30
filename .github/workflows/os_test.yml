@@ -57,6 +57,7 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         BREW_PREFIX=$(brew --prefix)
+        brew reinstall cmake
 
         export LDFLAGS="-L${BREW_PREFIX}/ffmpeg/lib -L${BREW_PREFIX}/libomp/lib -L${BREW_PREFIX}/llvm/lib -L${BREW_PREFIX}/llvm/lib/c++ -Wl,-rpath,${BREW_PREFIX}/llvm/lib/c++ -lunwind"
         export CPPFLAGS="-I${BREW_PREFIX}/ffmpeg/include -I${BREW_PREFIX}/libomp/include -I${BREW_PREFIX}/llvm/include"
