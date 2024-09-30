@@ -45,10 +45,9 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         export CPPFLAGS="-I$(brew --prefix libomp)/include"
-        export OpenMP_ROOT=$(brew --prefix)/opt/libomp
+        export OpenMP_ROOT=$(brew --prefix libomp)
         export CXX="/usr/bin/g++"
         export CC="/usr/bin/gcc"
-        export DYLD_LIBRARY_PATH="$(brew --prefix libomp)/lib"
         DEBUG=1 pip install . -v
 
     - name: Check linked libraries
@@ -66,10 +65,13 @@ jobs:
     - name: Run tests
       run: |
         export CPPFLAGS="-I$(brew --prefix libomp)/include"
-        export OpenMP_ROOT=$(brew --prefix)/opt/libomp
+        export OpenMP_ROOT=$(brew --prefix libomp)
         export CXX="/usr/bin/g++"
         export CC="/usr/bin/gcc"
-        export DYLD_LIBRARY_PATH="$(brew --prefix libomp)/lib"
+        # export DYLD_LIBRARY_PATH="$(brew --prefix libomp)/lib"
+        python -m unittest discover tests
+    - name: Run tests without env variables
+      run: |
         python -m unittest discover tests
 
 
