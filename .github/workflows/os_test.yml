@@ -69,10 +69,15 @@ jobs:
         
         # Inspect the linked libraries
         otool -L $module_file
-    
+    - name: Run tests under LLDB
+      continue-on-error: true
+      run: |
+        lldb python << EOF
+        run -m unittest discover tests
+        bt
+        EOF
     - name: Run tests
       run: |
-        export UNWIND_NO_UNWIND=1
         BREW_PREFIX=$(brew --prefix)
         LLVM_PREFIX=$(brew --prefix llvm)
         LIBOMP_PREFIX=$(brew --prefix libomp)
@@ -84,7 +89,7 @@ jobs:
         export CXX="$(brew --prefix llvm)/bin/clang++"
         export PATH="${BREW_PREFIX}/bin:${LLVM_PREFIX}/bin:$PATH"
         export DYLD_LIBRARY_PATH="${LLVM_PREFIX}/lib:${LIBOMP_PREFIX}/lib:$DYLD_LIBRARY_PATH"
-        python -m unittest discover tests
+        DYLD_PRINT_LIBRARIES=1 python -m unittest discover tests
         # lldb -- python -m unittest discover tests
 
 
