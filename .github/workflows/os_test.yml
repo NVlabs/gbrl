@@ -52,15 +52,15 @@ jobs:
         python -m pip install --upgrade pip
         BREW_PREFIX=$(brew --prefix)
         LLVM_PREFIX=$(brew --prefix llvm)
-        export LIBOMP_PREFIX=$(brew --prefix libomp)
+        LIBOMP_PREFIX=$(brew --prefix libomp)
         echo $LIBOMP_PREFIX
 
-        export LDFLAGS="-L${BREW_PREFIX}/libomp/lib -L${LLVM_PREFIX}/lib -L${LLVM_PREFIX}/lib/c++ -Wl,-rpath,${LLVM_PREFIX}/lib/c++ -lunwind"
-        export CPPFLAGS="-I${BREW_PREFIX}/libomp/include -I${LLVM_PREFIX}/include"
+        export LDFLAGS="-L${LIBOMP_PREFIX}/lib -L${LLVM_PREFIX}/lib -L${LLVM_PREFIX}/lib/c++ -Wl,-rpath,${LLVM_PREFIX}/lib/c++ -lunwind"
+        export CPPFLAGS="-I${LIBOMP_PREFIX}/include -I${LLVM_PREFIX}/include"
         export CC="$(brew --prefix llvm)/bin/clang"
         export CXX="$(brew --prefix llvm)/bin/clang++"
         export PATH="${LLVM_PREFIX}/bin:$PATH"
-        export DYLD_LIBRARY_PATH="${LLVM_PREFIX}/lib:${BREW_PREFIX}/libomp/lib:$DYLD_LIBRARY_PATH"
+        export DYLD_LIBRARY_PATH="${LLVM_PREFIX}/lib:${LIBOMP_PREFIX}/lib:$DYLD_LIBRARY_PATH"
         DEBUG=1 pip install . -v
 
     - name: Check linked libraries
@@ -82,9 +82,9 @@ jobs:
     #     lldb -- python -m unittest discover tests
     - name: Run tests under lldb
       run: |
-        lldb --batch --one-line "target create python" \
-            --one-line "settings set target.run-args -m unittest discover tests" \
-            --one-line "run" \
-            --one-line "bt"
+        lldb --batch -o "target create python" \
+            -o "settings set target.run-args -m unittest discover tests" \
+            -o "run" \
+            -o "bt"
 
 
