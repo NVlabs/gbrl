@@ -55,7 +55,7 @@ jobs:
         LIBOMP_PREFIX=$(brew --prefix libomp)
         echo $LIBOMP_PREFIX
 
-        export LDFLAGS="-L${LIBOMP_PREFIX}/lib -L${LLVM_PREFIX}/lib -L${LLVM_PREFIX}/lib/c++ -Wl,-rpath,${LLVM_PREFIX}/lib/c++ -lunwind"
+        export LDFLAGS="-L${LIBOMP_PREFIX}/lib -L${LLVM_PREFIX}/lib -L${LLVM_PREFIX}/lib/c++ -Wl,-rpath,${LLVM_PREFIX}/lib/c++"
         export CPPFLAGS="-I${LIBOMP_PREFIX}/include -I${LLVM_PREFIX}/include"
         export CC="$(brew --prefix llvm)/bin/clang"
         export CXX="$(brew --prefix llvm)/bin/clang++"
@@ -76,6 +76,7 @@ jobs:
         # Inspect the linked libraries
         otool -L $module_file
     - name: Run tests under lldb
+      continue-on-error: true
       run: |
         BREW_PREFIX=$(brew --prefix)
         LLVM_PREFIX=$(brew --prefix llvm)
@@ -88,8 +89,9 @@ jobs:
         export CXX="$(brew --prefix llvm)/bin/clang++"
         export PATH="${LLVM_PREFIX}/bin:$PATH"
         export DYLD_LIBRARY_PATH="${LLVM_PREFIX}/lib:${LIBOMP_PREFIX}/lib:$DYLD_LIBRARY_PATH"
-        lldb python
+        lldb python << EOF
         run -m unittest discover tests
+        EOF
     - name: Run tests
       run: |
         BREW_PREFIX=$(brew --prefix)
@@ -97,7 +99,7 @@ jobs:
         LIBOMP_PREFIX=$(brew --prefix libomp)
         echo $LIBOMP_PREFIX
 
-        export LDFLAGS="-L${LIBOMP_PREFIX}/lib -L${LLVM_PREFIX}/lib -L${LLVM_PREFIX}/lib/c++ -Wl,-rpath,${LLVM_PREFIX}/lib/c++ -lunwind"
+        export LDFLAGS="-L${LIBOMP_PREFIX}/lib -L${LLVM_PREFIX}/lib -L${LLVM_PREFIX}/lib/c++ -Wl,-rpath,${LLVM_PREFIX}/lib/c++"
         export CPPFLAGS="-I${LIBOMP_PREFIX}/include -I${LLVM_PREFIX}/include"
         export CC="$(brew --prefix llvm)/bin/clang"
         export CXX="$(brew --prefix llvm)/bin/clang++"
