@@ -51,9 +51,6 @@ jobs:
         export CXX="/usr/bin/g++"
         export CC="/usr/bin/gcc"
         pip install . -v
-        module_file=$(find gbrl/ -name "*.so")
-        install_name_tool -add_rpath @loader_path/include/libomp $module_file
-        # install_name_tool -change /opt/homebrew/opt/libomp/lib/libomp.dylib @loader_path/include/libomp/libomp.dylib $module_file
     
     - name: Install Python dependencies and build the project windows
       if: matrix.os == 'windows-latest'
@@ -74,24 +71,16 @@ jobs:
         
         # Inspect the linked libraries
         otool -L $module_file
-        otool -l $module_file | grep LC_RPATH -A2
     
-    # - name: Check linked libraries Windows
-    #   if: matrix.os == 'windows-latest'
-    #   shell: powershell
-    #   run: |
-    #     $module_file = Get-ChildItem gbrl\ -Filter "*.pyd"
-    #     if ($null -eq $module_file) {
-    #       Write-Error "Pybind11 module not found"
-    #       exit 1
-    #     }
-    #     dumpbin /DEPENDENTS $module_file
-    - name: Run tests without env variables
-      continue-on-error: true
+    - name: Run tests without env variables Mac
+      if: matrix.os == 'macos-latest'
       run: |
-        # if [ "${{ matrix.os }}" == 'macos-latest' ]; then
-        #   export DYLD_LIBRARY_PATH="${PWD}/gbrl/include/libomp"
-        # fi
+        export DYLD_LIBRARY_PATH="${PWD}/gbrl/include/libomp"
+        python -m unittest discover tests
+
+    - name: Run tests without env variables
+      if: matrix.os != 'macos-latest'
+      run: |
         python -m unittest discover tests
 
 
