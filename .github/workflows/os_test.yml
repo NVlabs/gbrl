@@ -52,18 +52,23 @@ jobs:
         python -m pip install --upgrade pip
         BREW_PREFIX=$(brew --prefix)
         LLVM_PREFIX=$(brew --prefix llvm)
-        OPENMP_PREFIX$(brew --prefix libomp)
 
-        export LDFLAGS="-L${OPENMP_PREFIX}/lib -L${LLVM_PREFIX}/lib -L${LLVM_PREFIX}/lib/c++ -Wl,-rpath,${LLVM_PREFIX}/lib/c++ -lunwind"
-        export CPPFLAGS="-I${OPENMP_PREFIX}/include -I${LLVM_PREFIX}/include"
+        export LDFLAGS="-L${BREW_PREFIX}/libomp/lib -L${LLVM_PREFIX}/lib -L${LLVM_PREFIX}/lib/c++ -Wl,-rpath,${LLVM_PREFIX}/lib/c++ -lunwind"
+        export CPPFLAGS="-I${BREW_PREFIX}/libomp/include -I${LLVM_PREFIX}/include"
         export CC="$(brew --prefix llvm)/bin/clang"
         export CXX="$(brew --prefix llvm)/bin/clang++"
         export PATH="${LLVM_PREFIX}/bin:$PATH"
-        export DYLD_LIBRARY_PATH="${LLVM_PREFIX}/lib:${OPENMP_PREFIX}/lib:$DYLD_LIBRARY_PATH"
+        export DYLD_LIBRARY_PATH="${LLVM_PREFIX}/lib:${BREW_PREFIX}/libomp/lib:$DYLD_LIBRARY_PATH"
         DEBUG=1 pip install . -v -v -v
 
     - name: Run tests
       run: |
+        export LDFLAGS="-L${BREW_PREFIX}/libomp/lib -L${LLVM_PREFIX}/lib -L${LLVM_PREFIX}/lib/c++ -Wl,-rpath,${LLVM_PREFIX}/lib/c++ -lunwind"
+        export CPPFLAGS="-I${BREW_PREFIX}/libomp/include -I${LLVM_PREFIX}/include"
+        export CC="$(brew --prefix llvm)/bin/clang"
+        export CXX="$(brew --prefix llvm)/bin/clang++"
+        export PATH="${LLVM_PREFIX}/bin:$PATH"
+        export DYLD_LIBRARY_PATH="${LLVM_PREFIX}/lib:${BREW_PREFIX}/libomp/lib:$DYLD_LIBRARY_PATH"
         python -m unittest discover tests
 
 
