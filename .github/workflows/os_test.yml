@@ -40,12 +40,6 @@ jobs:
       run: |
         brew install libomp llvm
         # Dynamic paths for Homebrew-installed tools
-    - name: Set up LLVM and environment
-      run: |
-        echo "Adding LLVM to path"
-        export PATH="$(brew --prefix llvm)/bin:$PATH"
-        which clang
-        which clang++
 
     - name: Install Python dependencies and build the project
       run: |
@@ -59,7 +53,7 @@ jobs:
         export CPPFLAGS="-I${LIBOMP_PREFIX}/include -I${LLVM_PREFIX}/include"
         export CC="$(brew --prefix llvm)/bin/clang"
         export CXX="$(brew --prefix llvm)/bin/clang++"
-        export PATH="${LLVM_PREFIX}/bin:$PATH"
+        export PATH="${BREW_PREFIX}/bin:${LLVM_PREFIX}/bin:$PATH"
         export DYLD_LIBRARY_PATH="${LLVM_PREFIX}/lib:${LIBOMP_PREFIX}/lib:$DYLD_LIBRARY_PATH"
         DEBUG=1 pip install . -v
 
@@ -75,24 +69,7 @@ jobs:
         
         # Inspect the linked libraries
         otool -L $module_file
-    - name: Run tests under lldb
-      continue-on-error: true
-      run: |
-        BREW_PREFIX=$(brew --prefix)
-        LLVM_PREFIX=$(brew --prefix llvm)
-        LIBOMP_PREFIX=$(brew --prefix libomp)
-        echo $LIBOMP_PREFIX
-
-        export LDFLAGS="-L${LIBOMP_PREFIX}/lib -L${LLVM_PREFIX}/lib -L${LLVM_PREFIX}/lib/c++ -Wl,-rpath,${LLVM_PREFIX}/lib/c++"
-        export CPPFLAGS="-I${LIBOMP_PREFIX}/include -I${LLVM_PREFIX}/include"
-        export CC="$(brew --prefix llvm)/bin/clang"
-        export CXX="$(brew --prefix llvm)/bin/clang++"
-        export PATH="${LLVM_PREFIX}/bin:$PATH"
-        export DYLD_LIBRARY_PATH="${LLVM_PREFIX}/lib:${LIBOMP_PREFIX}/lib:$DYLD_LIBRARY_PATH"
-        lldb python << EOF
-        run -m unittest discover tests > test_output.log 2>&1
-        EOF
-        cat test_output.log
+    
     - name: Run tests
       run: |
         export UNWIND_NO_UNWIND=1
@@ -105,7 +82,7 @@ jobs:
         export CPPFLAGS="-I${LIBOMP_PREFIX}/include -I${LLVM_PREFIX}/include"
         export CC="$(brew --prefix llvm)/bin/clang"
         export CXX="$(brew --prefix llvm)/bin/clang++"
-        export PATH="${LLVM_PREFIX}/bin:$PATH"
+        export PATH="${BREW_PREFIX}/bin:${LLVM_PREFIX}/bin:$PATH"
         export DYLD_LIBRARY_PATH="${LLVM_PREFIX}/lib:${LIBOMP_PREFIX}/lib:$DYLD_LIBRARY_PATH"
         python -m unittest discover tests
         # lldb -- python -m unittest discover tests
