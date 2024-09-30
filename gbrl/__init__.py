@@ -8,16 +8,6 @@
 ##############################################################################
 __version__ = "1.0.4"
 
-import platform
-import os
-
-if platform.system() == "Darwin":
-    libomp_path = os.path.join(os.path.dirname(__file__), "include", "libomp")
-    if "DYLD_LIBRARY_PATH" in os.environ:
-        os.environ["DYLD_LIBRARY_PATH"] = libomp_path + ":" + os.environ["DYLD_LIBRARY_PATH"]
-    else:
-        os.environ["DYLD_LIBRARY_PATH"] = libomp_path
-
 from .ac_gbrl import (ActorCritic, GaussianActor, ContinuousCritic,
                    DiscreteCritic, ParametricActor)
 from .gbt import GBRL
