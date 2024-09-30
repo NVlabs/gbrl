@@ -73,7 +73,7 @@ jobs:
         python -m unittest discover tests
     - name: Run tests without env variables
       run: |
-        export DYLD_LIBRARY_PATH="$(brew --prefix libomp)/lib"
+        export DYLD_LIBRARY_PATH="${${PWD}}/gbrl/include/libomp"
         python -m unittest discover tests
 
 
