@@ -54,4 +54,3 @@ endif()
 
 
 add_library(gbrl_cpp_src OBJECT ${CPP_SOURCES})
-# target_compile_definitions(gbrl_cpp_src PUBLIC MODULE_NAME="gbrl_cpp")

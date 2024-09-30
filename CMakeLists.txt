@@ -156,33 +156,18 @@ else()
 endif()
          
 
-if(APPLE)
-    find_package(OpenMP)
-    if(NOT OpenMP_FOUND)
-      # Try again with extra path info; required for libomp 15+ from Homebrew
-        execute_process(COMMAND brew --prefix libomp
-                        OUTPUT_VARIABLE HOMEBREW_LIBOMP_PREFIX
-                        OUTPUT_STRIP_TRAILING_WHITESPACE)
-        set(OpenMP_C_FLAGS
-        "-Xpreprocessor -fopenmp -I${HOMEBREW_LIBOMP_PREFIX}/include")
-        set(OpenMP_CXX_FLAGS
-        "-Xpreprocessor -fopenmp -I${HOMEBREW_LIBOMP_PREFIX}/include")      
-        set(OpenMP_C_LIB_NAMES omp)
-        set(OpenMP_CXX_LIB_NAMES omp)
-        set(OpenMP_omp_LIBRARY ${HOMEBREW_LIBOMP_PREFIX}/lib/libomp.dylib)
-        find_package(OpenMP REQUIRED)  
-    endif()
-else()
-    find_package(OpenMP REQUIRED)
-    set(OpenMP_CXX_FLAGS ${OpenMP_CXX_FLAGS})
-    set(OpenMP_CXX_LIB_NAMES ${OpenMP_CXX_LIB_NAMES})
-    set(OpenMP_omp_LIBRARY ${OpenMP_omp_LIBRARY})
-endif()
+
+find_package(OpenMP REQUIRED)
+set(OpenMP_CXX_FLAGS ${OpenMP_CXX_FLAGS})
+set(OpenMP_CXX_LIB_NAMES ${OpenMP_CXX_LIB_NAMES})
+set(OpenMP_omp_LIBRARY ${OpenMP_omp_LIBRARY})
+
 
 # Ensure OpenMP flags and directories are applied
 if (OpenMP_FOUND)
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+    set(OpenMP_EXE_LINKER_FLAGS "-lomp -static")    
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}")
 endif()
 
@@ -224,7 +209,11 @@ elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
     find_package(LLVM REQUIRED)
     include_directories(${LLVM_INCLUDE_DIRS})
     link_directories(${LLVM_LIBRARY_DIRS})
-    target_link_libraries(gbrl_cpp PRIVATE ${LLVM_LIBRARIES} OpenMP::OpenMP_CXX)
+    set(EXTERNAL_OMP_LIB_DIR "${CMAKE_SOURCE_DIR}/gbrl/include/libomp/")
+    # Find the dynamic library
+    find_library(OMP_LIBRARY NAMES omp PATHS ${EXTERNAL_OMP_LIB_DIR} NO_DEFAULT_PATH)
+    # target_link_libraries(gbrl_cpp PRIVATE ${LLVM_LIBRARIES} OpenMP::OpenMP_CXX)
+    target_link_libraries(gbrl_cpp PRIVATE ${LLVM_LIBRARIES} ${OMP_LIBRARY})
 elseif (WIN32)
     target_link_libraries(gbrl_cpp PRIVATE OpenMP::OpenMP_CXX)
     if (USE_CUDA)
