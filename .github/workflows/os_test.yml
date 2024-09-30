@@ -60,8 +60,8 @@ jobs:
 
         export LDFLAGS="-L${BREW_PREFIX}/ffmpeg/lib -L${BREW_PREFIX}/libomp/lib -L${BREW_PREFIX}/llvm/lib -L${BREW_PREFIX}/llvm/lib/c++ -Wl,-rpath,${BREW_PREFIX}/llvm/lib/c++ -lunwind"
         export CPPFLAGS="-I${BREW_PREFIX}/ffmpeg/include -I${BREW_PREFIX}/libomp/include -I${BREW_PREFIX}/llvm/include"
-        export CC="${BREW_PREFIX}/llvm/bin/clang"
-        export CXX="${BREW_PREFIX}/llvm/bin/clang++"
+        export CC="$(brew --prefix llvm)/bin/clang"
+        export CXX="$(brew --prefix llvm)/bin/clang++"
         export PATH="${BREW_PREFIX}/llvm/bin:$PATH"
         export DYLD_LIBRARY_PATH="${BREW_PREFIX}/llvm/lib:${BREW_PREFIX}/libomp/lib:$DYLD_LIBRARY_PATH"
 
