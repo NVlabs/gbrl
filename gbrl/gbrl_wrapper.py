@@ -362,7 +362,7 @@ class GBTWrapper:
 
     def compress(self, trees_to_keep: int, gradient_steps: int, features: Union[np.ndarray, th.Tensor], actions: th.Tensor = None, log_std: th.Tensor = None,
                  method: str = 'first_k', dist_type: str = 'supervised_learning', optimizer_kwargs: Optional[Dict[str, Any]] = None, 
-                 least_squares_W: bool = True, temperature: float = 1.0, lambda_reg: float = 1.0):
+                 least_squares_W: bool = True, temperature: float = 1.0, lambda_reg: float = 1.0, **kwargs):
         assert actions is not None or dist_type == 'supervised_learning', "Cannot compress a policy using supervised learning compression methods"
         A, V, n_leaves_per_tree, n_leaves, n_trees = self.get_matrix_representation(features) 
         A, V, n_leaves_per_tree = th.tensor(A, dtype=th.float32, device=self.device), th.tensor(V, dtype=th.float32, device=self.device), th.tensor(n_leaves_per_tree, device=self.device)
@@ -389,7 +389,7 @@ class GBTWrapper:
         # indices of the start of each leaf according to the compressed model
         new_tree_indices = np.zeros(n_compressed_trees)
         new_tree_indices[1:] = np.cumsum(n_leaves_per_tree[compressed_tree_indices].detach().cpu().numpy())[:-1]
-        # W = np.zeros_like(W, dtype=np.single)
+
         self.cpp_model.compress(n_compressed_leaves, n_compressed_trees, compressed_leaf_indices, compressed_tree_indices, new_tree_indices.astype(np.int32), W)
         print(f"Finished compressing - compressed model has {self.get_num_trees()} trees")
 
@@ -442,10 +442,11 @@ class SeparateActorCriticWrapper:
         self.device = device
     
     def compress(self, trees_to_keep: int, gradients_steps: int, observations: Union[np.ndarray, th.Tensor], actions: th.Tensor, log_std: th.Tensor = None, method: str = 'first_k', dist_type: str = 'supervised_learning', optimizer_kwargs: Optional[Dict[str, Any]] = None, 
-                 least_squares_W: bool = True, temperature: float = 1.0, lambda_reg: float = 1.0) -> None:
+                 least_squares_W: bool = True, temperature: float = 1.0, lambda_reg: float = 1.0, policy_only: bool = False) -> None:
         assert dist_type != 'supervised_learning', 'Cannot use supervised learning as a dist_type for an actor'
         self.policy_model.compress(trees_to_keep, gradients_steps, observations, actions, log_std, method, dist_type, optimizer_kwargs, least_squares_W, temperature)
-        self.value_model.compress(trees_to_keep, gradients_steps, observations, None, log_std, method, 'supervised_learning', optimizer_kwargs, True, temperature, lambda_reg)
+        if not policy_only:
+            self.value_model.compress(trees_to_keep, gradients_steps, observations, None, log_std, method, 'supervised_learning', optimizer_kwargs, True, temperature, lambda_reg)
 
     def tree_shap(self, tree_idx: int, observations: Union[np.ndarray, th.Tensor]) -> Tuple[np.ndarray, np.ndarray]:
         policy_shap = self.policy_model.tree_shap(tree_idx, observations)
@@ -617,7 +618,7 @@ class SharedActorCriticWrapper(GBTWrapper):
 
     def compress(self, trees_to_keep: int, gradient_steps: int, features: Union[np.ndarray, th.Tensor], actions: th.Tensor = None, log_std: th.Tensor = None,
                  method: str = 'first_k', dist_type: str = 'deterministic', optimizer_kwargs: Optional[Dict[str, Any]] = None, 
-                 least_squares_W: bool = True, temperature: float = 1.0, lambda_reg: float = 1.0) -> None:
+                 temperature: float = 1.0, lambda_reg: float = 1.0, **kwargs) -> None:
         assert actions is not None, "Cannot compress a shared actor-critic policy without actions"
         assert dist_type != 'supervised_learning', "Cannot compress a shared actor-critic policy using supervised learning compression methods"
         A, V, n_leaves_per_tree, n_leaves, n_trees = self.get_matrix_representation(features) 
@@ -640,7 +641,6 @@ class SharedActorCriticWrapper(GBTWrapper):
         # indices of the start of each leaf according to the compressed model
         new_tree_indices = np.zeros(n_compressed_trees)
         new_tree_indices[1:] = np.cumsum(n_leaves_per_tree[compressed_tree_indices].detach().cpu().numpy())[:-1]
-        # W = np.zeros_like(W, dtype=np.single)
         self.cpp_model.compress(n_compressed_leaves, n_compressed_trees, compressed_leaf_indices, compressed_tree_indices, new_tree_indices.astype(np.int32), W)
         print(f"Finished compressing - compressed model has {self.get_num_trees()} trees")
     def predict_policy(self, observations: Union[np.ndarray, th.Tensor], requires_grad: bool = True, start_idx: int = 0, stop_idx: int = None, tensor: bool = True):
