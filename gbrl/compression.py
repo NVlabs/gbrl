@@ -65,7 +65,7 @@ def get_least_squares_W(C: th.Tensor, A: th.Tensor, V: th.Tensor, epsilon: float
     CCTATA = CCT @ ATA
     del ATA
     inv_mat = (CCTATA @ CCT)
-    # inv_mat += epsilon * th.eye(inv_mat.size()[0]) 
+    # inv_mat +=  th.eye(inv_mat.size()[0], device=A.device) 
     inv_mat += th.eye(inv_mat.size()[0], device=A.device) 
     inv_mat = th.inverse(inv_mat)
     I  = th.eye(CCT.size()[0], device=A.device)
@@ -208,7 +208,10 @@ class CompressionMethod(nn.Module):
         if self.least_squares_W:
             C = construct_compression_matrix(tree_selection, self.n_leaves_per_tree)
             W_critic = get_least_squares_W(C, A , V[:, -1])
-            W  = th.cat([self.W, W_critic.unsqueeze(-1)], dim=1)
+            if not self.actor_critic:
+                W = W_critic
+            else:
+                W  = th.cat([self.W, W_critic.unsqueeze(-1)], dim=1)
         return selection_mask.detach().cpu().numpy().astype(np.int32), tree_selection.detach().cpu().numpy().astype(np.int32), W.detach().cpu().numpy().astype(np.single), n_compressed_trees, n_compressed_leaves
     
         
