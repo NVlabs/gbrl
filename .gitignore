@@ -15,3 +15,5 @@ docs/_build/
 *.ncu-rep
 *.nfs*
 Dockerfile
+local_binaries/
+binaries/
