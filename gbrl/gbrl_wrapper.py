@@ -378,11 +378,12 @@ class GBTWrapper:
         if actions is not None:
             compression_params['dist_type'] = dist_type
             compressor = ParametricActorCompression(**compression_params)
-            leaves_selection, tree_selection, W, n_compressed_trees, n_compressed_leaves = compressor.compress(A, V, actions, log_std)
+            parameters, losses = compressor.compress(A, V, actions, log_std)
         else:
             compression_params['least_squares_W'] =  least_squares_W
             compressor = TreeCompression(**compression_params)
-            leaves_selection, tree_selection, W, n_compressed_trees, n_compressed_leaves = compressor.compress(A, V)
+            parameters, losses = compressor.compress(A, V)
+        leaves_selection, tree_selection, W, n_compressed_trees, n_compressed_leaves = parameters
         # indices of selected leaves / trees in original indexing
         compressed_leaf_indices = np.where(leaves_selection > 0)[0].astype(np.int32)
         compressed_tree_indices = np.where(tree_selection > 0)[0].astype(np.int32)
@@ -392,6 +393,7 @@ class GBTWrapper:
 
         self.cpp_model.compress(n_compressed_leaves, n_compressed_trees, compressed_leaf_indices, compressed_tree_indices, new_tree_indices.astype(np.int32), W)
         print(f"Finished compressing - compressed model has {self.get_num_trees()} trees")
+        return losses[-1]
 
     def copy(self):
         return self.__copy__()
@@ -441,13 +443,15 @@ class SeparateActorCriticWrapper:
         self.value_model.set_device(device)
         self.device = device
     
-    def compress(self, trees_to_keep: int, gradients_steps: int, observations: Union[np.ndarray, th.Tensor], actions: th.Tensor, log_std: th.Tensor = None, method: str = 'first_k', dist_type: str = 'supervised_learning', optimizer_kwargs: Optional[Dict[str, Any]] = None, 
-                 least_squares_W: bool = True, temperature: float = 1.0, lambda_reg: float = 1.0, policy_only: bool = False) -> None:
+    def compress(self, trees_to_keep: int, gradient_steps: int, features: Union[np.ndarray, th.Tensor], actions: th.Tensor, log_std: th.Tensor = None, method: str = 'first_k', dist_type: str = 'supervised_learning', optimizer_kwargs: Optional[Dict[str, Any]] = None, 
+                 least_squares_W: bool = True, temperature: float = 1.0, lambda_reg: float = 1.0, policy_only: bool = False, **kwargs) -> None:
         assert dist_type != 'supervised_learning', 'Cannot use supervised learning as a dist_type for an actor'
-        self.policy_model.compress(trees_to_keep, gradients_steps, observations, actions, log_std, method, dist_type, optimizer_kwargs, least_squares_W, temperature)
+        policy_loss = self.policy_model.compress(trees_to_keep, gradient_steps, features, actions, log_std, method, dist_type, optimizer_kwargs, least_squares_W, temperature)
+        value_loss = 0
         if not policy_only:
-            self.value_model.compress(trees_to_keep, gradients_steps, observations, None, log_std, method, 'supervised_learning', optimizer_kwargs, True, temperature, lambda_reg)
-
+            value_loss = self.value_model.compress(trees_to_keep, gradient_steps, features, None, log_std, method, 'supervised_learning', optimizer_kwargs, True, temperature, lambda_reg)
+        return policy_loss, value_loss 
+    
     def tree_shap(self, tree_idx: int, observations: Union[np.ndarray, th.Tensor]) -> Tuple[np.ndarray, np.ndarray]:
         policy_shap = self.policy_model.tree_shap(tree_idx, observations)
         value_shap = self.value_model.tree_shap(tree_idx, observations)
@@ -634,7 +638,8 @@ class SharedActorCriticWrapper(GBTWrapper):
         
         compression_params['dist_type'] = dist_type
         compressor = SharedActorCriticCompression(**compression_params)
-        leaves_selection, tree_selection, W, n_compressed_trees, n_compressed_leaves = compressor.compress(A, V, actions, log_std)
+        parameters, losses = compressor.compress(A, V, actions, log_std)
+        leaves_selection, tree_selection, W, n_compressed_trees, n_compressed_leaves = parameters
         # indices of selected leaves / trees in original indexing
         compressed_leaf_indices = np.where(leaves_selection > 0)[0].astype(np.int32)
         compressed_tree_indices = np.where(tree_selection > 0)[0].astype(np.int32)
@@ -643,6 +648,8 @@ class SharedActorCriticWrapper(GBTWrapper):
         new_tree_indices[1:] = np.cumsum(n_leaves_per_tree[compressed_tree_indices].detach().cpu().numpy())[:-1]
         self.cpp_model.compress(n_compressed_leaves, n_compressed_trees, compressed_leaf_indices, compressed_tree_indices, new_tree_indices.astype(np.int32), W)
         print(f"Finished compressing - compressed model has {self.get_num_trees()} trees")
+        return losses[-1]
+    
     def predict_policy(self, observations: Union[np.ndarray, th.Tensor], requires_grad: bool = True, start_idx: int = 0, stop_idx: int = None, tensor: bool = True):
         preds, _ = self.predict(observations, requires_grad, start_idx, stop_idx, tensor)
         return preds

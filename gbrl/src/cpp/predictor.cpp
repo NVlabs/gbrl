@@ -115,9 +115,7 @@ void Predictor::predict_cpu(dataSet *dataset, float *preds, const ensembleData *
         std::cerr << "Given stop_tree_idx: " << stop_tree_idx << " greater than number of trees in model: " << n_trees << std::endl;
         return;
     } 
-    if (n_trees == 0)
-        return; 
-    
+
     if (stop_tree_idx == 0)
         stop_tree_idx = n_trees;
 

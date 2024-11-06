@@ -91,6 +91,7 @@ class TreeCompression:
     
     def compress(self, A: th.Tensor, V: th.Tensor) -> Tuple[np.ndarray, np.ndarray]:
         targets = A @ V 
+        losses = []
         if self.optimizer is not None:
             for i in range(self.gradient_steps):
                 predictions = self.compression(A, V)
@@ -98,12 +99,14 @@ class TreeCompression:
                 self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
+                losses.append(loss.item())
                 print(f"{i + 1}/{self.gradient_steps} - compression loss: {loss.item()}")
         else:
             predictions = self.compression(A, V)
             loss = nn.functional.mse_loss(predictions, targets)
             print(f"Compression loss: {loss.item()}")
-        return self.compression.get_parameters(A, V)
+            losses.append(loss.item())
+        return self.compression.get_parameters(A, V), losses
         
 
 class SharedActorCriticCompression(TreeCompression):
@@ -119,6 +122,8 @@ class SharedActorCriticCompression(TreeCompression):
         targets = A @ V 
         critic_targets = targets[:, -1]
         actions = actions.to(self.device)
+
+        losses = []
         if log_std is not None:
             log_std = log_std.to(self.device)
         for i in range(self.gradient_steps):
@@ -129,12 +134,13 @@ class SharedActorCriticCompression(TreeCompression):
             dist = categorical_dist(compressed_theta) if self.dist_type == 'categorical' else gaussian_dist(compressed_theta, log_std)
             log_prob = dist.log_prob(actions)
             actor_loss = -log_prob.mean()
-            loss = actor_loss + self.vf_coef * critic_loss + self.compression.reg_loss
+            loss = actor_loss + critic_loss + self.compression.reg_loss
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
+            losses.append(loss.item())
             print(f"{i + 1}/{self.gradient_steps} - compression loss: {loss.item()} with actor loss: {actor_loss.item()} critic loss: {critic_loss} reg loss: {self.compression.reg_loss} ")
-        return self.compression.get_parameters(A, V)
+        return self.compression.get_parameters(A, V), losses
 
 
 class ParametricActorCompression(TreeCompression):
@@ -148,6 +154,8 @@ class ParametricActorCompression(TreeCompression):
         assert log_std is not None or self.dist_type != 'gaussian', "Cannot compress using a Gaussian distribution without log std values!"
         targets = A @ V 
         actions = actions.to(self.device)
+
+        losses = []
         if log_std is not None:
             log_std = log_std.to(self.device)
         for i in range(self.gradient_steps):
@@ -162,8 +170,9 @@ class ParametricActorCompression(TreeCompression):
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
+            losses.append(loss)
             print(f"{i + 1}/{self.gradient_steps} - compression loss: {loss.item()}")
-        return self.compression.get_parameters(A, V)
+        return self.compression.get_parameters(A, V), losses
 
 
 class CompressionMethod(nn.Module):

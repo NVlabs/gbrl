@@ -199,7 +199,9 @@ class GBRL:
     def compress(self, trees_to_keep: int, gradient_steps: int, features: Union[np.ndarray, th.Tensor], actions: th.Tensor = None, log_std: th.Tensor = None,
                  method: str = 'first_k', dist_type: str = 'supervised_learning', optimizer_kwargs: Optional[Dict[str, Any]] = None, 
                  least_squares_W: bool = True, temperature: float = 1.0, lambda_reg: float = 1.0, **kwargs) -> None:
-        self._model.compress(trees_to_keep, gradient_steps, features, actions, log_std, method, dist_type, optimizer_kwargs, least_squares_W, temperature, lambda_reg, **kwargs)
+        return self._model.compress(trees_to_keep=trees_to_keep, gradient_steps=gradient_steps, features=features, actions=actions,
+                             log_std=log_std, method=method, dist_type=dist_type, optimizer_kwargs=optimizer_kwargs, 
+                             least_squares_W=least_squares_W, temperature=temperature, lambda_reg=lambda_reg, **kwargs)
     
     def tree_shap(self, tree_idx: int, features: Union[np.ndarray, th.Tensor]) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
         """Calculates SHAP values for a single tree
