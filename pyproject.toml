@@ -39,6 +39,8 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules"
 ]
 
+dynamic = ["license"]
+
 requires-python = ">=3.9"
 
 [tool.poetry]
