@@ -30,6 +30,7 @@ copyright = '2024, NVIDIA Corporation'
 author = 'Benjamin Fuhrer, Chen Tessler, Gal Dalal'
 release = __version__
 version = "master (" + __version__ + " )"
+language = 'en'
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
@@ -56,3 +57,6 @@ exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 html_theme = 'sphinx_rtd_theme'
 html_static_path = ['_static']
 
+html_theme_options = {
+    'display_version': True,  # Ensures the version appears in the sidebar title
+}

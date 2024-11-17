@@ -374,6 +374,7 @@ class GBTWrapper:
                               'lambda_reg': lambda_reg,
                               'output_dim': self.output_dim,
                               'device': self.device}
+        compression_params.update(kwargs)
         
         if actions is not None:
             compression_params['dist_type'] = dist_type
@@ -446,10 +447,10 @@ class SeparateActorCriticWrapper:
     def compress(self, trees_to_keep: int, gradient_steps: int, features: Union[np.ndarray, th.Tensor], actions: th.Tensor, log_std: th.Tensor = None, method: str = 'first_k', dist_type: str = 'supervised_learning', optimizer_kwargs: Optional[Dict[str, Any]] = None, 
                  least_squares_W: bool = True, temperature: float = 1.0, lambda_reg: float = 1.0, policy_only: bool = False, **kwargs) -> None:
         assert dist_type != 'supervised_learning', 'Cannot use supervised learning as a dist_type for an actor'
-        policy_loss = self.policy_model.compress(trees_to_keep, gradient_steps, features, actions, log_std, method, dist_type, optimizer_kwargs, least_squares_W, temperature)
+        policy_loss = self.policy_model.compress(trees_to_keep, gradient_steps, features, actions, log_std, method, dist_type, optimizer_kwargs, least_squares_W, temperature, **kwargs)
         value_loss = 0
         if not policy_only:
-            value_loss = self.value_model.compress(trees_to_keep, gradient_steps, features, None, log_std, method, 'supervised_learning', optimizer_kwargs, True, temperature, lambda_reg)
+            value_loss = self.value_model.compress(trees_to_keep, gradient_steps, features, None, log_std, method, 'supervised_learning', optimizer_kwargs, True, temperature, lambda_reg, **kwargs)
         return policy_loss, value_loss 
     
     def tree_shap(self, tree_idx: int, observations: Union[np.ndarray, th.Tensor]) -> Tuple[np.ndarray, np.ndarray]:
@@ -635,6 +636,7 @@ class SharedActorCriticWrapper(GBTWrapper):
                               'lambda_reg': lambda_reg,
                               'output_dim': self.output_dim,
                               'device': self.device}
+        compression_params.update(kwargs)
         
         compression_params['dist_type'] = dist_type
         compressor = SharedActorCriticCompression(**compression_params)
