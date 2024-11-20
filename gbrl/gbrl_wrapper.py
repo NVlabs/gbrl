@@ -636,11 +636,17 @@ class SharedActorCriticWrapper(GBTWrapper):
                               'lambda_reg': lambda_reg,
                               'output_dim': self.output_dim,
                               'device': self.device}
+        if 'policy_only' in kwargs:
+            del kwargs['policy_only']
         compression_params.update(kwargs)
         
         compression_params['dist_type'] = dist_type
-        compressor = SharedActorCriticCompression(**compression_params)
-        parameters, losses = compressor.compress(A, V, actions, log_std)
+        if dist_type == 'deterministic':
+            compressor = TreeCompression(**compression_params)
+            parameters, losses = compressor.compress(A, V)
+        else:
+            compressor = SharedActorCriticCompression(**compression_params)
+            parameters, losses = compressor.compress(A, V, actions, log_std)
         leaves_selection, tree_selection, W, n_compressed_trees, n_compressed_leaves = parameters
         # indices of selected leaves / trees in original indexing
         compressed_leaf_indices = np.where(leaves_selection > 0)[0].astype(np.int32)

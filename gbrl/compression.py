@@ -77,13 +77,15 @@ def get_least_squares_W(C: th.Tensor, A: th.Tensor, V: th.Tensor, epsilon: float
 
 class TreeCompression:
     def __init__(self, k: int, gradient_steps: int, n_trees: int, n_leaves_per_tree: Union[np.ndarray, th.Tensor], n_leaves: int, output_dim: int, method: str, optimizer_class: Type[th.optim.Optimizer] = th.optim.Adam,
-        optimizer_kwargs: Optional[Dict[str, Any]] = None, least_squares_W: bool = True, temperature: float = 1.0, lambda_reg: float = 1.0, use_W: bool = True, device: str = 'cpu', actor_critic: bool = False):
+        optimizer_kwargs: Optional[Dict[str, Any]] = None, least_squares_W: bool = False, temperature: float = 1.0, lambda_reg: float = 1.0, use_W: bool = True, device: str = 'cpu', actor_critic: bool = False, **kwargs):
         assert method in COMPRESSION_METHODS, f"Compression method: {method} is not supported! Supported compression methods are: {COMPRESSION_METHODS}"
         if isinstance(n_leaves_per_tree, np.ndarray):
             n_leaves_per_tree = th.tensor(n_leaves_per_tree, device=device)
         self.compression = FirstK(k, n_trees, n_leaves_per_tree, n_leaves, output_dim, least_squares_W, 0, use_W, device, actor_critic) if method == 'first_k' else BestK(k, n_trees, n_leaves_per_tree, n_leaves, output_dim, least_squares_W, temperature, lambda_reg, use_W, device, actor_critic)
         self.optimizer = None 
         self.device = device
+        self.method = method
+        self.use_W = use_W
         if list(self.compression.parameters()):
             self.optimizer = optimizer_class(self.compression.parameters(), **optimizer_kwargs)
         self.gradient_steps = gradient_steps
@@ -92,6 +94,8 @@ class TreeCompression:
     def compress(self, A: th.Tensor, V: th.Tensor) -> Tuple[np.ndarray, np.ndarray]:
         targets = A @ V 
         losses = []
+        if self.method == 'first_k' and not self.use_W:
+            return self.compression.get_parameters(A, V), [0]
         if self.optimizer is not None:
             for i in range(self.gradient_steps):
                 predictions = self.compression(A, V)
@@ -111,7 +115,7 @@ class TreeCompression:
 
 class SharedActorCriticCompression(TreeCompression):
     def __init__(self, k: int, gradient_steps: int, dist_type: str, n_trees: int, n_leaves_per_tree: Union[np.ndarray, th.Tensor], n_leaves: int, output_dim: int, method: str, optimizer_class: Type[th.optim.Optimizer] = th.optim.Adam,
-        optimizer_kwargs: Optional[Dict[str, Any]] = None, temperature: float = 1.0, vf_coef: float = 0.5, lambda_reg: float = 1.0, use_W: bool = True, device: str = 'cpu'):
+        optimizer_kwargs: Optional[Dict[str, Any]] = None, temperature: float = 1.0, vf_coef: float = 0.5, lambda_reg: float = 1.0, use_W: bool = True, device: str = 'cpu', **kwargs):
         assert dist_type in DIST_TYPES, f"Distribution type: {dist_type} is not supported! Supported distributions are: {DIST_TYPES}"
         super(SharedActorCriticCompression, self).__init__(k, gradient_steps, n_trees, n_leaves_per_tree, n_leaves, output_dim, method, optimizer_class, optimizer_kwargs, False, temperature, lambda_reg, use_W, device, actor_critic = True)
         self.dist_type = dist_type 
@@ -124,6 +128,9 @@ class SharedActorCriticCompression(TreeCompression):
         actions = actions.to(self.device)
 
         losses = []
+        if self.method == 'first_k' and not self.use_W:
+             return self.compression.get_parameters(A, V), [0]
+        
         if log_std is not None:
             log_std = log_std.to(self.device)
         for i in range(self.gradient_steps):
@@ -145,9 +152,9 @@ class SharedActorCriticCompression(TreeCompression):
 
 class ParametricActorCompression(TreeCompression):
     def __init__(self, k: int, gradient_steps: int, dist_type: str, n_trees: int, n_leaves_per_tree: Union[np.ndarray, th.Tensor], n_leaves: int, output_dim: int, method: str, optimizer_class: Type[th.optim.Optimizer] = th.optim.Adam,
-        optimizer_kwargs: Optional[Dict[str, Any]] = None, temperature: float = 1.0, lambda_reg: float = 1.0, device: str = 'cpu'):
+        optimizer_kwargs: Optional[Dict[str, Any]] = None, temperature: float = 1.0, lambda_reg: float = 1.0, use_W: bool = True, device: str = 'cpu', **kwargs):
         assert dist_type in DIST_TYPES, f"Distribution type: {dist_type} is not supported! Supported distributions are: {DIST_TYPES}"
-        super(ParametricActorCompression, self).__init__(k, gradient_steps, n_trees, n_leaves_per_tree, n_leaves, output_dim, method, optimizer_class, optimizer_kwargs, dist_type in ['deterministic', 'supervised_learning'] , temperature, lambda_reg, device, actor_critic=False)
+        super(ParametricActorCompression, self).__init__(k, gradient_steps, n_trees, n_leaves_per_tree, n_leaves, output_dim, method, optimizer_class, optimizer_kwargs, dist_type in ['deterministic', 'supervised_learning'] , temperature, lambda_reg, use_W=use_W, device=device, actor_critic=False)
         self.dist_type = dist_type 
     
     def compress(self, A: th.Tensor, V: th.Tensor, actions: th.Tensor, log_std: th.Tensor = None) ->  Tuple[np.ndarray, np.ndarray]:
@@ -156,6 +163,8 @@ class ParametricActorCompression(TreeCompression):
         actions = actions.to(self.device)
 
         losses = []
+        if self.method == 'first_k' and not self.use_W:
+             return self.compression.get_parameters(A, V), [0]
         if log_std is not None:
             log_std = log_std.to(self.device)
         for i in range(self.gradient_steps):
@@ -229,9 +238,10 @@ class FirstK(CompressionMethod):
                  n_leaves: int, output_dim: int, least_squares_W: bool, lambda_reg: float = 1.0, use_W: bool = True, device: str = 'cpu', actor_critic : bool = False):
         super(FirstK, self).__init__(k, n_trees, n_leaves_per_tree, n_leaves, least_squares_W, lambda_reg, device, actor_critic)
         if not least_squares_W:
-            self.W = nn.Parameter(th.randn(n_leaves + 1, output_dim - 1 if actor_critic and least_squares_W else output_dim, dtype=th.float32, device=device), requires_grad=True) 
-            if not use_W:
-                self.W = th.zeros(n_leaves + 1, output_dim - 1, device=device, dtype=th.float32)
+            if use_W:
+                self.W = nn.Parameter(th.randn(n_leaves + 1, output_dim - 1 if actor_critic and least_squares_W else output_dim, dtype=th.float32, device=device), requires_grad=True) 
+            else:
+                self.W = th.zeros(n_leaves + 1, output_dim , device=device, dtype=th.float32)
     
     def get_tree_selection(self) -> th.Tensor:
         tree_selection = th.zeros(self.n_trees, dtype=th.float32, device=self.device)
@@ -246,9 +256,10 @@ class BestK(CompressionMethod):
                  lambda_reg: float = 1.0, use_W: bool = True, device: str = 'cpu', actor_critic: bool = False):
         super(BestK, self).__init__(k, n_trees, n_leaves_per_tree, n_leaves, least_squares_W, lambda_reg, device, actor_critic)
         if not least_squares_W:
-            self.W = nn.Parameter(th.randn(n_leaves + 1, output_dim - 1 if actor_critic and least_squares_W else output_dim, dtype=th.float32, device=device), requires_grad=True)
-            if not use_W:
-                self.W = th.zeros(n_leaves + 1, output_dim - 1, device=device, dtype=th.float32)
+            if use_W:
+                self.W = nn.Parameter(th.randn(n_leaves + 1, output_dim - 1 if actor_critic and least_squares_W else output_dim, dtype=th.float32, device=device), requires_grad=True)
+            else:
+                self.W = th.zeros(n_leaves + 1, output_dim, device=device, dtype=th.float32)
         self.logits = nn.Parameter(th.randn(n_trees, dtype=th.float32, device=device), requires_grad=True)
         self.temperature = temperature
     
