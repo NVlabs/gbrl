@@ -96,7 +96,7 @@ class CMakeBuild(build_ext):
 
 setup(
     name="gbrl",
-    version = "1.0.5",
+    version = "1.0.6",
     description = "Gradient Boosted Trees for RL",
     author="Benjamin Fuhrer, Chen Tessler, Gal Dalal",
     author_email="bfuhrer@nvidia.com, ctessler@nvidia.com. gdalal@nvidia.com",
