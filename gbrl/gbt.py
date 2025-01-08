@@ -250,7 +250,7 @@ class GBRL:
         self._model.export(filename, modelname) 
 
     @classmethod
-    def load_model(cls, load_name: str) -> "GBRL":
+    def load_model(cls, load_name: str, device: str) -> "GBRL":
         """Loads GBRL model from a file
 
         Args:
@@ -260,7 +260,7 @@ class GBRL:
             GBRL instance 
         """
         instance = cls.__new__(cls)
-        instance._model = GBTWrapper.load(load_name)
+        instance._model = GBTWrapper.load(load_name, device)
         instance.optimizer =  instance._model.optimizer
         instance.output_dim = instance._model.output_dim
         instance.verbose = instance._model.verbose

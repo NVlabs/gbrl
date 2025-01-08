@@ -178,7 +178,7 @@ class GBTWrapper:
             print(f"Caught an exception in GBRL: {e}")
 
     @classmethod
-    def load(cls, filename: str) -> "GBTWrapper":
+    def load(cls, filename: str, device: str) -> "GBTWrapper":
         filename = filename.rstrip('.')
         if '.gbrl_model' not in filename:
             filename += '.gbrl_model'
@@ -186,6 +186,7 @@ class GBTWrapper:
         try:
             instance = cls.__new__(cls)
             instance.cpp_model = GBRL_CPP.load(filename)
+            instance.set_device(device)
             metadata =  instance.cpp_model.get_metadata()
             instance.tree_struct = {'max_depth': metadata['max_depth'], 
                             'min_data_in_leaf': metadata['min_data_in_leaf'],
@@ -296,7 +297,9 @@ class GBTWrapper:
         base_poly, norm_values, offset = get_poly_vectors(self.params['max_depth'], numerical_dtype)
         return self.cpp_model.ensemble_shap(num_features, cat_features, np.ascontiguousarray(norm_values), np.ascontiguousarray(base_poly), np.ascontiguousarray(offset)) 
     
-    def set_device(self, device: str) -> None:
+    def set_device(self, device: Union[str, th.device]) -> None:
+        if isinstance(device, th.device):
+            device = device.type
         try:
             self.cpp_model.to_device(device)
             self.device = device
@@ -516,10 +519,12 @@ class SeparateActorCriticWrapper:
         self.value_model.plot_tree(tree_idx,  filename.rstrip(".") + "_value")
 
     @classmethod
-    def load(cls, filename: str) -> "SeparateActorCriticWrapper":
+    def load(cls, filename: str, device: str) -> "SeparateActorCriticWrapper":
         instance = cls.__new__(cls)
         instance.policy_model = GBTWrapper.load(filename + '_policy')
         instance.value_model = GBTWrapper.load(filename + '_value')
+        instance.policy_model.set_device(device)
+        instance.value_model.set_device(device)
         instance.tree_struct = instance.policy_model.tree_struct
         instance.total_iterations = instance.policy_model.iteration + instance.value_model.iteration
         instance.output_dim = instance.policy_model.output_dim
@@ -667,8 +672,8 @@ class SharedActorCriticWrapper(GBTWrapper):
         return pred_values
     
     @classmethod
-    def load(cls, filename: str) -> "SharedActorCriticWrapper":
-        instance = super().load(filename) 
+    def load(cls, filename: str, device: str) -> "SharedActorCriticWrapper":
+        instance = super().load(filename, device) 
         instance.policy_optimizer = instance.optimizer[0]
         instance.value_optimizer = None if len(instance.optimizer) != 2 else instance.optimizer[1]
         return instance
