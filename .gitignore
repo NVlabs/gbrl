@@ -10,6 +10,7 @@ builds/
 *.gbrl_model
 *.tfevents
 *.json
+*.sh
 dist/
 docs/_build/
 *.ncu-rep

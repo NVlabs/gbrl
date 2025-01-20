@@ -57,6 +57,7 @@ def construct_compression_matrix(tree_selection: th.Tensor, n_leaves_per_tree: t
     # Construct the binary matrix C
     C = th.zeros((L, L_prime), dtype=th.float32, device=n_leaves_per_tree.device)
     C.scatter_(1, indices.long(), selection_mask.unsqueeze(1)) 
+    del selection_mask
     return C
 
 def get_least_squares_W(C: th.Tensor, A: th.Tensor, V: th.Tensor, epsilon: float = 1e-5):
@@ -70,7 +71,11 @@ def get_least_squares_W(C: th.Tensor, A: th.Tensor, V: th.Tensor, epsilon: float
     inv_mat = th.inverse(inv_mat)
     I  = th.eye(CCT.size()[0], device=A.device)
     res = inv_mat @ CCTATA
+    del inv_mat
+    del CCTATA
     res = res @ (I - CCT)
+    del CCT
+    del I
     return res @ V 
 
 
@@ -106,11 +111,14 @@ class TreeCompression:
                 losses.append(loss.item())
                 print(f"{i + 1}/{self.gradient_steps} - compression loss: {loss.item()}")
         else:
-            predictions = self.compression(A, V)
-            loss = nn.functional.mse_loss(predictions, targets)
+            with th.no_grad():
+                predictions = self.compression(A, V)
+                loss = nn.functional.mse_loss(predictions, targets)
+                del predictions
             print(f"Compression loss: {loss.item()}")
             losses.append(loss.item())
-        return self.compression.get_parameters(A, V), losses
+        compression_params = self.compression.get_parameters(A, V)
+        return compression_params, losses
         
 
 class SharedActorCriticCompression(TreeCompression):
@@ -212,7 +220,15 @@ class CompressionMethod(nn.Module):
                 W  = th.cat([self.W, W_critic], dim=1)
         else:
             W = self.W
-        return A @ C @ C.t() @ (V + W)
+        C_CT = C @ C.t()
+        del C
+        A_CT = A @ C_CT
+        del A
+        U = V + W
+        del V
+        del W
+        del tree_selection
+        return A_CT @ U
 
     def get_tree_selection(self) -> th.Tensor:
         raise NotImplementedError
@@ -222,15 +238,14 @@ class CompressionMethod(nn.Module):
         n_compressed_trees = int(tree_selection.sum())
         selection_mask = th.repeat_interleave(tree_selection, self.n_leaves_per_tree)
         n_compressed_leaves = int(selection_mask.sum())
-        W = self.W 
         if self.least_squares_W:
             C = construct_compression_matrix(tree_selection, self.n_leaves_per_tree)
-            W_critic = get_least_squares_W(C, A , V[:, -1])
             if not self.actor_critic:
-                W = W_critic
+                W = self.W
             else:
+                W_critic = get_least_squares_W(C, A , V[:, -1])
                 W  = th.cat([self.W, W_critic.unsqueeze(-1)], dim=1)
-        return selection_mask.detach().cpu().numpy().astype(np.int32), tree_selection.detach().cpu().numpy().astype(np.int32), W.detach().cpu().numpy().astype(np.single), n_compressed_trees, n_compressed_leaves
+        return selection_mask.clone().detach().cpu().numpy().astype(np.int32), tree_selection.clone().detach().cpu().numpy().astype(np.int32), W.clone().detach().cpu().numpy().astype(np.single), n_compressed_trees, n_compressed_leaves
     
         
 class FirstK(CompressionMethod):

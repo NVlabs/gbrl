@@ -397,6 +397,10 @@ class GBTWrapper:
 
         self.cpp_model.compress(n_compressed_leaves, n_compressed_trees, compressed_leaf_indices, compressed_tree_indices, new_tree_indices.astype(np.int32), W)
         print(f"Finished compressing - compressed model has {self.get_num_trees()} trees")
+        del compressor
+        del A
+        del V 
+        del n_leaves_per_tree
         return losses[-1]
 
     def copy(self):
@@ -521,8 +525,8 @@ class SeparateActorCriticWrapper:
     @classmethod
     def load(cls, filename: str, device: str) -> "SeparateActorCriticWrapper":
         instance = cls.__new__(cls)
-        instance.policy_model = GBTWrapper.load(filename + '_policy')
-        instance.value_model = GBTWrapper.load(filename + '_value')
+        instance.policy_model = GBTWrapper.load(filename + '_policy', device)
+        instance.value_model = GBTWrapper.load(filename + '_value', device)
         instance.policy_model.set_device(device)
         instance.value_model.set_device(device)
         instance.tree_struct = instance.policy_model.tree_struct

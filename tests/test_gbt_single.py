@@ -123,7 +123,6 @@ class TestGBTSingle(unittest.TestCase):
         model._model.cpp_model.compress(n_compressed_leaves, n_compressed_trees, compressed_leaf_indices, compressed_tree_indices, new_tree_indices.astype(np.int32), W)
         compressed_y = model(X, tensor=False)
         self.assertTrue(np.allclose(compressed_y, y_pred_k), "Discarding trees should be equal to prediction without them")
-        
 
         model._model.reset()
         model.set_bias_from_targets(y)
@@ -443,33 +442,33 @@ class TestGBTSingle(unittest.TestCase):
                             gbrl_params=gbrl_params,
                             verbose=0,
                             device='cpu')
-        model = GBRL.load_model(os.path.join(self.test_dir, 'test_cosine_cpu'))
+        model = GBRL.load_model(os.path.join(self.test_dir, 'test_cosine_cpu'), device='cpu')
         y_pred = model(X, requires_grad=False, tensor=False)
         loss = np.sqrt(np.mean((y_pred.squeeze() - y.squeeze())**2))
         self.assertTrue(loss < 2.0, f'Expected loss = {loss} < 2.0')
         
-        model = GBRL.load_model(os.path.join(self.test_dir, 'test_l2_cpu'))
+        model = GBRL.load_model(os.path.join(self.test_dir, 'test_l2_cpu'), device='cpu')
         y_pred = model(X, requires_grad=False, tensor=False)
         loss = np.sqrt(np.mean((y_pred.squeeze() - y.squeeze())**2))
         self.assertTrue(loss < 0.5, f'Expected loss = {loss} < 0.5')
         if (cuda_available()):
-            model = GBRL.load_model(os.path.join(self.test_dir, 'test_cosine_gpu'))
+            model = GBRL.load_model(os.path.join(self.test_dir, 'test_cosine_gpu'), device='cuda')
             y_pred = model(X, requires_grad=False, tensor=False)
             loss = np.sqrt(np.mean((y_pred.squeeze() - y.squeeze())**2))
             self.assertTrue(loss < 2.0, f'Expected loss = {loss} < 2.0')
-            model = GBRL.load_model(os.path.join(self.test_dir, 'test_cosine_oblivious_gpu'))
+            model = GBRL.load_model(os.path.join(self.test_dir, 'test_cosine_oblivious_gpu'), device='cuda')
             y_pred = model(X, requires_grad=False, tensor=False)
             loss = np.sqrt(np.mean((y_pred.squeeze() - y.squeeze())**2))
             self.assertTrue(loss < 12.0, f'Expected loss = {loss} < 12.0')
-            model = GBRL.load_model(os.path.join(self.test_dir, 'test_l2_gpu'))
+            model = GBRL.load_model(os.path.join(self.test_dir, 'test_l2_gpu'), device='cuda')
             y_pred = model(X, requires_grad=False, tensor=False)
             loss = np.sqrt(np.mean((y_pred.squeeze() - y.squeeze())**2))
             self.assertTrue(loss < 0.5, f'Expected loss = {loss} < 0.5')
-            model = GBRL.load_model(os.path.join(self.test_dir, 'test_l2_oblivious_gpu'))
+            model = GBRL.load_model(os.path.join(self.test_dir, 'test_l2_oblivious_gpu'), device='cuda')
             y_pred = model(X, requires_grad=False, tensor=False)
             loss = np.sqrt(np.mean((y_pred.squeeze() - y.squeeze())**2))
             self.assertTrue(loss < 10.0, f'Expected loss = {loss} < 10.0')
-        model = GBRL.load_model(os.path.join(self.test_dir, 'test_cosine_adam_cpu'))
+        model = GBRL.load_model(os.path.join(self.test_dir, 'test_cosine_adam_cpu'), device='cpu')
         y_pred = model(X, requires_grad=False, tensor=False)
         loss = np.sqrt(np.mean((y_pred.squeeze() - y.squeeze())**2))
         value = 50.0

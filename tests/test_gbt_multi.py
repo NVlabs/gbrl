@@ -493,18 +493,18 @@ class TestGBTMulti(unittest.TestCase):
     def test_loading(self):
         X, y = self.data
 
-        model = GBRL.load_model(os.path.join(self.test_dir, 'test_cosine_cpu'))
+        model = GBRL.load_model(os.path.join(self.test_dir, 'test_cosine_cpu'), device='cpu')
         y_pred = model(X, requires_grad=False, tensor=False)
         loss = np.sqrt(np.mean((y_pred.squeeze() - y.squeeze())**2))
         self.assertTrue(loss < 2.0, f'Expected loss = {loss} < 2.0')
         
         
-        model = GBRL.load_model(os.path.join(self.test_dir, 'test_l2_cpu'))
+        model = GBRL.load_model(os.path.join(self.test_dir, 'test_l2_cpu'), device='cpu')
         y_pred = model(X, requires_grad=False, tensor=False)
         loss = np.sqrt(np.mean((y_pred.squeeze() - y.squeeze())**2))
         self.assertTrue(loss < 0.5, f'Expected loss = {loss} < 0.5')
 
-        model = ActorCritic.load_model(os.path.join(self.test_dir, 'test_shared_cpu'))
+        model = ActorCritic.load_model(os.path.join(self.test_dir, 'test_shared_cpu'), device='cpu')
         policy_y, value_y = model(X, requires_grad=False, tensor=False)
         policy_loss, _ = rmse(policy_y, y[:, :-1])
         value_loss, _ = rmse(value_y, y[:, -1])
@@ -513,7 +513,7 @@ class TestGBTMulti(unittest.TestCase):
         self.assertTrue(policy_loss < policy_value, f'Expected loss = {policy_loss} < {policy_value}')
         self.assertTrue(value_loss < value_value, f'Expected loss = {value_loss} < {value_value}')
 
-        model = ActorCritic.load_model(os.path.join(self.test_dir, 'test_separate_cpu'))
+        model = ActorCritic.load_model(os.path.join(self.test_dir, 'test_separate_cpu'), device='cpu')
         policy_y, value_y = model(X, requires_grad=False, tensor=False)
         policy_loss, _ = rmse(policy_y, y[:, :-1])
         value_loss, _ = rmse(value_y, y[:, -1])
@@ -523,27 +523,27 @@ class TestGBTMulti(unittest.TestCase):
         self.assertTrue(value_loss < value_value, f'Expected loss = {value_loss} < {value_value}')
         
         if (cuda_available()):
-            model = GBRL.load_model(os.path.join(self.test_dir, 'test_cosine_gpu'))
+            model = GBRL.load_model(os.path.join(self.test_dir, 'test_cosine_gpu'), device='cuda')
             y_pred = model(X, requires_grad=False, tensor=False)
             loss = np.sqrt(np.mean((y_pred.squeeze() - y.squeeze())**2))
             self.assertTrue(loss < 2.0, f'Expected loss = {loss} < 2.0')
             
-            model = GBRL.load_model(os.path.join(self.test_dir, 'test_cosine_oblivious_gpu'))
+            model = GBRL.load_model(os.path.join(self.test_dir, 'test_cosine_oblivious_gpu'), device='cuda')
             y_pred = model(X, requires_grad=False, tensor=False)
             loss = np.sqrt(np.mean((y_pred.squeeze() - y.squeeze())**2))
             self.assertTrue(loss < 12.0, f'Expected loss = {loss} < 12.0')
             
-            model = GBRL.load_model(os.path.join(self.test_dir, 'test_l2_gpu'))
+            model = GBRL.load_model(os.path.join(self.test_dir, 'test_l2_gpu'), device='cuda')
             y_pred = model(X, requires_grad=False, tensor=False)
             loss = np.sqrt(np.mean((y_pred.squeeze() - y.squeeze())**2))
             self.assertTrue(loss < 0.5, f'Expected loss = {loss} < 0.5')
 
-            model = GBRL.load_model(os.path.join(self.test_dir, 'test_l2_oblivious_gpu'))
+            model = GBRL.load_model(os.path.join(self.test_dir, 'test_l2_oblivious_gpu'), device='cuda')
             y_pred = model(X, requires_grad=False, tensor=False)
             loss = np.sqrt(np.mean((y_pred.squeeze() - y.squeeze())**2))
             self.assertTrue(loss < 10.0, f'Expected loss = {loss} < 10.0')
 
-            model = ActorCritic.load_model(os.path.join(self.test_dir, 'test_shared_gpu'))
+            model = ActorCritic.load_model(os.path.join(self.test_dir, 'test_shared_gpu'), device='cuda')
             policy_y, value_y = model(X, requires_grad=False, tensor=False)
             policy_loss, _ = rmse(policy_y, y[:, :-1])
             value_loss, _ = rmse(value_y, y[:, -1])
@@ -552,7 +552,7 @@ class TestGBTMulti(unittest.TestCase):
             self.assertTrue(policy_loss < policy_value, f'Expected loss = {policy_loss} < {policy_value}')
             self.assertTrue(value_loss < value_value, f'Expected loss = {value_loss} < {value_value}')
 
-            model = ActorCritic.load_model(os.path.join(self.test_dir, 'test_separate_gpu'))
+            model = ActorCritic.load_model(os.path.join(self.test_dir, 'test_separate_gpu'), device='cuda')
             policy_y, value_y = model(X, requires_grad=False, tensor=False)
             policy_loss, _ = rmse(policy_y, y[:, :-1])
             value_loss, _ = rmse(value_y, y[:, -1])
@@ -561,7 +561,7 @@ class TestGBTMulti(unittest.TestCase):
             self.assertTrue(policy_loss < policy_value, f'Expected loss = {policy_loss} < {policy_value}')
             self.assertTrue(value_loss < value_value, f'Expected loss = {value_loss} < {value_value}')
 
-        model = GBRL.load_model(os.path.join(self.test_dir, 'test_cosine_adam_cpu'))
+        model = GBRL.load_model(os.path.join(self.test_dir, 'test_cosine_adam_cpu'), device='cpu')
         y_pred = model(X, requires_grad=False, tensor=False)
         loss = np.sqrt(np.mean((y_pred.squeeze() - y.squeeze())**2))
         value = 50.0
