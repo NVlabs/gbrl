@@ -26,8 +26,8 @@ Scheduler::Scheduler(const Scheduler& other):
 
 }
 
-void Scheduler::setType(schedulerFunc type){
-    this->type = type;
+void Scheduler::setType(schedulerFunc _type){
+    this->type = _type;
 }
 
 Scheduler* Scheduler::loadFromFile(std::ifstream& file){
@@ -61,8 +61,8 @@ int LinearScheduler::saveToFile(std::ofstream& file){
         std::cerr << "Error file is not open for writing: " << std::endl;
         return -1;
     }
-    schedulerFunc type = this->getType();
-    file.write(reinterpret_cast<char*>(&type), sizeof(schedulerFunc));
+    schedulerFunc _type = this->getType();
+    file.write(reinterpret_cast<char*>(&_type), sizeof(schedulerFunc));
     file.write(reinterpret_cast<char*>(&this->init_lr), sizeof(float));
     file.write(reinterpret_cast<char*>(&this->stop_lr), sizeof(float));
     file.write(reinterpret_cast<char*>(&this->T), sizeof(int));
@@ -96,8 +96,8 @@ int ConstScheduler::saveToFile(std::ofstream& file){
         std::cerr << "Error file is not open for writing: " << std::endl;
         return -1;
     }
-    schedulerFunc type = this->getType();
-    file.write(reinterpret_cast<char*>(&type), sizeof(schedulerFunc));
+    schedulerFunc _type = this->getType();
+    file.write(reinterpret_cast<char*>(&_type), sizeof(schedulerFunc));
     file.write(reinterpret_cast<char*>(&this->init_lr), sizeof(float));
     return 0;
 }

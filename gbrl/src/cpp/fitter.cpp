@@ -177,11 +177,10 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
         if (metadata->split_score_func == L2){
             float *mean_grads = calculate_mean(build_grads, batch_n_samples, output_dim, par_th);
             float *std = calculate_var_and_center(build_grads, mean_grads, batch_n_samples, output_dim, par_th);
-#ifndef _MSC_VER
-    #pragma omp simd
-#endif
-            for (int i = 0; i < output_dim; ++i)
-                std[i] = sqrtf(std[i]);
+
+            #pragma omp simd
+            for (int d = 0; d < output_dim; ++d)
+                std[d] = sqrtf(std[d]);
             divide_mat_by_vec_inplace(build_grads, std, batch_dataset.n_samples, metadata->output_dim, metadata->par_th);
             delete[] mean_grads;
             delete[] std;
@@ -305,7 +304,7 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
                     int feat_idx = (split_candidates[j].categorical_value == nullptr) ? split_candidates[j].feature_idx : split_candidates[j].feature_idx + metadata->n_num_features; 
                     score = score * dataset->feature_weights[feat_idx] - parent_score;
 #ifdef DEBUG
-                    std::cout << " cand: " <<  j << " score: " <<  score << " parent score: " <<  parent_score << " info: " << split_candidates[j] << std::endl;
+                    // std::cout << " cand: " <<  j << " score: " <<  score << " parent score: " <<  parent_score << " info: " << split_candidates[j] << std::endl;
 #endif 
                     if (score > local_best_score) {
                         local_best_score = score;
@@ -528,9 +527,8 @@ void Fitter::calc_leaf_value(dataSet *dataset, ensembleData *edata, ensembleMeta
         }
         if (passed){
             idx = i*output_dim;
-#ifndef _MSC_VER
-    #pragma omp simd
-#endif
+
+            #pragma omp simd
             for (int d = 0; d < output_dim; ++d)
                 edata->values[leaf_idx*output_dim + d] += grads[idx + d];
             count += 1;

@@ -170,12 +170,11 @@ ensembleMetaData* ensemble_metadata_alloc(int max_trees, int max_leaves, int max
 }
 
 ensembleData* ensemble_data_alloc(ensembleMetaData *metadata){
-    ensembleData *edata = new ensembleData;
     if (metadata == nullptr){
         std::cerr << "Error metadata is nullptr cannot allocate ensembleData." << std::endl;
         throw std::runtime_error("Error invalid pointer");
-        return nullptr;
     }
+    ensembleData *edata = new ensembleData;
     edata->bias = new float[metadata->output_dim];
     memset(edata->bias, 0, metadata->output_dim * sizeof(float));
     int split_sizes = (metadata->grow_policy == OBLIVIOUS) ? metadata->max_trees : metadata->max_leaves;
@@ -207,12 +206,11 @@ ensembleData* ensemble_data_alloc(ensembleMetaData *metadata){
 
 ensembleData* ensemble_copy_data_alloc(ensembleMetaData *metadata){
     // same as normal alloc but only allocate memory for existing size 
-    ensembleData *edata = new ensembleData;
     if (metadata == nullptr){
         std::cerr << "Error metadata is nullptr cannot allocate ensembleData." << std::endl;
         throw std::runtime_error("Error invalid pointer");
-        return nullptr;
     }
+    ensembleData *edata = new ensembleData;
     edata->bias = new float[metadata->output_dim];
     memset(edata->bias, 0, metadata->output_dim * sizeof(float));
     int split_sizes = (metadata->grow_policy == OBLIVIOUS) ? metadata->n_trees : metadata->n_leaves;
@@ -243,12 +241,11 @@ ensembleData* ensemble_copy_data_alloc(ensembleMetaData *metadata){
 }
 
 ensembleData* copy_ensemble_data(ensembleData *other_edata, ensembleMetaData *metadata){
-    ensembleData *edata = new ensembleData;
     if (metadata == nullptr || other_edata == nullptr){
         std::cerr << "Error metadata is nullptr cannot allocate ensembleData." << std::endl;
         throw std::runtime_error("Error invalid pointer");
-        return nullptr;
     }
+    ensembleData *edata = new ensembleData;
     edata->bias = new float[metadata->output_dim];
     memcpy(edata->bias, other_edata->bias, metadata->output_dim * sizeof(float));
     int split_sizes = (metadata->grow_policy == OBLIVIOUS) ? metadata->n_trees : metadata->n_leaves;

@@ -37,13 +37,13 @@ class GBRL {
         float* tree_shap(const int tree_idx, const float *obs, const char *categorical_obs, const int n_samples, float *norm, float *base_poly, float *offset);
         float* ensemble_shap(const float *obs, const char *categorical_obs, const int n_samples, float *norm, float *base_poly, float *offset);
         static bool cuda_available();
-        void to_device(deviceType device);
+        void to_device(deviceType _device);
         std::string get_device();
         int saveToFile(const std::string& filename);
         int exportModel(const std::string& filename, const std::string& modelname);
         int loadFromFile(const std::string& filename);
 
-        void step(const float *obs, const char *categorical_obs, float *grads, const float *feature_weights, const int n_samples, const int n_num_features, const int n_cat_features, deviceType device);
+        void step(const float *obs, const char *categorical_obs, float *grads, const float *feature_weights, const int n_samples, const int n_num_features, const int n_cat_features, deviceType _device);
 #ifdef USE_CUDA
         void _step_gpu(dataSet *dataset);
         float _fit_gpu(dataSet *dataset, float *targets, const int n_iterations);
@@ -51,7 +51,7 @@ class GBRL {
         float fit(float *obs, char *categorical_obs, float *targets, const float *feature_weights, int iterations, const int n_samples, const int n_num_features, const int n_cat_features, bool shuffle = true, std::string _loss_type = "MultiRMSE");
         void set_bias(float *bias, const int output_dim);
         float* get_bias();
-        float* predict(const float *obs, const char *categorical_obs, const int n_samples, const int n_num_features, const int n_cat_features, int start_tree_idx, int stop_tree_idx, deviceType device);
+        float* predict(const float *obs, const char *categorical_obs, const int n_samples, const int n_num_features, const int n_cat_features, int start_tree_idx, int stop_tree_idx, deviceType _device);
         
         float* get_scheduler_lrs();
 

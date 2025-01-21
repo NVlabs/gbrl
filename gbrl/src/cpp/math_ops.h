@@ -44,22 +44,21 @@ void calculate_squared_norm(float *norm, const float *mat, const int n_samples, 
 
 inline float mat_vec_dot_sum(const int *indices, const float *grads, const float *vec, const int n_samples, const int n_cols){
     float sum = 0.0f;
-#ifndef _MSC_VER
-    #pragma omp simd
-#endif
-    for (int i = 0; i < n_samples*n_cols; ++i){
-        int row = i / n_cols;
-        int col = i % n_cols;
-        sum += grads[indices[row]*n_cols + col] * vec[col];
+
+    for (int row = 0; row < n_samples; row++){
+        #pragma omp simd
+        for (int col = 0; col < n_cols; ++col){
+            sum += grads[indices[row]*n_cols + col] * vec[col];
+        }
     }
+
     return sum;
 }
 
 inline float norm(const float *vec, const int n_samples){
     float sum = 0.0f;
-#ifndef _MSC_VER
+
     #pragma omp simd
-#endif
     for (int n = 0; n < n_samples; ++n){
         sum += (vec[n]*vec[n]);
     }
@@ -68,9 +67,8 @@ inline float norm(const float *vec, const int n_samples){
 
 inline float squared_norm(const float *vec, const int n_samples){
     float sum = 0.0f;
-#ifndef _MSC_VER
+
     #pragma omp simd
-#endif
     for (int n = 0; n < n_samples; ++n){
         sum += (vec[n]*vec[n]);
     }

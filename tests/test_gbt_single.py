@@ -18,12 +18,18 @@ import shap
 import torch as th
 from torch.nn.functional import mse_loss
 
+import sys
+from pathlib import Path
+
+ROOT_PATH = Path(__file__).parent.parent
+sys.path.insert(0, str(ROOT_PATH))
+
 from gbrl import GBRL, cuda_available
 from tests import CATEGORICAL_INPUTS, CATEGORICAL_OUTPUTS
 
 N_EPOCHS = 100
 
-def rmse_model(model, X, y, n_epochs, device='cpu'):
+def  rmse_model(model, X, y, n_epochs, device='cpu'):
     y_ = th.tensor(y, dtype=th.float32, device=device).squeeze()
     X_ = X.copy()
     epoch = 0
@@ -416,5 +422,6 @@ class TestGBTSingle(unittest.TestCase):
         self.assertTrue(loss < value, f'Expected loss = {loss} < {value}')
 
 if __name__ == '__main__':
-    unittest.main()
+    # unittest.main()
+    unittest.main(argv=['first-arg-is-ignored', 'TestGBTSingle.test_cosine_cpu'])
     # unittest.main(argv=['first-arg-is-ignored', 'TestGBTSingle.test_cosine_gpu'])

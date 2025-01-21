@@ -99,6 +99,14 @@ class GBRL:
         if len(bias.shape) == 1:
             bias = bias[:, np.newaxis]
         self._model.set_bias(bias.astype(np.single))
+
+    def get_bias(self) -> np.ndarray:
+        """Sets GBRL bias
+
+        Returns:
+            np.ndarray: bias
+        """
+        return self._model.get_bias()
     
     def set_bias_from_targets(self, targets: Union[np.ndarray, th.Tensor]):
         """Sets bias as mean of targets
