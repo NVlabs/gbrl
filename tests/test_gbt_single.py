@@ -423,5 +423,5 @@ class TestGBTSingle(unittest.TestCase):
 
 if __name__ == '__main__':
     # unittest.main()
-    unittest.main(argv=['first-arg-is-ignored', 'TestGBTSingle.test_cosine_cpu'])
-    # unittest.main(argv=['first-arg-is-ignored', 'TestGBTSingle.test_cosine_gpu'])
+    # unittest.main(argv=['first-arg-is-ignored', 'TestGBTSingle.test_cosine_cpu'])
+    unittest.main(argv=['first-arg-is-ignored', 'TestGBTSingle.test_cosine_cpu', 'TestGBTSingle.test_cosine_gpu', 'TestGBTSingle.test_l2_cpu', 'TestGBTSingle.test_cosine_oblivious_cpu', 'TestGBTSingle.test_cosine_oblivious_gpu'])

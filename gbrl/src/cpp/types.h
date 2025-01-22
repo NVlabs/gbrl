@@ -132,7 +132,6 @@ struct dataSet {
     float *grads;
     const float *feature_weights;
     const float *build_grads;
-    const float *norm_grads;
     int n_samples;
     deviceType device;
 };

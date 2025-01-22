@@ -75,17 +75,39 @@ inline float squared_norm(const float *vec, const int n_samples){
     return sum;
 }
 
-inline float cosine_dist(const int *indices, const float *raw_grads, const float *mean, const int n_samples, const int n_cols, float squared_norms){
+inline float cosine_dist(const int *indices, const float *raw_grads, const float *mean, const int n_samples, const int n_cols){
     if (n_samples == 0)
         return 0.0f;
     float n_samples_f = static_cast<float>(n_samples);
     float sum_dot_product = mat_vec_dot_sum(indices, raw_grads, mean, n_samples, n_cols);
-    float mean_norm = norm(mean, n_cols);
-    float denominator = mean_norm * sqrtf(squared_norms);
+    float mean_norm = squared_norm(mean, n_cols);
+    float denominator = mean_norm * n_samples_f;
     if (denominator == 0.0f) {
         return 0.0f;
     }
-    return (sum_dot_product / denominator) * n_samples_f;
+    return (sum_dot_product / sqrt(denominator)) ;
+}
+
+inline float cosine_score(const int *true_indices, const int *false_indices,  const float *raw_grads, const float *true_mean, const float *false_mean, const int true_n_samples, const int false_n_samples, const int n_cols){
+    float true_numerator = 0.0f, false_numerator = 0.0f;
+    float true_n_samples_f = static_cast<float>(true_n_samples), false_n_samples_f = static_cast<float>(false_n_samples);
+    if (true_n_samples > 0)
+        true_numerator = mat_vec_dot_sum(true_indices, raw_grads, true_mean, true_n_samples, n_cols);
+    if (false_n_samples > 0)
+        false_numerator = mat_vec_dot_sum(false_indices, raw_grads, false_mean, false_n_samples, n_cols);
+
+    float true_mean_norm = squared_norm(true_mean, n_cols);
+    float false_mean_norm = squared_norm(false_mean, n_cols);
+    float true_denominator = true_mean_norm * true_n_samples_f;
+    float false_denominator = false_mean_norm * false_n_samples_f;
+
+    float numerator = true_numerator + false_numerator;
+    float denominator = true_denominator + false_denominator;
+
+    if (denominator == 0.0f) {
+        return 0.0f;
+    }
+    return (numerator / sqrtf(denominator)) ;
 }
 
 #endif 

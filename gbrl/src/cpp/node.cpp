@@ -161,15 +161,15 @@ float TreeNode::getSplitScore(dataSet *dataset, scoreFunc split_score_func, cons
     switch (split_score_func) {
         case L2: {
             if (is_numeric)
-                return this->splitScoreL2(dataset->obs, dataset->build_grads, split_candidate, min_data_in_leaf);
+                return this->splitScoreL2(dataset->obs, dataset->feature_weights, dataset->build_grads, split_candidate, min_data_in_leaf);
             else
-                return this->splitScoreL2Categorical(dataset->categorical_obs, dataset->build_grads, split_candidate, min_data_in_leaf);
+                return this->splitScoreL2Categorical(dataset->categorical_obs, dataset->feature_weights, dataset->build_grads, split_candidate, min_data_in_leaf);
         }
         case Cosine: {
             if (is_numeric)
-                return this->splitScoreCosine(dataset->obs, dataset->build_grads, dataset->norm_grads, split_candidate, min_data_in_leaf);
+                return this->splitScoreCosine(dataset->obs, dataset->feature_weights, dataset->build_grads, split_candidate, min_data_in_leaf);
             else
-                return this->splitScoreCosineCategorical(dataset->categorical_obs, dataset->build_grads, dataset->norm_grads, split_candidate, min_data_in_leaf);
+                return this->splitScoreCosineCategorical(dataset->categorical_obs, dataset->feature_weights, dataset->build_grads,  split_candidate, min_data_in_leaf);
         }
         default: {
             std::cerr << "Unknown scoreFunc." << std::endl;
@@ -178,7 +178,7 @@ float TreeNode::getSplitScore(dataSet *dataset, scoreFunc split_score_func, cons
     }
 }
 
-float TreeNode::splitScoreCosine(const float *obs, const float *grads, const float *grads_norm, const splitCandidate &split_candidate, const int min_data_in_leaf){
+float TreeNode::splitScoreCosine(const float *obs, const float *feature_weights, const float *grads, const splitCandidate &split_candidate, const int min_data_in_leaf){
     int left_count = 0, right_count = 0;
     int n_features = this->n_num_features, n_cols = this->output_dim;
     int *left_indices = new int[this->n_samples];
@@ -194,7 +194,6 @@ float TreeNode::splitScoreCosine(const float *obs, const float *grads, const flo
         right_mean[d] = 0;
     }
     
-    float left_norms = 0, right_norms = 0;
     int sample_idx, grad_row;
 
     for (int n = 0; n < this->n_samples; ++n){
@@ -205,7 +204,6 @@ float TreeNode::splitScoreCosine(const float *obs, const float *grads, const flo
             #pragma omp simd
             for (int d = 0; d < n_cols; ++d)
                 right_mean[d] += grads[grad_row + d];
-            right_norms += grads_norm[sample_idx];
             right_indices[right_count] = sample_idx;
             ++right_count;
         } else {
@@ -213,7 +211,6 @@ float TreeNode::splitScoreCosine(const float *obs, const float *grads, const flo
             #pragma omp simd
             for (int d = 0; d < n_cols; ++d)
                 left_mean[d] += grads[grad_row + d];
-            left_norms += grads_norm[sample_idx];
             left_indices[left_count] = sample_idx;
             ++left_count;
         }
@@ -237,18 +234,18 @@ float TreeNode::splitScoreCosine(const float *obs, const float *grads, const flo
         right_mean[d] *= right_count_recip;
     }
 
-    float left_cosine = cosine_dist(left_indices, grads, left_mean, left_count, n_cols, left_norms);
-    float right_cosine = cosine_dist(right_indices, grads, right_mean, right_count, n_cols, right_norms);
+    float split_score = cosine_score(right_indices, left_indices, grads, right_mean, left_mean, right_count, left_count, n_cols);
 
     delete[] left_mean;
     delete[] right_mean;
     delete[] left_indices;
     delete[] right_indices;
  
-    return left_cosine + right_cosine;
+    int feat_idx = split_candidate.feature_idx;
+    return split_score * feature_weights[feat_idx]; 
 }
 
-float TreeNode::splitScoreCosineCategorical(const char *obs, const float *grads, const float *grads_norm, const splitCandidate &split_candidate, const int min_data_in_leaf){
+float TreeNode::splitScoreCosineCategorical(const char *obs, const float *feature_weights, const float *grads, const splitCandidate &split_candidate, const int min_data_in_leaf){
     int left_count = 0, right_count = 0;
     int n_features = this->n_cat_features, n_cols = this->output_dim;
     int *left_indices = new int[this->n_samples];
@@ -264,7 +261,6 @@ float TreeNode::splitScoreCosineCategorical(const char *obs, const float *grads,
         right_mean[d] = 0;
     }
     
-    float left_norms = 0, right_norms = 0;
     int sample_idx, grad_row;
 
     for (int n = 0; n < this->n_samples; ++n){
@@ -275,7 +271,6 @@ float TreeNode::splitScoreCosineCategorical(const char *obs, const float *grads,
             #pragma omp simd
             for (int d = 0; d < n_cols; ++d)
                 right_mean[d] += grads[grad_row + d];
-            right_norms += grads_norm[sample_idx];
             right_indices[right_count] = sample_idx;
             ++right_count;
         } else {
@@ -283,7 +278,6 @@ float TreeNode::splitScoreCosineCategorical(const char *obs, const float *grads,
             #pragma omp simd
             for (int d = 0; d < n_cols; ++d)
                 left_mean[d] += grads[grad_row + d];
-            left_norms += grads_norm[sample_idx];
             left_indices[left_count] = sample_idx;
             ++left_count;
         }
@@ -308,19 +302,20 @@ float TreeNode::splitScoreCosineCategorical(const char *obs, const float *grads,
         right_mean[d] *= right_count_recip;
     }
 
-    float left_cosine = cosine_dist(left_indices, grads, left_mean, left_count, n_cols, left_norms);
-    float right_cosine = cosine_dist(right_indices, grads, right_mean, right_count, n_cols, right_norms);
+    float split_score = cosine_score(right_indices, left_indices,  grads, right_mean, left_mean, right_count, left_count, n_cols);
 
     delete[] left_mean;
     delete[] right_mean;
     delete[] left_indices;
     delete[] right_indices;
- 
-    return left_cosine + right_cosine;
+
+    int feat_idx = split_candidate.feature_idx + n_num_features;
+    return split_score * feature_weights[feat_idx]; 
+
 }
 
 
-float TreeNode::splitScoreL2(const float *obs, const float *grads, const splitCandidate &split_candidate, const int min_data_in_leaf){
+float TreeNode::splitScoreL2(const float *obs, const float *feature_weights, const float *grads, const splitCandidate &split_candidate, const int min_data_in_leaf){
     int left_count = 0, right_count = 0;
     int n_cols = this->output_dim, n_features = this->n_num_features;
     const int *_sample_indices = this->sample_indices;
@@ -372,10 +367,12 @@ float TreeNode::splitScoreL2(const float *obs, const float *grads, const splitCa
     float right_mean_norm = squared_norm(right_mean, n_cols);
     delete[] left_mean;
     delete[] right_mean;
-    return left_count_f*left_mean_norm + right_count_f*right_mean_norm;
+    float split_score = left_count_f*left_mean_norm + right_count_f*right_mean_norm;
+    int feat_idx = split_candidate.feature_idx;
+    return split_score * feature_weights[feat_idx];
 }
 
-float TreeNode::splitScoreL2Categorical(const char *obs, const float *grads, const splitCandidate &split_candidate, const int min_data_in_leaf){
+float TreeNode::splitScoreL2Categorical(const char *obs, const float *feature_weights, const float *grads, const splitCandidate &split_candidate, const int min_data_in_leaf){
     int left_count = 0, right_count = 0;
     int n_cols = this->output_dim, n_features = this->n_cat_features;
     const int *_sample_indices = this->sample_indices;
@@ -428,7 +425,10 @@ float TreeNode::splitScoreL2Categorical(const char *obs, const float *grads, con
     float right_mean_norm = squared_norm(right_mean, n_cols);
     delete[] left_mean;
     delete[] right_mean;
-    return left_count_f*left_mean_norm + right_count_f*right_mean_norm;
+
+    float split_score = left_count_f*left_mean_norm + right_count_f*right_mean_norm;
+    int feat_idx = split_candidate.feature_idx + n_num_features;
+    return split_score * feature_weights[feat_idx];
 }
 
 bool TreeNode::isLeaf() const {

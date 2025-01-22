@@ -148,7 +148,6 @@ void SplitCandidateGenerator::processCategoricalCandidates(const char *categoric
     for (int i = 0; i < n_unique; ++i){
         // convert each unique element's string back to char* and copy exactly MAX_CHAR_SIZE of it to the correct position in categorical value
         categoryInfo cat_info = unique_cats[cat_vec[i].first];
-        // printf("n_candidates %d/%d\n", n_candidates, n_unique);
         this->split_candidates[n_candidates].feature_idx = cat_info.feature_idx;
         this->split_candidates[n_candidates].feature_value = INFINITY;
         this->split_candidates[n_candidates].categorical_value = new char[MAX_CHAR_SIZE]; 
@@ -255,7 +254,7 @@ std::ostream& operator<<(std::ostream& os, const splitCandidate& obj){
     return os;
 }
 
-float scoreCosine(const int *indices, const int n_samples, const float *grads, const float *grads_norm_raw, const int n_cols){
+float scoreCosine(const int *indices, const int n_samples, const float *grads, const int n_cols){
     float *mean = new float[n_cols]; 
     float n_samples_f = static_cast<float>(n_samples);
     float n_samples_recip = 1.0f / n_samples_f;
@@ -273,7 +272,6 @@ float scoreCosine(const int *indices, const int n_samples, const float *grads, c
         for (int d = 0; d < n_cols; ++d){
             mean[d] += grads[row + d];
         }
-        squared_norms += grads_norm_raw[idx];
     }
 
 
@@ -282,7 +280,7 @@ float scoreCosine(const int *indices, const int n_samples, const float *grads, c
         mean[d] *= n_samples_recip;
     }
 
-    float cosine = cosine_dist(indices, grads, mean, n_samples, n_cols, squared_norms);
+    float cosine = cosine_dist(indices, grads, mean, n_samples, n_cols);
     delete[] mean;
     return cosine;
 }

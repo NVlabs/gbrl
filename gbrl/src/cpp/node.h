@@ -22,10 +22,10 @@ class TreeNode {
         ~TreeNode();
         int splitNode(const float *obs, const char *categorical_obs, const int _node_idx, const splitCandidate &split_candidate);
         float getSplitScore(dataSet *dataset, scoreFunc split_score_func, const splitCandidate &split_candidate, const int min_data_in_leaf);
-        float splitScoreCosine(const float *obs, const float *grads, const float *grads_norm, const splitCandidate &split_candidate, const int min_data_in_leaf);
-        float splitScoreCosineCategorical(const char *obs, const float *grads, const float *grads_norm, const splitCandidate &split_candidate, const int min_data_in_leaf);
-        float splitScoreL2(const float *obs, const float *grads, const splitCandidate &split_candidate, const int min_data_in_leaf);
-        float splitScoreL2Categorical(const char *obs, const float *grads, const splitCandidate &split_candidate, const int min_data_in_leaf);
+        float splitScoreCosine(const float *obs, const float *feature_weights, const float *grads, const splitCandidate &split_candidate, const int min_data_in_leaf);
+        float splitScoreCosineCategorical(const char *obs, const float *feature_weights, const float *grads, const splitCandidate &split_candidate, const int min_data_in_leaf);
+        float splitScoreL2(const float *obs, const float *feature_weights, const float *grads, const splitCandidate &split_candidate, const int min_data_in_leaf);
+        float splitScoreL2Categorical(const char *obs, const float *feature_weights, const float *grads, const splitCandidate &split_candidate, const int min_data_in_leaf);
         bool isLeaf() const;
         static void printTree(TreeNode *node);
         friend std::ostream& operator<<(std::ostream& os, const TreeNode& obj);

@@ -131,10 +131,10 @@ void evaluate_greedy_splits(dataSet *dataset, const TreeNodeGPU *node, candidate
         get_grid_dimensions(parent_n_samples*candidata->n_candidates, n_blocks, tpb);
         split_conditional_sum_kernel<<<n_blocks, tpb>>>(dataset->obs, dataset->categorical_obs, dataset->build_grads, node, candidata->candidate_indices, candidata->candidate_values, candidata->candidate_categories, candidata->candidate_numeric, candidata->n_candidates,  dataset->n_samples, split_data->left_sum, split_data->right_sum, split_data->left_count, split_data->right_count);
         cudaDeviceSynchronize();
-        split_contidional_dot_kernel<<<n_blocks, tpb>>>(dataset->obs, dataset->categorical_obs, dataset->build_grads, dataset->norm_grads, node, candidata->candidate_indices, candidata->candidate_values, candidata->candidate_categories, candidata->candidate_numeric, candidata->n_candidates, dataset->n_samples,  split_data->left_sum,  split_data->right_sum, split_data->left_count, split_data->right_count, split_data->left_dot, split_data->right_dot, split_data->left_norms, split_data->right_norms);
+        split_contidional_dot_kernel<<<n_blocks, tpb>>>(dataset->obs, dataset->categorical_obs, dataset->build_grads, node, candidata->candidate_indices, candidata->candidate_values, candidata->candidate_categories, candidata->candidate_numeric, candidata->n_candidates, dataset->n_samples,  split_data->left_sum,  split_data->right_sum, split_data->left_count, split_data->right_count, split_data->left_dot, split_data->right_dot);
         cudaDeviceSynchronize();
         get_grid_dimensions(candidata->n_candidates, n_blocks, tpb);
-        split_cosine_score_kernel<<<n_blocks, tpb>>>(node, dataset->feature_weights, split_data->split_scores, candidata->candidate_indices, candidata->candidate_values, candidata->candidate_categories, candidata->candidate_numeric, candidata->n_candidates, split_data->left_sum, split_data->right_sum, split_data->left_count, split_data->right_count, split_data->left_dot, split_data->right_dot, split_data->left_norms, split_data->right_norms, metadata->min_data_in_leaf, metadata->n_num_features);
+        split_cosine_score_kernel<<<n_blocks, tpb>>>(node, dataset->feature_weights, split_data->split_scores, candidata->candidate_indices, candidata->candidate_values, candidata->candidate_categories, candidata->candidate_numeric, candidata->n_candidates, split_data->left_sum, split_data->right_sum, split_data->left_count, split_data->right_count, split_data->left_dot, split_data->right_dot, metadata->min_data_in_leaf, metadata->n_num_features);
 
      } else if (metadata->split_score_func == L2){
         cudaMemset(split_data->split_scores, 0, split_data->size);
@@ -163,8 +163,8 @@ void evaluate_oblivious_splits_cuda(dataSet *dataset, TreeNodeGPU ** nodes, cons
     calc_oblivious_parallelism(candidata->n_candidates, metadata->output_dim, threads_per_block, metadata->split_score_func, depth);
     for (int i = 0; i < n_nodes; ++i){
         if (metadata->split_score_func == Cosine){
-            size_t shared_mem = sizeof(float)*2*(metadata->output_dim + 3)*threads_per_block;
-            split_score_cosine_cuda<<<candidata->n_candidates, threads_per_block, shared_mem>>>(dataset->obs, dataset->categorical_obs, dataset->build_grads, dataset->norm_grads, dataset->feature_weights, nodes[i], candidata->candidate_indices, candidata->candidate_values, candidata->candidate_categories, candidata->candidate_numeric, metadata->min_data_in_leaf, split_data->oblivious_split_scores + candidata->n_candidates*i, dataset->n_samples, metadata->n_num_features);
+            size_t shared_mem = sizeof(float)*2*(metadata->output_dim + 2)*threads_per_block;
+            split_score_cosine_cuda<<<candidata->n_candidates, threads_per_block, shared_mem>>>(dataset->obs, dataset->categorical_obs, dataset->build_grads, dataset->feature_weights, nodes[i], candidata->candidate_indices, candidata->candidate_values, candidata->candidate_categories, candidata->candidate_numeric, metadata->min_data_in_leaf, split_data->oblivious_split_scores + candidata->n_candidates*i, dataset->n_samples, metadata->n_num_features);
         } else if (metadata->split_score_func == L2){
             size_t shared_mem = sizeof(float)*2*(metadata->output_dim + 1)*threads_per_block;
             split_score_l2_cuda<<<candidata->n_candidates, threads_per_block, shared_mem>>>(dataset->obs, dataset->categorical_obs, dataset->build_grads, dataset->feature_weights, nodes[i], candidata->candidate_indices, candidata->candidate_values, candidata->candidate_categories, candidata->candidate_numeric, metadata->min_data_in_leaf, split_data->oblivious_split_scores + candidata->n_candidates*i, dataset->n_samples, metadata->n_num_features);
@@ -182,7 +182,7 @@ void evaluate_oblivious_splits_cuda(dataSet *dataset, TreeNodeGPU ** nodes, cons
     cudaDeviceSynchronize();
 }
 
-__global__ void split_score_cosine_cuda(const float* __restrict__ obs, const char* __restrict__ categorical_obs, const float* __restrict__ grads, const float* __restrict__ grads_norm, const float* __restrict__ feature_weights, const TreeNodeGPU* __restrict__ node, const int* __restrict__ candidate_indices, const float* __restrict__ candidate_values, const char* __restrict__ candidate_categories, const bool* __restrict__ candidate_numeric, const int min_data_in_leaf, float* __restrict__ split_scores, const int global_n_samples, const int n_num_features){
+__global__ void split_score_cosine_cuda(const float* __restrict__ obs, const char* __restrict__ categorical_obs, const float* __restrict__ grads, const float* __restrict__ feature_weights, const TreeNodeGPU* __restrict__ node, const int* __restrict__ candidate_indices, const float* __restrict__ candidate_values, const char* __restrict__ candidate_categories, const bool* __restrict__ candidate_numeric, const int min_data_in_leaf, float* __restrict__ split_scores, const int global_n_samples, const int n_num_features){
     extern __shared__ float sdata[];
     int n_samples = __ldg(&node->n_samples), n_cols = __ldg(&node->output_dim);
     int cand_idx = blockIdx.x;
@@ -206,16 +206,12 @@ __global__ void split_score_cosine_cuda(const float* __restrict__ obs, const cha
     int thread_offset = 0;
     float *left_mean = &sdata[0];
     thread_offset += blockDim.x * n_cols;
-    float *left_grad_sum = &sdata[thread_offset];
-    thread_offset += blockDim.x;
     float *l_count = &sdata[thread_offset];
     thread_offset += blockDim.x;
     float *l_dot_sum = &sdata[thread_offset];
     thread_offset += blockDim.x;
     float* right_mean = &sdata[thread_offset]; // Assuming each part is n_cols floats long
     thread_offset += blockDim.x * n_cols;
-    float* right_grad_sum = &sdata[thread_offset]; // Assuming each part is n_cols floats long
-    thread_offset += blockDim.x;
     float* r_count = &sdata[thread_offset]; // Assuming each part is n_cols floats long
     thread_offset += blockDim.x;
     float* r_dot_sum = &sdata[thread_offset]; // Assuming each part is n_cols floats long
@@ -224,8 +220,6 @@ __global__ void split_score_cosine_cuda(const float* __restrict__ obs, const cha
     l_count[threadIdx.x] = 0.0f;
     r_dot_sum[threadIdx.x] = 0.0f;
     l_dot_sum[threadIdx.x] = 0.0f;
-    right_grad_sum[threadIdx.x] = 0.0f;
-    left_grad_sum[threadIdx.x] = 0.0f;
     for (int d = 0; d < n_cols; ++d){
         right_mean[threadIdx.x*n_cols + d] = 0.0f;
         left_mean[threadIdx.x*n_cols + d] = 0.0f;
@@ -238,13 +232,11 @@ __global__ void split_score_cosine_cuda(const float* __restrict__ obs, const cha
         if (passed){
             for (int d = 0; d < n_cols; ++d)
                 right_mean[threadIdx.x*n_cols + d] += __ldg(&grads[sample_idx*n_cols + d]);
-            right_grad_sum[threadIdx.x] += __ldg(&grads_norm[sample_idx]);
             r_count[threadIdx.x] += 1;
         } 
         else {
             for (int d = 0; d < n_cols; ++d)
                 left_mean[threadIdx.x*n_cols + d] += __ldg(&grads[sample_idx*n_cols + d]);
-            left_grad_sum[threadIdx.x] += __ldg(&grads_norm[sample_idx]);
             l_count[threadIdx.x] += 1;
         }
     }
@@ -256,8 +248,6 @@ __global__ void split_score_cosine_cuda(const float* __restrict__ obs, const cha
                 left_mean[threadIdx.x*n_cols + d] += left_mean[(threadIdx.x + offset)*n_cols + d];
                 right_mean[threadIdx.x*n_cols + d] += right_mean[(threadIdx.x + offset)*n_cols + d];
             }
-            left_grad_sum[threadIdx.x]  += left_grad_sum[threadIdx.x + offset];
-            right_grad_sum[threadIdx.x] += right_grad_sum[threadIdx.x + offset];
             l_count[threadIdx.x] += l_count[threadIdx.x + offset];
             r_count[threadIdx.x] += r_count[threadIdx.x + offset];
             
@@ -296,27 +286,27 @@ __global__ void split_score_cosine_cuda(const float* __restrict__ obs, const cha
 
     // thread 0 writes the final result
     if (threadIdx.x == 0){
-        float left_cosine = 0.0f, right_cosine = 0.0f, l_mean_norm = 0.0f, r_mean_norm = 0.0f;
+        float cosine = 0.0f, l_mean_norm = 0.0f, r_mean_norm = 0.0f;
         for (int d = 0; d < n_cols; ++d){
             l_mean_norm += left_mean[d] * left_mean[d];
             r_mean_norm += right_mean[d] * right_mean[d];
         }
-        l_mean_norm = (l_count[0] > 0.0f) ? sqrtf(l_mean_norm / (l_count[0]*l_count[0])) : 0.0f;
-        r_mean_norm = (r_count[0] > 0.0f) ? sqrtf(r_mean_norm / (r_count[0]*r_count[0])) : 0.0f;
+        l_mean_norm = (l_count[0] > 0.0f) ? l_mean_norm / (l_count[0]*l_count[0]) : 0.0f;
+        r_mean_norm = (r_count[0] > 0.0f) ? r_mean_norm / (r_count[0]*r_count[0]) : 0.0f;
         l_dot_sum[0] = (l_count[0] > 0.0f) ? l_dot_sum[0] / l_count[0] : 0.0f;
         r_dot_sum[0] = (r_count[0] > 0.0f) ? r_dot_sum[0] / r_count[0] : 0.0f;
-        float left_denominator = sqrtf(left_grad_sum[0]) * l_mean_norm;
-        float right_denominator = sqrtf(right_grad_sum[0]) * r_mean_norm;
-        if (left_denominator > 0.0f) {
-            left_cosine = (l_dot_sum[0] / left_denominator)*l_count[0];
+        float denominator = l_count[0]* l_mean_norm + r_count[0] * r_mean_norm;
+        if (denominator > 0.0f) {
+            cosine = (l_dot_sum[0] + r_dot_sum[0]) / sqrtf(denominator);
         }
-        if (right_denominator > 0.0f) {
-            right_cosine = (r_dot_sum[0] / right_denominator)*r_count[0];
+        else {
+            split_scores[cand_idx] = -INFINITY;
+            return;
         }
         int feat_idx = __ldg(&candidate_indices[cand_idx]);
         if (!candidate_numeric[cand_idx])
             feat_idx += n_num_features;
-        split_scores[cand_idx] = (left_cosine + right_cosine) * __ldg(feature_weights + feat_idx);
+        split_scores[cand_idx] = cosine * __ldg(feature_weights + feat_idx);
     }  
 }
 
@@ -433,7 +423,7 @@ __global__ void split_conditional_sum_kernel(const float* __restrict__ obs, cons
     }
 }
 
-__global__ void split_contidional_dot_kernel(const float* __restrict__ obs, const char* __restrict__ categorical_obs, const float* __restrict__ grads, const float* __restrict__ grad_norms, const TreeNodeGPU* __restrict__ node, const int* __restrict__ candidate_indices, const float* __restrict__ candidate_values,  const char* __restrict__ candidate_categories, const bool* __restrict__ candidate_numeric, const int n_candidates, const int global_n_samples, float* __restrict__ left_sum, float* __restrict__ right_sum, float* __restrict__ left_count, float* __restrict__ right_count, float* __restrict__ ldot, float* __restrict__ rdot, float* __restrict__ lnorms, float* __restrict__ rnorms){
+__global__ void split_contidional_dot_kernel(const float* __restrict__ obs, const char* __restrict__ categorical_obs, const float* __restrict__ grads, const TreeNodeGPU* __restrict__ node, const int* __restrict__ candidate_indices, const float* __restrict__ candidate_values,  const char* __restrict__ candidate_categories, const bool* __restrict__ candidate_numeric, const int n_candidates, const int global_n_samples, float* __restrict__ left_sum, float* __restrict__ right_sum, float* __restrict__ left_count, float* __restrict__ right_count, float* __restrict__ ldot, float* __restrict__ rdot){
 
     int n_cols = __ldg(&node->output_dim), n_samples = __ldg(&node->n_samples);
     int global_idx = threadIdx.x + blockIdx.x*blockDim.x;
@@ -452,19 +442,16 @@ __global__ void split_contidional_dot_kernel(const float* __restrict__ obs, cons
                 cdot += __ldg(&grads[row_idx + d]) * __ldg(&right_sum[cand_row + d]);
             cdot /= __ldg(&right_count[cand_idx]);
             atomicAdd(rdot + cand_idx, cdot);
-            atomicAdd(rnorms + cand_idx, __ldg(&grad_norms[sample_idx]) );
-
         } else {
             for (int d = 0; d < n_cols; ++d)
                 cdot += __ldg(&grads[row_idx + d]) * __ldg(&left_sum[cand_row + d]);
             cdot /= __ldg(&left_count[cand_idx]);
             atomicAdd(ldot + cand_idx, cdot);
-            atomicAdd(lnorms + cand_idx, __ldg(&grad_norms[sample_idx]) );
         }
     }
 }
 
-__global__ void split_cosine_score_kernel(const TreeNodeGPU* __restrict__ node, const float* __restrict__ feature_weights, float* __restrict__ split_scores, const int* __restrict__ candidate_indices, const float* __restrict__ candidate_values,  const char* __restrict__ candidate_categories, const bool* __restrict__ candidate_numeric, const int n_candidates, float* __restrict__ lsum, float* __restrict__ rsum, float* __restrict__ lcount, float* __restrict__ rcount, float* __restrict__ ldot, float* __restrict__ rdot, float* __restrict__ lnorms, float* __restrict__ rnorms, const int min_data_in_leaf, const int n_num_features){
+__global__ void split_cosine_score_kernel(const TreeNodeGPU* __restrict__ node, const float* __restrict__ feature_weights, float* __restrict__ split_scores, const int* __restrict__ candidate_indices, const float* __restrict__ candidate_values,  const char* __restrict__ candidate_categories, const bool* __restrict__ candidate_numeric, const int n_candidates, float* __restrict__ lsum, float* __restrict__ rsum, float* __restrict__ lcount, float* __restrict__ rcount, float* __restrict__ ldot, float* __restrict__ rdot, const int min_data_in_leaf, const int n_num_features){
     int cand_idx = blockIdx.x*blockDim.x + threadIdx.x;
     int n_cols = __ldg(&node->output_dim);
     int cand_row = cand_idx*n_cols;
@@ -505,20 +492,17 @@ __global__ void split_cosine_score_kernel(const TreeNodeGPU* __restrict__ node, 
         l_mean_norm = (lvalue > 0.0f) ? sqrtf(l_mean_norm / (lvalue * lvalue)) : 0.0f;
         r_mean_norm = (rvalue > 0.0f) ? sqrtf(r_mean_norm / (rvalue * rvalue)) : 0.0f;
 
-        float ldenominator = sqrtf(lnorms[cand_idx]) * l_mean_norm;
-        float rdenominator = sqrtf(rnorms[cand_idx]) * r_mean_norm;
-        float lcos = 0.0f;
-        float rcos = 0.0f;
-        if (ldenominator > 0.0f) {
-            lcos = (ldot[cand_idx] / ldenominator)*lvalue;
+        float denominator =  lcount[cand_idx] * l_mean_norm + rcount[cand_idx] * r_mean_norm;
+        float numerator = ldot[cand_idx] + rdot[cand_idx];
+        if (denominator == 0.0f){
+            split_scores[cand_idx] = -INFINITY;
+            return;
         }
-        if (rdenominator > 0.0f) {
-            rcos = (rdot[cand_idx] / rdenominator)*rvalue;
-        }
+        float cos = numerator / sqrtf(denominator);
         int feat_idx = __ldg(&candidate_indices[cand_idx]);
         if (!candidate_numeric[cand_idx])
             feat_idx += n_num_features;
-        split_scores[cand_idx] = (lcos + rcos) * __ldg(feature_weights + feat_idx);
+        split_scores[cand_idx] = cos * __ldg(feature_weights + feat_idx);
     }
 }
 
@@ -733,17 +717,15 @@ __global__ void node_l2_kernel(TreeNodeGPU *node, const float *mean){
     }
 }
 
-__global__ void node_cosine_kernel(TreeNodeGPU* node, const float *grads, const float *grads_norm, float *mean){
+__global__ void node_cosine_kernel(TreeNodeGPU* node, const float *grads, float *mean){
     extern __shared__ float sdata[];
 
     int n_samples = node->n_samples, n_cols = node->output_dim;    
     int threads_per_block = blockDim.x;
     int thread_offset = 0;
-    float *grad_sum = &sdata[thread_offset];
     thread_offset += threads_per_block;
     float *dot_sum = &sdata[thread_offset];
 
-    grad_sum[threadIdx.x] = 0.0f;
     dot_sum[threadIdx.x] = 0.0f;
     __syncthreads();
     // Accumulate per thread partial sum
@@ -752,7 +734,6 @@ __global__ void node_cosine_kernel(TreeNodeGPU* node, const float *grads, const 
         int row_idx = sample_idx*n_cols;
         for (int d = 0; d < n_cols ; ++d)
             dot_sum[threadIdx.x] += grads[row_idx + d]*mean[d];
-        grad_sum[threadIdx.x] += grads_norm[sample_idx];
     }
     __syncthreads();
 
@@ -760,7 +741,6 @@ __global__ void node_cosine_kernel(TreeNodeGPU* node, const float *grads, const 
     for(int offset = blockDim.x / 2; offset > 0; offset >>= 1) {
         if(threadIdx.x < offset) {
             dot_sum[threadIdx.x] += dot_sum[threadIdx.x + offset]; 
-            grad_sum[threadIdx.x] += grad_sum[threadIdx.x + offset]; 
         }
         __syncthreads();
     }
@@ -771,9 +751,9 @@ __global__ void node_cosine_kernel(TreeNodeGPU* node, const float *grads, const 
         float mean_norm = 0.0f;
         for (int d = 0; d < n_cols; ++d)
             mean_norm += mean[d]*mean[d];
-        float denominator = sqrtf(grad_sum[0]) * sqrtf(mean_norm);
+        float denominator = static_cast<float>(n_samples) * mean_norm;
         if (denominator > 0) {
-            cosine = (dot_sum[0] / denominator)*static_cast<float>(n_samples);
+            cosine = dot_sum[0] / sqrtf(denominator);
         }
         node->score = (node->node_idx > 0) ? cosine : 0.0f;
     }  
@@ -1215,8 +1195,8 @@ void fit_tree_greedy_cuda(dataSet *dataset, ensembleData *edata, ensembleMetaDat
             node_column_mean_reduce<<<(metadata->output_dim + BLOCK_COLS-1) /BLOCK_COLS, n_threads_per_blockdim3 >>>(dataset->build_grads, split_data->node_mean, metadata->output_dim, crnt_node);
             cudaDeviceSynchronize();
             if (metadata->split_score_func == Cosine){
-                shmsize = 2*sizeof(float) * THREADS_PER_BLOCK;
-                node_cosine_kernel<<<1, THREADS_PER_BLOCK, shmsize>>>(crnt_node, dataset->build_grads, dataset->norm_grads, split_data->node_mean);
+                shmsize = sizeof(float) * THREADS_PER_BLOCK;
+                node_cosine_kernel<<<1, THREADS_PER_BLOCK, shmsize>>>(crnt_node, dataset->build_grads, split_data->node_mean);
             } else if (metadata->split_score_func == L2){
                 node_l2_kernel<<<1, WARP_SIZE>>>(crnt_node, split_data->node_mean);
             } else{
