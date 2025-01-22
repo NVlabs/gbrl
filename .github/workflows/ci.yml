@@ -35,7 +35,7 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y lcov g++ gcc
 
-      - name: Install dependencies on Windows
+    - name: Install dependencies on Windows
       if: matrix.os == 'windows-latest'
       run: |
         python -m pip install --upgrade pip
