@@ -146,7 +146,7 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
 
     for (int i = 0; i < iterations; ++i){
         batch_dataset.obs = dataset->obs + batch_start_idx*metadata->n_num_features; 
-        batch_dataset.categorical_obs = dataset->categorical_obs + batch_start_idx*metadata->n_cat_features*MAX_CHAR_SIZE; ; 
+        batch_dataset.categorical_obs = dataset->categorical_obs + batch_start_idx*metadata->n_cat_features*MAX_CHAR_SIZE;
         batch_dataset.n_samples = batch_n_samples; 
 
         const float *shifted_targets = targets + batch_start_idx*metadata->output_dim; 
@@ -170,7 +170,7 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
         }
 
         norm_grads = is_last_batch ? last_batch_grad_norms : batch_grad_norms;
-        int size_preds = is_last_batch ? last_batch_preds_size: batch_preds_size;
+        int size_preds = is_last_batch ? last_batch_preds_size : batch_preds_size;
         build_grads =  is_last_batch ? last_batch_build_grads : batch_build_grads;
         memcpy(build_grads, grads, sizeof(float) * size_preds);
         if (metadata->split_score_func == L2){
@@ -204,7 +204,6 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
             std::cout << "Boosting iteration: " << metadata->iteration << " - MultiRMSE Loss: " << batch_loss << std::endl;
         }
         
-            
     }
     if (indices != nullptr){
         for (int i = 0; i < metadata->n_num_features; ++i){
