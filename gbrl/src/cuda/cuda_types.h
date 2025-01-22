@@ -47,8 +47,6 @@ struct splitDataGPU{
     float *best_score;
     int *best_idx;
     // cosine score
-    float *left_norms;
-    float *right_norms;
     float *left_dot;
     float *right_dot;
     float *oblivious_split_scores;
@@ -88,9 +86,9 @@ ensembleData* ensemble_data_alloc_cuda(ensembleMetaData *metadata);
 ensembleData* ensemble_copy_data_alloc_cuda(ensembleMetaData *metadata);
 splitDataGPU* allocate_split_data(ensembleMetaData *metadata, const int n_candidates);
 void ensemble_data_dealloc_cuda(ensembleData *edata);
-ensembleData* ensemble_data_copy_gpu_gpu(ensembleMetaData *metadata, ensembleData *other_edata);
-ensembleData* ensemble_data_copy_cpu_gpu(ensembleMetaData *metadata, ensembleData *other_edata);
-ensembleData* ensemble_data_copy_gpu_cpu(ensembleMetaData *metadata, ensembleData *other_edata);
+ensembleData* ensemble_data_copy_gpu_gpu(ensembleMetaData *metadata, ensembleData *other_edata, ensembleData* edata);
+ensembleData* ensemble_data_copy_cpu_gpu(ensembleMetaData *metadata, ensembleData *other_edata, ensembleData* edata);
+ensembleData* ensemble_data_copy_gpu_cpu(ensembleMetaData *metadata, ensembleData *other_edata, ensembleData* edata);
 void allocate_ensemble_memory_cuda(ensembleMetaData *metadata, ensembleData *edata);
 #ifdef __cplusplus
 }

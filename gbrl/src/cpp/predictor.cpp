@@ -113,9 +113,6 @@ void Predictor::predict_cpu(dataSet *dataset, float *preds, const ensembleData *
         std::cerr << "Given stop_tree_idx: " << stop_tree_idx << " greater than number of trees in model: " << n_trees << std::endl;
         return;
     } 
-    if (n_trees == 0)
-        return; 
-    
     if (stop_tree_idx == 0)
         stop_tree_idx = n_trees;
 
@@ -171,6 +168,8 @@ void Predictor::predict_cpu(dataSet *dataset, float *preds, const ensembleData *
 
 
 void Predictor::predict_over_leaves(const float *obs, const char *categorical_obs, float *theta, const int sample_idx, const ensembleData *edata, const ensembleMetaData *metadata, const int start_tree_idx, const int stop_tree_idx, std::vector<Optimizer*> opts){
+    /* Predict function for non-oblivious trees
+    */
     int tree_idx = start_tree_idx;
     int n_leaves = metadata->n_leaves;
     int max_depth = metadata->max_depth;
@@ -212,6 +211,8 @@ void Predictor::predict_over_leaves(const float *obs, const char *categorical_ob
 }
 
 void Predictor::predict_over_trees(const float *obs, const char *categorical_obs, float *theta, const int sample_idx, const ensembleData *edata, const ensembleMetaData *metadata, const int start_tree_idx, const int stop_tree_idx, std::vector<Optimizer*> opts){
+    /* Predict function for oblivious trees
+    */
     int tree_idx = start_tree_idx;
     int max_depth = metadata->max_depth;
     bool passed;
@@ -245,5 +246,4 @@ void Predictor::predict_over_trees(const float *obs, const char *categorical_obs
         ++tree_idx;
     }
 }
-
 

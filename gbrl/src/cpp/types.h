@@ -151,6 +151,7 @@ struct ensembleData {
     bool* is_numerics;
     bool* inequality_directions; 
     char* categorical_values;  
+    size_t alloc_data_size;
 };
 
 struct serializationHeader {

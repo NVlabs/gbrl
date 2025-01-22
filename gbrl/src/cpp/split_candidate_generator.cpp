@@ -263,7 +263,7 @@ float scoreCosine(const int *indices, const int n_samples, const float *grads, c
     for (int d = 0; d < n_cols; ++d){
         mean[d] = 0;
     }
-    float squared_norms = 0.0f;
+
     for (int i = 0; i < n_samples; ++i){
         int idx = indices[i];
         int row = idx * n_cols;
@@ -273,7 +273,6 @@ float scoreCosine(const int *indices, const int n_samples, const float *grads, c
             mean[d] += grads[row + d];
         }
     }
-
 
     #pragma omp simd
     for (int d = 0; d < n_cols; ++d){

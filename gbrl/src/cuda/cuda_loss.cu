@@ -36,7 +36,7 @@ float MultiRMSEGradandLoss(const float *preds, const float *targets, float *grad
         loss += result[i];
     }
     delete[] result;
-    return sqrtf(0.5f * loss / static_cast<float>(n_samples));
+    return sqrtf(0.5f * loss / static_cast<float>(n_samples*output_dim));
 }
 
 __global__ void multirmse_grad_kernel(const float* __restrict__ preds, const float* __restrict__ targets, float* __restrict__ grads, const int n_samples, const int output_dim){

@@ -489,10 +489,11 @@ __global__ void split_cosine_score_kernel(const TreeNodeGPU* __restrict__ node, 
         }
         lvalue = __ldg(&lcount[cand_idx]);
         rvalue = __ldg(&rcount[cand_idx]);
-        l_mean_norm = (lvalue > 0.0f) ? sqrtf(l_mean_norm / (lvalue * lvalue)) : 0.0f;
-        r_mean_norm = (rvalue > 0.0f) ? sqrtf(r_mean_norm / (rvalue * rvalue)) : 0.0f;
 
-        float denominator =  lcount[cand_idx] * l_mean_norm + rcount[cand_idx] * r_mean_norm;
+        l_mean_norm = (lvalue > 0.0f) ? l_mean_norm / (lvalue * lvalue) : 0.0f;
+        r_mean_norm = (rvalue > 0.0f) ? r_mean_norm / (rvalue * rvalue) : 0.0f;
+
+        float denominator =  lvalue * l_mean_norm + rvalue * r_mean_norm;
         float numerator = ldot[cand_idx] + rdot[cand_idx];
         if (denominator == 0.0f){
             split_scores[cand_idx] = -INFINITY;
@@ -719,13 +720,9 @@ __global__ void node_l2_kernel(TreeNodeGPU *node, const float *mean){
 
 __global__ void node_cosine_kernel(TreeNodeGPU* node, const float *grads, float *mean){
     extern __shared__ float sdata[];
-
     int n_samples = node->n_samples, n_cols = node->output_dim;    
-    int threads_per_block = blockDim.x;
     int thread_offset = 0;
-    thread_offset += threads_per_block;
     float *dot_sum = &sdata[thread_offset];
-
     dot_sum[threadIdx.x] = 0.0f;
     __syncthreads();
     // Accumulate per thread partial sum

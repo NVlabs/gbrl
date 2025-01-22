@@ -29,7 +29,7 @@ from tests import CATEGORICAL_INPUTS, CATEGORICAL_OUTPUTS
 
 N_EPOCHS = 100
 
-def  rmse_model(model, X, y, n_epochs, device='cpu'):
+def rmse_model(model, X, y, n_epochs, device='cpu'):
     y_ = th.tensor(y, dtype=th.float32, device=device).squeeze()
     X_ = X.copy()
     epoch = 0
@@ -389,39 +389,40 @@ class TestGBTSingle(unittest.TestCase):
                             gbrl_params=gbrl_params,
                             verbose=0,
                             device='cpu')
-        model = GBRL.load_model(os.path.join(self.test_dir, 'test_cosine_cpu'))
+        model = GBRL.load_model(os.path.join(self.test_dir, 'test_cosine_cpu'), device='cpu')
         y_pred = model(X, requires_grad=False, tensor=False)
         loss = np.sqrt(np.mean((y_pred.squeeze() - y.squeeze())**2))
         self.assertTrue(loss < 2.0, f'Expected loss = {loss} < 2.0')
         
-        model = GBRL.load_model(os.path.join(self.test_dir, 'test_l2_cpu'))
+        model = GBRL.load_model(os.path.join(self.test_dir, 'test_l2_cpu'), device='cpu')
         y_pred = model(X, requires_grad=False, tensor=False)
         loss = np.sqrt(np.mean((y_pred.squeeze() - y.squeeze())**2))
         self.assertTrue(loss < 0.5, f'Expected loss = {loss} < 0.5')
         if (cuda_available()):
-            model = GBRL.load_model(os.path.join(self.test_dir, 'test_cosine_gpu'))
+            model = GBRL.load_model(os.path.join(self.test_dir, 'test_cosine_gpu'), device='cuda')
             y_pred = model(X, requires_grad=False, tensor=False)
             loss = np.sqrt(np.mean((y_pred.squeeze() - y.squeeze())**2))
             self.assertTrue(loss < 2.0, f'Expected loss = {loss} < 2.0')
-            model = GBRL.load_model(os.path.join(self.test_dir, 'test_cosine_oblivious_gpu'))
+            model = GBRL.load_model(os.path.join(self.test_dir, 'test_cosine_oblivious_gpu'), device='cuda')
             y_pred = model(X, requires_grad=False, tensor=False)
             loss = np.sqrt(np.mean((y_pred.squeeze() - y.squeeze())**2))
             self.assertTrue(loss < 12.0, f'Expected loss = {loss} < 12.0')
-            model = GBRL.load_model(os.path.join(self.test_dir, 'test_l2_gpu'))
+            model = GBRL.load_model(os.path.join(self.test_dir, 'test_l2_gpu'), device='cuda')
             y_pred = model(X, requires_grad=False, tensor=False)
             loss = np.sqrt(np.mean((y_pred.squeeze() - y.squeeze())**2))
             self.assertTrue(loss < 0.5, f'Expected loss = {loss} < 0.5')
-            model = GBRL.load_model(os.path.join(self.test_dir, 'test_l2_oblivious_gpu'))
+            model = GBRL.load_model(os.path.join(self.test_dir, 'test_l2_oblivious_gpu'), device='cuda')
             y_pred = model(X, requires_grad=False, tensor=False)
             loss = np.sqrt(np.mean((y_pred.squeeze() - y.squeeze())**2))
             self.assertTrue(loss < 10.0, f'Expected loss = {loss} < 10.0')
-        model = GBRL.load_model(os.path.join(self.test_dir, 'test_cosine_adam_cpu'))
+        model = GBRL.load_model(os.path.join(self.test_dir, 'test_cosine_adam_cpu'), device='cpu')
         y_pred = model(X, requires_grad=False, tensor=False)
         loss = np.sqrt(np.mean((y_pred.squeeze() - y.squeeze())**2))
         value = 50.0
         self.assertTrue(loss < value, f'Expected loss = {loss} < {value}')
 
 if __name__ == '__main__':
-    # unittest.main()
+    unittest.main()
     # unittest.main(argv=['first-arg-is-ignored', 'TestGBTSingle.test_cosine_cpu'])
-    unittest.main(argv=['first-arg-is-ignored', 'TestGBTSingle.test_cosine_cpu', 'TestGBTSingle.test_cosine_gpu', 'TestGBTSingle.test_l2_cpu', 'TestGBTSingle.test_cosine_oblivious_cpu', 'TestGBTSingle.test_cosine_oblivious_gpu'])
+    # unittest.main(argv=['first-arg-is-ignored', 'TestGBTSingle.test_cosine_cpu', 'TestGBTSingle.test_cosine_gpu', 'TestGBTSingle.test_l2_cpu', 'TestGBTSingle.test_cosine_oblivious_cpu', 'TestGBTSingle.test_cosine_oblivious_gpu'])
+    # unittest.main(argv=['first-arg-is-ignored', 'TestGBTSingle.test_cosine_gpu', 'TestGBTSingle.test_cosine_oblivious_gpu'])

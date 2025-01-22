@@ -6,7 +6,7 @@
 # https://nvlabs.github.io/gbrl/license.html
 #
 ##############################################################################
-from typing import Dict, List, Union, Tuple, Optional
+from typing import Dict, List, Union, Tuple, Optional, Any
 
 import numpy as np
 import torch as th
@@ -99,14 +99,6 @@ class GBRL:
         if len(bias.shape) == 1:
             bias = bias[:, np.newaxis]
         self._model.set_bias(bias.astype(np.single))
-
-    def get_bias(self) -> np.ndarray:
-        """Sets GBRL bias
-
-        Returns:
-            np.ndarray: bias
-        """
-        return self._model.get_bias()
     
     def set_bias_from_targets(self, targets: Union[np.ndarray, th.Tensor]):
         """Sets bias as mean of targets
@@ -123,7 +115,7 @@ class GBRL:
             arr = arr[:, np.newaxis]
         mean_arr = np.mean(arr, axis=0)
         if isinstance(mean_arr, float):
-            mean_arr = np.array([mean_arr])
+            mean_arr = np.ndarray([mean_arr])
         self._model.set_bias(mean_arr.astype(np.single)) # GBRL only works with float32
     
     def get_iteration(self) -> int:
@@ -180,7 +172,7 @@ class GBRL:
             params = (params[0].detach().cpu().numpy(), params[1].detach().cpu().numpy()) 
         return params, self.grad
     
-    def fit(self, X: Union[np.ndarray, th.Tensor], targets: Union[np.ndarray, th.Tensor], iterations: int, shuffle: bool=True, loss_type: str='MultiRMSE') -> float:
+    def fit(self, X: Union[np.ndarray, th.Tensor], targets: Union[np.ndarray, th.Tensor], iterations: int, shuffle: bool = True, loss_type: str = 'MultiRMSE') -> float:
         """Fit multiple iterations (as in supervised learning)
 
         Args:
@@ -251,7 +243,7 @@ class GBRL:
         self._model.export(filename, modelname) 
 
     @classmethod
-    def load_model(cls, load_name: str) -> "GBRL":
+    def load_model(cls, load_name: str, device: str) -> "GBRL":
         """Loads GBRL model from a file
 
         Args:
@@ -261,7 +253,7 @@ class GBRL:
             GBRL instance 
         """
         instance = cls.__new__(cls)
-        instance._model = GBTWrapper.load(load_name)
+        instance._model = GBTWrapper.load(load_name, device)
         instance.optimizer =  instance._model.optimizer
         instance.output_dim = instance._model.output_dim
         instance.verbose = instance._model.verbose
