@@ -43,7 +43,8 @@ jobs:
     - name: Set up MSVC environment
       if: matrix.os == 'windows-latest'
       run: |
-        & "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
+        where cl
+        cl
 
     - name: Set environment variable for coverage
       if: matrix.os == 'ubuntu-latest'
