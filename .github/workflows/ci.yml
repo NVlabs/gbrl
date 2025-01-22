@@ -17,7 +17,7 @@ jobs:
     
     strategy:
       matrix:
-        os: [ubuntu-latest]
+        os: [ubuntu-latest, windows-latest]
         python-version: ['3.10']
 
     steps:
@@ -35,7 +35,18 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y lcov g++ gcc
 
+      - name: Install dependencies on Windows
+      if: matrix.os == 'windows-latest'
+      run: |
+        python -m pip install --upgrade pip
+
+    - name: Set up MSVC environment
+      if: matrix.os == 'windows-latest'
+      run: |
+        call "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
+
     - name: Set environment variable for coverage
+      if: matrix.os == 'ubuntu-latest'
       run: echo "COVERAGE=1" >> $GITHUB_ENV
 
     - name: Install Python dependencies and build the project with coverage
@@ -44,22 +55,31 @@ jobs:
         python -m pip install coverage
         pip install .
 
-    - name: Run tests
+    - name: Run tests with coverage
+      if: matrix.os == 'ubuntu-latest'
       run: |
         coverage run --source=gbrl -m unittest discover tests
+      
+      - name: Run tests coverage
+      if: matrix.os == 'windows-latest'
+      run: |
+        python -m unittest discover tests
 
     - name: Generate coverage report
+      if: matrix.os == 'ubuntu-latest'
       run: |
         coverage report
         coverage xml
 
     - name: Generate C++ coverage report
+      if: matrix.os == 'ubuntu-latest'
       run: |
         lcov --capture --directory . --output-file coverage.info
         lcov --remove coverage.info '/usr/*' --output-file coverage.info
         lcov --list coverage.info
  
     - name: Upload coverage reports as artifacts
+      if: matrix.os == 'ubuntu-latest'
       uses: actions/upload-artifact@v4
       with:
         name: coverage-reports
