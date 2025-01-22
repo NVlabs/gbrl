@@ -13,7 +13,7 @@
 #include "loss.h"
 
 float MultiRMSE::get_loss_and_gradients(const float *raw_preds, const float *raw_targets, float *raw_grads, const int n_samples, const int output_dim){
-    float count_recip = 1.0f /  static_cast<float>(n_samples * output_dim);
+    float count_recip = 1.0f /  static_cast<float>(n_samples);
     const int n_threads = static_cast<int>(omp_get_max_threads());
     int n_elements = n_samples*output_dim;
     int elements_per_thread = n_elements / n_threads;
@@ -42,7 +42,7 @@ float MultiRMSE::get_loss_and_gradients(const float *raw_preds, const float *raw
 }
 
 float MultiRMSE::get_loss(const float *raw_preds, const float *raw_targets, const int n_samples, const int output_dim){
-    float count_recip = 1.0f /  static_cast<float>(n_samples * output_dim);
+    float count_recip = 1.0f /  static_cast<float>(n_samples);
     const int n_threads = static_cast<int>(omp_get_max_threads());
     int samples_per_thread = n_samples / n_threads;
     int row;
