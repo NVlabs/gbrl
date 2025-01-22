@@ -42,6 +42,7 @@ class GBRL {
         int saveToFile(const std::string& filename);
         int exportModel(const std::string& filename, const std::string& modelname);
         int loadFromFile(const std::string& filename);
+        void ensemble_check();
 
         void step(const float *obs, const char *categorical_obs, float *grads, const float *feature_weights, const int n_samples, const int n_num_features, const int n_cat_features, deviceType device);
 #ifdef USE_CUDA
@@ -61,6 +62,7 @@ class GBRL {
         void set_optimizer(optimizerAlgo algo, schedulerFunc scheduler_func, float init_lr, int start_idx, int stop_idx, float stop_lr, int T, float beta_1, float beta_2, float eps, float shrinkage);
 
         void print_tree(int tree_idx);
+        void print_ensemble_metadata();
         void plot_tree(int tree_idx, const std::string &filename);
 
         ensembleData *edata;

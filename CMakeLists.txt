@@ -21,6 +21,19 @@ if (POLICY CMP0148)
     cmake_policy(SET CMP0148 NEW)
 endif()
 
+if (MSVC)
+  if(MSVC_VERSION LESS 1910)
+    message(
+      FATAL_ERROR
+      "The compiler ${CMAKE_CXX_COMPILER} doesn't support required C++14 features. Please use a newer MSVC."
+    )
+  endif()
+endif()
+
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+    add_definitions(-DDEBUG)
+endif()
+
 # Allow overriding Python paths
 if (DEFINED PYTHON_EXECUTABLE)
     set(Python3_EXECUTABLE ${PYTHON_EXECUTABLE} CACHE FILEPATH "Path to the Python executable")
@@ -173,7 +186,11 @@ if(APPLE)
         find_package(OpenMP REQUIRED)  
     endif()
 else()
-    find_package(OpenMP REQUIRED)
+    if (MSVC)
+        find_package(OpenMP REQUIRED COMPONENTS C CXX)
+    else()
+        find_package(OpenMP REQUIRED)
+    endif()
     set(OpenMP_CXX_FLAGS ${OpenMP_CXX_FLAGS})
     set(OpenMP_CXX_LIB_NAMES ${OpenMP_CXX_LIB_NAMES})
     set(OpenMP_omp_LIBRARY ${OpenMP_omp_LIBRARY})
@@ -184,6 +201,9 @@ if (OpenMP_FOUND)
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}")
+    if (MSVC)
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /openmp:experimental")
+    endif()
 endif()
 
 # Add subdirectories for cpp and cuda

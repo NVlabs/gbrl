@@ -15,7 +15,7 @@
 
 
 void get_grid_dimensions(int n_elements, int& blocks, int& threads_per_block) {
-    const int max_threads_per_block = 256; // You can adjust this based on your GPU
+    const int max_threads_per_block = THREADS_PER_BLOCK; // You can adjust this based on your GPU
 
     if (n_elements < WARP_SIZE) {
         threads_per_block = WARP_SIZE;

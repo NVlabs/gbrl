@@ -104,7 +104,7 @@ GBRL::GBRL(GBRL& other):
         this->device= other.device;
 #ifdef USE_CUDA
         if (this->device == gpu)
-            this->edata = ensemble_data_copy_gpu_gpu(this->metadata, other.edata);
+            this->edata = ensemble_data_copy_gpu_gpu(this->metadata, other.edata, nullptr);
 #endif
         if (this->device == cpu)
             this->edata = copy_ensemble_data(other.edata, this->metadata);
@@ -138,8 +138,6 @@ GBRL::~GBRL() {
     this->metadata = nullptr;
 }
 
-
-
 void GBRL::to_device(deviceType device){
     if (device == this->device){
         std::cout << "GBRL device is already " << deviceTypeToString(device) << std::endl;
@@ -167,12 +165,12 @@ void GBRL::to_device(deviceType device){
             this->device = gpu;
         }
     } else if (this->device == cpu && device == gpu){
-        ensembleData* edata_gpu = ensemble_data_copy_cpu_gpu(this->metadata, this->edata);
+        ensembleData* edata_gpu = ensemble_data_copy_cpu_gpu(this->metadata, this->edata, nullptr);
         ensemble_data_dealloc(this->edata);
         this->edata = edata_gpu;
         this->device = gpu;
     } else {
-        ensembleData* edata_cpu = ensemble_data_copy_gpu_cpu(this->metadata, this->edata);
+        ensembleData* edata_cpu = ensemble_data_copy_gpu_cpu(this->metadata, this->edata, nullptr);
         ensemble_data_dealloc_cuda(this->edata);
         this->edata = edata_cpu;
         this->device = cpu;
@@ -234,7 +232,7 @@ float* GBRL::predict(const float *obs, const char *categorical_obs, const int n_
     }
 #endif
 
-    dataSet dataset{obs, categorical_obs, nullptr, nullptr, nullptr, nullptr, n_samples, device};
+    dataSet dataset{obs, categorical_obs, nullptr, nullptr, nullptr, n_samples, device};
     float *preds = nullptr;
     // int n_trees = this->get_num_trees();
 #ifdef USE_CUDA
@@ -252,6 +250,18 @@ float* GBRL::predict(const float *obs, const char *categorical_obs, const int n_
     }
     return preds;
 
+}
+
+
+void GBRL::ensemble_check(){
+    if (this->metadata->iteration == 0 || this->metadata->n_trees == 0){
+        std::cerr << "Error! ensemble has no trees!";
+        throw std::runtime_error("Uninitialized ensemble");
+    } 
+    else if (this->opts.size() == 0){
+        std::cerr << "Error! ensemble has no optimizers!";
+        throw std::runtime_error("Uninitialized ensemble");
+    }
 }
 
 int GBRL::get_num_trees(){
@@ -313,6 +323,14 @@ void GBRL::set_optimizer(optimizerAlgo algo, schedulerFunc scheduler_func, float
         if (scheduler_func == Const){
             opt = new SGDOptimizer(scheduler_func, init_lr);
         } else if (scheduler_func == Linear){
+
+#ifdef USE_CUDA
+        if (this->device == gpu){
+            std::cerr << "Linear schedular has CPU support only." << std::endl;
+            throw std::runtime_error("Incompatible GPU scheduler");
+            return;
+        }
+#endif
             opt = new SGDOptimizer(scheduler_func, init_lr, stop_lr, T);
         } else {
             std::cerr << "Unrecognized scheduler func." << std::endl;
@@ -350,8 +368,9 @@ float* GBRL::get_scheduler_lrs(){
 bool GBRL::cuda_available(){
 #ifdef USE_CUDA
     return true;
-#endif 
+#else
     return false;
+#endif 
 }
 
 #ifdef USE_CUDA
@@ -438,7 +457,7 @@ void GBRL::_step_gpu(dataSet *dataset){
     preprocess_matrices(gpu_build_grads, gpu_grads_norm, n_samples, output_dim, this->metadata->split_score_func);
 
     int n_candidates = process_candidates_cuda(gpu_obs, dataset->categorical_obs, gpu_grads_norm, candidate_indices, candidate_values, candidate_categories, candidate_numerical, n_samples, n_num_features, n_cat_features, n_bins, this->metadata->generator_type);
-    dataSet cuda_dataset{trans_obs, gpu_categorical_obs, gpu_grads, gpu_feature_weights, gpu_build_grads, gpu_grads_norm, n_samples, this->device};
+    dataSet cuda_dataset{trans_obs, gpu_categorical_obs, gpu_grads, gpu_feature_weights, gpu_build_grads, n_samples, this->device};
     candidatesData candidata{n_candidates, candidate_indices, candidate_values, candidate_numerical, candidate_categories};
     splitDataGPU *split_data = allocate_split_data(this->metadata, candidata.n_candidates);  
     if (this->metadata->grow_policy == GREEDY)
@@ -531,7 +550,7 @@ float GBRL::_fit_gpu(dataSet *dataset, float *targets, const int n_iterations){
     cudaMemcpy(gpu_categorical_obs, dataset->categorical_obs, sizeof(char)*n_cat_features*n_samples*MAX_CHAR_SIZE, cudaMemcpyHostToDevice);
     transpose_matrix(gpu_obs, trans_obs, n_num_features, n_samples);
     
-    dataSet cuda_dataset{gpu_obs, gpu_categorical_obs, gpu_grads, gpu_feature_weights, gpu_build_grads, gpu_grads_norm, n_samples, this->device};
+    dataSet cuda_dataset{gpu_obs, gpu_categorical_obs, gpu_grads, gpu_feature_weights, gpu_build_grads, n_samples, this->device};
     predict_cuda_no_host(&cuda_dataset, gpu_preds, this->metadata, this->edata, this->cuda_opt, this->n_cuda_opts, 0, 0, true);
 
     MultiRMSEGrad(gpu_preds, gpu_targets, gpu_grads,  output_dim, n_samples, n_blocks, threads_per_block);
@@ -547,7 +566,6 @@ float GBRL::_fit_gpu(dataSet *dataset, float *targets, const int n_iterations){
        cuda_dataset.grads = gpu_grads;
        cuda_dataset.obs = trans_obs;
        cuda_dataset.build_grads = gpu_build_grads;
-       cuda_dataset.norm_grads = gpu_grads_norm;
         if (this->metadata->grow_policy == GREEDY)
             fit_tree_greedy_cuda(&cuda_dataset, this->edata, this->metadata, &candidata, split_data);
         else
@@ -600,7 +618,7 @@ void GBRL::step(const float *obs, const char *categorical_obs, float *grads, con
         return;
     }
 #endif
-    dataSet dataset{obs, categorical_obs, grads, feature_weights, nullptr, nullptr, n_samples, device};
+    dataSet dataset{obs, categorical_obs, grads, feature_weights, nullptr, n_samples, device};
 #ifdef USE_CUDA
     if (this->device == gpu)
         this->_step_gpu(&dataset);
@@ -679,7 +697,7 @@ float GBRL::fit(float *obs, char *categorical_obs, float *targets, const float *
 
     float *bias = calculate_mean(training_targets, n_samples, output_dim, metadata->par_th);
     this->set_bias(bias, this->metadata->output_dim);
-    dataSet dataset{training_obs, training_cat_obs, nullptr, feature_weights, nullptr, nullptr, n_samples, this->device};
+    dataSet dataset{training_obs, training_cat_obs, nullptr, feature_weights, nullptr, n_samples, this->device};
 
     float full_loss = -INFINITY;
 #ifdef USE_CUDA
@@ -834,12 +852,25 @@ int GBRL::loadFromFile(const std::string& filename){
     return 0;  // Success
 }
 
+void GBRL::print_ensemble_metadata(){
+    std::cout << "######## GBRL model ########" << std::endl;
+    std::cout << "output_dim: " << this->metadata->output_dim;
+    std::cout << " max_depth: " << this->metadata->max_depth << " min_data_in_leaf: " << this->metadata->min_data_in_leaf << std::endl;
+    std::cout << "generator_type: " << generatorTypeToString(this->metadata->generator_type) << " n_bins: " << this->metadata->n_bins;
+    std::cout << " cv_beta: " << this->metadata->cv_beta << " split_score_func: " << scoreFuncToString(this->metadata->split_score_func) << std::endl;
+    std::cout << "grow_policy: " << growPolicyToString(this->metadata->grow_policy);
+    std::cout << " verbose: " << this->metadata->verbose << " device: "<< deviceTypeToString(this->device);
+    std::cout << " use_cv: " << this->metadata->use_cv << " batch_size: " << this->metadata->batch_size << std::endl;
+    std::cout << "Loaded: " << this->metadata->n_leaves << " leaves from " << this->metadata->n_trees << " trees" <<  std::endl;
+    std::cout << "Model has: " << this->opts.size() << " optimizers " <<  std::endl;
+}
+
 float* GBRL::tree_shap(const int tree_idx, const float *obs, const char *categorical_obs, const int n_samples, float *norm, float *base_poly, float *offset){
     valid_tree_idx(tree_idx, this->metadata);
 ensembleData *edata_cpu = nullptr;
 #ifdef USE_CUDA
     if (this->device == gpu){
-        edata_cpu = ensemble_data_copy_gpu_cpu(this->metadata, this->edata);
+        edata_cpu = ensemble_data_copy_gpu_cpu(this->metadata, this->edata, nullptr);
     }
 #endif 
     if (this->device == cpu)
@@ -849,7 +880,7 @@ ensembleData *edata_cpu = nullptr;
     shap_data->base_poly = base_poly;
     shap_data->norm_values = norm;
     float *shap_values = init_zero_mat((this->metadata->n_num_features + this->metadata->n_cat_features)*this->metadata->output_dim * n_samples);
-    dataSet dataset{obs, categorical_obs, nullptr, nullptr, nullptr, nullptr, n_samples, this->device};
+    dataSet dataset{obs, categorical_obs, nullptr, nullptr, nullptr, n_samples, this->device};
     // print_shap_data(shap_data, this->metadata);
     get_shap_values(this->metadata, edata_cpu, shap_data, &dataset, shap_values);
     dealloc_shap_data(shap_data);
@@ -864,11 +895,11 @@ ensembleData *edata_cpu = nullptr;
 float* GBRL::ensemble_shap(const float *obs, const char *categorical_obs, const int n_samples, float *norm, float *base_poly, float *offset){
     valid_tree_idx(0, this->metadata);
     float *shap_values = init_zero_mat((this->metadata->n_num_features + this->metadata->n_cat_features)*this->metadata->output_dim * n_samples);
-    dataSet dataset{obs, categorical_obs, nullptr, nullptr, nullptr, nullptr, n_samples, this->device};
+    dataSet dataset{obs, categorical_obs, nullptr, nullptr, nullptr, n_samples, this->device};
     ensembleData *edata_cpu = nullptr;
 #ifdef USE_CUDA
     if (this->device == gpu){
-        edata_cpu = ensemble_data_copy_gpu_cpu(this->metadata, this->edata);
+        edata_cpu = ensemble_data_copy_gpu_cpu(this->metadata, this->edata, nullptr);
     }
 #endif 
     if (this->device == cpu)
@@ -896,7 +927,7 @@ void GBRL::print_tree(int tree_idx){
     ensembleData *edata_cpu = nullptr;
 #ifdef USE_CUDA
     if (this->device == gpu){
-        edata_cpu = ensemble_data_copy_gpu_cpu(this->metadata, this->edata);
+        edata_cpu = ensemble_data_copy_gpu_cpu(this->metadata, this->edata, nullptr);
     }
 #endif 
     if (this->device == cpu)
@@ -943,7 +974,7 @@ void GBRL::plot_tree(int tree_idx, const std::string &filename){
     ensembleData *edata_cpu = this->edata; 
 #ifdef USE_CUDA
     if (this->device == gpu){
-        edata_cpu = ensemble_data_copy_gpu_cpu(this->metadata, this->edata);
+        edata_cpu = ensemble_data_copy_gpu_cpu(this->metadata, this->edata, nullptr);
     }
 #endif 
     valid_tree_idx(tree_idx, this->metadata);

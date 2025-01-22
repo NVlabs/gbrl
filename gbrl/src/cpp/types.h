@@ -132,7 +132,6 @@ struct dataSet {
     float *grads;
     const float *feature_weights;
     const float *build_grads;
-    const float *norm_grads;
     int n_samples;
     deviceType device;
 };
@@ -152,6 +151,7 @@ struct ensembleData {
     bool* is_numerics;
     bool* inequality_directions; 
     char* categorical_values;  
+    size_t alloc_data_size;
 };
 
 struct serializationHeader {

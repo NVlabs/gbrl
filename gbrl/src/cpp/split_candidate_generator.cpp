@@ -148,7 +148,6 @@ void SplitCandidateGenerator::processCategoricalCandidates(const char *categoric
     for (int i = 0; i < n_unique; ++i){
         // convert each unique element's string back to char* and copy exactly MAX_CHAR_SIZE of it to the correct position in categorical value
         categoryInfo cat_info = unique_cats[cat_vec[i].first];
-        // printf("n_candidates %d/%d\n", n_candidates, n_unique);
         this->split_candidates[n_candidates].feature_idx = cat_info.feature_idx;
         this->split_candidates[n_candidates].feature_value = INFINITY;
         this->split_candidates[n_candidates].categorical_value = new char[MAX_CHAR_SIZE]; 
@@ -255,37 +254,32 @@ std::ostream& operator<<(std::ostream& os, const splitCandidate& obj){
     return os;
 }
 
-float scoreCosine(const int *indices, const int n_samples, const float *grads, const float *grads_norm_raw, const int n_cols){
+float scoreCosine(const int *indices, const int n_samples, const float *grads, const int n_cols){
     float *mean = new float[n_cols]; 
     float n_samples_f = static_cast<float>(n_samples);
     float n_samples_recip = 1.0f / n_samples_f;
-#ifndef _MSC_VER    
+
     #pragma omp simd
-#endif
     for (int d = 0; d < n_cols; ++d){
         mean[d] = 0;
     }
-    float squared_norms = 0.0f;
+
     for (int i = 0; i < n_samples; ++i){
         int idx = indices[i];
         int row = idx * n_cols;
-#ifndef _MSC_VER
-    #pragma omp simd
-#endif
+
+        #pragma omp simd
         for (int d = 0; d < n_cols; ++d){
             mean[d] += grads[row + d];
         }
-        squared_norms += grads_norm_raw[idx];
     }
 
-#ifndef _MSC_VER
     #pragma omp simd
-#endif
     for (int d = 0; d < n_cols; ++d){
         mean[d] *= n_samples_recip;
     }
 
-    float cosine = cosine_dist(indices, grads, mean, n_samples, n_cols, squared_norms);
+    float cosine = cosine_dist(indices, grads, mean, n_samples, n_cols);
     delete[] mean;
     return cosine;
 }
@@ -296,24 +290,21 @@ float scoreL2(const int *indices, const int n_samples, const float *grads, const
     float n_samples_f = static_cast<float>(n_samples);
     float n_samples_recip = 1.0f / n_samples_f;
 
-#ifndef _MSC_VER
+
     #pragma omp simd
-#endif
     for (int d = 0; d < n_cols; ++d){
         mean[d] = 0.0f;
     }
-#ifndef _MSC_VER
+
     #pragma omp simd
-#endif
     for (int i = 0; i < n_samples * n_cols; ++i){
         int row = i / n_cols;
         int col = i % n_cols;
         mean[col] += grads[indices[row]*n_cols + col];
     }
     
-#ifndef _MSC_VER
+
     #pragma omp simd
-#endif
     for (int d = 0; d < n_cols; ++d){
         mean[d] *= n_samples_recip;
     }

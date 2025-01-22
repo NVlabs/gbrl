@@ -78,7 +78,7 @@ class ActorCritic(GBRL):
         self.value_grad = None
         
     @classmethod
-    def load_model(cls, load_name: str) -> "ActorCritic":
+    def load_model(cls, load_name: str, device: str) -> "ActorCritic":
         """Loads GBRL model from a file
 
         Args:
@@ -92,11 +92,11 @@ class ActorCritic(GBRL):
 
         instance = cls.__new__(cls)
         if os.path.isfile(policy_file) and os.path.isfile(value_file):
-            instance._model = SeparateActorCriticWrapper.load(load_name)
+            instance._model = SeparateActorCriticWrapper.load(load_name, device)
             instance.shared_tree_struct = False
             instance.bias = instance._model.policy_model.get_bias() 
         else:
-            instance._model = SharedActorCriticWrapper.load(load_name)
+            instance._model = SharedActorCriticWrapper.load(load_name, device)
             instance.shared_tree_struct = True 
             instance.bias = instance._model.get_bias()
         instance.value_optimizer = instance._model.value_optimizer
@@ -314,7 +314,7 @@ class ParametricActor(GBRL):
         self.grad = policy_grad
 
     @classmethod
-    def load_model(cls, load_name: str) -> "ParametricActor":
+    def load_model(cls, load_name: str, device: str) -> "ParametricActor":
         """Loads GBRL model from a file
 
         Args:
@@ -324,7 +324,7 @@ class ParametricActor(GBRL):
             ParametricActor: loaded ActorCriticModel
         """
         instance = cls.__new__(cls)
-        instance._model = GBTWrapper.load(load_name)
+        instance._model = GBTWrapper.load(load_name, device)
         instance.bias = instance._model.get_bias()
         instance.policy_optimizer = instance._model.optimizer
         instance.output_dim = instance._model.output_dim

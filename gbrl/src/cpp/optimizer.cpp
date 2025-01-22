@@ -56,8 +56,8 @@ Optimizer::Optimizer(const Optimizer& other):
     }
 }
 
-void Optimizer::setAlgo(optimizerAlgo algo){
-    this->algo = algo;
+void Optimizer::setAlgo(optimizerAlgo _algo){
+    this->algo = _algo;
 }
 
 optimizerAlgo Optimizer::getAlgo() const {
@@ -65,9 +65,9 @@ optimizerAlgo Optimizer::getAlgo() const {
 }
 
 
-void Optimizer::set_indices(int start_idx, int stop_idx){
-    this->start_idx = start_idx;
-    this->stop_idx = stop_idx;
+void Optimizer::set_indices(int _start_idx, int _stop_idx){
+    this->start_idx = _start_idx;
+    this->stop_idx = _stop_idx;
 }
 
 Optimizer* Optimizer::loadFromFile(std::ifstream& file){
@@ -90,25 +90,24 @@ Optimizer* Optimizer::loadFromFile(std::ifstream& file){
 }
 
 SGDOptimizer::SGDOptimizer(): Optimizer(){
-    optimizerAlgo algo = SGD;
-    this->setAlgo(algo);
+    optimizerAlgo _algo = SGD;
+    this->setAlgo(_algo);
 }
 SGDOptimizer::SGDOptimizer(schedulerFunc schedule_func, float init_lr): Optimizer(schedule_func, init_lr){
-    optimizerAlgo algo = SGD;
-    this->setAlgo(algo);
+    optimizerAlgo _algo = SGD;
+    this->setAlgo(_algo);
 }
 SGDOptimizer::SGDOptimizer(schedulerFunc schedule_func, float init_lr, float stop_lr, int T): Optimizer(schedule_func, init_lr, stop_lr, T){
-    optimizerAlgo algo = SGD;
-    this->setAlgo(algo);
+    optimizerAlgo _algo = SGD;
+    this->setAlgo(_algo);
 }
 
 void SGDOptimizer::step(float *theta, const float *raw_grad_theta, int t, int sample_idx){
-    int start_idx = this->start_idx, stop_idx = this->stop_idx;
+    int _start_idx = this->start_idx, _stop_idx = this->stop_idx;
     float lr = this->scheduler->get_lr(t);
-#ifndef _MSC_VER
+
     #pragma omp simd
-#endif
-    for (int i = start_idx; i < stop_idx; i++){
+    for (int i = _start_idx; i < _stop_idx; i++){
         theta[sample_idx + i] -= lr * raw_grad_theta[i];
     }
 }
@@ -118,8 +117,8 @@ int SGDOptimizer::saveToFile(std::ofstream& file){
         std::cerr << "Error file is not open for writing: " << std::endl;
         return -1;
     }
-    optimizerAlgo algo = SGD;
-    file.write(reinterpret_cast<char*>(&algo), sizeof(optimizerAlgo));
+    optimizerAlgo _algo = SGD;
+    file.write(reinterpret_cast<char*>(&_algo), sizeof(optimizerAlgo));
     file.write(reinterpret_cast<char*>(&this->start_idx), sizeof(int));
     file.write(reinterpret_cast<char*>(&this->stop_idx), sizeof(int));
     this->scheduler->saveToFile(file);
@@ -177,16 +176,16 @@ void SGDOptimizer::set_memory(const int n_samples, const int output_dim) {
 }
 
 AdamOptimizer::AdamOptimizer(float beta_1, float beta_2, float eps = 1.0e-8): Optimizer(), beta_1(beta_1), beta_2(beta_2), eps(eps){
-    optimizerAlgo algo = Adam;
-    this->setAlgo(algo);
+    optimizerAlgo _algo = Adam;
+    this->setAlgo(_algo);
 }
 AdamOptimizer::AdamOptimizer(schedulerFunc schedule_func, float init_lr, float beta_1, float beta_2, float eps = 1.0e-8): Optimizer(schedule_func, init_lr), beta_1(beta_1), beta_2(beta_2), eps(eps){
-    optimizerAlgo algo = Adam;
-    this->setAlgo(algo);
+    optimizerAlgo _algo = Adam;
+    this->setAlgo(_algo);
 }
 AdamOptimizer::AdamOptimizer(schedulerFunc schedule_func, float init_lr, float stop_lr, int T, float beta_1, float beta_2, float eps = 1.0e-8): Optimizer(schedule_func, init_lr, stop_lr, T), beta_1(beta_1), beta_2(beta_2), eps(eps){
-    optimizerAlgo algo = Adam;
-    this->setAlgo(algo);
+    optimizerAlgo _algo = Adam;
+    this->setAlgo(_algo);
 }
 
 AdamOptimizer::AdamOptimizer(const AdamOptimizer& other): Optimizer(other), 
@@ -221,8 +220,8 @@ int AdamOptimizer::saveToFile(std::ofstream& file){
         std::cerr << "Error file is not open for writing: " << std::endl;
         return -1;
     }
-    optimizerAlgo algo = Adam;
-    file.write(reinterpret_cast<char*>(&algo), sizeof(optimizerAlgo));
+    optimizerAlgo _algo = Adam;
+    file.write(reinterpret_cast<char*>(&_algo), sizeof(optimizerAlgo));
     file.write(reinterpret_cast<char*>(&this->start_idx), sizeof(int));
     file.write(reinterpret_cast<char*>(&this->stop_idx), sizeof(int));
     file.write(reinterpret_cast<char*>(&this->beta_1), sizeof(float));
@@ -264,9 +263,8 @@ void AdamOptimizer::step(float *theta, const float *raw_grad_theta, int t, int s
     float *raw_m = this->m, *raw_v = this->v;
     float alpha = lr*sqrt(1 - pow(this->beta_2, t_float)) / (1 - pow(this->beta_1, t_float));
 
-#ifndef _MSC_VER
+
     #pragma omp simd
-#endif
     for (int i = start_idx; i < stop_idx; ++i){
         int index = sample_idx + i;
         raw_m[index] *= this->beta_1; 
