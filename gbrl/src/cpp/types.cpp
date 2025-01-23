@@ -503,8 +503,12 @@ void export_ensemble_data(std::ofstream& header_file, const std::string& model_n
                 break;
         }
     }
-
-    header_file << "\tunsigned int j, tree_idx, depth, current_depth, idx, leaf_ptr, cond_ptr;\n";
+    
+    header_file << "\tunsigned int tree_idx, depth, current_depth, idx, leaf_ptr, cond_ptr";
+    if (metadata->output_dim){
+        header_file << ", j";
+    }
+    header_file << ";\n";
     header_file << "\t/* Model data */\n";
     header_file << "\tconst unsigned int depths[" << prefix << "N_TREES] = {";
     for (int i  = 0; i < metadata->n_trees; ++i){
