@@ -40,7 +40,7 @@ class SplitCandidateGenerator {
 std::ostream& operator<<(std::ostream& os, const splitCandidate& obj);
 
 int processCategoricalCandidates_func(const char *categorical_obs, const float *grad_norms, const int n_samples, const int n_cat_features, const int n_bins, int* feature_inds, float *feature_values, char* category_values, bool* numerics);
-float scoreCosine(const int *indices, const int n_samples, const float *grads, const int n_cols);
+float scoreCosine(const int *indices, const int n_samples, const float *grads, const float *grads_norm_raw, const int n_cols);
 float scoreL2(const int *indices, const int n_samples, const float *grads, const int n_col);
 
 #endif 

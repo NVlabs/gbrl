@@ -46,7 +46,7 @@ void Fitter::step_cpu(dataSet *dataset, ensembleData *edata, ensembleMetaData *m
     } 
 
     float *norm_grads = nullptr;
-    if (metadata->n_cat_features > 0){
+    if (metadata->split_score_func == Cosine || metadata->n_cat_features > 0){
         norm_grads = init_zero_mat(dataset->n_samples*metadata->output_dim);
         calculate_squared_norm(norm_grads, dataset->grads, dataset->n_samples, metadata->output_dim, par_th);
     }
@@ -74,6 +74,7 @@ void Fitter::step_cpu(dataSet *dataset, ensembleData *edata, ensembleMetaData *m
         generator.processCategoricalCandidates(dataset->categorical_obs, norm_grads);
 
     dataset->build_grads = build_grads; 
+    dataset->norm_grads = norm_grads; 
     int added_leaves = 0;
     if (metadata->grow_policy == GREEDY)
         added_leaves = Fitter::fit_greedy_tree(dataset, edata, metadata, generator);
@@ -187,6 +188,7 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
             calculate_squared_norm(norm_grads, grads, batch_dataset.n_samples, metadata->output_dim, metadata->par_th);
         }
         batch_dataset.build_grads = build_grads; 
+        batch_dataset.norm_grads = norm_grads; 
 
         int added_leaves = 0;
         if (metadata->grow_policy == GREEDY)
@@ -275,7 +277,7 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
         best_score = -INFINITY;
         if (to_split){
             if (metadata->split_score_func == Cosine){
-                parent_score = scoreCosine(crnt_node->sample_indices, crnt_node->n_samples, dataset->build_grads, metadata->output_dim);
+                parent_score = scoreCosine(crnt_node->sample_indices, crnt_node->n_samples, dataset->build_grads, dataset->norm_grads, metadata->output_dim);
             } else if (metadata->split_score_func == L2){
                 parent_score = scoreL2(crnt_node->sample_indices, crnt_node->n_samples, dataset->build_grads, metadata->output_dim);
             } else{

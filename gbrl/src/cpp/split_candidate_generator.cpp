@@ -254,7 +254,7 @@ std::ostream& operator<<(std::ostream& os, const splitCandidate& obj){
     return os;
 }
 
-float scoreCosine(const int *indices, const int n_samples, const float *grads, const int n_cols){
+float scoreCosine(const int *indices, const int n_samples, const float *grads,  const float *grads_norm_raw,  const int n_cols){
     float *mean = new float[n_cols]; 
     float n_samples_f = static_cast<float>(n_samples);
     float n_samples_recip = 1.0f / n_samples_f;
@@ -263,7 +263,7 @@ float scoreCosine(const int *indices, const int n_samples, const float *grads, c
     for (int d = 0; d < n_cols; ++d){
         mean[d] = 0;
     }
-
+    float squared_norms = 0.0f;
     for (int i = 0; i < n_samples; ++i){
         int idx = indices[i];
         int row = idx * n_cols;
@@ -272,6 +272,7 @@ float scoreCosine(const int *indices, const int n_samples, const float *grads, c
         for (int d = 0; d < n_cols; ++d){
             mean[d] += grads[row + d];
         }
+        squared_norms += grads_norm_raw[idx];
     }
 
     #pragma omp simd
@@ -279,7 +280,7 @@ float scoreCosine(const int *indices, const int n_samples, const float *grads, c
         mean[d] *= n_samples_recip;
     }
 
-    float cosine = cosine_dist(indices, grads, mean, n_samples, n_cols);
+    float cosine = cosine_dist(indices, grads, mean, n_samples, n_cols, squared_norms);
     delete[] mean;
     return cosine;
 }

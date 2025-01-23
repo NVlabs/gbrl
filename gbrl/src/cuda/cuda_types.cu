@@ -248,7 +248,7 @@ splitDataGPU* allocate_split_data(ensembleMetaData *metadata, const int n_candid
                     sizeof(float) * n_candidates * 2 + 
                     sizeof(int)*3 + sizeof(int) + sizeof(float);
     if (metadata->split_score_func == Cosine)
-        data_alloc_size += sizeof(float) * n_candidates * 2;
+        data_alloc_size += sizeof(float) * n_candidates * 4;
     if (metadata->grow_policy == OBLIVIOUS)
         data_alloc_size += sizeof(float) * n_candidates * nodes_per_evaluation;
 
@@ -287,10 +287,16 @@ splitDataGPU* allocate_split_data(ensembleMetaData *metadata, const int n_candid
     split_data->best_idx = (int *)(data_alloc + trace);
     trace += sizeof(int);
 
+    split_data->left_norms = nullptr;
+    split_data->right_norms = nullptr;
     split_data->left_dot = nullptr;
     split_data->right_dot = nullptr;
 
     if (metadata->split_score_func == Cosine){
+        split_data->left_norms = (float *)(data_alloc + trace);
+        trace += sizeof(float)*n_candidates;
+        split_data->right_norms  = (float *)(data_alloc + trace);
+        trace += sizeof(float)*n_candidates;
         split_data->left_dot = (float *)(data_alloc + trace);
         trace += sizeof(float)*n_candidates;
         split_data->right_dot = (float *)(data_alloc + trace);

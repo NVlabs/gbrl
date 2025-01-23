@@ -22,7 +22,7 @@ class Scheduler {
         virtual float get_lr(int t) = 0; 
         virtual int saveToFile(std::ofstream& file) = 0;
         schedulerFunc getType() const ;
-        void setType(schedulerFunc _type);
+        void setType(schedulerFunc type);
         static Scheduler *loadFromFile(std::ifstream& file);
 
         float init_lr;

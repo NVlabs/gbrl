@@ -26,9 +26,9 @@ class Optimizer {
         virtual int saveToFile(std::ofstream& file) = 0;
         static Optimizer* loadFromFile(std::ifstream& file);
         virtual void set_memory(const int n_samples, const int output_dim) = 0 ;
-        void setAlgo(optimizerAlgo _algo);
+        void setAlgo(optimizerAlgo algo);
         optimizerAlgo getAlgo() const ;
-        void set_indices(int _start_idx, int _stop_idx);
+        void set_indices(int start_idx, int stop_idx);
 
         Scheduler *scheduler;
         int start_idx = 0;

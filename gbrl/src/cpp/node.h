@@ -20,10 +20,10 @@ class TreeNode {
     public:
         TreeNode(int *sample_indices, const int n_samples, const int n_num_features, const int n_cat_features, const int output_dim, const int depth, const int node_idx);
         ~TreeNode();
-        int splitNode(const float *obs, const char *categorical_obs, const int _node_idx, const splitCandidate &split_candidate);
+        int splitNode(const float *obs, const char *categorical_obs, const int node_idx, const splitCandidate &split_candidate);
         float getSplitScore(dataSet *dataset, scoreFunc split_score_func, const splitCandidate &split_candidate, const int min_data_in_leaf);
-        float splitScoreCosine(const float *obs, const float *feature_weights, const float *grads, const splitCandidate &split_candidate, const int min_data_in_leaf);
-        float splitScoreCosineCategorical(const char *obs, const float *feature_weights, const float *grads, const splitCandidate &split_candidate, const int min_data_in_leaf);
+        float splitScoreCosine(const float *obs, const float *feature_weights, const float *grads, const float *grads_norm, const splitCandidate &split_candidate, const int min_data_in_leaf);
+        float splitScoreCosineCategorical(const char *obs, const float *feature_weights, const float *grads, const float *grads_norm, const splitCandidate &split_candidate, const int min_data_in_leaf);
         float splitScoreL2(const float *obs, const float *feature_weights, const float *grads, const splitCandidate &split_candidate, const int min_data_in_leaf);
         float splitScoreL2Categorical(const char *obs, const float *feature_weights, const float *grads, const splitCandidate &split_candidate, const int min_data_in_leaf);
         bool isLeaf() const;
