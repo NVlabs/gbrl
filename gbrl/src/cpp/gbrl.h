@@ -40,7 +40,7 @@ class GBRL {
         void to_device(deviceType device);
         std::string get_device();
         int saveToFile(const std::string& filename);
-        int exportModel(const std::string& filename, const std::string& modelname);
+        int exportModel(const std::string& filename, const std::string& modelname, const std::string& export_format, const std::string& prefix);
         int loadFromFile(const std::string& filename);
         void ensemble_check();
 

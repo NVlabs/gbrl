@@ -164,15 +164,23 @@ class GBTWrapper:
         status = self.cpp_model.save(filename)
         assert status == 0, "Failed to save model"
 
-    def export(self, filename: str, modelname: str = None) -> None:
+    def export(self, filename: str, modelname: str = None, format: str = None, prefix: str = None) -> None:
         # exports model to C
+        if format is None:
+            format = 'float'
+        assert format in ['float', 'fxp8'], "export format must be either ['float' or 'fxp8']"
+        if prefix is None:
+            prefix = ""
+        else:
+            if prefix[-1] != '_':
+                prefix += '_'
         filename = filename.rstrip('.')
         filename += '.h'
         assert self.cpp_model is not None, "Can't export non-existent model!"
         if modelname is None:
             modelname = ""
         try:
-            status = self.cpp_model.export(filename, modelname)
+            status = self.cpp_model.export(filename, modelname, format, prefix)
             assert status == 0, "Failed to export model"
         except RuntimeError as e:
             print(f"Caught an exception in GBRL: {e}")
@@ -506,9 +514,9 @@ class SeparateActorCriticWrapper:
         self.policy_model.save(filename + '_policy')
         self.value_model.save(filename + '_value')
 
-    def export(self, filename: str) -> None:
-        self.policy_model.export(filename + '_policy')
-        self.value_model.export(filename + '_value')
+    def export(self, filename: str, format: str, prefix: str) -> None:
+        self.policy_model.export(filename + '_policy', format, prefix)
+        self.value_model.export(filename + '_value', format, prefix)
     
     def print_tree(self, tree_idx: int) -> None:
         print("Policy ensemble")

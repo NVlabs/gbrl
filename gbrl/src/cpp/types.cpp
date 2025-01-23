@@ -54,6 +54,12 @@ deviceType stringTodeviceType(std::string str) {
     throw std::runtime_error("Invalid device! Options are: cpu/cuda");
 }
 
+exportFormat stringToexportFormat(std::string str) {
+    if (str == "fxp8") return exportFormat::EXP_FXP8;
+    if (str == "float") return exportFormat::EXP_FLOAT;
+    throw std::runtime_error("Invalid exportFormat! Options are: float/fxp8");
+}
+
 optimizerAlgo stringToAlgoType(std::string str) {
     if (str == "Adam" || str == "adam") return optimizerAlgo::Adam;
     if (str == "SGD" || str == "sgd") return optimizerAlgo::SGD;
@@ -100,7 +106,6 @@ std::string growPolicyToString(growPolicy type) {
             throw std::runtime_error("Invalid generator type.");
     }
 }
-
 
 std::string lossTypeToString(lossType type) {
     switch (type) {
@@ -398,8 +403,21 @@ void ensemble_data_dealloc(ensembleData *edata){
     delete edata;
 }
 
-void export_ensemble_data(std::ofstream& header_file, const std::string& model_name, ensembleData *edata, ensembleMetaData *metadata, deviceType device, std::vector<Optimizer*> opts)
+void export_ensemble_data(std::ofstream& header_file, const std::string& model_name, ensembleData *edata, ensembleMetaData *metadata, deviceType device, std::vector<Optimizer*> opts, exportFormat export_format, const std::string &prefix)
 {
+    std::string type_name;
+    switch (export_format){
+       case EXP_FLOAT:
+            type_name = "float";
+            break;
+        case EXP_FXP8:
+            type_name = "int16";
+            break;
+        default:
+            std::cerr << "Invalid exportFormat!" << std::endl;
+            return; // Exit the function if the format is invalid
+    }
+
     ensembleData *edata_cpu = nullptr;
 #ifdef USE_CUDA
     if (device == gpu){
@@ -459,44 +477,87 @@ void export_ensemble_data(std::ofstream& header_file, const std::string& model_n
     header_file << "alloc_data_size: " << edata->alloc_data_size;
     header_file << "\n*/\n";
 
-    header_file << "#define N_TREES " << metadata->n_trees << "\n";
-    header_file << "#define N_LEAVES " << metadata->n_leaves << "\n";
-    header_file << "#define BINARY_FEATURES " << binary_splits << "\n";
-    header_file << "#define N_OUTPUTS " << metadata->output_dim << "\n";
-    header_file << "#define N_FEATURES " << metadata->n_num_features  << "\n\n";
+    header_file << "#define " << prefix << "N_TREES " << metadata->n_trees << "\n";
+    header_file << "#define " << prefix << "N_LEAVES " << metadata->n_leaves << "\n";
+    header_file << "#define " << prefix << "BINARY_FEATURES " << binary_splits << "\n";
+    header_file << "#define " << prefix << "N_OUTPUTS " << metadata->output_dim << "\n";
+    header_file << "#define " << prefix << "N_FEATURES " << metadata->n_num_features  << "\n\n";
+    if (metadata->output_dim > 1){
+        header_file << "static inline void gbrl_predict(" << type_name << " *results, const " << type_name << " *features){\n\n";
+    } else {
+        header_file << "static inline " << type_name << " gbrl_predict(const " << type_name << " *features){\n\n";
+        header_file << "\t" << type_name << " result = ";
+        switch (export_format){
+            case EXP_FLOAT:
+                header_file << "0.0f\n;";
+                break;
+            case EXP_FXP8:
+                header_file << "0\n;";
+                break;
+        }
+    }
 
-    header_file << "static inline void gbrl_predict(float *results, const float *features){\n\n";
     header_file << "\tunsigned int j, tree_idx, depth, current_depth, idx, leaf_ptr, cond_ptr;\n";
     header_file << "\t/* Model data */\n";
-    header_file << "\tconst unsigned int depths[N_TREES] = {";
+    header_file << "\tconst unsigned int depths[" << prefix << "N_TREES] = {";
     for (int i  = 0; i < metadata->n_trees; ++i){
         header_file << edata_cpu->depths[i];
         if (i < metadata->n_trees - 1)
             header_file << ", ";
     }
     header_file << "};\n";
-    header_file << "\tconst float bias[N_OUTPUTS] = {";
-    for (int i  = 0; i < metadata->output_dim; ++i){
-        header_file << edata_cpu->bias[i];
-        if (i < metadata->output_dim - 1)
-            header_file << ", ";
+    if (metadata->output_dim > 1){
+        header_file << "\tconst " << type_name << " bias[" << prefix << "N_OUTPUTS] = {";
+        for (int i  = 0; i < metadata->output_dim; ++i){
+            switch (export_format){
+                case EXP_FLOAT:
+                    header_file << edata_cpu->bias[i];
+                    break;
+                case EXP_FXP8:
+                    header_file << float_to_int16(edata_cpu->bias[i]);
+                    break;
+            }
+            if (i < metadata->output_dim - 1)
+                header_file << ", ";
+        }
+
+    } else {
+        header_file << "\tconst " << type_name << " bias = {";
+        switch (export_format){
+            case EXP_FLOAT:
+                header_file << edata_cpu->bias[0];
+                break;
+            case EXP_FXP8:
+                header_file << float_to_int16(edata_cpu->bias[0]);
+                break;
+        }
     }
     header_file << "};\n";
-    header_file << "\tconst unsigned int feature_indices[BINARY_FEATURES] = {";
+
+    header_file << "\tconst unsigned int feature_indices[" << prefix << "BINARY_FEATURES] = {";
     for (int i  = 0; i < binary_splits; ++i){
         header_file << edata_cpu->feature_indices[i];
         if (i < binary_splits - 1)
             header_file << ", ";
     }
     header_file << "};\n";
-    header_file << "\tconst float feature_values[BINARY_FEATURES] = {";
+
+    header_file << "\tconst " << type_name << " feature_values[" << prefix << "BINARY_FEATURES] = {";
     for (int i  = 0; i < binary_splits; ++i){
-        header_file << edata_cpu->feature_values[i];
+        switch (export_format){
+            case EXP_FLOAT:
+                header_file << edata_cpu->feature_values[i];
+                break;
+            case EXP_FXP8:
+                   header_file << float_to_int16(edata_cpu->feature_values[i]);
+                break;
+        }
         if (i < binary_splits - 1)
             header_file << ", ";
     }
     header_file << "};\n";
-    header_file << "\tconst float leaf_values[N_LEAVES*N_OUTPUTS] = {";
+
+    header_file << "\tconst " << type_name << " leaf_values[" << prefix << "N_LEAVES*" << prefix << "N_OUTPUTS]  = {";
     int tree_idx = 0;
     int limit_leaf_idx = edata_cpu->tree_indices[tree_idx];
     float value;
@@ -509,7 +570,14 @@ void export_ensemble_data(std::ofstream& header_file, const std::string& model_n
         for (size_t opt_idx = 0; opt_idx < opts.size(); ++opt_idx){
             for (int j=opts[opt_idx]->start_idx; j < opts[opt_idx]->stop_idx; ++j){
                 value = -edata_cpu->values[value_idx + j] * opts[opt_idx]->scheduler->get_lr(tree_idx);
-                header_file << value;
+                switch (export_format){
+                    case EXP_FLOAT:
+                        header_file << value;
+                        break;
+                    case EXP_FXP8:
+                        header_file << float_to_int16(value);
+                        break;
+                }
                 if ((i < metadata->n_leaves - 1) || (j < metadata->output_dim - 1  && i == metadata->n_leaves - 1))
                     header_file << ", ";
             }
@@ -520,7 +588,7 @@ void export_ensemble_data(std::ofstream& header_file, const std::string& model_n
     header_file << "\tleaf_ptr = 0;\n";
     header_file << "\tcond_ptr = 0;\n";
     header_file << "\tunsigned char pass;\n";
-    header_file << "\tfor (tree_idx = 0; tree_idx < N_TREES; ++tree_idx)\n";
+    header_file << "\tfor (tree_idx = 0; tree_idx < " << prefix << "N_TREES; ++tree_idx)\n";
     header_file << "\t{\n";
     header_file << "\t\tcurrent_depth = depths[tree_idx];\n";
     header_file << "\t\tidx = 0;\n";
@@ -528,13 +596,23 @@ void export_ensemble_data(std::ofstream& header_file, const std::string& model_n
     header_file << "\t\t\tpass = (unsigned char)(features[feature_indices[cond_ptr + depth]] > feature_values[cond_ptr + depth]);\n";
     header_file << "\t\t\tidx |= (pass <<  (current_depth - 1 - depth));\n";
     header_file << "\t\t}\n";
-    header_file << "\t\tfor (j = 0 ; j < N_OUTPUTS; j++)\n";
-    header_file << "\t\t\tresults[j] += leaf_values[(leaf_ptr + idx)*N_OUTPUTS + j];\n";
+    if (metadata->output_dim > 1){
+        header_file << "\t\tfor (j = 0 ; j < " << prefix << "N_OUTPUTS; j++)\n";
+        header_file << "\t\t\tresults[j] += leaf_values[(leaf_ptr + idx)*" << prefix << "N_OUTPUTS + j];\n";
+    } else {
+        header_file << "\t\tresult += leaf_values[leaf_ptr + idx];\n";
+    }
+
     header_file << "\t\tleaf_ptr += (1 << current_depth);\n";
     header_file << "\t\tcond_ptr += current_depth;\n";
     header_file << "\t}\n";
-    header_file << "\tfor (j = 0 ; j < N_OUTPUTS; j++)\n";
-    header_file << "\t\tresults[j] += bias[j];\n";
+    if (metadata->output_dim > 1){
+        header_file << "\tfor (j = 0 ; j < " << prefix << "N_OUTPUTS; j++)\n";
+        header_file << "\t\tresults[j] += bias[j];\n";
+    } else {
+        header_file << "\tresult += bias;\n";
+        header_file << "\treturn result;\n";
+    }
     header_file << "}\n";
     header_file << "#endif\n";
 

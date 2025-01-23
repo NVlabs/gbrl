@@ -80,6 +80,11 @@ enum NULL_CHECK : uint8_t {
     VALID
 };
 
+enum exportFormat : uint8_t {
+    EXP_FLOAT,
+    EXP_FXP8
+};
+
 enum growPolicy : uint8_t {
     GREEDY,
     OBLIVIOUS
@@ -179,6 +184,7 @@ struct matrixRepresentation {
 };
 
 scoreFunc stringToScoreFunc(std::string str);
+exportFormat stringToexportFormat(std::string str);
 generatorType stringTogeneratorType(std::string str);
 growPolicy stringTogrowPolicy(std::string str);
 lossType stringTolossType(std::string str);
@@ -201,7 +207,7 @@ ensembleData* copy_ensemble_data(ensembleData *other_edata, ensembleMetaData *me
 ensembleData* copy_compressed_ensemble_data(ensembleData *other_edata, ensembleMetaData *metadata, const int *leaf_indices, const int *tree_indices, const int n_compressed_leaves, const int n_compressed_trees, const int *new_tree_indices);
 void ensemble_data_dealloc(ensembleData *edata);
 void save_ensemble_data(std::ofstream& file, ensembleData *edata, ensembleMetaData *metadata, deviceType device);
-void export_ensemble_data(std::ofstream& header_file, const std::string& model_name, ensembleData *edata, ensembleMetaData *metadata, deviceType device, std::vector<Optimizer*> opts);
+void export_ensemble_data(std::ofstream& header_file, const std::string& model_name, ensembleData *edata, ensembleMetaData *metadata, deviceType device, std::vector<Optimizer*> opts, exportFormat export_format, const std::string &prefix);
 ensembleData* load_ensemble_data(std::ifstream& file, ensembleMetaData *metadata);
 void allocate_ensemble_memory(ensembleMetaData *metadata, ensembleData *edata);
 #endif 

@@ -15,6 +15,9 @@
 #include <iostream>
 #include <stdexcept>
 #include <omp.h>
+#include <cmath>  // For std::round
+#include <cstdint> // For int16_t
+#include <algorithm> // For std::clamp
 
 #include "types.h"
 
@@ -73,4 +76,14 @@ serializationHeader create_header();
 serializationHeader read_header(std::ifstream& file);
 
 void display_header(serializationHeader header);
+
+// Function to convert float to int16
+inline int16_t float_to_int16(float value) {
+    // Multiply by 256 (2^8) and round to nearest integer
+    float scaled_value = value * 256.0f;
+    scaled_value = std::clamp(scaled_value, static_cast<float>(INT16_MIN), static_cast<float>(INT16_MAX));
+    int16_t result = static_cast<int16_t>(std::round(scaled_value));
+    return result;
+}
+
 #endif 

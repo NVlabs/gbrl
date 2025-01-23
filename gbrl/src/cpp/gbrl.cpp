@@ -770,7 +770,7 @@ float GBRL::fit(float *obs, char *categorical_obs, float *targets, const float *
     return full_loss;   
 }
 
-int GBRL::exportModel(const std::string& filename, const std::string& modelname){
+int GBRL::exportModel(const std::string& filename, const std::string& modelname, const std::string& export_format, const std::string& prefix){
     std::ofstream header_file(filename, std::ios::binary);
     if (!header_file.is_open() || header_file.fail()) {
         std::cerr << "Error opening file: " << filename << std::endl;
@@ -783,7 +783,7 @@ int GBRL::exportModel(const std::string& filename, const std::string& modelname)
         throw std::runtime_error("Export is supported only for Oblivious trees.");
         return -1;
     }
-    export_ensemble_data(header_file, modelname, this->edata, this->metadata, this->device, this->opts);
+    export_ensemble_data(header_file, modelname, this->edata, this->metadata, this->device, this->opts, stringToexportFormat(export_format), prefix);
     if (!header_file.good()) {
         std::cerr << "Error occurred at writing time." << std::endl;
         throw std::runtime_error("Writing to file error");
