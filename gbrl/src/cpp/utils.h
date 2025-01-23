@@ -81,7 +81,11 @@ void display_header(serializationHeader header);
 inline int16_t float_to_int16(float value) {
     // Multiply by 256 (2^8) and round to nearest integer
     float scaled_value = value * 256.0f;
-    scaled_value = std::clamp(scaled_value, static_cast<float>(INT16_MIN), static_cast<float>(INT16_MAX));
+    if (scaled_value < static_cast<float>(INT16_MIN))
+        scaled_value = static_cast<float>(INT16_MIN);
+
+    if (scaled_value > static_cast<float>(INT16_MAX))
+        scaled_value = static_cast<float>(INT16_MAX);
     int16_t result = static_cast<int16_t>(std::round(scaled_value));
     return result;
 }
