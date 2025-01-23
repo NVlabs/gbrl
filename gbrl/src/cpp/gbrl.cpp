@@ -278,7 +278,7 @@ matrixRepresentation* GBRL::get_matrix_representation(const float *obs, const ch
         }
     }
 
-    dataSet dataset{obs, categorical_obs, nullptr, nullptr, nullptr, nullptr, n_samples, this->device};
+    dataSet dataset{obs, categorical_obs, nullptr, nullptr, nullptr, n_samples, this->device};
     matrixRepresentation* matrix = new matrixRepresentation;
 #ifdef USE_CUDA
     if (this->device == gpu){
