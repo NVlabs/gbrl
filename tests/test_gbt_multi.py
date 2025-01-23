@@ -20,7 +20,9 @@ from torch.nn.functional import mse_loss
 
 from sklearn import datasets
 
-from gbrl import GBRL, cuda_available, ActorCritic
+from gbrl import cuda_available
+from gbrl.gbt import GBRL
+from gbrl.ac_gbrl import ActorCritic
 
 def rmse(preds: Union[np.array, th.Tensor], targets: Union[np.array, th.Tensor]) -> Tuple[float, np.array]:
     if isinstance(preds, th.Tensor):
