@@ -47,8 +47,6 @@ struct splitDataGPU{
     float *best_score;
     int *best_idx;
     // cosine score
-    float *left_norms;
-    float *right_norms;
     float *left_dot;
     float *right_dot;
     float *oblivious_split_scores;

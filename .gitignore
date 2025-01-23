@@ -13,7 +13,9 @@ builds/
 *.sh
 dist/
 docs/_build/
-*.ncu-rep
+*.whl
+*ncu-rep
+*.sh
 *.nfs*
 Dockerfile
 local_binaries/

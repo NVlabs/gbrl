@@ -4,6 +4,7 @@ include gbrl/src/cuda/CMakeLists.txt
 include gbrl/src/cpp/*.cpp
 include gbrl/src/cpp/*.h
 include gbrl/src/cpp/CMakeLists.txt
+recursive-include gbrl/include *
 include README.md
 include LICENSE
 include LICENSES.txt

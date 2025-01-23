@@ -46,7 +46,7 @@ void Fitter::step_cpu(dataSet *dataset, ensembleData *edata, ensembleMetaData *m
     } 
 
     float *norm_grads = nullptr;
-    if (metadata->split_score_func == Cosine || metadata->n_cat_features > 0){
+    if (metadata->n_cat_features > 0){
         norm_grads = init_zero_mat(dataset->n_samples*metadata->output_dim);
         calculate_squared_norm(norm_grads, dataset->grads, dataset->n_samples, metadata->output_dim, par_th);
     }
@@ -74,7 +74,6 @@ void Fitter::step_cpu(dataSet *dataset, ensembleData *edata, ensembleMetaData *m
         generator.processCategoricalCandidates(dataset->categorical_obs, norm_grads);
 
     dataset->build_grads = build_grads; 
-    dataset->norm_grads = norm_grads; 
     int added_leaves = 0;
     if (metadata->grow_policy == GREEDY)
         added_leaves = Fitter::fit_greedy_tree(dataset, edata, metadata, generator);
@@ -147,7 +146,7 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
 
     for (int i = 0; i < iterations; ++i){
         batch_dataset.obs = dataset->obs + batch_start_idx*metadata->n_num_features; 
-        batch_dataset.categorical_obs = dataset->categorical_obs + batch_start_idx*metadata->n_cat_features*MAX_CHAR_SIZE; ; 
+        batch_dataset.categorical_obs = dataset->categorical_obs + batch_start_idx*metadata->n_cat_features*MAX_CHAR_SIZE;
         batch_dataset.n_samples = batch_n_samples; 
 
         const float *shifted_targets = targets + batch_start_idx*metadata->output_dim; 
@@ -171,17 +170,16 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
         }
 
         norm_grads = is_last_batch ? last_batch_grad_norms : batch_grad_norms;
-        int size_preds = is_last_batch ? last_batch_preds_size: batch_preds_size;
+        int size_preds = is_last_batch ? last_batch_preds_size : batch_preds_size;
         build_grads =  is_last_batch ? last_batch_build_grads : batch_build_grads;
         memcpy(build_grads, grads, sizeof(float) * size_preds);
         if (metadata->split_score_func == L2){
             float *mean_grads = calculate_mean(build_grads, batch_n_samples, output_dim, par_th);
             float *std = calculate_var_and_center(build_grads, mean_grads, batch_n_samples, output_dim, par_th);
-#ifndef _MSC_VER
-    #pragma omp simd
-#endif
-            for (int i = 0; i < output_dim; ++i)
-                std[i] = sqrtf(std[i]);
+
+            #pragma omp simd
+            for (int d = 0; d < output_dim; ++d)
+                std[d] = sqrtf(std[d]);
             divide_mat_by_vec_inplace(build_grads, std, batch_dataset.n_samples, metadata->output_dim, metadata->par_th);
             delete[] mean_grads;
             delete[] std;
@@ -189,7 +187,6 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
             calculate_squared_norm(norm_grads, grads, batch_dataset.n_samples, metadata->output_dim, metadata->par_th);
         }
         batch_dataset.build_grads = build_grads; 
-        batch_dataset.norm_grads = norm_grads; 
 
         int added_leaves = 0;
         if (metadata->grow_policy == GREEDY)
@@ -207,7 +204,6 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
             std::cout << "Boosting iteration: " << metadata->iteration << " - MultiRMSE Loss: " << batch_loss << std::endl;
         }
         
-            
     }
     if (indices != nullptr){
         for (int i = 0; i < metadata->n_num_features; ++i){
@@ -279,7 +275,7 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
         best_score = -INFINITY;
         if (to_split){
             if (metadata->split_score_func == Cosine){
-                parent_score = scoreCosine(crnt_node->sample_indices, crnt_node->n_samples, dataset->build_grads, dataset->norm_grads, metadata->output_dim);
+                parent_score = scoreCosine(crnt_node->sample_indices, crnt_node->n_samples, dataset->build_grads, metadata->output_dim);
             } else if (metadata->split_score_func == L2){
                 parent_score = scoreL2(crnt_node->sample_indices, crnt_node->n_samples, dataset->build_grads, metadata->output_dim);
             } else{
@@ -528,9 +524,8 @@ void Fitter::calc_leaf_value(dataSet *dataset, ensembleData *edata, ensembleMeta
         }
         if (passed){
             idx = i*output_dim;
-#ifndef _MSC_VER
-    #pragma omp simd
-#endif
+
+            #pragma omp simd
             for (int d = 0; d < output_dim; ++d)
                 edata->values[leaf_idx*output_dim + d] += grads[idx + d];
             count += 1;

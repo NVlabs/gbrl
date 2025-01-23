@@ -171,12 +171,11 @@ ensembleMetaData* ensemble_metadata_alloc(int max_trees, int max_leaves, int max
 }
 
 ensembleData* ensemble_data_alloc(ensembleMetaData *metadata){
-    ensembleData *edata = new ensembleData;
     if (metadata == nullptr){
         std::cerr << "Error metadata is nullptr cannot allocate ensembleData." << std::endl;
         throw std::runtime_error("Error invalid pointer");
-        return nullptr;
     }
+    ensembleData *edata = new ensembleData;
     size_t data_size = 0;
     edata->bias = new float[metadata->output_dim];
     data_size += sizeof(float) * metadata->output_dim;
@@ -221,12 +220,11 @@ ensembleData* ensemble_data_alloc(ensembleMetaData *metadata){
 
 ensembleData* ensemble_copy_data_alloc(ensembleMetaData *metadata){
     // same as normal alloc but only allocate memory for existing size 
-    ensembleData *edata = new ensembleData;
     if (metadata == nullptr){
         std::cerr << "Error metadata is nullptr cannot allocate ensembleData." << std::endl;
         throw std::runtime_error("Error invalid pointer");
-        return nullptr;
     }
+    ensembleData *edata = new ensembleData;
     size_t data_size = 0;
     edata->bias = new float[metadata->output_dim];
     data_size += sizeof(float) * metadata->output_dim;
@@ -270,12 +268,11 @@ ensembleData* ensemble_copy_data_alloc(ensembleMetaData *metadata){
 }
 
 ensembleData* copy_ensemble_data(ensembleData *other_edata, ensembleMetaData *metadata){
-    ensembleData *edata = new ensembleData;
     if (metadata == nullptr || other_edata == nullptr){
         std::cerr << "Error metadata is nullptr cannot allocate ensembleData." << std::endl;
         throw std::runtime_error("Error invalid pointer");
-        return nullptr;
     }
+    ensembleData *edata = new ensembleData;
     size_t data_size = 0;
     edata->bias = new float[metadata->output_dim];
     data_size += sizeof(float) * metadata->output_dim;

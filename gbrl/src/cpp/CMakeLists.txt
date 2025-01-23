@@ -40,19 +40,47 @@ else()
     message(STATUS "Did not Find Graphviz")
 endif()
 
-
 if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -std=c++14 -Wall -Wpedantic -Wextra -march=native -fPIC")
+    set(BASE_CXX_FLAGS "-Wall -Wpedantic -Wextra -std=c++14 -fPIC")
 elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -std=c++14 -Wall -Wpedantic -Wextra -fPIC")
+    set(BASE_CXX_FLAGS "-Wall -Wpedantic -Wextra -std=c++14 -fPIC")
 elseif (WIN32)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /O2 /std:c++14 /W3")
+    set(BASE_CXX_FLAGS "/std:c++14 /W3")
 endif()
 
-if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")
+if (MSVC)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /W4 /MP") # Enable warnings and multi-processor compilation
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /permissive-")
 endif()
+
+# Debug-specific flags
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+    message(STATUS "Configuring for Debug build.")
+    if (CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+        set(DEBUG_CXX_FLAGS "-g")
+    elseif (MSVC)
+        set(DEBUG_CXX_FLAGS "/Zi")  # Debug symbols
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /DEBUG") # Generate .pdb
+    endif()
+else()
+    message(STATUS "Configuring for Release build.")
+    if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        set(RELEASE_CXX_FLAGS "-O3 -march=native")
+    elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+        set(RELEASE_CXX_FLAGS "-O3")
+    elseif (WIN32)
+        if (MSVC)
+            set(RELEASE_CXX_FLAGS "/O2 /Ob2 /Oi /Ot /Oy")
+        else()
+            set(RELEASE_CXX_FLAGS "/O2")
+        endif()
+    endif()
+endif()
+
+# Combine base flags with build-specific flags
+set(CMAKE_CXX_FLAGS "${BASE_CXX_FLAGS} ${CMAKE_CXX_FLAGS} ${DEBUG_CXX_FLAGS} ${RELEASE_CXX_FLAGS}")
 
 
 add_library(gbrl_cpp_src OBJECT ${CPP_SOURCES})
-# target_compile_definitions(gbrl_cpp_src PUBLIC MODULE_NAME="gbrl_cpp")
+
