@@ -12,8 +12,8 @@ import numpy as np
 import torch as th
 
 
-from .gbrl_wrapper import GBTWrapper
-from .utils import setup_optimizer, clip_grad_norm, validate_array
+from gbrl.gbrl_wrapper import GBTWrapper
+from gbrl.utils import setup_optimizer, clip_grad_norm, validate_array
 
 
 class GBRL:

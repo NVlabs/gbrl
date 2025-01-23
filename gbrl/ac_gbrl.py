@@ -11,10 +11,9 @@ import os
 import numpy as np
 import torch as th
 
-from .gbrl_wrapper import (GBTWrapper, SeparateActorCriticWrapper,
-                           SharedActorCriticWrapper, )
-from .gbt import GBRL
-from .utils import (setup_optimizer, clip_grad_norm, numerical_dtype, 
+from gbrl.gbrl_wrapper import GBTWrapper, SeparateActorCriticWrapper, SharedActorCriticWrapper, 
+from gbrl.gbt import GBRL
+from gbrl.utils import (setup_optimizer, clip_grad_norm, numerical_dtype, 
                     concatenate_arrays, validate_array, constant_like,
                     tensor_to_leaf)
 

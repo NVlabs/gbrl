@@ -11,7 +11,7 @@ import numpy as np
 import torch as th
 from scipy.special import binom
 
-from .config import APPROVED_OPTIMIZERS, VALID_OPTIMIZER_ARGS
+from gbrl.config import APPROVED_OPTIMIZERS, VALID_OPTIMIZER_ARGS
 
 import numpy as np 
 # Define custom dtypes
