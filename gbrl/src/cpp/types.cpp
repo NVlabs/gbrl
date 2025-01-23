@@ -56,8 +56,9 @@ deviceType stringTodeviceType(std::string str) {
 
 exportFormat stringToexportFormat(std::string str) {
     if (str == "fxp8") return exportFormat::EXP_FXP8;
+    if (str == "fxp16") return exportFormat::EXP_FXP16;
     if (str == "float") return exportFormat::EXP_FLOAT;
-    throw std::runtime_error("Invalid exportFormat! Options are: float/fxp8");
+    throw std::runtime_error("Invalid exportFormat! Options are: float/fxp8/fxp16");
 }
 
 optimizerAlgo stringToAlgoType(std::string str) {
@@ -413,6 +414,9 @@ void export_ensemble_data(std::ofstream& header_file, const std::string& model_n
         case EXP_FXP8:
             type_name = "int16";
             break;
+        case EXP_FXP16:
+            type_name = "int32";
+            break;
         default:
             std::cerr << "Invalid exportFormat!" << std::endl;
             return; // Exit the function if the format is invalid
@@ -489,10 +493,13 @@ void export_ensemble_data(std::ofstream& header_file, const std::string& model_n
         header_file << "\t" << type_name << " result = ";
         switch (export_format){
             case EXP_FLOAT:
-                header_file << "0.0f\n;";
+                header_file << "0.0f;\n";
                 break;
             case EXP_FXP8:
-                header_file << "0\n;";
+                header_file << "0;\n";
+                break;
+            case EXP_FXP16:
+                header_file << "0;\n";
                 break;
         }
     }
@@ -516,6 +523,9 @@ void export_ensemble_data(std::ofstream& header_file, const std::string& model_n
                 case EXP_FXP8:
                     header_file << float_to_int16(edata_cpu->bias[i]);
                     break;
+                case EXP_FXP16:
+                    header_file << float_to_int32(edata_cpu->bias[i]);
+                    break;
             }
             if (i < metadata->output_dim - 1)
                 header_file << ", ";
@@ -529,6 +539,9 @@ void export_ensemble_data(std::ofstream& header_file, const std::string& model_n
                 break;
             case EXP_FXP8:
                 header_file << float_to_int16(edata_cpu->bias[0]);
+                break;
+            case EXP_FXP16:
+                header_file << float_to_int32(edata_cpu->bias[0]);
                 break;
         }
     }
@@ -550,6 +563,9 @@ void export_ensemble_data(std::ofstream& header_file, const std::string& model_n
                 break;
             case EXP_FXP8:
                    header_file << float_to_int16(edata_cpu->feature_values[i]);
+                break;
+            case EXP_FXP16:
+                   header_file << float_to_int32(edata_cpu->feature_values[i]);
                 break;
         }
         if (i < binary_splits - 1)
@@ -576,6 +592,9 @@ void export_ensemble_data(std::ofstream& header_file, const std::string& model_n
                         break;
                     case EXP_FXP8:
                         header_file << float_to_int16(value);
+                        break;
+                    case EXP_FXP16:
+                        header_file << float_to_int32(value);
                         break;
                 }
                 if ((i < metadata->n_leaves - 1) || (j < metadata->output_dim - 1  && i == metadata->n_leaves - 1))

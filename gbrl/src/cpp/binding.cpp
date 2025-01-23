@@ -447,7 +447,7 @@ PYBIND11_MODULE(gbrl_cpp, m) {
     gbrl.def("export", [](GBRL &self, const std::string& filename, const std::string& modelname, const std::string& export_format, const std::string& prefix) -> int {
         py::gil_scoped_release release; 
         return self.exportModel(filename, modelname, export_format, prefix); 
-    }, py::arg("filename"), py::arg("modelname") = "", "Export model as a C-header file");
+    }, py::arg("filename"), py::arg("modelname") = "", py::arg("export_format") = "float", py::arg("prefix") = "", "Export model as a C-header file");
     gbrl.def("get_scheduler_lrs", [](GBRL &self) ->  py::array_t<float> {
         py::gil_scoped_release release; 
         float* lrs = self.get_scheduler_lrs(); 

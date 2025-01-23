@@ -82,7 +82,8 @@ enum NULL_CHECK : uint8_t {
 
 enum exportFormat : uint8_t {
     EXP_FLOAT,
-    EXP_FXP8
+    EXP_FXP8,
+    EXP_FXP16,
 };
 
 enum growPolicy : uint8_t {

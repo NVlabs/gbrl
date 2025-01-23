@@ -90,4 +90,16 @@ inline int16_t float_to_int16(float value) {
     return result;
 }
 
+inline int32_t float_to_int32(float value) {
+    // Multiply by 256 (2^8) and round to nearest integer
+    float scaled_value = value * 256.0f;
+    if (scaled_value < static_cast<float>(INT32_MIN))
+        scaled_value = static_cast<float>(INT32_MIN);
+
+    if (scaled_value > static_cast<float>(INT32_MAX))
+        scaled_value = static_cast<float>(INT32_MAX);
+    int32_t result = static_cast<int32_t>(std::round(scaled_value));
+    return result;
+}
+
 #endif 

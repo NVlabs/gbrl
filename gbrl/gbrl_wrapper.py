@@ -168,7 +168,7 @@ class GBTWrapper:
         # exports model to C
         if format is None:
             format = 'float'
-        assert format in ['float', 'fxp8'], "export format must be either ['float' or 'fxp8']"
+        assert format in ['float', 'fxp8', 'fxp16'], "export format must be either ['float', 'fxp8', 'fxp16']"
         if prefix is None:
             prefix = ""
         else:
