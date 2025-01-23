@@ -61,7 +61,8 @@ scikit-learn = ">=1.5.0"
 scipy = ">=1.7.0"
 shap = ">=0.40.0"
 matplotlib = ">=3.5.0"
+jinja2 = ">=3.1.5"
 
-[tool.poetry.dev-dependencies]
+[tool.poetry.group.dev-dependencies]
 pytest = "*"
 
