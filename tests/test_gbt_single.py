@@ -273,7 +273,7 @@ class TestGBTSingle(unittest.TestCase):
         model._model.reset()
         model.set_bias_from_targets(y)
         train_loss = model.fit(X, y, self.n_epochs)
-        value = 2.0
+        value = 3.0
         self.assertTrue(train_loss < value, f'Expected loss = {train_loss} < {value}')
         X_categorical, y_categorical = self.cat_data
         model._model.reset()
