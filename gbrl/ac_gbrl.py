@@ -157,9 +157,10 @@ class ActorCritic(GBRL):
             self.policy_grad = None
             self.value_grad = None
             self.params = params
+            self.input = observations
         return params
     
-    def step(self, observations: Union[np.ndarray, th.Tensor], policy_grad_clip: float = None, value_grad_clip : float = None, policy_grad: Optional[Union[np.ndarray, th.Tensor]] = None, value_grad: Optional[Union[np.ndarray, th.Tensor]] = None) -> None:
+    def step(self, observations: Optional[Union[np.ndarray, th.Tensor]] = None, policy_grad: Optional[Union[np.ndarray, th.Tensor]] = None, value_grad: Optional[Union[np.ndarray, th.Tensor]] = None, policy_grad_clip: Optional[float] = None, value_grad_clip : Optional[float] = None) -> None:
         """Performs a boosting step for both actor and critic
 
         Args:
@@ -169,6 +170,9 @@ class ActorCritic(GBRL):
             policy_grad (Optional[Union[np.ndarray, th.Tensor]], optional): manually calculated gradients. Defaults to None.
             value_grad (Optional[Union[np.ndarray, th.Tensor]], optional): manually calculated gradients. Defaults to None.
         """
+        if observations is None:
+            assert self.input is not None, "Cannot update trees without input. Make sure model is called with requires_grad=True"
+            observations = self.input
         n_samples = len(observations)
 
         policy_grad = policy_grad if policy_grad is not None else self.params[0].grad.detach() * n_samples
@@ -183,8 +187,9 @@ class ActorCritic(GBRL):
         self._model.step(observations, policy_grad, value_grad)
         self.policy_grad = policy_grad
         self.value_grad = value_grad
+        self.input = None
     
-    def actor_step(self, observations: Union[np.ndarray, th.Tensor], policy_grad_clip: float = None, policy_grad: Optional[Union[np.ndarray, th.Tensor]] = None) -> None:
+    def actor_step(self, observations: Optional[Union[np.ndarray, th.Tensor]] = None, policy_grad: Optional[Union[np.ndarray, th.Tensor]] = None, policy_grad_clip: Optional[float] = None) -> None:
         """Performs a single boosting step for the actor (should only be used if actor and critic use separate models)
 
         Args:
@@ -196,6 +201,9 @@ class ActorCritic(GBRL):
             np.ndarray: policy gradient
         """
         assert not self.shared_tree_struct, "Cannot separate boosting steps for actor and critic when using separate tree architectures!"
+        if observations is None:
+            assert self.input is not None, "Cannot update trees without input. Make sure model is called with requires_grad=True"
+            observations = self.input
         n_samples = len(observations)
         policy_grad = policy_grad if policy_grad is not None else self.params[0].grad.detach() * n_samples
         policy_grad = clip_grad_norm(policy_grad, policy_grad_clip)
@@ -204,7 +212,7 @@ class ActorCritic(GBRL):
         self._model.step_policy(observations, policy_grad)
         self.policy_grad = policy_grad
     
-    def critic_step(self, observations: Union[np.ndarray, th.Tensor], value_grad_clip : float = None, value_grad: Optional[Union[np.ndarray, th.Tensor]] = None) -> None:
+    def critic_step(self, observations: Optional[Union[np.ndarray, th.Tensor]] = None, value_grad: Optional[Union[np.ndarray, th.Tensor]] = None, value_grad_clip: Optional[float] = None) -> None:
         """Performs a single boosting step for the critic (should only be used if actor and critic use separate models)
 
         Args:
@@ -216,6 +224,9 @@ class ActorCritic(GBRL):
             np.ndarray: value gradient
         """
         assert not self.shared_tree_struct, "Cannot separate boosting steps for actor and critic when using separate tree architectures!"
+        if observations is None:
+            assert self.input is not None, "Cannot update trees without input. Make sure model is called with requires_grad=True"
+            observations = self.input
         n_samples = len(observations)
         
         value_grad = value_grad if value_grad is not None else self.params[1].grad.detach() * n_samples
@@ -295,7 +306,7 @@ class ParametricActor(GBRL):
         self._model.reset()
         self._model.set_bias(self.bias)
 
-    def step(self, observations: Union[np.ndarray, th.Tensor], policy_grad_clip: float = None, policy_grad: Optional[Union[np.ndarray, th.Tensor]] = None) -> None:
+    def step(self, observations: Optional[Union[np.ndarray, th.Tensor]] = None, policy_grad: Optional[Union[np.ndarray, th.Tensor]] = None, policy_grad_clip: Optional[float] = None,) -> None:
         """Performs a single boosting iteration.
 
         Args:
@@ -303,6 +314,9 @@ class ParametricActor(GBRL):
             policy_grad_clip (float, optional): . Defaults to None.
             policy_grad (Optional[Union[np.ndarray, th.Tensor]], optional): manually calculated gradients. Defaults to None.
         """
+        if observations is None:
+            assert self.input is not None, "Cannot update trees without input. Make sure model is called with requires_grad=True"
+            observations = self.input
         n_samples = len(observations)
             
         policy_grad = policy_grad if policy_grad is not None else self.params.grad.detach() * n_samples
@@ -311,6 +325,7 @@ class ParametricActor(GBRL):
 
         self._model.step(observations, policy_grad)
         self.grad = policy_grad
+        self.input = None
 
     @classmethod
     def load_model(cls, load_name: str, device: str) -> "ParametricActor":
@@ -359,6 +374,7 @@ class ParametricActor(GBRL):
         if requires_grad:
             self.grads = None
             self.params = params
+            self.input = observations
         return params
     
     def __copy__(self) -> "ParametricActor":
@@ -430,7 +446,7 @@ class GaussianActor(GBRL):
         self._model.reset()
         self._model.set_bias(self.bias)
         
-    def step(self, observations: Union[np.ndarray, th.Tensor], mu_grad_clip: float = None, log_std_grad_clip: float = None, mu_grad: Optional[Union[np.ndarray, th.Tensor]] = None, log_std_grad: Optional[Union[np.ndarray, th.Tensor]] = None) -> None:
+    def step(self, observations: Optional[Union[np.ndarray, th.Tensor]] = None, mu_grad: Optional[Union[np.ndarray, th.Tensor]] = None, log_std_grad: Optional[Union[np.ndarray, th.Tensor]] = None, mu_grad_clip: Optional[float] = None, log_std_grad_clip: Optional[float] = None) -> None:
         """Performs a single boosting iteration.
 
         Args:
@@ -440,6 +456,9 @@ class GaussianActor(GBRL):
             mu_grad (Optional[Union[np.ndarray, th.Tensor]], optional): manually calculated gradients. Defaults to None.
             log_std_grad (Optional[Union[np.ndarray, th.Tensor]], optional): manually calculated gradients. Defaults to None.
         """
+        if observations is None:
+            assert self.input is not None, "Cannot update trees without input. Make sure model is called with requires_grad=True"
+            observations = self.input
         n_samples = len(observations)
         mu_grad = mu_grad if mu_grad is not None else self.params[0].grad.detach() * n_samples
         mu_grad = clip_grad_norm(mu_grad, mu_grad_clip)
@@ -457,6 +476,7 @@ class GaussianActor(GBRL):
         self.grad = mu_grad
         if self.std_optimizer is not None:
             self.grad = (mu_grad, log_std_grad)
+        self.input = None
     
     def get_num_trees(self) -> int:
         """Returns the number of trees in the ensemble
@@ -488,6 +508,7 @@ class GaussianActor(GBRL):
         if requires_grad:
             self.grad = None
             self.params = mean_actions, log_std
+            self.input = observations
         return mean_actions, log_std
     
     def __copy__(self) -> "GaussianActor":
@@ -558,7 +579,7 @@ class ContinuousCritic(GBRL):
         self._model.reset()
         self._model.set_bias(self.bias)
         
-    def step(self, observations: Union[np.ndarray, th.Tensor], q_grad_clip: float = None, weight_grad: Optional[Union[np.ndarray, th.Tensor]] = None, bias_grad: Optional[Union[np.ndarray, th.Tensor]] = None) -> None:
+    def step(self, observations: Optional[Union[np.ndarray, th.Tensor]] = None, weight_grad: Optional[Union[np.ndarray, th.Tensor]] = None, bias_grad: Optional[Union[np.ndarray, th.Tensor]] = None, q_grad_clip: Optional[float] = None) -> None:
         """Performs a single boosting step
 
         Args:
@@ -567,7 +588,9 @@ class ContinuousCritic(GBRL):
         weight_grad (Optional[Union[np.ndarray, th.Tensor]], optional): manually calculated gradients. Defaults to None.
             bias_grad (Optional[Union[np.ndarray, th.Tensor]], optional): manually calculated gradients. Defaults to None.           
         """
-
+        if observations is None:
+            assert self.input is not None, "Cannot update trees without input. Make sure model is called with requires_grad=True"
+            observations = self.input
         n_samples = len(observations)
         weight_grad = weight_grad if weight_grad is not None else self.params[0].grad.detach() * n_samples
         bias_grad = bias_grad if bias_grad is not None else self.params[1].grad.detach() * n_samples
@@ -581,6 +604,7 @@ class ContinuousCritic(GBRL):
 
         self._model.step(observations, theta_grad)
         self.grad = (weight_grad, bias_grad)
+        self.input = None
 
     def predict_target(self, observations: Union[np.ndarray, th.Tensor], tensor: bool = True) -> Tuple[Union[np.ndarray, th.Tensor], Union[np.ndarray, th.Tensor]]:
         """Predict the parameters of a Target Continuous Critic as Tensors.
@@ -629,6 +653,7 @@ class ContinuousCritic(GBRL):
         if requires_grad:
             self.grad = None
             self.params = weights, bias
+            self.input = observations
         return weights, bias
     
     def __copy__(self) -> "ContinuousCritic":
@@ -683,7 +708,7 @@ class DiscreteCritic(GBRL):
         self._model.reset()
         self._model.set_bias(self.bias)
 
-    def step(self, observations: Union[np.ndarray, th.Tensor], max_q_grad_norm: np.ndarray = None, q_grad: Optional[Union[np.ndarray, th.Tensor]] = None) -> None:
+    def step(self, observations: Optional[Union[np.ndarray, th.Tensor]] = None, q_grad: Optional[Union[np.ndarray, th.Tensor]] = None, max_q_grad_norm: Optional[np.ndarray] = None) -> None:
         """Performs a single boosting iterations.
 
         Args:
@@ -691,6 +716,9 @@ class DiscreteCritic(GBRL):
             max_q_grad_norm (np.ndarray, optional). Defaults to None.
             q_grad (Optional[Union[np.ndarray, th.Tensor]], optional): manually calculated gradients. Defaults to None.
         """
+        if observations is None:
+            assert self.input is not None, "Cannot update trees without input. Make sure model is called with requires_grad=True"
+            observations = self.input
         if q_grad is None:
             n_samples = len(observations)
             q_grad = self.params.grad.detach().cpu().numpy() * n_samples
@@ -698,8 +726,9 @@ class DiscreteCritic(GBRL):
       
         self._model.step(observations, q_grad)
         self.grad = q_grad
+        self.input = None
 
-    def __call__(self, observations: Union[np.ndarray, th.Tensor], requires_grad: bool = True, start_idx: int = 0, stop_idx: int = None, tensor: bool = True) -> Union[np.ndarray, th.Tensor]:
+    def __call__(self, observations: Union[np.ndarray, th.Tensor], requires_grad: bool = True, start_idx: int = 0, stop_idx: Optional[int] = None, tensor: bool = True) -> Union[np.ndarray, th.Tensor]:
         """Predict and return Critic's outputs as Tensors. if `requires_grad=True` then stores 
            differentiable parameters in self.params. 
            Return type/device is identical to the input type/device.
@@ -718,6 +747,7 @@ class DiscreteCritic(GBRL):
         if requires_grad:
             self.grad = None
             self.params = q_values
+            self.input = observations
         return q_values
 
     def predict_target(self, observations: Union[np.ndarray, th.Tensor], tensor: bool = True) -> th.Tensor:

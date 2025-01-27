@@ -38,7 +38,7 @@ def rmse_model(model, X, y, n_epochs, device='cpu'):
         y_pred = model(X_, requires_grad=True)
         loss = 0.5*mse_loss(y_pred, y_)
         loss.backward()
-        model.step(X_)
+        model.step()
         print(f"epoch: {epoch} loss: {loss.sqrt()}")
         epoch += 1
     y_pred = model(X_)

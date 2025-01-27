@@ -81,6 +81,7 @@ class GBRL:
             self._model = GBTWrapper(self.output_dim, self.tree_struct, self.optimizer, self.gbrl_params, self.verbose, self.device)
             self._model.reset()
         self.grad = None
+        self.input = None
 
     def reset_params(self):
         """Resets param attributes
@@ -144,7 +145,7 @@ class GBRL:
         """
         return self._model.get_schedule_learning_rates()
 
-    def step(self,  X: Union[np.ndarray, th.Tensor], max_grad_norm: float = None, grad: Optional[Union[np.ndarray, th.Tensor]] = None) -> None:
+    def step(self,  X: Optional[Union[np.ndarray, th.Tensor]] = None, grad: Optional[Union[np.ndarray, th.Tensor]] = None, max_grad_norm: Optional[float] = None) -> None:
         """Perform a boosting step (fits a single tree on the gradients)
 
         Args:
@@ -152,6 +153,9 @@ class GBRL:
             max_grad_norm (float, optional): perform gradient clipping by norm. Defaults to None.
             grad (Optional[Union[np.ndarray, th.Tensor]], optional): manually calculated gradients. Defaults to None.
         """
+        if X is None:
+            assert self.input is not None, "Cannot update trees without input. Make sure model is called with requires_grad=True"
+            X = self.input
         n_samples = len(X)
         grad = grad if grad is not None else self.params.grad.detach() * n_samples
 
@@ -159,6 +163,7 @@ class GBRL:
         validate_array(grad)
         self._model.step(X, grad)
         self.grad = grad
+        self.input = None
         
     def get_params(self) -> Tuple[np.ndarray, np.ndarray]:
         """Returns predicted model parameters and their respective gradients
@@ -300,6 +305,7 @@ class GBRL:
         if requires_grad:
             self.grad = None
             self.params = y_pred
+            self.input = X
         return y_pred
 
     def print_tree(self, tree_idx: int) -> None:

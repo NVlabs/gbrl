@@ -10,7 +10,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gbrl"
-version = "1.0.7"
+version = "1.0.8"
 description = "Gradient Boosted Trees for RL"
 readme = { file = "README.md", content-type = "text/markdown" }
 authors = [
