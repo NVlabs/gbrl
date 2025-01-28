@@ -20,7 +20,9 @@ from torch.nn.functional import mse_loss
 
 from sklearn import datasets
 
-from gbrl import GBRL, cuda_available, ActorCritic
+from gbrl import cuda_available
+from gbrl.gbt import GBRL
+from gbrl.ac_gbrl import ActorCritic
 
 def rmse(preds: Union[np.array, th.Tensor], targets: Union[np.array, th.Tensor]) -> Tuple[float, np.array]:
     if isinstance(preds, th.Tensor):
@@ -44,7 +46,7 @@ def rmse_model(model, X, y, n_epochs, device='cpu'):
         y_pred = model(X_, requires_grad=True)
         loss = 0.5*mse_loss(y_pred, y_) * y_.shape[1]
         loss.backward() 
-        model.step(X_)
+        model.step()
         print(f"epoch: {epoch} loss: {(loss / y_.shape[1]).sqrt()}")
         epoch += 1
     y_pred = model(X_)
@@ -62,7 +64,7 @@ def ac_rmse_model(model, X, y, n_epochs, device='cpu'):
         loss_theta.backward()
         loss_value = 0.5*mse_loss(value, y_value)
         loss_value.backward()
-        model.step(X_)
+        model.step()
         print(f"epoch: {epoch} loss_theta: {loss_theta.sqrt():.5f} loss_value: {(loss_value).sqrt():.5f}")
         epoch += 1
     theta, value = model(X_)

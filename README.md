@@ -81,5 +81,5 @@ For comprehensive documentation, visit the [GBRL documentation](https://nvlabs.g
 # Licenses
 Copyright © 2024, NVIDIA Corporation. All rights reserved.
 
-This work is made available under the NVIDIA Source Code License-NC. Click [here](https://nvlabs.github.io/gbrl/license.htm). to view a copy of this license.
+This work is made available under the NVIDIA Source Code License-NC. Click [here](https://github.com/NVlabs/gbrl/blob/master/LICENSE). to view a copy of this license.
 

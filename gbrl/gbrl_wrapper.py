@@ -13,8 +13,8 @@ from typing import Dict, List, Union, Tuple, Optional, Any
 import numpy as np
 import torch as th
 
-from .gbrl_cpp import GBRL as GBRL_CPP
-from .utils import (get_input_dim, get_poly_vectors, 
+from gbrl import GBRL_CPP
+from gbrl.utils import (get_input_dim, get_poly_vectors, 
                     to_numpy,
                     numerical_dtype, 
                     get_tensor_info,
