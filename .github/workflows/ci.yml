@@ -36,23 +36,19 @@ jobs:
         # sudo apt-get install -y lcov g++ gcc
         sudo apt-get install -y g++ gcc
 
-    - name: Install dependencies on MacOs
+    - name: Install LLVM via Homebrew
+      if: matrix.os == 'macos-latest'
+      run: brew install libomp llvm
+
+    - name: Configure Environment Variables
       if: matrix.os == 'macos-latest'
       run: |
-        python -m pip install --upgrade pip
-        brew install libomp llvm
-        export PATH="$(brew --prefix llvm)/bin:$PATH"
-        export LDFLAGS="-L$(brew --prefix libomp)/lib -L$(brew --prefix llvm)/lib -L/opt/homebrew/opt/llvm/lib -L$(brew --prefix llvm)/lib/c++ -Wl,-rpath,$(brew --prefix llvm)/lib/c++"
-        export CPPFLAGS="-I$(brew --prefix libomp)/include -I$(brew --prefix llvm)/include"
-        export CC="$(brew --prefix llvm)/bin/clang"
-        export CXX="$(brew --prefix llvm)/bin/clang++"
-        export DYLD_LIBRARY_PATH="$(brew --prefix llvm)/lib:$(brew --prefix libomp)/lib"
-        
-
-    - name: Install dependencies on Windows
-      if: matrix.os == 'windows-latest'
-      run: |
-        python -m pip install --upgrade pip
+        echo "PATH=$(brew --prefix llvm)/bin:$PATH" >> $GITHUB_ENV
+        echo "LDFLAGS=-L$(brew --prefix libomp)/lib -L$(brew --prefix llvm)/lib -L$(brew --prefix llvm)/lib/c++ -Wl,-rpath,$(brew --prefix llvm)/lib/c++" >> $GITHUB_ENV
+        echo "CPPFLAGS=-I$(brew --prefix libomp)/include -I$(brew --prefix llvm)/include" >> $GITHUB_ENV
+        echo "CC=$(brew --prefix llvm)/bin/clang" >> $GITHUB_ENV
+        echo "CXX=$(brew --prefix llvm)/bin/clang++" >> $GITHUB_ENV
+        echo "DYLD_LIBRARY_PATH=$(brew --prefix llvm)/lib:$(brew --prefix libomp)/lib" >> $GITHUB_ENV
 
     - name: Set up MSVC environment
       if: matrix.os == 'windows-latest'
