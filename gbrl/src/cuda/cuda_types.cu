@@ -25,12 +25,14 @@ ensembleData* ensemble_data_alloc_cuda(ensembleMetaData *metadata){
 
     char *data;
     size_t bias_size = metadata->output_dim * sizeof(float);
+    size_t feature_size = metadata->input_dim * sizeof(float);
     size_t tree_size = metadata->max_trees * sizeof(int);
     size_t split_sizes = (metadata->grow_policy == OBLIVIOUS) ? metadata->max_trees : metadata->max_leaves;
     size_t value_sizes = metadata->output_dim * metadata->max_leaves * sizeof(float);
     size_t cond_sizes = split_sizes*metadata->max_depth;
     size_t edge_size = metadata->max_depth * metadata->max_leaves;
-    size_t data_size = bias_size
+    size_t data_size = bias_size 
+                     + feature_size
                      + tree_size
                      + split_sizes * sizeof(int) // depths
                      + value_sizes 
@@ -57,6 +59,8 @@ ensembleData* ensemble_data_alloc_cuda(ensembleMetaData *metadata){
     size_t trace = 0;
     edata->bias = (float*)(data + trace);
     trace += bias_size;
+    edata->feature_weights = (float*)(data + trace);
+    trace += feature_size;
 #ifdef DEBUG 
     edata->n_samples = (int *)(data + trace);
     trace += sample_size;
@@ -92,6 +96,7 @@ ensembleData* ensemble_copy_data_alloc_cuda(ensembleMetaData *metadata){
 
     char *data;
     size_t bias_size = metadata->output_dim * sizeof(float);
+    size_t feature_size = metadata->input_dim * sizeof(float);
     size_t tree_size = metadata->n_trees * sizeof(int);
     size_t split_sizes = (metadata->grow_policy == OBLIVIOUS) ? metadata->n_trees : metadata->n_leaves;
     size_t value_sizes = metadata->output_dim * metadata->n_leaves * sizeof(float);
@@ -99,6 +104,7 @@ ensembleData* ensemble_copy_data_alloc_cuda(ensembleMetaData *metadata){
     size_t edge_size = metadata->n_leaves*metadata->max_depth;
 
     size_t data_size = bias_size
+                     + feature_size
                      + tree_size
                      + split_sizes * sizeof(int) // depths
                      + value_sizes 
@@ -125,6 +131,8 @@ ensembleData* ensemble_copy_data_alloc_cuda(ensembleMetaData *metadata){
     size_t trace = 0;
     edata->bias = (float*)(data + trace);
     trace += bias_size;
+    edata->feature_weights = (float*)(data + trace);
+    trace += feature_size;
 #ifdef DEBUG 
     edata->n_samples = (int *)(data + trace);
     trace += sample_size;
@@ -157,6 +165,7 @@ ensembleData* ensemble_data_copy_gpu_gpu(ensembleMetaData *metadata, ensembleDat
     if (edata == nullptr)
         edata = ensemble_copy_data_alloc_cuda(metadata);
     size_t bias_size = metadata->output_dim * sizeof(float);
+    size_t feature_size = metadata->input_dim * sizeof(float);
     size_t tree_size = metadata->n_trees * sizeof(int);
     size_t split_sizes = (metadata->grow_policy == OBLIVIOUS) ? metadata->n_trees : metadata->n_leaves;
     size_t value_sizes = metadata->output_dim * metadata->n_leaves * sizeof(float);
@@ -164,6 +173,7 @@ ensembleData* ensemble_data_copy_gpu_gpu(ensembleMetaData *metadata, ensembleDat
     size_t edge_size = metadata->n_leaves*metadata->max_depth;
 
     cudaMemcpy(edata->bias, other_edata->bias, bias_size, cudaMemcpyDeviceToDevice);
+    cudaMemcpy(edata->feature_weights, other_edata->feature_weights, feature_size, cudaMemcpyDeviceToDevice);
 #ifdef DEBUG 
     size_t sample_size = metadata->n_leaves * sizeof(int);
     cudaMemcpy(edata->n_samples, other_edata->n_samples, sample_size, cudaMemcpyDeviceToDevice);
@@ -184,6 +194,7 @@ ensembleData* ensemble_data_copy_gpu_cpu(ensembleMetaData *metadata, ensembleDat
     if (edata == nullptr)
         edata = ensemble_copy_data_alloc(metadata);
     size_t bias_size = metadata->output_dim * sizeof(float);
+    size_t feature_size = metadata->input_dim * sizeof(float);
     size_t tree_size = metadata->n_trees * sizeof(int);
     size_t split_sizes = (metadata->grow_policy == OBLIVIOUS) ? metadata->n_trees : metadata->n_leaves;
     size_t value_sizes = metadata->output_dim * metadata->n_leaves * sizeof(float);
@@ -191,6 +202,7 @@ ensembleData* ensemble_data_copy_gpu_cpu(ensembleMetaData *metadata, ensembleDat
     size_t edge_size = metadata->n_leaves*metadata->max_depth;
     
     cudaMemcpy(edata->bias, other_edata->bias, bias_size, cudaMemcpyDeviceToHost);
+    cudaMemcpy(edata->feature_weights, other_edata->feature_weights, feature_size, cudaMemcpyDeviceToHost);
 #ifdef DEBUG 
     size_t sample_size = metadata->n_leaves * sizeof(int);
     cudaMemcpy(edata->n_samples, other_edata->n_samples, sample_size, cudaMemcpyDeviceToHost);
@@ -211,13 +223,14 @@ ensembleData* ensemble_data_copy_cpu_gpu(ensembleMetaData *metadata, ensembleDat
     if (edata == nullptr)
         edata = ensemble_copy_data_alloc_cuda(metadata);
     size_t bias_size = metadata->output_dim * sizeof(float);
+    size_t feature_size = metadata->input_dim * sizeof(float);
     size_t tree_size = metadata->n_trees * sizeof(int);
     size_t split_sizes = (metadata->grow_policy == OBLIVIOUS) ? metadata->n_trees : metadata->n_leaves;
     size_t value_sizes = metadata->output_dim * metadata->n_leaves * sizeof(float);
     size_t cond_sizes = split_sizes*metadata->max_depth;
     size_t edge_size = metadata->n_leaves*metadata->max_depth;
-
     cudaMemcpy(edata->bias, other_edata->bias, bias_size, cudaMemcpyHostToDevice);
+    cudaMemcpy(edata->feature_weights, other_edata->feature_weights, feature_size, cudaMemcpyHostToDevice);
 #ifdef DEBUG 
     size_t sample_size = metadata->n_leaves * sizeof(int);
     cudaMemcpy(edata->n_samples, other_edata->n_samples, sample_size, cudaMemcpyHostToDevice);
@@ -313,6 +326,7 @@ void allocate_ensemble_memory_cuda(ensembleMetaData *metadata, ensembleData *eda
         metadata->max_trees = new_tree_size;
         ensembleData *new_data = ensemble_data_alloc_cuda(metadata);
         cudaMemcpy(new_data->bias, edata->bias, metadata->output_dim*sizeof(float), cudaMemcpyDeviceToDevice);
+        cudaMemcpy(new_data->feature_weights, edata->feature_weights, metadata->input_dim*sizeof(float), cudaMemcpyDeviceToDevice);
 #ifdef DEBUG
         cudaMemcpy(new_data->n_samples, edata->n_samples, leaf_idx*sizeof(int), cudaMemcpyDeviceToDevice);
 #endif 
@@ -335,6 +349,7 @@ void allocate_ensemble_memory_cuda(ensembleMetaData *metadata, ensembleData *eda
         }
         cudaFree(edata->bias);
         edata->bias = new_data->bias;
+        edata->feature_weights = new_data->feature_weights;
 #ifdef DEBUG
         edata->n_samples = new_data->n_samples;
 #endif

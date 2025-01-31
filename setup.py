@@ -50,16 +50,25 @@ class CMakeBuild(build_ext):
             cmake_args.append('-DCMAKE_C_COMPILER=' + os.environ['CC'])
         if 'CXX' in os.environ:
             cmake_args.append('-DCMAKE_CXX_COMPILER=' + os.environ['CXX'])
+        if 'CPPFLAGS' in os.environ:
+            cmake_args.append('-DCMAKE_CXX_FLAGS=' + os.environ['CPPFLAGS'])
         build_args = ['--config', cfg]
         if self.cmake_verbose:
             cmake_args.append('-DCMAKE_VERBOSE_MAKEFILE:BOOL=ON')
+            cmake_args.append('--debug-trycompile')
             build_args.append('--verbose')
 
         if ('CPU_ONLY' not in os.environ and platform.system() != 'Darwin') or ('CPU_ONLY' in os.environ and os.environ['CPU_ONLY'] != '1'):
             cmake_args.append('-DUSE_CUDA=ON')
             if 'CUDACXX' in os.environ:
                 cmake_args.append('-DCMAKE_CUDA_COMPILER=' + os.environ['CUDACXX'])
-        
+        # # Set CMAKE_PREFIX_PATH for LLVM
+        # if platform.system() == 'Darwin':  # MacOS specific logic
+        #     brew_prefix = subprocess.check_output(['brew', '--prefix', 'llvm']).decode().strip()
+        #     print(brew_prefix)
+        #     cmake_args.append(f'-DCMAKE_PREFIX_PATH={brew_prefix}')
+        #     cmake_args.append(f'-DLLVM_DIR={brew_prefix}/lib/cmake/llvm')
+            
         build_temp = self.build_temp
         if not os.path.exists(build_temp):
             os.makedirs(build_temp)
@@ -96,7 +105,7 @@ class CMakeBuild(build_ext):
 
 setup(
     name="gbrl",
-    version = "1.0.8",
+    version = "1.0.9",
     description = "Gradient Boosted Trees for RL",
     author="Benjamin Fuhrer, Chen Tessler, Gal Dalal",
     author_email="bfuhrer@nvidia.com, ctessler@nvidia.com. gdalal@nvidia.com",

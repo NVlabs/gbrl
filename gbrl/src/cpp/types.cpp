@@ -144,8 +144,9 @@ std::string schedulerTypeToString(schedulerFunc func) {
     }
 }
 
-ensembleMetaData* ensemble_metadata_alloc(int max_trees, int max_leaves, int max_trees_batch, int max_leaves_batch, int output_dim, int max_depth, int min_data_in_leaf, int n_bins, int par_th, float cv_beta, int verbose, int batch_size, bool use_cv, scoreFunc split_score_func, generatorType generator_type, growPolicy grow_policy){
+ensembleMetaData* ensemble_metadata_alloc(int max_trees, int max_leaves, int max_trees_batch, int max_leaves_batch, int input_dim, int output_dim, int max_depth, int min_data_in_leaf, int n_bins, int par_th, float cv_beta, int verbose, int batch_size, bool use_cv, scoreFunc split_score_func, generatorType generator_type, growPolicy grow_policy){
     ensembleMetaData *metadata = new ensembleMetaData;
+    metadata->input_dim = input_dim; 
     metadata->output_dim = output_dim; 
     metadata->max_depth = max_depth; 
     metadata->min_data_in_leaf = min_data_in_leaf; 
@@ -180,6 +181,8 @@ ensembleData* ensemble_data_alloc(ensembleMetaData *metadata){
     edata->bias = new float[metadata->output_dim];
     data_size += sizeof(float) * metadata->output_dim;
     memset(edata->bias, 0, metadata->output_dim * sizeof(float));
+    edata->feature_weights = new float[metadata->input_dim];
+    memset(edata->feature_weights, 0, metadata->input_dim * sizeof(float));
     int split_sizes = (metadata->grow_policy == OBLIVIOUS) ? metadata->max_trees : metadata->max_leaves;
 #ifdef DEBUG
     edata->n_samples = new int[metadata->max_leaves]; // debugging
@@ -229,6 +232,8 @@ ensembleData* ensemble_copy_data_alloc(ensembleMetaData *metadata){
     edata->bias = new float[metadata->output_dim];
     data_size += sizeof(float) * metadata->output_dim;
     memset(edata->bias, 0, metadata->output_dim * sizeof(float));
+    edata->feature_weights = new float[metadata->input_dim];
+    memset(edata->feature_weights, 0, metadata->input_dim * sizeof(float));
     int split_sizes = (metadata->grow_policy == OBLIVIOUS) ? metadata->n_trees : metadata->n_leaves;
 #ifdef DEBUG
     edata->n_samples = new int[metadata->n_leaves]; // debugging
@@ -277,6 +282,8 @@ ensembleData* copy_ensemble_data(ensembleData *other_edata, ensembleMetaData *me
     edata->bias = new float[metadata->output_dim];
     data_size += sizeof(float) * metadata->output_dim;
     memcpy(edata->bias, other_edata->bias, metadata->output_dim * sizeof(float));
+    edata->feature_weights = new float[metadata->input_dim];
+    memcpy(edata->feature_weights, other_edata->feature_weights, metadata->input_dim * sizeof(float));
     int split_sizes = (metadata->grow_policy == OBLIVIOUS) ? metadata->n_trees : metadata->n_leaves;
 #ifdef DEBUG
     edata->n_samples = new int[metadata->n_leaves]; // debugging
@@ -319,6 +326,7 @@ ensembleData* copy_ensemble_data(ensembleData *other_edata, ensembleMetaData *me
 
 void ensemble_data_dealloc(ensembleData *edata){
     delete[] edata->bias;
+    delete[] edata->feature_weights;
 #ifdef DEBUG
     delete[] edata->n_samples;
 #endif
@@ -377,6 +385,7 @@ void export_ensemble_data(std::ofstream& header_file, const std::string& model_n
     header_file << "max_leaves: " << metadata->max_leaves << ", ";
     header_file << "max_trees_batch: " << metadata->max_trees_batch << ", ";
     header_file << "max_leaves_batch: " << metadata->max_leaves_batch << ", ";
+    header_file << "input_dim: " << metadata->input_dim << ", ";
     header_file << "output_dim: " << metadata->output_dim << ", ";
     header_file << "\nmax_depth: " << metadata->max_depth << ", ";
     header_file << "min_data_in_leaf: " << metadata->min_data_in_leaf << ", ";
@@ -398,6 +407,7 @@ void export_ensemble_data(std::ofstream& header_file, const std::string& model_n
     header_file << "#define N_TREES " << metadata->n_trees << "\n";
     header_file << "#define N_LEAVES " << metadata->n_leaves << "\n";
     header_file << "#define BINARY_FEATURES " << binary_splits << "\n";
+    header_file << "#define N_INPUTS " << metadata->input_dim << "\n";
     header_file << "#define N_OUTPUTS " << metadata->output_dim << "\n";
     header_file << "#define N_FEATURES " << metadata->n_num_features  << "\n\n";
 
@@ -498,6 +508,10 @@ void save_ensemble_data(std::ofstream& file, ensembleData *edata, ensembleMetaDa
     file.write(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
     if (edata_cpu->bias != nullptr)
         file.write(reinterpret_cast<char*>(edata_cpu->bias), metadata->output_dim * sizeof(float));
+    check = edata_cpu->feature_weights != nullptr ? VALID : NULL_OPT;
+    file.write(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
+    if (edata_cpu->feature_weights != nullptr)
+        file.write(reinterpret_cast<char*>(edata_cpu->feature_weights), metadata->input_dim * sizeof(float));
 #ifdef DEBUG
     check = edata_cpu->n_samples != nullptr ? VALID : NULL_OPT;
     file.write(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
@@ -560,6 +574,10 @@ ensembleData* load_ensemble_data(std::ifstream& file, ensembleMetaData *metadata
     if (check == VALID) {
         file.read(reinterpret_cast<char*>(edata_cpu->bias), metadata->output_dim * sizeof(float));
     } 
+    file.read(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
+    if (check == VALID) {
+        file.read(reinterpret_cast<char*>(edata_cpu->feature_weights), metadata->input_dim * sizeof(float));
+    } 
 #ifdef DEBUG
     file.read(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
     if (check == VALID) {
@@ -616,6 +634,7 @@ void allocate_ensemble_memory(ensembleMetaData *metadata, ensembleData *edata){
         metadata->max_trees = new_tree_size;
         ensembleData *new_data = ensemble_data_alloc(metadata);
         memcpy(new_data->bias, edata->bias, metadata->output_dim*sizeof(float));
+        memcpy(new_data->feature_weights, edata->feature_weights, metadata->input_dim*sizeof(float));
 #ifdef DEBUG
         memcpy(new_data->n_samples, edata->n_samples, leaf_idx*sizeof(int));
 #endif 
@@ -637,6 +656,7 @@ void allocate_ensemble_memory(ensembleMetaData *metadata, ensembleData *edata){
             memcpy(new_data->categorical_values, edata->categorical_values, tree_idx*metadata->max_depth*sizeof(char)*MAX_CHAR_SIZE);
         }
         delete[] edata->bias;
+        delete[] edata->feature_weights;
 #ifdef DEBUG
         delete [] edata->n_samples;
 #endif
@@ -652,6 +672,7 @@ void allocate_ensemble_memory(ensembleMetaData *metadata, ensembleData *edata){
         delete[] edata->inequality_directions; 
 
         edata->bias = new_data->bias;
+        edata->feature_weights = new_data->feature_weights;
 #ifdef DEBUG
         edata->n_samples = new_data->n_samples;
 #endif

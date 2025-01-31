@@ -92,6 +92,7 @@ class TestGBTMulti(unittest.TestCase):
         out_dim = y.shape[1]
         cls.data = (X, y)
         cls.out_dim = out_dim
+        cls.input_dim = X.shape[1]
         cls.n_epochs = 100
         cls.test_dir = tempfile.mkdtemp()
         cls.tree_struct = {'max_depth': 4, 
@@ -114,7 +115,7 @@ class TestGBTMulti(unittest.TestCase):
         print("Running Multi test_cosine_cpu")
         X, y = self.data
         gbrl_params = dict({"control_variates": False, "split_score_func": "Cosine"})
-        model = GBRL(
+        model = GBRL(input_dim=self.input_dim,
                             output_dim=self.out_dim,
                             tree_struct=self.tree_struct,
                             optimizer=self.sgd_optimizer,
@@ -137,7 +138,7 @@ class TestGBTMulti(unittest.TestCase):
 
         gbrl_params = dict({"control_variates": False, "split_score_func": "L2",
                             "generator_type": "Uniform"})
-        model = GBRL(
+        model = GBRL(input_dim=self.input_dim,
                     output_dim=self.out_dim,
                     tree_struct=tree_struct,
                     optimizer=self.sgd_optimizer,
@@ -159,7 +160,7 @@ class TestGBTMulti(unittest.TestCase):
                     'stop_idx': self.out_dim
                 }
         gbrl_params = dict({"control_variates": False, "split_score_func": "Cosine"})
-        model = GBRL(
+        model = GBRL(input_dim=self.input_dim,
                     output_dim=self.out_dim,
                     tree_struct=self.tree_struct,
                     optimizer=optimizer,
@@ -177,13 +178,13 @@ class TestGBTMulti(unittest.TestCase):
         print("Running Multi test_cosine_gpu")
         X, y = self.data
         gbrl_params = dict({"control_variates": False, "split_score_func": "Cosine"})
-        model = GBRL(
-                            output_dim=self.out_dim,
-                            tree_struct=self.tree_struct,
-                            optimizer=self.sgd_optimizer,
-                            gbrl_params=gbrl_params,
-                            verbose=0,
-                            device='cuda')
+        model = GBRL(input_dim=self.input_dim,
+                    output_dim=self.out_dim,
+                    tree_struct=self.tree_struct,
+                    optimizer=self.sgd_optimizer,
+                    gbrl_params=gbrl_params,
+                    verbose=0,
+                    device='cuda')
         model.set_bias_from_targets(y)
         loss = rmse_model(model, X, y, self.n_epochs, device='cuda')
         value = 2.0
@@ -198,13 +199,13 @@ class TestGBTMulti(unittest.TestCase):
                 'par_th': 2,
                 'grow_policy': 'oblivious'}
         gbrl_params = dict({"control_variates": False, "split_score_func": "Cosine"})
-        model = GBRL(
-                            output_dim=self.out_dim,
-                            tree_struct=tree_struct,
-                            optimizer=self.sgd_optimizer,
-                            gbrl_params=gbrl_params,
-                            verbose=0,
-                            device='cpu')
+        model = GBRL(input_dim=self.input_dim,
+                    output_dim=self.out_dim,
+                    tree_struct=tree_struct,
+                    optimizer=self.sgd_optimizer,
+                    gbrl_params=gbrl_params,
+                    verbose=0,
+                    device='cpu')
         model.set_bias_from_targets(y)
         loss = rmse_model(model, X, y, self.n_epochs)
         self.assertTrue(loss < 12, f'Expected loss = {loss} < 12')
@@ -219,13 +220,13 @@ class TestGBTMulti(unittest.TestCase):
                 'par_th': 2,
                 'grow_policy': 'oblivious'}
         gbrl_params = dict({"control_variates": False, "split_score_func": "Cosine"})
-        model = GBRL(
-                            output_dim=self.out_dim,
-                            tree_struct=tree_struct,
-                            optimizer=self.sgd_optimizer,
-                            gbrl_params=gbrl_params,
-                            verbose=0,
-                            device='cuda')
+        model = GBRL(input_dim=self.input_dim,
+                    output_dim=self.out_dim,
+                    tree_struct=tree_struct,
+                    optimizer=self.sgd_optimizer,
+                    gbrl_params=gbrl_params,
+                    verbose=0,
+                    device='cuda')
         model.set_bias_from_targets(y)
         loss = rmse_model(model, X, y, self.n_epochs, device='cuda')
         value = 12
@@ -236,13 +237,13 @@ class TestGBTMulti(unittest.TestCase):
         print("Running Multi test_l2_cpu")
         X, y = self.data
         gbrl_params = dict({"control_variates": False, "split_score_func": "L2"})
-        model = GBRL(
-                            output_dim=self.out_dim,
-                            tree_struct=self.tree_struct,
-                            optimizer=self.sgd_optimizer,
-                            gbrl_params=gbrl_params,
-                            verbose=0,
-                            device='cpu')
+        model = GBRL(input_dim=self.input_dim,
+                    output_dim=self.out_dim,
+                    tree_struct=self.tree_struct,
+                    optimizer=self.sgd_optimizer,
+                    gbrl_params=gbrl_params,
+                    verbose=0,
+                    device='cpu')
         model.set_bias_from_targets(y)
         loss = rmse_model(model, X, y, self.n_epochs)
         value = 0.5
@@ -254,13 +255,13 @@ class TestGBTMulti(unittest.TestCase):
         print("Running Multi test_l2_gpu")
         X, y = self.data
         gbrl_params = dict({"control_variates": False, "split_score_func": "L2"})
-        model = GBRL(
-                            output_dim=self.out_dim,
-                            tree_struct=self.tree_struct,
-                            optimizer=self.sgd_optimizer,
-                            gbrl_params=gbrl_params,
-                            verbose=0,
-                            device='cuda')
+        model = GBRL(input_dim=self.input_dim,
+                    output_dim=self.out_dim,
+                    tree_struct=self.tree_struct,
+                    optimizer=self.sgd_optimizer,
+                    gbrl_params=gbrl_params,
+                    verbose=0,
+                    device='cuda')
         model.set_bias_from_targets(y)
         loss = rmse_model(model, X, y, self.n_epochs, device='cuda')
         value = 0.5
@@ -275,13 +276,13 @@ class TestGBTMulti(unittest.TestCase):
                 'par_th': 2,
                 'grow_policy': 'oblivious'}
         gbrl_params = dict({"control_variates": False, "split_score_func": "L2"})
-        model = GBRL(
-                            output_dim=self.out_dim,
-                            tree_struct=tree_struct,
-                            optimizer=self.sgd_optimizer,
-                            gbrl_params=gbrl_params,
-                            verbose=0,
-                            device='cpu')
+        model = GBRL(input_dim=self.input_dim,
+                    output_dim=self.out_dim,
+                    tree_struct=tree_struct,
+                    optimizer=self.sgd_optimizer,
+                    gbrl_params=gbrl_params,
+                    verbose=0,
+                    device='cpu')
         model.set_bias_from_targets(y)
         loss = rmse_model(model, X, y, self.n_epochs)
         value = 10.0
@@ -305,6 +306,7 @@ class TestGBTMulti(unittest.TestCase):
                 }
         gbrl_params = dict({"control_variates": False, "split_score_func": "cosine"})
         model = ActorCritic(
+                            input_dim=self.input_dim,
                             output_dim=self.out_dim,
                             tree_struct=self.tree_struct,
                             policy_optimizer=policy_optimizer,
@@ -336,7 +338,7 @@ class TestGBTMulti(unittest.TestCase):
             'stop_idx': 1
         }
         gbrl_params = dict({"control_variates": False, "split_score_func": "cosine"})
-        model = ActorCritic(
+        model = ActorCritic(input_dim=self.input_dim,
                             output_dim=self.out_dim,
                             tree_struct=self.tree_struct,
                             policy_optimizer=policy_optimizer,
@@ -370,6 +372,7 @@ class TestGBTMulti(unittest.TestCase):
                 }
         gbrl_params = dict({"control_variates": False, "split_score_func": "cosine"})
         model = ActorCritic(
+                            input_dim=self.input_dim,
                             output_dim=self.out_dim,
                             tree_struct=self.tree_struct,
                             policy_optimizer=policy_optimizer,
@@ -402,7 +405,7 @@ class TestGBTMulti(unittest.TestCase):
                     'stop_idx': self.out_dim
                 }
         gbrl_params = dict({"control_variates": False, "split_score_func": "cosine"})
-        model = ActorCritic(
+        model = ActorCritic(input_dim=self.input_dim,
                             output_dim=self.out_dim,
                             tree_struct=self.tree_struct,
                             policy_optimizer=policy_optimizer,
@@ -427,13 +430,13 @@ class TestGBTMulti(unittest.TestCase):
                 'par_th': 2,
                 'grow_policy': 'oblivious'}
         gbrl_params = dict({"control_variates": False, "split_score_func": "L2"})
-        model = GBRL(
-                            output_dim=self.out_dim,
-                            tree_struct=tree_struct,
-                            optimizer=self.sgd_optimizer,
-                            gbrl_params=gbrl_params,
-                            verbose=0,
-                            device='cuda')
+        model = GBRL(input_dim=self.input_dim,
+                        output_dim=self.out_dim,
+                        tree_struct=tree_struct,
+                        optimizer=self.sgd_optimizer,
+                        gbrl_params=gbrl_params,
+                        verbose=0,
+                        device='cuda')
         model.set_bias_from_targets(y)
         loss = rmse_model(model, X, y, self.n_epochs, device='cuda')
         value = 10.0
