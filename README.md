@@ -1,8 +1,7 @@
 # Gradient Boosting Reinforcement Learning (GBRL)
 GBRL is a Python-based Gradient Boosting Trees (GBT) library, similar to popular packages such as [XGBoost](https://xgboost.readthedocs.io/en/stable/), [CatBoost](https://catboost.ai/), but specifically designed and optimized for reinforcement learning (RL). GBRL is implemented in C++/CUDA aimed to seamlessly integrate within popular RL libraries. 
 
-<!-- [![Build Status](https://img.shields.io/github/workflow/status/Nvlabs/gbrl/CI)](https://github.com/NVlabs/gbrl/actions) -->
-[![License](https://img.shields.io/badge/license-NVIDIA-green.svg)](https://nvlabs.github.io/gbrl/license.htm)
+[![License](https://img.shields.io/badge/license-NVIDIA-green.svg)](https://github.com/NVlabs/gbrl/blob/master/LICENSE)
 [![PyPI version](https://badge.fury.io/py/gbrl.svg)](https://badge.fury.io/py/gbrl)
 <!-- [![Python Coverage](https://codecov.io/gh/Nvlabs/gbrl/branch/master/graph/badge.svg?flag=python)](https://codecov.io/gh/Nvlabs/gbrl)
 [![C++ Coverage](https://codecov.io/gh/Nvlabs/gbrl/branch/master/graph/badge.svg?flag=cpp)](https://codecov.io/gh/Nvlabs/gbrl) -->
@@ -82,5 +81,5 @@ For comprehensive documentation, visit the [GBRL documentation](https://nvlabs.g
 # Licenses
 Copyright © 2024, NVIDIA Corporation. All rights reserved.
 
-This work is made available under the NVIDIA Source Code License-NC. Click [here](https://nvlabs.github.io/gbrl/license.htm). to view a copy of this license.
+This work is made available under the NVIDIA Source Code License-NC. Click [here](https://github.com/NVlabs/gbrl/blob/master/LICENSE). to view a copy of this license.
 

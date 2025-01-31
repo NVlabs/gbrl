@@ -92,4 +92,4 @@ int count_distinct(T *arr, int n){
     return res;
 }
 template int count_distinct<int>(int* arr, int n);
-template int count_distinct<double>(double* arr, int n);
+template int count_distinct<float>(float* arr, int n);

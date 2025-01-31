@@ -6,14 +6,14 @@
 # https://nvlabs.github.io/gbrl/license.html
 #
 ##############################################################################
-from typing import Dict, List, Union, Tuple, Optional
+from typing import Dict, List, Union, Tuple, Optional, Any
 
 import numpy as np
 import torch as th
 
 
-from .gbrl_wrapper import GBTWrapper
-from .utils import setup_optimizer, clip_grad_norm, validate_array
+from gbrl.gbrl_wrapper import GBTWrapper
+from gbrl.utils import setup_optimizer, clip_grad_norm, validate_array
 
 
 class GBRL:
@@ -81,6 +81,7 @@ class GBRL:
             self._model = GBTWrapper(self.output_dim, self.tree_struct, self.optimizer, self.gbrl_params, self.verbose, self.device)
             self._model.reset()
         self.grad = None
+        self.input = None
 
     def reset_params(self):
         """Resets param attributes
@@ -115,7 +116,7 @@ class GBRL:
             arr = arr[:, np.newaxis]
         mean_arr = np.mean(arr, axis=0)
         if isinstance(mean_arr, float):
-            mean_arr = np.array([mean_arr])
+            mean_arr = np.ndarray([mean_arr])
         self._model.set_bias(mean_arr.astype(np.single)) # GBRL only works with float32
     
     def get_iteration(self) -> int:
@@ -144,7 +145,7 @@ class GBRL:
         """
         return self._model.get_schedule_learning_rates()
 
-    def step(self,  X: Union[np.ndarray, th.Tensor], max_grad_norm: float = None, grad: Optional[Union[np.ndarray, th.Tensor]] = None) -> None:
+    def step(self,  X: Optional[Union[np.ndarray, th.Tensor]] = None, grad: Optional[Union[np.ndarray, th.Tensor]] = None, max_grad_norm: Optional[float] = None) -> None:
         """Perform a boosting step (fits a single tree on the gradients)
 
         Args:
@@ -152,6 +153,9 @@ class GBRL:
             max_grad_norm (float, optional): perform gradient clipping by norm. Defaults to None.
             grad (Optional[Union[np.ndarray, th.Tensor]], optional): manually calculated gradients. Defaults to None.
         """
+        if X is None:
+            assert self.input is not None, "Cannot update trees without input. Make sure model is called with requires_grad=True"
+            X = self.input
         n_samples = len(X)
         grad = grad if grad is not None else self.params.grad.detach() * n_samples
 
@@ -159,6 +163,7 @@ class GBRL:
         validate_array(grad)
         self._model.step(X, grad)
         self.grad = grad
+        self.input = None
         
     def get_params(self) -> Tuple[np.ndarray, np.ndarray]:
         """Returns predicted model parameters and their respective gradients
@@ -172,7 +177,7 @@ class GBRL:
             params = (params[0].detach().cpu().numpy(), params[1].detach().cpu().numpy()) 
         return params, self.grad
     
-    def fit(self, X: Union[np.ndarray, th.Tensor], targets: Union[np.ndarray, th.Tensor], iterations: int, shuffle: bool=True, loss_type: str='MultiRMSE') -> float:
+    def fit(self, X: Union[np.ndarray, th.Tensor], targets: Union[np.ndarray, th.Tensor], iterations: int, shuffle: bool = True, loss_type: str = 'MultiRMSE') -> float:
         """Fit multiple iterations (as in supervised learning)
 
         Args:
@@ -243,7 +248,7 @@ class GBRL:
         self._model.export(filename, modelname) 
 
     @classmethod
-    def load_model(cls, load_name: str) -> "GBRL":
+    def load_model(cls, load_name: str, device: str) -> "GBRL":
         """Loads GBRL model from a file
 
         Args:
@@ -253,7 +258,7 @@ class GBRL:
             GBRL instance 
         """
         instance = cls.__new__(cls)
-        instance._model = GBTWrapper.load(load_name)
+        instance._model = GBTWrapper.load(load_name, device)
         instance.optimizer =  instance._model.optimizer
         instance.output_dim = instance._model.output_dim
         instance.verbose = instance._model.verbose
@@ -300,6 +305,7 @@ class GBRL:
         if requires_grad:
             self.grad = None
             self.params = y_pred
+            self.input = X
         return y_pred
 
     def print_tree(self, tree_idx: int) -> None:

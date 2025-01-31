@@ -37,9 +37,16 @@ template<typename T>
 int count_distinct(T *arr, int n);
 
 inline void valid_tree_idx(const int tree_idx, const ensembleMetaData* metadata){
-    if (tree_idx < 0 || tree_idx >= metadata->n_trees){
+    if (tree_idx < 0 || tree_idx > metadata->n_trees){
         std::cerr << "ERROR: invalid tree_idx " << tree_idx << " in ensemble with ntrees = " << metadata->n_trees <<std::endl;
         throw std::runtime_error("Invalid tree index");
+    }
+}
+
+inline void valid_tree_range(const int start_tree_idx, const int stop_tree_idx, const ensembleMetaData* metadata){
+    if (start_tree_idx < 0 || stop_tree_idx > metadata->n_trees || start_tree_idx >= stop_tree_idx){
+        std::cerr << "ERROR: invalid tree range [" <<  start_tree_idx << ", " << stop_tree_idx << "] in ensemble with ntrees = " << metadata->n_trees <<std::endl;
+        throw std::runtime_error("Invalid tree range");
     }
 }
 

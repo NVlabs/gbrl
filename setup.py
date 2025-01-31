@@ -105,8 +105,18 @@ class CMakeBuild(build_ext):
 
 setup(
     name="gbrl",
+    version = "1.0.8",
+    description = "Gradient Boosted Trees for RL",
+    author="Benjamin Fuhrer, Chen Tessler, Gal Dalal",
+    author_email="bfuhrer@nvidia.com, ctessler@nvidia.com. gdalal@nvidia.com",
+    license="NVIDIA Proprietary Software",
     ext_modules=[CMakeExtension('gbrl/gbrl_cpp', sourcedir='.')],
     cmdclass=dict(build_ext=CMakeBuild),
     packages=find_packages(include=["gbrl"]),  # List of all packages to include
     include_package_data=True,
 )
+
+
+
+
+

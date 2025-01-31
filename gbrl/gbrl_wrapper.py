@@ -8,13 +8,13 @@
 #
 ##############################################################################
 import os
-from typing import Dict, List, Union, Tuple
+from typing import Dict, List, Union, Tuple, Optional, Any
 
 import numpy as np
 import torch as th
 
-from .gbrl_cpp import GBRL as GBRL_CPP
-from .utils import (get_input_dim, get_poly_vectors, 
+from gbrl import GBRL_CPP
+from gbrl.utils import (get_input_dim, get_poly_vectors, 
                     to_numpy,
                     numerical_dtype, 
                     get_tensor_info,
@@ -51,6 +51,7 @@ class GBTWrapper:
         else:
             feature_weights = np.ascontiguousarray(np.ones(input_dim, dtype=np.single))
         self.feature_weights = feature_weights
+
 
     def reset(self) -> None:
         if self.cpp_model is not None:
@@ -121,7 +122,7 @@ class GBTWrapper:
             print(f"Caught an exception in GBRL: {e}")
 
     @classmethod
-    def load(cls, filename: str) -> "GBTWrapper":
+    def load(cls, filename: str, device: str) -> "GBTWrapper":
         filename = filename.rstrip('.')
         if '.gbrl_model' not in filename:
             filename += '.gbrl_model'
@@ -129,6 +130,7 @@ class GBTWrapper:
         try:
             instance = cls.__new__(cls)
             instance.cpp_model = GBRL_CPP.load(filename)
+            instance.set_device(device)
             metadata =  instance.cpp_model.get_metadata()
             instance.tree_struct = {'max_depth': metadata['max_depth'], 
                             'min_data_in_leaf': metadata['min_data_in_leaf'],
@@ -156,6 +158,7 @@ class GBTWrapper:
             instance.iteration = metadata['iteration']
             instance.total_iterations = metadata['iteration']
             instance.student_model = None
+            instance.device = instance.params['device']
             return instance
         except RuntimeError as e:
             print(f"Caught an exception in GBRL: {e}")
@@ -180,12 +183,12 @@ class GBTWrapper:
             raise TypeError("Input should be a numpy array or float")
 
         if isinstance(bias, float):
-            bias = np.array([float])
+            bias = np.ndarray([float])
 
         if bias.ndim > 1:
             bias = bias.ravel()
         elif bias.ndim == 0:
-            bias = np.array([bias.item()])  # Converts 0D arrays to 1D
+            bias = np.ndarray([bias.item()])  # Converts 0D arrays to 1D
         try:
             self.cpp_model.set_bias(bias)
         except RuntimeError as e:
@@ -259,7 +262,9 @@ class GBTWrapper:
         base_poly, norm_values, offset = get_poly_vectors(self.params['max_depth'], numerical_dtype)
         return self.cpp_model.ensemble_shap(num_features, cat_features, np.ascontiguousarray(norm_values), np.ascontiguousarray(base_poly), np.ascontiguousarray(offset)) 
     
-    def set_device(self, device: str) -> None:
+    def set_device(self, device: Union[str, th.device]) -> None:
+        if isinstance(device, th.device):
+            device = device.type
         try:
             self.cpp_model.to_device(device)
             self.device = device
@@ -305,7 +310,7 @@ class GBTWrapper:
 
         bias = np.mean(targets, axis=0)
         if isinstance(bias, float):
-            bias = np.array([bias])
+            bias = np.ndarray([bias])
         self.student_model.set_bias(bias.astype(numerical_dtype))
         tr_loss = self.student_model.fit(num_obs, cat_obs, targets, params['min_steps'])
         while tr_loss> params.get('min_distillation_loss', 0.1):
@@ -320,6 +325,9 @@ class GBTWrapper:
 
     def copy(self):
         return self.__copy__()
+    
+    def print_ensemble_metadata(self):
+        self.cpp_model.print_ensemble_metadata()
     
     def __copy__(self):
         copy_ = GBTWrapper(self.output_dim, self.tree_struct.copy(), [opt.copy() if opt is not None else opt for opt in self.optimizer], self.gbrl_params, self.verbose, self.device)
@@ -426,10 +434,12 @@ class SeparateActorCriticWrapper:
         self.value_model.plot_tree(tree_idx,  filename.rstrip(".") + "_value")
 
     @classmethod
-    def load(cls, filename: str) -> "SeparateActorCriticWrapper":
+    def load(cls, filename: str, device: str) -> "SeparateActorCriticWrapper":
         instance = cls.__new__(cls)
-        instance.policy_model = GBTWrapper.load(filename + '_policy')
-        instance.value_model = GBTWrapper.load(filename + '_value')
+        instance.policy_model = GBTWrapper.load(filename + '_policy', device)
+        instance.value_model = GBTWrapper.load(filename + '_value', device)
+        instance.policy_model.set_device(device)
+        instance.value_model.set_device(device)
         instance.tree_struct = instance.policy_model.tree_struct
         instance.total_iterations = instance.policy_model.iteration + instance.value_model.iteration
         instance.output_dim = instance.policy_model.output_dim
@@ -550,8 +560,8 @@ class SharedActorCriticWrapper(GBTWrapper):
         return pred_values
     
     @classmethod
-    def load(cls, filename: str) -> "SharedActorCriticWrapper":
-        instance = super().load(filename) 
+    def load(cls, filename: str, device: str) -> "SharedActorCriticWrapper":
+        instance = super().load(filename, device) 
         instance.policy_optimizer = instance.optimizer[0]
         instance.value_optimizer = None if len(instance.optimizer) != 2 else instance.optimizer[1]
         return instance

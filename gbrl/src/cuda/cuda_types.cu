@@ -82,6 +82,7 @@ ensembleData* ensemble_data_alloc_cuda(ensembleMetaData *metadata){
     edata->inequality_directions = (bool *)(data + trace);
     trace += edge_size * sizeof(bool);
     edata->categorical_values = (char *)(data + trace);
+    edata->alloc_data_size = data_size;
     return edata;
 }
 
@@ -139,7 +140,7 @@ ensembleData* ensemble_copy_data_alloc_cuda(ensembleMetaData *metadata){
     edata->tree_indices = (int *)(data + trace);
     trace += tree_size;
     edata->depths = (int *)(data + trace);
-    trace += split_sizes*sizeof(int);
+    trace += split_sizes * sizeof(int);
     edata->values = (float *)(data + trace);
     trace += value_sizes;
     edata->feature_indices = (int *)(data + trace);
@@ -156,11 +157,13 @@ ensembleData* ensemble_copy_data_alloc_cuda(ensembleMetaData *metadata){
 
     metadata->max_trees = metadata->n_trees;
     metadata->max_leaves = metadata->n_leaves;
+    edata->alloc_data_size = data_size;
     return edata;
 }
 
-ensembleData* ensemble_data_copy_gpu_gpu(ensembleMetaData *metadata, ensembleData *other_edata){
-    ensembleData *edata = ensemble_copy_data_alloc_cuda(metadata);
+ensembleData* ensemble_data_copy_gpu_gpu(ensembleMetaData *metadata, ensembleData *other_edata, ensembleData *edata){
+    if (edata == nullptr)
+        edata = ensemble_copy_data_alloc_cuda(metadata);
     size_t bias_size = metadata->output_dim * sizeof(float);
     size_t feature_size = metadata->input_dim * sizeof(float);
     size_t tree_size = metadata->n_trees * sizeof(int);
@@ -187,8 +190,9 @@ ensembleData* ensemble_data_copy_gpu_gpu(ensembleMetaData *metadata, ensembleDat
     return edata;
 }
 
-ensembleData* ensemble_data_copy_gpu_cpu(ensembleMetaData *metadata, ensembleData *other_edata){
-    ensembleData *edata = ensemble_copy_data_alloc(metadata);
+ensembleData* ensemble_data_copy_gpu_cpu(ensembleMetaData *metadata, ensembleData *other_edata, ensembleData *edata){
+    if (edata == nullptr)
+        edata = ensemble_copy_data_alloc(metadata);
     size_t bias_size = metadata->output_dim * sizeof(float);
     size_t feature_size = metadata->input_dim * sizeof(float);
     size_t tree_size = metadata->n_trees * sizeof(int);
@@ -215,8 +219,9 @@ ensembleData* ensemble_data_copy_gpu_cpu(ensembleMetaData *metadata, ensembleDat
     return edata;
 }
 
-ensembleData* ensemble_data_copy_cpu_gpu(ensembleMetaData *metadata, ensembleData *other_edata){
-    ensembleData *edata = ensemble_copy_data_alloc_cuda(metadata);
+ensembleData* ensemble_data_copy_cpu_gpu(ensembleMetaData *metadata, ensembleData *other_edata, ensembleData *edata){
+    if (edata == nullptr)
+        edata = ensemble_copy_data_alloc_cuda(metadata);
     size_t bias_size = metadata->output_dim * sizeof(float);
     size_t feature_size = metadata->input_dim * sizeof(float);
     size_t tree_size = metadata->n_trees * sizeof(int);
@@ -257,7 +262,7 @@ splitDataGPU* allocate_split_data(ensembleMetaData *metadata, const int n_candid
                     sizeof(float) * n_candidates * 2 + 
                     sizeof(int)*3 + sizeof(int) + sizeof(float);
     if (metadata->split_score_func == Cosine)
-        data_alloc_size += sizeof(float) * n_candidates * 4;
+        data_alloc_size += sizeof(float) * n_candidates * 2;
     if (metadata->grow_policy == OBLIVIOUS)
         data_alloc_size += sizeof(float) * n_candidates * nodes_per_evaluation;
 
@@ -296,16 +301,10 @@ splitDataGPU* allocate_split_data(ensembleMetaData *metadata, const int n_candid
     split_data->best_idx = (int *)(data_alloc + trace);
     trace += sizeof(int);
 
-    split_data->left_norms = nullptr;
-    split_data->right_norms = nullptr;
     split_data->left_dot = nullptr;
     split_data->right_dot = nullptr;
 
     if (metadata->split_score_func == Cosine){
-        split_data->left_norms = (float *)(data_alloc + trace);
-        trace += sizeof(float)*n_candidates;
-        split_data->right_norms  = (float *)(data_alloc + trace);
-        trace += sizeof(float)*n_candidates;
         split_data->left_dot = (float *)(data_alloc + trace);
         trace += sizeof(float)*n_candidates;
         split_data->right_dot = (float *)(data_alloc + trace);

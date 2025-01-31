@@ -11,7 +11,7 @@ import numpy as np
 import torch as th
 from scipy.special import binom
 
-from .config import APPROVED_OPTIMIZERS, VALID_OPTIMIZER_ARGS
+from gbrl.config import APPROVED_OPTIMIZERS, VALID_OPTIMIZER_ARGS
 
 import numpy as np 
 # Define custom dtypes
@@ -40,9 +40,45 @@ def process_array(arr: np.ndarray)-> Tuple[np.ndarray, np.ndarray]:
     """
     if np.issubdtype(arr.dtype, np.floating) or np.issubdtype(arr.dtype, np.integer):
         return np.ascontiguousarray(arr, dtype=numerical_dtype), None 
-    else:
+    elif arr.dtype == categorical_dtype or np.issubdtype(arr.dtype, np.str_):
         fixed_str = np.char.encode(arr.astype(str), 'utf-8').astype(categorical_dtype)
         return None, np.ascontiguousarray(fixed_str)
+    elif arr.dtype == object:
+        # Get the first row
+        if arr.ndim == 1:
+            # For 1D array, use the array itself as first_row
+            first_row = arr
+        else:
+            # For 2D array, get the first row
+            first_row = arr[0]
+        # Vectorized function to check if a type is numerical
+        is_numerical_type = np.vectorize(
+            lambda x: isinstance(x, (int, float, np.integer, np.floating))
+        )(first_row)
+
+        # Create masks for numerical and categorical columns
+        numerical_mask = is_numerical_type
+        categorical_mask = ~is_numerical_type
+        # Check if there are any numerical columns
+        if np.any(numerical_mask):
+            # Select numerical columns and convert to numerical_dtype
+            numerical_array = np.ascontiguousarray(arr[numerical_mask]).astype(numerical_dtype) if arr.ndim == 1 else np.ascontiguousarray(
+                arr[:, numerical_mask].astype(numerical_dtype)
+            )
+        else:
+            numerical_array = None
+        # Check if there are any categorical columns
+        if np.any(categorical_mask):
+            # Select categorical columns and convert to categorical_dtype
+            categorical_array = arr[categorical_mask] if arr.ndim == 1 else arr[:, categorical_mask]
+            categorical_array = np.char.encode(categorical_array.astype(str), 'utf-8').astype(categorical_dtype)
+        else:
+            categorical_array = None
+
+        return numerical_array, categorical_array
+
+    else:
+        raise ValueError(f"Unsupported array data type: {arr.dtype}")
     
 def to_numpy(arr: Union[np.ndarray, th.Tensor]) -> np.ndarray:
     if isinstance(arr, th.Tensor):
@@ -98,8 +134,8 @@ def clip_grad_norm(grads: Union[np.ndarray, th.Tensor], grad_clip: float) -> Uni
     if isinstance(grads, th.Tensor):
         grad_norms = th.norm(grads, p=2, dim=1, keepdim=True)
     else:
-        grad_norms = np.linalg.norm(grads, axis=1)
-    mask = grad_norms > grad_clip
+        grad_norms = np.linalg.norm(grads, axis=1, ord=2, keepdims=True)
+    mask = (grad_norms > grad_clip).squeeze()
     grads[mask] = grad_clip * grads[mask] / grad_norms[mask]
     return grads
 
