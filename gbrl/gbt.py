@@ -275,6 +275,7 @@ class GBRL:
         instance = cls.__new__(cls)
         instance._model = GBTWrapper.load(load_name, device)
         instance.optimizer =  instance._model.optimizer
+        instance.input_dim = instance._model.input_dim
         instance.output_dim = instance._model.output_dim
         instance.verbose = instance._model.verbose
         instance.tree_struct = instance._model.tree_struct

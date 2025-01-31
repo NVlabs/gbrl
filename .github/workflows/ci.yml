@@ -42,11 +42,12 @@ jobs:
         python -m pip install --upgrade pip
         brew install libomp llvm
         export PATH="$(brew --prefix llvm)/bin:$PATH"
-        export LDFLAGS="-L$(brew --prefix libomp)/lib -L$(brew --prefix llvm)/lib -L$(brew --prefix llvm)/lib/c++ -Wl,-rpath,$(brew --prefix llvm)/lib/c++"
+        export LDFLAGS="-L$(brew --prefix libomp)/lib -L$(brew --prefix llvm)/lib -L/opt/homebrew/opt/llvm/lib -L$(brew --prefix llvm)/lib/c++ -Wl,-rpath,$(brew --prefix llvm)/lib/c++"
         export CPPFLAGS="-I$(brew --prefix libomp)/include -I$(brew --prefix llvm)/include"
         export CC="$(brew --prefix llvm)/bin/clang"
         export CXX="$(brew --prefix llvm)/bin/clang++"
         export DYLD_LIBRARY_PATH="$(brew --prefix llvm)/lib:$(brew --prefix libomp)/lib"
+        
 
     - name: Install dependencies on Windows
       if: matrix.os == 'windows-latest'
