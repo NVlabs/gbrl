@@ -82,12 +82,6 @@ class GBTWrapper:
         else:
             num_features, cat_features = preprocess_features(features)
             grads = np.ascontiguousarray(grads.reshape((len(grads), self.params['output_dim']))).astype(numerical_dtype)
-            input_dim = 0 if num_features is None else num_features.shape[1]
-            input_dim += 0 if cat_features is None else cat_features.shape[1]
-            if self.feature_weights is None:
-                self.feature_weights = np.ones(input_dim, dtype=numerical_dtype)
-            assert len(self.feature_weights) == input_dim, "feature weights has to have the same number of elements as features"
-            assert np.all(self.feature_weights >= 0), "feature weights contains non-positive values"
             self.cpp_model.step(num_features, cat_features, grads)
         self.iteration = self.cpp_model.get_iteration()
         self.total_iterations += 1
@@ -207,6 +201,8 @@ class GBTWrapper:
             feature_weights = feature_weights.ravel()
         elif feature_weights.ndim == 0:
             feature_weights = np.array([feature_weights.item()])  # Converts 0D arrays to 1D
+        assert len(feature_weights) == self.input_dim, "feature weights has to have the same number of elements as features"
+        assert np.all(feature_weights >= 0), "feature weights contains non-positive values"
         try:
             self.cpp_model.set_feature_weights(feature_weights)
         except RuntimeError as e:

@@ -147,6 +147,7 @@ class TestGBTSingle(unittest.TestCase):
         value = 5
         self.assertTrue(loss < value, f'Expected loss = {loss} < {value}')
 
+    @unittest.skipIf(not cuda_available(), "cuda not available skipping over gpu tests")
     def test_continuation_gpu(self):
         print("Running test_continuation_gpu")
         X, y = self.single_data
