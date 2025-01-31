@@ -109,6 +109,7 @@ struct ensembleMetaData {
     int max_leaves;
     int max_trees_batch; // maximum number of trees to add in a batch
     int max_leaves_batch; // maximum number of leaves to add in a batch
+    int input_dim;
     int output_dim;
     int max_depth;
     int min_data_in_leaf;
@@ -130,7 +131,6 @@ struct dataSet {
     const float *obs;
     const char *categorical_obs;
     float *grads;
-    const float *feature_weights;
     const float *build_grads;
     const float *norm_grads;
     int n_samples;
@@ -139,6 +139,7 @@ struct dataSet {
 
 struct ensembleData {
     float *bias;
+    float *feature_weights;
 #ifdef DEBUG
     int *n_samples; // debugging
 #endif 
@@ -186,7 +187,7 @@ std::string deviceTypeToString(deviceType type);
 std::string algoTypeToString(optimizerAlgo algo);
 std::string schedulerTypeToString(schedulerFunc func);
 
-ensembleMetaData* ensemble_metadata_alloc(int max_trees, int max_leaves, int max_trees_batch, int max_leaves_batch, int output_dim, int max_depth, int min_data_in_leaf, int n_bins, int par_th, float cv_beta, int verbose, int batch_size, bool use_cv, scoreFunc split_score_func, generatorType generator_type, growPolicy grow_policy);
+ensembleMetaData* ensemble_metadata_alloc(int max_trees, int max_leaves, int max_trees_batch, int max_leaves_batch, int input_dim, int output_dim, int max_depth, int min_data_in_leaf, int n_bins, int par_th, float cv_beta, int verbose, int batch_size, bool use_cv, scoreFunc split_score_func, generatorType generator_type, growPolicy grow_policy);
 ensembleData* ensemble_data_alloc(ensembleMetaData *metadata);
 ensembleData* ensemble_copy_data_alloc(ensembleMetaData *metadata);
 ensembleData* copy_ensemble_data(ensembleData *other_edata, ensembleMetaData *metadata);

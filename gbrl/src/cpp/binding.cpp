@@ -214,7 +214,8 @@ py::list getOptimizerConfigs(const std::vector<Optimizer*>& opts) {
 
 PYBIND11_MODULE(gbrl_cpp, m) {
     py::class_<GBRL> gbrl(m, "GBRL");
-    gbrl.def(py::init<int, int, int, int, int, float, std::string, std::string, bool, int, std::string, int, std::string>(),
+    gbrl.def(py::init<int, int, int, int, int, int, float, std::string, std::string, bool, int, std::string, int, std::string>(),
+         py::arg("input_dim_dim")=1, 
          py::arg("output_dim")=1, 
          py::arg("max_depth")=4, 
          py::arg("min_data_in_leaf")=0, 
@@ -240,13 +241,12 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         self.to_device(stringTodeviceType(str_device)); 
     },  py::arg("device"),
     "Set GBRL device ['cpu', 'cuda']");
-    gbrl.def("step", [](GBRL &self, py::object &obs, py::object &categorical_obs, py::object &grads, py::object &feature_weights) {
+    gbrl.def("step", [](GBRL &self, py::object &obs, py::object &categorical_obs, py::object &grads) {
         const float* obs_ptr = nullptr;
-        const float*feature_weights_ptr = nullptr;
         const char* cat_obs_ptr= nullptr;
         float* grads_ptr = nullptr;
-        std::vector<size_t> obs_shape, cat_obs_shape, grads_shape, feature_weights_shape;
-        std::string obs_device, cat_obs_device, grads_device, feature_weights_device;
+        std::vector<size_t> obs_shape, cat_obs_shape, grads_shape;
+        std::string obs_device, cat_obs_device, grads_device;
         int n_samples, n_num_features = 0, n_cat_features = 0;
         handle_input_info<float>(grads, grads_ptr, grads_shape, grads_device, "grads", false, "step");
         if (grads_shape.size() == 1){
@@ -297,20 +297,14 @@ PYBIND11_MODULE(gbrl_cpp, m) {
                 throw std::runtime_error(ss.str());
             }
         }
-        handle_input_info<const float>(feature_weights, feature_weights_ptr, feature_weights_shape, feature_weights_device, "feature_weights", false, "step");
-        if (grads_device != feature_weights_device){
-            std::stringstream ss;
-            ss << "Feature weights device: " << feature_weights_device << " != expected device " << grads_device;
-            throw std::runtime_error(ss.str());
-        }
+
         py::gil_scoped_release release; 
-        self.step(obs_ptr, cat_obs_ptr, grads_ptr, feature_weights_ptr, n_samples, n_num_features, n_cat_features, stringTodeviceType(grads_device)); 
+        self.step(obs_ptr, cat_obs_ptr, grads_ptr, n_samples, n_num_features, n_cat_features, stringTodeviceType(grads_device)); 
     },  py::arg("obs"),
         py::arg("categorical_obs"),
         py::arg("grads"),
-        py::arg("feature_weights"),
     "Fit a decision tree with the given observations and gradients");
-    gbrl.def("fit", [](GBRL &self, py::object &obs, py::object &categorical_obs, py::array_t<float> &targets, py::array_t<float> &feature_weights, int iterations, bool shuffle, std::string loss_type) -> float {
+    gbrl.def("fit", [](GBRL &self, py::object &obs, py::object &categorical_obs, py::array_t<float> &targets, int iterations, bool shuffle, std::string loss_type) -> float {
         if (!targets.attr("flags").attr("c_contiguous").cast<bool>()) {
             throw std::runtime_error("Arrays must be C-contiguous");
         }
@@ -337,22 +331,14 @@ PYBIND11_MODULE(gbrl_cpp, m) {
             n_cat_features = static_cast<int>(info_categorical_obs.shape[1]);
         }
         
-        if (!feature_weights.attr("flags").attr("c_contiguous").cast<bool>()) {
-            throw std::runtime_error("Arrays must be C-contiguous");
-        }
-        
-        py::buffer_info info_feature_weights = feature_weights.request();
-        float* feature_weights_ptr = static_cast<float*>(info_feature_weights.ptr);
-        
         py::gil_scoped_release release; 
         py::buffer_info info_targets = targets.request();
         float* targets_ptr = static_cast<float*>(info_targets.ptr);
         int n_samples = static_cast<int>(info_targets.shape[0]);
-        return self.fit(obs_ptr, cat_obs_ptr, targets_ptr, feature_weights_ptr, iterations, n_samples, n_num_features, n_cat_features, shuffle, loss_type); 
+        return self.fit(obs_ptr, cat_obs_ptr, targets_ptr, iterations, n_samples, n_num_features, n_cat_features, shuffle, loss_type); 
     },  py::arg("obs"),
         py::arg("categorical_obs"),
         py::arg("targets"),
-        py::arg("feature_weights"),
         py::arg("iterations"),
         py::arg("shuffle")=true,  
         py::arg("loss_type")="MultiRMSE",  
@@ -369,6 +355,18 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         
         self.set_bias(bias_ptr, output_dim); 
     }, "Set GBRL model bias");
+    gbrl.def("set_feature_weights", [](GBRL &self, const py::array_t<float> &feature_weights) {
+        if (!feature_weights.attr("flags").attr("c_contiguous").cast<bool>()) {
+            throw std::runtime_error("Arrays must be C-contiguous");
+        }
+        py::gil_scoped_release release; 
+
+        py::buffer_info info = feature_weights.request();
+        float* feature_weights_ptr = static_cast<float*>(info.ptr);
+        int input_dim = static_cast<int>(len(feature_weights));
+        
+        self.set_feature_weights(feature_weights_ptr, input_dim); 
+    }, "Set GBRL model feature weights");
     gbrl.def("get_bias", [](GBRL &self) -> py::array_t<float> {
         py::gil_scoped_release release; 
         float* bias_ptr = self.get_bias();  
@@ -377,6 +375,15 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         auto capsule = py::capsule(bias_ptr, [](void* ptr) {
             delete[] reinterpret_cast<float*>(ptr);});
         return py::array(size, bias_ptr, capsule);
+    }, "Get GBRL model bias");
+    gbrl.def("get_feature_weights", [](GBRL &self) -> py::array_t<float> {
+        py::gil_scoped_release release; 
+        float* feature_weights_ptr = self.get_feature_weights();  
+        int size = self.metadata->input_dim; // You need to know the size of the array
+        py::gil_scoped_acquire acquire;
+        auto capsule = py::capsule(feature_weights_ptr, [](void* ptr) {
+            delete[] reinterpret_cast<float*>(ptr);});
+        return py::array(size, feature_weights_ptr, capsule);
     }, "Get GBRL model bias");
     gbrl.def("get_optimizers", [](GBRL &self) -> py::list {
         return getOptimizerConfigs(self.opts);
