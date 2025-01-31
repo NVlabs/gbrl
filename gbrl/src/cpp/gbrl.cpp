@@ -170,8 +170,8 @@ void GBRL::to_device(deviceType device){
         this->edata = edata_gpu;
         this->device = gpu;
     } else {
+         printf("else\n");
         ensembleData* edata_cpu = ensemble_data_copy_gpu_cpu(this->metadata, this->edata, nullptr);
-        ensemble_data_dealloc_cuda(this->edata);
         this->edata = edata_cpu;
         this->device = cpu;
     }
@@ -425,9 +425,9 @@ void GBRL::_step_gpu(dataSet *dataset){
     size_t grads_size = sizeof(float)*output_dim*n_samples;
     size_t grads_norm_size = sizeof(float)*n_samples;
 
-    size_t cand_indices_size =  sizeof(int)*n_bins*(this->metadata->input_dim;
-    size_t cand_float_size =  sizeof(float)*n_bins*(this->metadata->input_dim);
-    size_t cand_cat_size =  sizeof(char)*n_bins*this->metadata->input_dims*MAX_CHAR_SIZE;
+    size_t cand_indices_size =  sizeof(int)*n_bins*this->metadata->input_dim;
+    size_t cand_float_size =  sizeof(float)*n_bins*this->metadata->input_dim;
+    size_t cand_cat_size =  sizeof(char)*n_bins*this->metadata->input_dim*MAX_CHAR_SIZE;
     size_t cand_numerical_size =  sizeof(bool)*n_bins*this->metadata->input_dim;
 
     size_t alloc_size = obs_size + grads_size + cat_obs_size + grads_norm_size + cand_indices_size + cand_float_size + cand_cat_size + cand_numerical_size;
@@ -578,7 +578,7 @@ float GBRL::_fit_gpu(dataSet *dataset, float *targets, const int n_iterations){
     cudaMemcpy(gpu_categorical_obs, dataset->categorical_obs, sizeof(char)*n_cat_features*n_samples*MAX_CHAR_SIZE, cudaMemcpyHostToDevice);
     transpose_matrix(gpu_obs, trans_obs, n_num_features, n_samples);
     
-    dataSet cuda_dataset{gpu_obs, gpu_categorical_obs, gpu_grads, gpu_build_grads, gpu_grads_norm, n_samples, this->device};
+    dataSet cuda_dataset{gpu_obs, gpu_categorical_obs, gpu_grads, gpu_build_grads, n_samples, this->device};
     predict_cuda_no_host(&cuda_dataset, gpu_preds, this->metadata, this->edata, this->cuda_opt, this->n_cuda_opts, 0, 0, true);
 
     MultiRMSEGrad(gpu_preds, gpu_targets, gpu_grads,  output_dim, n_samples, n_blocks, threads_per_block);
@@ -867,6 +867,7 @@ int GBRL::loadFromFile(const std::string& filename){
 
     this->device = cpu;
     std::cout << "######## Loaded GBRL model ########" << std::endl;
+    std::cout << "input_dim: " << this->metadata->input_dim;
     std::cout << "output_dim: " << this->metadata->output_dim;
     std::cout << " max_depth: " << this->metadata->max_depth << " min_data_in_leaf: " << this->metadata->min_data_in_leaf << std::endl;
     std::cout << "generator_type: " << generatorTypeToString(this->metadata->generator_type) << " n_bins: " << this->metadata->n_bins;
@@ -882,6 +883,7 @@ int GBRL::loadFromFile(const std::string& filename){
 
 void GBRL::print_ensemble_metadata(){
     std::cout << "######## GBRL model ########" << std::endl;
+    std::cout << "input_dim: " << this->metadata->input_dim;
     std::cout << "output_dim: " << this->metadata->output_dim;
     std::cout << " max_depth: " << this->metadata->max_depth << " min_data_in_leaf: " << this->metadata->min_data_in_leaf << std::endl;
     std::cout << "generator_type: " << generatorTypeToString(this->metadata->generator_type) << " n_bins: " << this->metadata->n_bins;

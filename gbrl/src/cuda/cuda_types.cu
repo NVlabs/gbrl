@@ -229,9 +229,8 @@ ensembleData* ensemble_data_copy_cpu_gpu(ensembleMetaData *metadata, ensembleDat
     size_t value_sizes = metadata->output_dim * metadata->n_leaves * sizeof(float);
     size_t cond_sizes = split_sizes*metadata->max_depth;
     size_t edge_size = metadata->n_leaves*metadata->max_depth;
-
     cudaMemcpy(edata->bias, other_edata->bias, bias_size, cudaMemcpyHostToDevice);
-    cudaMemcpy(edata->feature_weights, other_edata->feature_weights, feature_size, cudaMemcpyDeviceToHost);
+    cudaMemcpy(edata->feature_weights, other_edata->feature_weights, feature_size, cudaMemcpyHostToDevice);
 #ifdef DEBUG 
     size_t sample_size = metadata->n_leaves * sizeof(int);
     cudaMemcpy(edata->n_samples, other_edata->n_samples, sample_size, cudaMemcpyHostToDevice);

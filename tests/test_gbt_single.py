@@ -114,12 +114,58 @@ class TestGBTSingle(unittest.TestCase):
         self.assertTrue(train_loss < value, f'Expected loss = {train_loss} < {value}')
 
         X_categorical, y_categorical = self.cat_data
-        model._model.reset()
+        model = GBRL(input_dim=X_categorical.shape[1],
+                     output_dim=self.out_dim,
+                     tree_struct=self.tree_struct,
+                     optimizer=self.sgd_optimizer,
+                     gbrl_params=gbrl_params,
+                     verbose=0,
+                     device='cpu')
         model.set_bias_from_targets(y)
-        model.set_feature_weights(np.ones(X_categorical.shape[1]))
         loss = rmse_model(model, X_categorical, y_categorical, self.n_epochs)
         value = 5000
         self.assertTrue(loss < value, f'Expected Categorical loss = {loss} < {value}')
+
+
+    def test_continuation_cpu(self):
+        print("Running test_continuation_cpu")
+        X, y = self.single_data
+        gbrl_params = dict({"control_variates": False, "split_score_func": "Cosine",
+                            "generator_type": "Quantile"})
+        model = GBRL(input_dim=self.input_dim,
+                     output_dim=self.out_dim,
+                     tree_struct=self.tree_struct,
+                     optimizer=self.sgd_optimizer,
+                     gbrl_params=gbrl_params,
+                     verbose=0,
+                     device='cpu')
+        model.set_bias_from_targets(y)
+        loss = rmse_model(model, X, y, self.n_epochs // 2)
+        model.save_model(os.path.join(self.test_dir, 'test_continuation_cpu'))
+        new_model = GBRL.load_model(os.path.join(self.test_dir, 'test_continuation_cpu'), device='cpu')
+        loss = rmse_model(new_model, X, y, self.n_epochs // 2)
+        value = 5
+        self.assertTrue(loss < value, f'Expected loss = {loss} < {value}')
+
+    def test_continuation_gpu(self):
+        print("Running test_continuation_gpu")
+        X, y = self.single_data
+        gbrl_params = dict({"control_variates": False, "split_score_func": "Cosine",
+                            "generator_type": "Quantile"})
+        model = GBRL(input_dim=self.input_dim,
+                     output_dim=self.out_dim,
+                     tree_struct=self.tree_struct,
+                     optimizer=self.sgd_optimizer,
+                     gbrl_params=gbrl_params,
+                     verbose=0,
+                     device='cpu')
+        model.set_bias_from_targets(y)
+        loss = rmse_model(model, X, y, self.n_epochs // 2)
+        model.save_model(os.path.join(self.test_dir, 'test_continuation_gpu'))
+        new_model = GBRL.load_model(os.path.join(self.test_dir, 'test_continuation_gpu'), device='cuda')
+        loss = rmse_model(new_model, X, y, self.n_epochs // 2, device='cuda')
+        value = 5
+        self.assertTrue(loss < value, f'Expected loss = {loss} < {value}')
 
     def test_shap_cpu(self):
         print("Running test_shap_cpu")
@@ -191,8 +237,13 @@ class TestGBTSingle(unittest.TestCase):
         self.assertTrue(train_loss < value, f'Expected loss = {train_loss} < {value}')
 
         X_categorical, y_categorical = self.cat_data
-        model._model.reset()
-        model.set_feature_weights(np.ones(X_categorical.shape[1]))
+        model = GBRL(input_dim=X_categorical.shape[1],
+                output_dim=self.out_dim,
+                tree_struct=self.tree_struct,
+                optimizer=self.sgd_optimizer,
+                gbrl_params=gbrl_params,
+                verbose=0,
+                device='cuda')
         model.set_bias_from_targets(y_categorical)
         loss = rmse_model(model, X_categorical, y_categorical, self.n_epochs, device='cuda')
         value = 5000
@@ -223,7 +274,13 @@ class TestGBTSingle(unittest.TestCase):
         train_loss = model.fit(X, y, self.n_epochs)
         self.assertTrue(train_loss < value, f'Expected loss = {train_loss} < {value}')
         X_categorical, y_categorical = self.cat_data
-        model._model.reset()
+        model = GBRL(input_dim=X_categorical.shape[1],
+                     output_dim=self.out_dim,
+                     tree_struct=self.tree_struct,
+                     optimizer=self.sgd_optimizer,
+                     gbrl_params=gbrl_params,
+                     verbose=0,
+                     device='cpu')
         model.set_bias_from_targets(y_categorical)
         loss = rmse_model(model, X_categorical, y_categorical, self.n_epochs)
         value = 5000
@@ -256,7 +313,13 @@ class TestGBTSingle(unittest.TestCase):
         self.assertTrue(train_loss < value, f'Expected loss = {train_loss} < {value}')
 
         X_categorical, y_categorical = self.cat_data
-        model._model.reset()
+        model = GBRL(input_dim=X_categorical.shape[1],
+                     output_dim=self.out_dim,
+                     tree_struct=self.tree_struct,
+                     optimizer=self.sgd_optimizer,
+                     gbrl_params=gbrl_params,
+                     verbose=0,
+                     device='cuda')
         model.set_bias_from_targets(y_categorical)
         loss = rmse_model(model, X_categorical, y_categorical, self.n_epochs, device='cuda')
         value = 5000
@@ -284,7 +347,13 @@ class TestGBTSingle(unittest.TestCase):
         value = 6.0
         self.assertTrue(train_loss < value, f'Expected loss = {train_loss} < {value}')
         X_categorical, y_categorical = self.cat_data
-        model._model.reset()
+        model = GBRL(input_dim=X_categorical.shape[1],
+                     output_dim=self.out_dim,
+                     tree_struct=self.tree_struct,
+                     optimizer=self.sgd_optimizer,
+                     gbrl_params=gbrl_params,
+                     verbose=0,
+                     device='cpu')
         model.set_bias_from_targets(y_categorical)
         loss = rmse_model(model, X_categorical, y_categorical, self.n_epochs)
         value = 5000
@@ -314,7 +383,13 @@ class TestGBTSingle(unittest.TestCase):
         value = 0.5
         self.assertTrue(train_loss < value, f'Expected loss = {train_loss} < {value}')
         X_categorical, y_categorical = self.cat_data
-        model._model.reset()
+        model = GBRL(input_dim=X_categorical.shape[1],
+                     output_dim=self.out_dim,
+                     tree_struct=self.tree_struct,
+                     optimizer=self.sgd_optimizer,
+                     gbrl_params=gbrl_params,
+                     verbose=0,
+                     device='cuda')
         model.set_bias_from_targets(y_categorical)
         loss = rmse_model(model, X_categorical, y_categorical, self.n_epochs, device='cuda')
         value = 5000
@@ -340,6 +415,7 @@ class TestGBTSingle(unittest.TestCase):
         loss = rmse_model(model, X, y, self.n_epochs)
         self.assertTrue(loss < 10.0, f'Expected loss = {loss} < 10.0')
         model.save_model(os.path.join(self.test_dir, 'test_l2_oblivious_cpu'))
+
         model._model.reset()
         model.set_bias_from_targets(y)
         train_loss = model.fit(X, y, self.n_epochs)
@@ -347,7 +423,14 @@ class TestGBTSingle(unittest.TestCase):
         self.assertTrue(train_loss < value, f'Expected loss = {train_loss} < {value}')
 
         X_categorical, y_categorical = self.cat_data
-        model._model.reset()
+       
+        model = GBRL(input_dim=X_categorical.shape[1],
+                output_dim=self.out_dim,
+                tree_struct=self.tree_struct,
+                optimizer=self.sgd_optimizer,
+                gbrl_params=gbrl_params,
+                verbose=0,
+                device='cpu')
         model.set_bias_from_targets(y_categorical)
         loss = rmse_model(model, X_categorical, y_categorical, self.n_epochs)
         value = 5000
@@ -379,7 +462,13 @@ class TestGBTSingle(unittest.TestCase):
         value = 10.0
         self.assertTrue(train_loss < value, f'Expected loss = {train_loss} < {value}')
         X_categorical, y_categorical = self.cat_data
-        model._model.reset()
+        model = GBRL(input_dim=X_categorical.shape[1],
+                     output_dim=self.out_dim,
+                     tree_struct=self.tree_struct,
+                     optimizer=self.sgd_optimizer,
+                     gbrl_params=gbrl_params,
+                     verbose=0,
+                     device='cuda')
         model.set_bias_from_targets(y_categorical)
         loss = rmse_model(model, X_categorical, y_categorical, self.n_epochs, device='cuda')
         value = 5000
@@ -432,7 +521,7 @@ class TestGBTSingle(unittest.TestCase):
         self.assertTrue(loss < value, f'Expected loss = {loss} < {value}')
 
 if __name__ == '__main__':
-    unittest.main()
-    # unittest.main(argv=['first-arg-is-ignored', 'TestGBTSingle.test_l2_cpu'])
+    # unittest.main()
+    unittest.main(argv=['first-arg-is-ignored', 'TestGBTSingle.test_continuation_gpu'])
     # unittest.main(argv=['first-arg-is-ignored', 'TestGBTSingle.test_cosine_cpu', 'TestGBTSingle.test_cosine_gpu', 'TestGBTSingle.test_l2_cpu', 'TestGBTSingle.test_cosine_oblivious_cpu', 'TestGBTSingle.test_cosine_oblivious_gpu'])
     # unittest.main(argv=['first-arg-is-ignored', 'TestGBTSingle.test_cosine_gpu', 'TestGBTSingle.test_cosine_oblivious_gpu'])

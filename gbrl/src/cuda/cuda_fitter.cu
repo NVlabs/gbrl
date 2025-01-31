@@ -92,9 +92,9 @@ __global__ void update_best_candidate_cuda(float *split_scores, int n_candidates
     __syncthreads();
     // Each thread processes multiple elements
     for (int i = threadIdx.x; i < n_candidates; i += blockDim.x) {
-#ifdef DEBUG
-        printf("split_score[%d]: %f - %f\n", i, split_scores[i], node->score);
-#endif
+// #ifdef DEBUG
+//         printf("split_score[%d]: %f - %f\n", i, split_scores[i], node->score);
+// #endif
         split_scores[i] -= node->score;
         if (split_scores[i] > s_best_scores[threadIdx.x]) {
             s_best_scores[threadIdx.x] = split_scores[i];
@@ -134,7 +134,7 @@ void evaluate_greedy_splits(dataSet *dataset, ensembleData *edata, const TreeNod
         split_contidional_dot_kernel<<<n_blocks, tpb>>>(dataset->obs, dataset->categorical_obs, dataset->build_grads, node, candidata->candidate_indices, candidata->candidate_values, candidata->candidate_categories, candidata->candidate_numeric, candidata->n_candidates, dataset->n_samples,  split_data->left_sum,  split_data->right_sum, split_data->left_count, split_data->right_count, split_data->left_dot, split_data->right_dot);
         cudaDeviceSynchronize();
         get_grid_dimensions(candidata->n_candidates, n_blocks, tpb);
-        split_cosine_score_kernel<<<n_blocks, tpb>>>(node, edata->feature_weights, split_data->split_scores, candidata->candidate_indices, candidata->candidate_values, candidata->candidate_categories, candidata->candidate_numeric, candidata->n_candidates, split_data->left_sum, split_data->right_sum, split_data->left_count, split_data->right_count, split_data->left_dot, split_data->right_dot, split_data->left_norms, split_data->right_norms, metadata->min_data_in_leaf, metadata->n_num_features);
+        split_cosine_score_kernel<<<n_blocks, tpb>>>(node, edata->feature_weights, split_data->split_scores, candidata->candidate_indices, candidata->candidate_values, candidata->candidate_categories, candidata->candidate_numeric, candidata->n_candidates, split_data->left_sum, split_data->right_sum, split_data->left_count, split_data->right_count, split_data->left_dot, split_data->right_dot, metadata->min_data_in_leaf, metadata->n_num_features);
 
      } else if (metadata->split_score_func == L2){
         cudaMemset(split_data->split_scores, 0, split_data->size);
@@ -164,7 +164,7 @@ void evaluate_oblivious_splits_cuda(dataSet *dataset, ensembleData *edata, TreeN
     for (int i = 0; i < n_nodes; ++i){
         if (metadata->split_score_func == Cosine){
             size_t shared_mem = sizeof(float)*2*(metadata->output_dim + 3)*threads_per_block;
-            split_score_cosine_cuda<<<candidata->n_candidates, threads_per_block, shared_mem>>>(dataset->obs, dataset->categorical_obs, dataset->build_grads, dataset->norm_grads, edata->feature_weights, nodes[i], candidata->candidate_indices, candidata->candidate_values, candidata->candidate_categories, candidata->candidate_numeric, metadata->min_data_in_leaf, split_data->oblivious_split_scores + candidata->n_candidates*i, dataset->n_samples, metadata->n_num_features);
+            split_score_cosine_cuda<<<candidata->n_candidates, threads_per_block, shared_mem>>>(dataset->obs, dataset->categorical_obs, dataset->build_grads, edata->feature_weights, nodes[i], candidata->candidate_indices, candidata->candidate_values, candidata->candidate_categories, candidata->candidate_numeric, metadata->min_data_in_leaf, split_data->oblivious_split_scores + candidata->n_candidates*i, dataset->n_samples, metadata->n_num_features);
         } else if (metadata->split_score_func == L2){
             size_t shared_mem = sizeof(float)*2*(metadata->output_dim + 1)*threads_per_block;
             split_score_l2_cuda<<<candidata->n_candidates, threads_per_block, shared_mem>>>(dataset->obs, dataset->categorical_obs, dataset->build_grads, edata->feature_weights, nodes[i], candidata->candidate_indices, candidata->candidate_values, candidata->candidate_categories, candidata->candidate_numeric, metadata->min_data_in_leaf, split_data->oblivious_split_scores + candidata->n_candidates*i, dataset->n_samples, metadata->n_num_features);

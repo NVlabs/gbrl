@@ -71,10 +71,12 @@ class ActorCritic(GBRL):
         # init model
         if self.shared_tree_struct:
             self._model = SharedActorCriticWrapper(self.input_dim, self.output_dim, self.tree_struct, self.policy_optimizer, self.value_optimizer, self.gbrl_params, self.verbose, self.device) 
+            self._model.reset()
+            self._model.set_bias(self.bias)
         else:
             self._model = SeparateActorCriticWrapper(self.input_dim, self.output_dim, self.tree_struct, self.policy_optimizer, self.value_optimizer, self.gbrl_params, self.verbose, self.device)
-        self._model.reset()
-        self._model.set_bias(self.bias)
+            self._model.reset()
+            self._model.set_policy_bias(self.bias)
         self.policy_grad = None 
         self.value_grad = None
         

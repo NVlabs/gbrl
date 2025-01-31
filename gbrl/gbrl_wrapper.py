@@ -78,7 +78,7 @@ class GBTWrapper:
         if isinstance(features, th.Tensor):
             if self.feature_weights is None:
                 self.feature_weights = th.ones(get_input_dim(features), device=features.device).float()
-            self.cpp_model.step(get_tensor_info(features.float()), None, get_tensor_info(grads.float()), get_tensor_info(self.feature_weights))
+            self.cpp_model.step(get_tensor_info(features.float()), None, get_tensor_info(grads.float()))
         else:
             num_features, cat_features = preprocess_features(features)
             grads = np.ascontiguousarray(grads.reshape((len(grads), self.params['output_dim']))).astype(numerical_dtype)
@@ -88,7 +88,7 @@ class GBTWrapper:
                 self.feature_weights = np.ones(input_dim, dtype=numerical_dtype)
             assert len(self.feature_weights) == input_dim, "feature weights has to have the same number of elements as features"
             assert np.all(self.feature_weights >= 0), "feature weights contains non-positive values"
-            self.cpp_model.step(num_features, cat_features, grads, self.feature_weights)
+            self.cpp_model.step(num_features, cat_features, grads)
         self.iteration = self.cpp_model.get_iteration()
         self.total_iterations += 1
 
@@ -159,6 +159,7 @@ class GBTWrapper:
             instance.iteration = metadata['iteration']
             instance.total_iterations = metadata['iteration']
             instance.student_model = None
+            instance.feature_weights = instance.cpp_model.get_feature_weights()
             instance.device = instance.params['device']
             return instance
         except RuntimeError as e:
@@ -343,12 +344,13 @@ class GBTWrapper:
 class SeparateActorCriticWrapper:
     def __init__(self, input_dim: int, output_dim: int, tree_struct: Dict, policy_optimizer: Dict, value_optimizer: Dict, gbrl_params: Dict, verbose: int = 0, device: str = 'cpu'):
         print('****************************************')
-        print(f'Separate GBRL Tree with output dim: {output_dim}, tree_struct: {tree_struct} policy_optimizer: {policy_optimizer} value_optimizer: {value_optimizer}')
+        print(f'Separate GBRL Tree with input dim: {input_dim}, output dim: {output_dim}, tree_struct: {tree_struct} policy_optimizer: {policy_optimizer} value_optimizer: {value_optimizer}')
         print('****************************************')
         self.policy_model = GBTWrapper(input_dim, output_dim - 1, tree_struct, policy_optimizer, gbrl_params, verbose, device)
         self.value_model = GBTWrapper(input_dim, 1, tree_struct, value_optimizer, gbrl_params, verbose, device)
         self.tree_struct = tree_struct
         self.total_iterations = 0
+        self.input_dim = input_dim
         self.output_dim = output_dim
         self.policy_optimizer = policy_optimizer
         self.value_optimizer = value_optimizer
@@ -443,6 +445,7 @@ class SeparateActorCriticWrapper:
         instance.value_model.set_device(device)
         instance.tree_struct = instance.policy_model.tree_struct
         instance.total_iterations = instance.policy_model.iteration + instance.value_model.iteration
+        instance.input_dim = instance.policy_model.input_dim
         instance.output_dim = instance.policy_model.output_dim
         instance.policy_optimizer = instance.policy_model.optimizer[0]
         instance.value_optimizer = instance.value_model.optimizer[0]
@@ -495,7 +498,7 @@ class SeparateActorCriticWrapper:
 class SharedActorCriticWrapper(GBTWrapper):
     def __init__(self, input_dim: int, output_dim: int, tree_struct: Dict, policy_optimizer: Dict, value_optimizer: Dict, gbrl_params: Dict=dict(), verbose: int = 0, device: str = 'cpu'):
         print('****************************************')
-        print(f'Shared GBRL Tree with output dim: {output_dim}, tree_struct: {tree_struct} policy_optimizer: {policy_optimizer} value_optimizer: {value_optimizer}')
+        print(f'Shared GBRL Tree with input dim: {input_dim}, output dim: {output_dim}, tree_struct: {tree_struct} policy_optimizer: {policy_optimizer} value_optimizer: {value_optimizer}')
         print('****************************************')
         self.value_optimizer = value_optimizer
         self.policy_optimizer = policy_optimizer

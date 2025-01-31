@@ -306,6 +306,7 @@ class TestGBTMulti(unittest.TestCase):
                 }
         gbrl_params = dict({"control_variates": False, "split_score_func": "cosine"})
         model = ActorCritic(
+                            input_dim=self.input_dim,
                             output_dim=self.out_dim,
                             tree_struct=self.tree_struct,
                             policy_optimizer=policy_optimizer,
@@ -371,6 +372,7 @@ class TestGBTMulti(unittest.TestCase):
                 }
         gbrl_params = dict({"control_variates": False, "split_score_func": "cosine"})
         model = ActorCritic(
+                            input_dim=self.input_dim,
                             output_dim=self.out_dim,
                             tree_struct=self.tree_struct,
                             policy_optimizer=policy_optimizer,

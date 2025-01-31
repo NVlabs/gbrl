@@ -168,6 +168,7 @@ py::object return_tensor_info(int num_samples, int output_dim, float *ptr, devic
 py::dict metadataToDict(const ensembleMetaData* metadata){
     py::dict d;
     if (metadata != nullptr){
+        d["input_dim"] = metadata->input_dim;
         d["output_dim"] = metadata->output_dim;
         d["split_score_func"] = scoreFuncToString(metadata->split_score_func);
         d["generator_type"] = generatorTypeToString(metadata->generator_type);
