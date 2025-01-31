@@ -60,15 +60,14 @@ def construct_compression_matrix(tree_selection: th.Tensor, n_leaves_per_tree: t
     del selection_mask
     return C
 
-def get_least_squares_W(C: th.Tensor, A: th.Tensor, V: th.Tensor, epsilon: float = 1e-5):
+def get_least_squares_W(C: th.Tensor, A: th.Tensor, V: th.Tensor, lambda_reg: float, epsilon: float = 1e-5):
     CCT = C @ C.T 
     ATA = A.T @ A
     CCTATA = CCT @ ATA
     del ATA
     inv_mat = (CCTATA @ CCT)
-    # inv_mat +=  th.eye(inv_mat.size()[0], device=A.device) 
-    inv_mat += th.eye(inv_mat.size()[0], device=A.device) 
-    inv_mat = th.inverse(inv_mat)
+    inv_mat += lambda_reg* th.eye(inv_mat.size()[0], device=A.device) 
+    inv_mat = th.linalg.pinv(inv_mat)
     I  = th.eye(CCT.size()[0], device=A.device)
     res = inv_mat @ CCTATA
     del inv_mat
@@ -213,10 +212,10 @@ class CompressionMethod(nn.Module):
         C = construct_compression_matrix(tree_selection, self.n_leaves_per_tree)
         if self.least_squares_W: 
             if not self.actor_critic:
-                self.W = get_least_squares_W(C, A , V)
+                self.W = get_least_squares_W(C, A , V, self.lambda_reg)
                 W = self.W
             else: 
-                W_critic = get_least_squares_W(C, A , V[:, -1])
+                W_critic = get_least_squares_W(C, A , V[:, -1], self.lambda_reg)
                 W  = th.cat([self.W, W_critic], dim=1)
         else:
             W = self.W
@@ -243,7 +242,7 @@ class CompressionMethod(nn.Module):
             if not self.actor_critic:
                 W = self.W
             else:
-                W_critic = get_least_squares_W(C, A , V[:, -1])
+                W_critic = get_least_squares_W(C, A , V[:, -1], self.lambda_reg)
                 W  = th.cat([self.W, W_critic.unsqueeze(-1)], dim=1)
         return selection_mask.clone().detach().cpu().numpy().astype(np.int32), tree_selection.clone().detach().cpu().numpy().astype(np.int32), W.clone().detach().cpu().numpy().astype(np.single), n_compressed_trees, n_compressed_leaves
     
