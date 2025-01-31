@@ -328,7 +328,7 @@ class GBTWrapper:
         self.cpp_model.print_ensemble_metadata()
     
     def __copy__(self):
-        copy_ = GBTWrapper(self.output_dim, self.tree_struct.copy(), [opt.copy() if opt is not None else opt for opt in self.optimizer], self.gbrl_params, self.verbose, self.device)
+        copy_ = GBTWrapper(self.input_dim, self.output_dim, self.tree_struct.copy(), [opt.copy() if opt is not None else opt for opt in self.optimizer], self.gbrl_params, self.verbose, self.device)
         copy_.iteration = self.iteration 
         copy_.total_iterations = self.total_iterations
         if self.cpp_model is not None:
@@ -484,7 +484,7 @@ class SeparateActorCriticWrapper:
         return self.__copy__()
     
     def __copy__(self) -> "SeparateActorCriticWrapper":
-        copy_ = SeparateActorCriticWrapper(self.output_dim, self.tree_struct.copy(), self.policy_optimizer.copy(), self.value_optimizer.copy(), self.gbrl_params, self.verbose, self.device)
+        copy_ = SeparateActorCriticWrapper(self.input_dim, self.output_dim, self.tree_struct.copy(), self.policy_optimizer.copy(), self.value_optimizer.copy(), self.gbrl_params, self.verbose, self.device)
         copy_.total_iterations = self.total_iterations
         copy_.policy_model = self.policy_model.copy()
         copy_.value_model = self.value_model.copy()

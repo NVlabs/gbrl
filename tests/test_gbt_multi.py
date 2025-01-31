@@ -523,4 +523,3 @@ class TestGBTMulti(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
-    # unittest.main(argv=['first-arg-is-ignored', 'TestGBTMulti.test_1shared_cpu'])

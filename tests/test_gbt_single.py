@@ -126,6 +126,24 @@ class TestGBTSingle(unittest.TestCase):
         value = 5000
         self.assertTrue(loss < value, f'Expected Categorical loss = {loss} < {value}')
 
+    def test_copy_cpu(self):
+        print("Running test_copy_cpu")
+        X, y = self.single_data
+        gbrl_params = dict({"control_variates": False, "split_score_func": "Cosine",
+                            "generator_type": "Quantile"})
+        model = GBRL(input_dim=self.input_dim,
+                     output_dim=self.out_dim,
+                     tree_struct=self.tree_struct,
+                     optimizer=self.sgd_optimizer,
+                     gbrl_params=gbrl_params,
+                     verbose=0,
+                     device='cpu')
+        model.set_bias_from_targets(y)
+        _ = rmse_model(model, X, y, self.n_epochs)
+        copy_model = model.copy()
+        y_pred = model(X, requires_grad=False, tensor=False)
+        y_copy_pred = copy_model(X, requires_grad=False, tensor=False)
+        assert np.allclose(y_pred, y_copy_pred), "Expected copied GBRL model to be equal to original"
 
     def test_continuation_cpu(self):
         print("Running test_continuation_cpu")
@@ -522,7 +540,4 @@ class TestGBTSingle(unittest.TestCase):
         self.assertTrue(loss < value, f'Expected loss = {loss} < {value}')
 
 if __name__ == '__main__':
-    # unittest.main()
-    unittest.main(argv=['first-arg-is-ignored', 'TestGBTSingle.test_continuation_gpu'])
-    # unittest.main(argv=['first-arg-is-ignored', 'TestGBTSingle.test_cosine_cpu', 'TestGBTSingle.test_cosine_gpu', 'TestGBTSingle.test_l2_cpu', 'TestGBTSingle.test_cosine_oblivious_cpu', 'TestGBTSingle.test_cosine_oblivious_gpu'])
-    # unittest.main(argv=['first-arg-is-ignored', 'TestGBTSingle.test_cosine_gpu', 'TestGBTSingle.test_cosine_oblivious_gpu'])
+    unittest.main()

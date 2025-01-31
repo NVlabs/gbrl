@@ -868,7 +868,7 @@ int GBRL::loadFromFile(const std::string& filename){
     this->device = cpu;
     std::cout << "######## Loaded GBRL model ########" << std::endl;
     std::cout << "input_dim: " << this->metadata->input_dim;
-    std::cout << "output_dim: " << this->metadata->output_dim;
+    std::cout << " output_dim: " << this->metadata->output_dim;
     std::cout << " max_depth: " << this->metadata->max_depth << " min_data_in_leaf: " << this->metadata->min_data_in_leaf << std::endl;
     std::cout << "generator_type: " << generatorTypeToString(this->metadata->generator_type) << " n_bins: " << this->metadata->n_bins;
     std::cout << " cv_beta: " << this->metadata->cv_beta << " split_score_func: " << scoreFuncToString(this->metadata->split_score_func) << std::endl;

@@ -11,6 +11,6 @@
 
 #define MAJOR_VERSION 1
 #define MINOR_VERSION 0
-#define PATCH_VERSION 9
+#define PATCH_VERSION 10
 
 #endif // VERSION_CONFIG_H
