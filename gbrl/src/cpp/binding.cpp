@@ -215,7 +215,7 @@ py::list getOptimizerConfigs(const std::vector<Optimizer*>& opts) {
 PYBIND11_MODULE(gbrl_cpp, m) {
     py::class_<GBRL> gbrl(m, "GBRL");
     gbrl.def(py::init<int, int, int, int, int, int, float, std::string, std::string, bool, int, std::string, int, std::string>(),
-         py::arg("input_dim_dim")=1, 
+         py::arg("input_dim")=1, 
          py::arg("output_dim")=1, 
          py::arg("max_depth")=4, 
          py::arg("min_data_in_leaf")=0, 

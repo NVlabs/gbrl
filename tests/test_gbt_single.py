@@ -61,8 +61,10 @@ class TestGBTSingle(unittest.TestCase):
         out_dim = 1 if len(y.shape) == 1  else  y.shape[1]
         if out_dim == 1:
             y = y[:, np.newaxis]
+        input_dim = X.shape[1]
         cls.single_data = (X, y)
         cls.out_dim = out_dim
+        cls.input_dim = input_dim
         cls.n_epochs = 100
         cls.test_dir = tempfile.mkdtemp()
         # Setup categorical data
@@ -93,12 +95,13 @@ class TestGBTSingle(unittest.TestCase):
         X, y = self.single_data
         gbrl_params = dict({"control_variates": False, "split_score_func": "Cosine",
                             "generator_type": "Quantile"})
-        model = GBRL(output_dim=self.out_dim,
-                    tree_struct=self.tree_struct,
-                    optimizer=self.sgd_optimizer,
-                    gbrl_params=gbrl_params,
-                    verbose=0,
-                    device='cpu')
+        model = GBRL(input_dim=self.input_dim,
+                     output_dim=self.out_dim,
+                     tree_struct=self.tree_struct,
+                     optimizer=self.sgd_optimizer,
+                     gbrl_params=gbrl_params,
+                     verbose=0,
+                     device='cpu')
         model.set_bias_from_targets(y)
         loss = rmse_model(model, X, y, self.n_epochs)
         value = 5
@@ -113,6 +116,7 @@ class TestGBTSingle(unittest.TestCase):
         X_categorical, y_categorical = self.cat_data
         model._model.reset()
         model.set_bias_from_targets(y)
+        model.set_feature_weights(np.ones(X_categorical.shape[1]))
         loss = rmse_model(model, X_categorical, y_categorical, self.n_epochs)
         value = 5000
         self.assertTrue(loss < value, f'Expected Categorical loss = {loss} < {value}')
@@ -126,13 +130,13 @@ class TestGBTSingle(unittest.TestCase):
                 'grow_policy': 'greedy'}
         gbrl_params = dict({"control_variates": False, "split_score_func": "L2",
                             "generator_type": "Uniform"})
-        model = GBRL(
-                        output_dim=self.out_dim,
-                        tree_struct=tree_struct,
-                        optimizer=self.sgd_optimizer,
-                        gbrl_params=gbrl_params,
-                        verbose=0,
-                        device='cpu')
+        model = GBRL(input_dim=self.input_dim,
+                    output_dim=self.out_dim,
+                    tree_struct=tree_struct,
+                    optimizer=self.sgd_optimizer,
+                    gbrl_params=gbrl_params,
+                    verbose=0,
+                    device='cpu')
         model._model.step(X, y)
         gbrl_shap = model.tree_shap(0, X[0, :]).flatten()
         clf = DecisionTreeRegressor(max_depth=3).fit(X, y)
@@ -149,7 +153,8 @@ class TestGBTSingle(unittest.TestCase):
                     'stop_idx': self.out_dim
                 }
         gbrl_params = dict({"control_variates": False, "split_score_func": "Cosine"})
-        model = GBRL(output_dim=self.out_dim,
+        model = GBRL(input_dim=self.input_dim,
+                    output_dim=self.out_dim,
                     tree_struct=self.tree_struct,
                     optimizer=optimizer,
                     gbrl_params=gbrl_params,
@@ -166,7 +171,7 @@ class TestGBTSingle(unittest.TestCase):
         print("Running test_cosine_gpu")
         X, y = self.single_data
         gbrl_params = dict({"control_variates": False, "split_score_func": "Cosine"})
-        model = GBRL(
+        model = GBRL(input_dim=self.input_dim,
                     output_dim=self.out_dim,
                     tree_struct=self.tree_struct,
                     optimizer=self.sgd_optimizer,
@@ -187,6 +192,7 @@ class TestGBTSingle(unittest.TestCase):
 
         X_categorical, y_categorical = self.cat_data
         model._model.reset()
+        model.set_feature_weights(np.ones(X_categorical.shape[1]))
         model.set_bias_from_targets(y_categorical)
         loss = rmse_model(model, X_categorical, y_categorical, self.n_epochs, device='cuda')
         value = 5000
@@ -200,13 +206,13 @@ class TestGBTSingle(unittest.TestCase):
                 'par_th': 2,
                 'grow_policy': 'oblivious'}
         gbrl_params = dict({"control_variates": False, "split_score_func": "Cosine"})
-        model = GBRL(
-                            output_dim=self.out_dim,
-                            tree_struct=tree_struct,
-                            optimizer=self.sgd_optimizer,
-                            gbrl_params=gbrl_params,
-                            verbose=0,
-                            device='cpu')
+        model = GBRL(input_dim=self.input_dim,
+                    output_dim=self.out_dim,
+                    tree_struct=tree_struct,
+                    optimizer=self.sgd_optimizer,
+                    gbrl_params=gbrl_params,
+                    verbose=0,
+                    device='cpu')
         model.set_bias_from_targets(y)
         loss = rmse_model(model, X, y, self.n_epochs)
         value = 13
@@ -232,13 +238,13 @@ class TestGBTSingle(unittest.TestCase):
                 'par_th': 2,
                 'grow_policy': 'oblivious'}
         gbrl_params = dict({"control_variates": False, "split_score_func": "Cosine"})
-        model = GBRL(
-                            output_dim=self.out_dim,
-                            tree_struct=tree_struct,
-                            optimizer=self.sgd_optimizer,
-                            gbrl_params=gbrl_params,
-                            verbose=0,
-                            device='cuda')
+        model = GBRL(input_dim=self.input_dim,
+                    output_dim=self.out_dim,
+                    tree_struct=tree_struct,
+                    optimizer=self.sgd_optimizer,
+                    gbrl_params=gbrl_params,
+                    verbose=0,
+                    device='cuda')
         model.set_bias_from_targets(y)
         loss = rmse_model(model, X, y, self.n_epochs, device='cuda')
         value = 12
@@ -261,12 +267,13 @@ class TestGBTSingle(unittest.TestCase):
         X, y = self.single_data
         gbrl_params = dict({"control_variates": False, "split_score_func": "L2"})
         model = GBRL(
-                            output_dim=self.out_dim,
-                            tree_struct=self.tree_struct,
-                            optimizer=self.sgd_optimizer,
-                            gbrl_params=gbrl_params,
-                            verbose=1,
-                            device='cpu')
+                    input_dim=self.input_dim,
+                    output_dim=self.out_dim,
+                    tree_struct=self.tree_struct,
+                    optimizer=self.sgd_optimizer,
+                    gbrl_params=gbrl_params,
+                    verbose=1,
+                    device='cpu')
         model.set_bias_from_targets(y)
         loss = rmse_model(model, X, y, self.n_epochs)
         self.assertTrue(loss < 0.5, f'Expected loss = {loss} < 0.5')
@@ -289,12 +296,13 @@ class TestGBTSingle(unittest.TestCase):
         X, y = self.single_data
         gbrl_params = dict({"control_variates": False, "split_score_func": "L2"})
         model = GBRL(
-                            output_dim=self.out_dim,
-                            tree_struct=self.tree_struct,
-                            optimizer=self.sgd_optimizer,
-                            gbrl_params=gbrl_params,
-                            verbose=0,
-                            device='cuda')
+                    input_dim=self.input_dim,
+                    output_dim=self.out_dim,
+                    tree_struct=self.tree_struct,
+                    optimizer=self.sgd_optimizer,
+                    gbrl_params=gbrl_params,
+                    verbose=0,
+                    device='cuda')
         model.set_bias_from_targets(y)
         loss = rmse_model(model, X, y, self.n_epochs, device='cuda')
 
@@ -321,12 +329,13 @@ class TestGBTSingle(unittest.TestCase):
                 'grow_policy': 'oblivious'}
         gbrl_params = dict({"control_variates": False, "split_score_func": "L2"})
         model = GBRL(
-                            output_dim=self.out_dim,
-                            tree_struct=tree_struct,
-                            optimizer=self.sgd_optimizer,
-                            gbrl_params=gbrl_params,
-                            verbose=0,
-                            device='cpu')
+                    input_dim=self.input_dim,
+                    output_dim=self.out_dim,
+                    tree_struct=tree_struct,
+                    optimizer=self.sgd_optimizer,
+                    gbrl_params=gbrl_params,
+                    verbose=0,
+                    device='cpu')
         model.set_bias_from_targets(y)
         loss = rmse_model(model, X, y, self.n_epochs)
         self.assertTrue(loss < 10.0, f'Expected loss = {loss} < 10.0')
@@ -353,13 +362,13 @@ class TestGBTSingle(unittest.TestCase):
                 'par_th': 2,
                 'grow_policy': 'oblivious'}
         gbrl_params = dict({"control_variates": False, "split_score_func": "L2"})
-        model = GBRL(
-                            output_dim=self.out_dim,
-                            tree_struct=tree_struct,
-                            optimizer=self.sgd_optimizer,
-                            gbrl_params=gbrl_params,
-                            verbose=0,
-                            device='cuda')
+        model = GBRL(input_dim=self.input_dim,
+                    output_dim=self.out_dim,
+                    tree_struct=tree_struct,
+                    optimizer=self.sgd_optimizer,
+                    gbrl_params=gbrl_params,
+                    verbose=0,
+                    device='cuda')
         model.set_bias_from_targets(y)
         loss = rmse_model(model, X, y, self.n_epochs, device='cuda')
         self.assertTrue(loss < 10.0, f'Expected loss = {loss} < 10.0')
@@ -383,13 +392,13 @@ class TestGBTSingle(unittest.TestCase):
                 'par_th': 2,
                 'grow_policy': 'oblivious'}
         gbrl_params = dict({"control_variates": False, "split_score_func": "cosine"})
-        model = GBRL(
-                            output_dim=self.out_dim,
-                            tree_struct=tree_struct,
-                            optimizer=self.sgd_optimizer,
-                            gbrl_params=gbrl_params,
-                            verbose=0,
-                            device='cpu')
+        model = GBRL(input_dim=self.input_dim,
+                    output_dim=self.out_dim,
+                    tree_struct=tree_struct,
+                    optimizer=self.sgd_optimizer,
+                    gbrl_params=gbrl_params,
+                    verbose=0,
+                    device='cpu')
         model = GBRL.load_model(os.path.join(self.test_dir, 'test_cosine_cpu'), device='cpu')
         y_pred = model(X, requires_grad=False, tensor=False)
         loss = np.sqrt(np.mean((y_pred.squeeze() - y.squeeze())**2))
@@ -423,7 +432,7 @@ class TestGBTSingle(unittest.TestCase):
         self.assertTrue(loss < value, f'Expected loss = {loss} < {value}')
 
 if __name__ == '__main__':
-    # unittest.main()
-    unittest.main(argv=['first-arg-is-ignored', 'TestGBTSingle.test_l2_cpu'])
+    unittest.main()
+    # unittest.main(argv=['first-arg-is-ignored', 'TestGBTSingle.test_l2_cpu'])
     # unittest.main(argv=['first-arg-is-ignored', 'TestGBTSingle.test_cosine_cpu', 'TestGBTSingle.test_cosine_gpu', 'TestGBTSingle.test_l2_cpu', 'TestGBTSingle.test_cosine_oblivious_cpu', 'TestGBTSingle.test_cosine_oblivious_gpu'])
     # unittest.main(argv=['first-arg-is-ignored', 'TestGBTSingle.test_cosine_gpu', 'TestGBTSingle.test_cosine_oblivious_gpu'])

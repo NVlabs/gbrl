@@ -271,8 +271,7 @@ float* GBRL::predict(const float *obs, const char *categorical_obs, const int n_
     }
 #endif
 
-    dataSet dataset{obs, categorical_obs, nullptr, nullptr, nullptr, n_samples, device};
-    dataSet dataset{obs, categorical_obs, nullptr, nullptr, nullptr, n_samples, device};
+    dataSet dataset{obs, categorical_obs, nullptr, nullptr, n_samples, device};
     float *preds = nullptr;
     // int n_trees = this->get_num_trees();
 #ifdef USE_CUDA
@@ -490,7 +489,7 @@ void GBRL::_step_gpu(dataSet *dataset){
     preprocess_matrices(gpu_build_grads, gpu_grads_norm, n_samples, output_dim, this->metadata->split_score_func);
 
     int n_candidates = process_candidates_cuda(gpu_obs, dataset->categorical_obs, gpu_grads_norm, candidate_indices, candidate_values, candidate_categories, candidate_numerical, n_samples, n_num_features, n_cat_features, n_bins, this->metadata->generator_type);
-    dataSet cuda_dataset{trans_obs, gpu_categorical_obs, gpu_grads, gpu_build_grads, gpu_grads_norm, n_samples, this->device};
+    dataSet cuda_dataset{trans_obs, gpu_categorical_obs, gpu_grads, gpu_build_grads, n_samples, this->device};
     candidatesData candidata{n_candidates, candidate_indices, candidate_values, candidate_numerical, candidate_categories};
     splitDataGPU *split_data = allocate_split_data(this->metadata, candidata.n_candidates);  
     if (this->metadata->grow_policy == GREEDY)
@@ -647,7 +646,7 @@ void GBRL::step(const float *obs, const char *categorical_obs, float *grads, con
         return;
     }
 #endif
-    dataSet dataset{obs, categorical_obs, grads, nullptr, nullptr, n_samples, device};
+    dataSet dataset{obs, categorical_obs, grads, nullptr, n_samples, device};
 #ifdef USE_CUDA
     if (this->device == gpu)
         this->_step_gpu(&dataset);
@@ -726,7 +725,7 @@ float GBRL::fit(float *obs, char *categorical_obs, float *targets, int iteration
 
     float *bias = calculate_mean(training_targets, n_samples, output_dim, metadata->par_th);
     this->set_bias(bias, this->metadata->output_dim);
-    dataSet dataset{training_obs, training_cat_obs, nullptr, nullptr, nullptr, n_samples, this->device};
+    dataSet dataset{training_obs, training_cat_obs, nullptr, nullptr, n_samples, this->device};
 
     float full_loss = -INFINITY;
 #ifdef USE_CUDA
@@ -909,7 +908,7 @@ ensembleData *edata_cpu = nullptr;
     shap_data->base_poly = base_poly;
     shap_data->norm_values = norm;
     float *shap_values = init_zero_mat((this->metadata->n_num_features + this->metadata->n_cat_features)*this->metadata->output_dim * n_samples);
-    dataSet dataset{obs, categorical_obs, nullptr, nullptr, nullptr, n_samples, this->device};
+    dataSet dataset{obs, categorical_obs, nullptr, nullptr, n_samples, this->device};
     // print_shap_data(shap_data, this->metadata);
     get_shap_values(this->metadata, edata_cpu, shap_data, &dataset, shap_values);
     dealloc_shap_data(shap_data);
@@ -924,7 +923,7 @@ ensembleData *edata_cpu = nullptr;
 float* GBRL::ensemble_shap(const float *obs, const char *categorical_obs, const int n_samples, float *norm, float *base_poly, float *offset){
     valid_tree_idx(0, this->metadata);
     float *shap_values = init_zero_mat((this->metadata->n_num_features + this->metadata->n_cat_features)*this->metadata->output_dim * n_samples);
-    dataSet dataset{obs, categorical_obs, nullptr, nullptr, nullptr, n_samples, this->device};
+    dataSet dataset{obs, categorical_obs, nullptr, nullptr, n_samples, this->device};
     ensembleData *edata_cpu = nullptr;
 #ifdef USE_CUDA
     if (this->device == gpu){

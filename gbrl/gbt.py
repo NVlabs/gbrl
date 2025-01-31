@@ -19,6 +19,7 @@ from gbrl.utils import setup_optimizer, clip_grad_norm, validate_array
 class GBRL:
     def __init__(self, 
                  tree_struct: Dict,
+                 input_dim: int,
                  output_dim: int,
                  optimizer: Union[Dict, List[Dict]],
                  gbrl_params: Dict = dict(),
@@ -70,6 +71,7 @@ class GBRL:
             optimizer = [setup_optimizer(opt) for opt in optimizer]
 
         self.optimizer = optimizer
+        self.input_dim = input_dim
         self.output_dim = output_dim
         self.verbose = verbose
         self.tree_struct = tree_struct
@@ -78,7 +80,7 @@ class GBRL:
         self.device = device
         self.params = None
         if type(self) is GBRL:
-            self._model = GBTWrapper(self.output_dim, self.tree_struct, self.optimizer, self.gbrl_params, self.verbose, self.device)
+            self._model = GBTWrapper(self.input_dim, self.output_dim, self.tree_struct, self.optimizer, self.gbrl_params, self.verbose, self.device)
             self._model.reset()
         self.grad = None
         self.input = None
@@ -92,7 +94,7 @@ class GBRL:
         """Sets GBRL bias
 
         Args:
-            y (Union[np.ndarray, th.Tensor]): _description_
+            bias (Union[np.ndarray, th.Tensor])
         """
         if isinstance(bias, th.Tensor):
             bias = bias.clone().detach().cpu().numpy()
@@ -100,6 +102,19 @@ class GBRL:
         if len(bias.shape) == 1:
             bias = bias[:, np.newaxis]
         self._model.set_bias(bias.astype(np.single))
+
+    def set_feature_weights(self, feature_weights: Union[np.ndarray, th.Tensor]):
+        """Sets GBRL feature_weights
+
+        Args:
+            feature_weights (Union[np.ndarray, th.Tensor])
+        """
+        if isinstance(feature_weights, th.Tensor):
+            feature_weights = feature_weights.clone().detach().cpu().numpy()
+        # GBRL works with 2D numpy arrays.
+        if len(feature_weights.shape) == 1:
+            feature_weights = feature_weights[:, np.newaxis]
+        self._model.set_feature_weights(feature_weights.astype(np.single))
     
     def set_bias_from_targets(self, targets: Union[np.ndarray, th.Tensor]):
         """Sets bias as mean of targets
@@ -335,7 +350,7 @@ class GBRL:
         return self.__copy__()
     
     def __copy__(self) -> "GBRL":
-        copy_ = GBRL(self.tree_struct.copy(), self.output_dim, self.optimizer.copy(), self.gbrl_params, self.verbose)
+        copy_ = GBRL(self.tree_struct.copy(), self.input_dim, self.output_dim, self.optimizer.copy(), self.gbrl_params, self.verbose)
         if self._model is not None:
             copy_._model = self._model.copy()
         return copy_

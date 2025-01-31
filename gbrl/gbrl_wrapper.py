@@ -34,6 +34,7 @@ class GBTWrapper:
                        'use_control_variates': gbrl_params.get('control_variates', False), 
                        'verbose': verbose, 'device': device, **tree_struct}
         self.tree_struct = tree_struct
+        self.input_dim = input_dim
         self.output_dim = output_dim
         self.device = device
         self.optimizer = optimizer if isinstance(optimizer, list) or optimizer is None else [optimizer]
