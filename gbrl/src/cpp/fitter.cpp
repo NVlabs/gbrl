@@ -142,7 +142,6 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
         delete[] full_grad_norms;
     }
     dataSet batch_dataset;
-    batch_dataset.feature_weights = dataset->feature_weights;
 
     for (int i = 0; i < iterations; ++i){
         batch_dataset.obs = dataset->obs + batch_start_idx*metadata->n_num_features; 
@@ -297,9 +296,9 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
                 int end_idx = (thread_num == n_threads - 1) ? n_candidates : start_idx + batch_size;
                 // Process the batch of candidates
                 for (int j = start_idx; j < end_idx; ++j) {
-                    float score = crnt_node->getSplitScore(dataset, metadata->split_score_func, split_candidates[j], metadata->min_data_in_leaf);
+                    float score = crnt_node->getSplitScore(dataset, edata->feature_weights, metadata->split_score_func, split_candidates[j], metadata->min_data_in_leaf);
                     int feat_idx = (split_candidates[j].categorical_value == nullptr) ? split_candidates[j].feature_idx : split_candidates[j].feature_idx + metadata->n_num_features; 
-                    score = score * dataset->feature_weights[feat_idx] - parent_score;
+                    score = score * edata->feature_weights[feat_idx] - parent_score;
 #ifdef DEBUG
                     std::cout << " cand: " <<  j << " score: " <<  score << " parent score: " <<  parent_score << " info: " << split_candidates[j] << std::endl;
 #endif 
@@ -393,10 +392,10 @@ int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMe
                 float score = 0.0f;
                 for (int node_idx = 0; node_idx < (1 << depth); ++node_idx){
                     TreeNode *crnt_node = tree_nodes[node_idx];
-                    score += crnt_node->getSplitScore(dataset, metadata->split_score_func, split_candidates[j], metadata->min_data_in_leaf);
+                    score += crnt_node->getSplitScore(dataset, edata->feature_weights, metadata->split_score_func, split_candidates[j], metadata->min_data_in_leaf);
                 }
                 int feat_idx = (split_candidates[j].categorical_value == nullptr) ? split_candidates[j].feature_idx : split_candidates[j].feature_idx + metadata->n_num_features; 
-                score = score*dataset->feature_weights[feat_idx] - parent_score;
+                score = score*edata->feature_weights[feat_idx] - parent_score;
 #ifdef DEBUG
                 std::cout << " cand: " <<  j << " score: " <<  score << " parent_score: " << parent_score <<  " info: " << split_candidates[j] << std::endl;
 #endif

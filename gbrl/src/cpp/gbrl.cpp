@@ -54,11 +54,11 @@
 
 
 
-GBRL::GBRL(int output_dim, int max_depth, int min_data_in_leaf, 
+GBRL::GBRL(int input_dim, int output_dim, int max_depth, int min_data_in_leaf, 
            int n_bins, int par_th, float cv_beta, scoreFunc split_score_func,
            generatorType generator_type, bool use_cv, int batch_size, growPolicy grow_policy, int verbose, 
            deviceType device){
-    this->metadata = ensemble_metadata_alloc(INITAL_MAX_TREES, INITAL_MAX_TREES * (1 << max_depth), TREES_BATCH, TREES_BATCH * (1 << max_depth), output_dim, max_depth, min_data_in_leaf, n_bins, par_th, cv_beta, verbose, batch_size, use_cv, split_score_func, generator_type, grow_policy);
+    this->metadata = ensemble_metadata_alloc(INITAL_MAX_TREES, INITAL_MAX_TREES * (1 << max_depth), TREES_BATCH, TREES_BATCH * (1 << max_depth), input_dim, output_dim, max_depth, min_data_in_leaf, n_bins, par_th, cv_beta, verbose, batch_size, use_cv, split_score_func, generator_type, grow_policy);
     this->sheader = create_header();
 #ifdef USE_CUDA
     if (device == gpu){
@@ -72,11 +72,11 @@ GBRL::GBRL(int output_dim, int max_depth, int min_data_in_leaf,
         
 }
 
-GBRL::GBRL(int output_dim, int max_depth, int min_data_in_leaf, 
+GBRL::GBRL(int input_dim, int output_dim, int max_depth, int min_data_in_leaf, 
            int n_bins, int par_th, float cv_beta, std::string split_score_func,
            std::string generator_type, bool use_cv, int batch_size, 
            std::string grow_policy, int verbose, std::string device){
-    this->metadata = ensemble_metadata_alloc(INITAL_MAX_TREES, INITAL_MAX_TREES * (1 << max_depth), TREES_BATCH, TREES_BATCH * (1 << max_depth), output_dim, max_depth, min_data_in_leaf, n_bins, par_th, cv_beta, verbose, batch_size, use_cv, stringToScoreFunc(split_score_func), stringTogeneratorType(generator_type), stringTogrowPolicy(grow_policy));
+    this->metadata = ensemble_metadata_alloc(INITAL_MAX_TREES, INITAL_MAX_TREES * (1 << max_depth), TREES_BATCH, TREES_BATCH * (1 << max_depth), input_dim, output_dim, max_depth, min_data_in_leaf, n_bins, par_th, cv_beta, verbose, batch_size, use_cv, stringToScoreFunc(split_score_func), stringTogeneratorType(generator_type), stringTogrowPolicy(grow_policy));
     this->sheader = create_header();
 #ifdef USE_CUDA
     if (stringTodeviceType(device) == gpu){
@@ -172,8 +172,8 @@ void GBRL::to_device(deviceType device){
         this->edata = edata_gpu;
         this->device = gpu;
     } else {
+         printf("else\n");
         ensembleData* edata_cpu = ensemble_data_copy_gpu_cpu(this->metadata, this->edata, nullptr);
-        ensemble_data_dealloc_cuda(this->edata);
         this->edata = edata_cpu;
         this->device = cpu;
     }
@@ -182,7 +182,8 @@ void GBRL::to_device(deviceType device){
         this->metadata->use_cv = false;
     }
 #endif 
-    std::cout << "Setting GBRL device to " << deviceTypeToString(device) << std::endl;
+    if (this->metadata->verbose > 0)
+        std::cout << "Setting GBRL device to " << deviceTypeToString(device) << std::endl;
 }
 
 void GBRL::set_bias(float *bias, const int output_dim){
@@ -198,6 +199,25 @@ void GBRL::set_bias(float *bias, const int output_dim){
 #endif
     if (this->device == cpu)
         memcpy(this->edata->bias, bias, sizeof(float)*this->metadata->output_dim);
+    if (this->metadata->verbose > 0)
+        std::cout << "Setting GBRL bias " << std::endl;
+}
+
+void GBRL::set_feature_weights(float *feature_weights, const int input_dim){
+    if (input_dim != this->metadata->input_dim)
+    {
+        std::cerr << "Given feature_weights vector has different dimensions than expect. " << " Given: " << input_dim << " expected: " << this->metadata->input_dim << std::endl; 
+        throw std::runtime_error("Incompatible dimensions");
+        return;
+    }
+#ifdef USE_CUDA
+    if (this->device == gpu)
+        cudaMemcpy(this->edata->feature_weights, feature_weights, sizeof(float)*this->metadata->input_dim, cudaMemcpyHostToDevice);
+#endif
+    if (this->device == cpu)
+        memcpy(this->edata->feature_weights, feature_weights, sizeof(float)*this->metadata->input_dim);
+    if (this->metadata->verbose > 0)
+        std::cout << "Setting GBRL feature weights " << std::endl;
 }
 
 float* GBRL::get_bias(){
@@ -214,6 +234,20 @@ float* GBRL::get_bias(){
     return nullptr;
 }
 
+float* GBRL::get_feature_weights(){
+    // returns a copy. must deallocated new float pointer!
+#ifdef USE_CUDA
+    if (this->device == gpu){
+        float *feature_weights = new float[this->metadata->input_dim];
+        cudaMemcpy(feature_weights, this->edata->feature_weights, sizeof(float)*this->metadata->input_dim, cudaMemcpyDeviceToHost);
+        return feature_weights;
+    }
+#endif 
+    if (this->device == cpu)
+        return copy_mat(this->edata->feature_weights, this->metadata->input_dim, this->metadata->par_th);
+    return nullptr;
+}
+
 
 float* GBRL::predict(const float *obs, const char *categorical_obs, const int n_samples, const int n_num_features, const int n_cat_features, int start_tree_idx, int stop_tree_idx, deviceType device){
     for (size_t optIdx = 0; optIdx < this->opts.size(); ++optIdx){
@@ -222,6 +256,11 @@ float* GBRL::predict(const float *obs, const char *categorical_obs, const int n_
     if (this->metadata->iteration == 0){
         this->metadata->n_num_features = n_num_features;
         this->metadata->n_cat_features = n_cat_features;
+    }
+    if (n_num_features + n_cat_features != metadata->input_dim){
+        int total_features = n_num_features + n_cat_features;
+        std::cerr << "Error. Cannot use ensemble with this dataset. Excepted input with " << metadata->input_dim <<  " received " << total_features << ".";
+        throw std::runtime_error("Incompatible dataset");
     }
     if (n_num_features != metadata->n_num_features || n_cat_features != metadata->n_cat_features){
         std::cerr << "Error. Cannot use ensemble with this dataset. Excepted input with " << metadata->n_num_features << " numerical features followed by " << metadata->n_cat_features << " categorical features, but received " << n_num_features << " numerical features and " << n_cat_features << " categorical features.";
@@ -234,7 +273,7 @@ float* GBRL::predict(const float *obs, const char *categorical_obs, const int n_
     }
 #endif
 
-    dataSet dataset{obs, categorical_obs, nullptr, nullptr, nullptr, n_samples, device};
+    dataSet dataset{obs, categorical_obs, nullptr, nullptr, n_samples, device};
     float *preds = nullptr;
     // int n_trees = this->get_num_trees();
 #ifdef USE_CUDA
@@ -437,19 +476,17 @@ void GBRL::_step_gpu(dataSet *dataset){
     size_t obs_size = sizeof(float)*n_num_features*n_samples;
     size_t cat_obs_size = sizeof(char)*n_cat_features*n_samples*MAX_CHAR_SIZE;
     size_t grads_size = sizeof(float)*output_dim*n_samples;
-    size_t feature_size = sizeof(float)*(n_num_features + n_cat_features);
     size_t grads_norm_size = sizeof(float)*n_samples;
 
-    size_t cand_indices_size =  sizeof(int)*n_bins*(n_num_features + n_cat_features);
-    size_t cand_float_size =  sizeof(float)*n_bins*(n_num_features + n_cat_features);
-    size_t cand_cat_size =  sizeof(char)*n_bins*(n_num_features + n_cat_features)*MAX_CHAR_SIZE;
-    size_t cand_numerical_size =  sizeof(bool)*n_bins*(n_num_features + n_cat_features);
+    size_t cand_indices_size =  sizeof(int)*n_bins*this->metadata->input_dim;
+    size_t cand_float_size =  sizeof(float)*n_bins*this->metadata->input_dim;
+    size_t cand_cat_size =  sizeof(char)*n_bins*this->metadata->input_dim*MAX_CHAR_SIZE;
+    size_t cand_numerical_size =  sizeof(bool)*n_bins*this->metadata->input_dim;
 
     size_t alloc_size = obs_size + grads_size + cat_obs_size + grads_norm_size + cand_indices_size + cand_float_size + cand_cat_size + cand_numerical_size;
     if (dataset->device == cpu){
         alloc_size += obs_size;
         alloc_size += grads_size;
-        alloc_size += feature_size;
     }
     char *device_memory_block; 
 
@@ -473,22 +510,17 @@ void GBRL::_step_gpu(dataSet *dataset){
 
     float *gpu_obs;
     float *gpu_grads;
-    float *gpu_feature_weights;
     if (dataset->device == cpu){
         gpu_obs = (float*)(device_memory_block + trace);
         trace += obs_size;
         gpu_grads = (float*)(device_memory_block + trace);
         trace += grads_size;
-        gpu_feature_weights = (float*)(device_memory_block + trace);
-        trace += feature_size;
         cudaMemcpy(gpu_obs, dataset->obs, obs_size, cudaMemcpyHostToDevice);
         cudaMemcpy(gpu_build_grads, dataset->grads, grads_size, cudaMemcpyHostToDevice);
         cudaMemcpy(gpu_grads, dataset->grads, grads_size, cudaMemcpyHostToDevice);
-        cudaMemcpy(gpu_feature_weights, dataset->feature_weights, feature_size, cudaMemcpyHostToDevice);
     } else {
         gpu_obs = const_cast<float*>(dataset->obs);
         gpu_grads = dataset->grads;
-        gpu_feature_weights = const_cast<float*>(dataset->feature_weights);
         cudaMemcpy(gpu_build_grads, gpu_grads, grads_size, cudaMemcpyDeviceToDevice);
     }
     float *trans_obs = (float*)(device_memory_block + trace);
@@ -510,7 +542,7 @@ void GBRL::_step_gpu(dataSet *dataset){
     preprocess_matrices(gpu_build_grads, gpu_grads_norm, n_samples, output_dim, this->metadata->split_score_func);
 
     int n_candidates = process_candidates_cuda(gpu_obs, dataset->categorical_obs, gpu_grads_norm, candidate_indices, candidate_values, candidate_categories, candidate_numerical, n_samples, n_num_features, n_cat_features, n_bins, this->metadata->generator_type);
-    dataSet cuda_dataset{trans_obs, gpu_categorical_obs, gpu_grads, gpu_feature_weights, gpu_build_grads, n_samples, this->device};
+    dataSet cuda_dataset{trans_obs, gpu_categorical_obs, gpu_grads, gpu_build_grads, n_samples, this->device};
     candidatesData candidata{n_candidates, candidate_indices, candidate_values, candidate_numerical, candidate_categories};
     splitDataGPU *split_data = allocate_split_data(this->metadata, candidata.n_candidates);  
     if (this->metadata->grow_policy == GREEDY)
@@ -538,14 +570,13 @@ float GBRL::_fit_gpu(dataSet *dataset, float *targets, const int n_iterations){
     size_t cat_obs_size = sizeof(char)*n_cat_features*n_samples*MAX_CHAR_SIZE;
     size_t grads_size = sizeof(float)*output_dim*n_samples;
     size_t grads_norm_size = sizeof(float)*n_samples;
-    size_t feature_size = sizeof(float)*(n_num_features + n_cat_features);
 
-    size_t cand_indices_size =  sizeof(int)*n_bins*(n_num_features + n_cat_features);
-    size_t cand_float_size =  sizeof(float)*n_bins*(n_num_features + n_cat_features);
-    size_t cand_cat_size =  sizeof(char)*n_bins*(n_num_features + n_cat_features)*MAX_CHAR_SIZE;
-    size_t cand_numerical_size =  sizeof(bool)*n_bins*(n_num_features + n_cat_features);
+    size_t cand_indices_size =  sizeof(int)*n_bins*this->metadata->input_dim;
+    size_t cand_float_size =  sizeof(float)*n_bins*this->metadata->input_dim;
+    size_t cand_cat_size =  sizeof(char)*n_bins*this->metadata->input_dim*MAX_CHAR_SIZE;
+    size_t cand_numerical_size =  sizeof(bool)*n_bins*this->metadata->input_dim;
     size_t result_tmp_size = sizeof(float)*n_blocks;
-    size_t alloc_size = obs_size*2 + cat_obs_size + feature_size + grads_size*4 + grads_norm_size + cand_indices_size + cand_float_size + cand_cat_size + cand_numerical_size + result_tmp_size;
+    size_t alloc_size = obs_size*2 + cat_obs_size + grads_size*4 + grads_norm_size + cand_indices_size + cand_float_size + cand_cat_size + cand_numerical_size + result_tmp_size;
     char *device_memory_block; 
 
     if (this->cuda_opt == nullptr){
@@ -573,8 +604,6 @@ float GBRL::_fit_gpu(dataSet *dataset, float *targets, const int n_iterations){
     trace += obs_size;
     float *trans_obs = (float*)(device_memory_block + trace);
     trace += obs_size;
-    float *gpu_feature_weights = (float*)(device_memory_block + trace);
-    trace += feature_size;
     float *gpu_build_grads = (float*)(device_memory_block + trace);
     trace += grads_size;
     float *gpu_grads = (float*)(device_memory_block + trace);
@@ -599,11 +628,10 @@ float GBRL::_fit_gpu(dataSet *dataset, float *targets, const int n_iterations){
 
     cudaMemcpy(gpu_obs, dataset->obs, sizeof(float)*n_num_features*n_samples, cudaMemcpyHostToDevice);
     cudaMemcpy(gpu_targets, targets, sizeof(float)*output_dim*n_samples, cudaMemcpyHostToDevice);
-    cudaMemcpy(gpu_feature_weights, dataset->feature_weights, feature_size, cudaMemcpyHostToDevice);
     cudaMemcpy(gpu_categorical_obs, dataset->categorical_obs, sizeof(char)*n_cat_features*n_samples*MAX_CHAR_SIZE, cudaMemcpyHostToDevice);
     transpose_matrix(gpu_obs, trans_obs, n_num_features, n_samples);
     
-    dataSet cuda_dataset{gpu_obs, gpu_categorical_obs, gpu_grads, gpu_feature_weights, gpu_build_grads, n_samples, this->device};
+    dataSet cuda_dataset{gpu_obs, gpu_categorical_obs, gpu_grads, gpu_build_grads, n_samples, this->device};
     predict_cuda_no_host(&cuda_dataset, gpu_preds, this->metadata, this->edata, this->cuda_opt, this->n_cuda_opts, 0, 0, true);
 
     MultiRMSEGrad(gpu_preds, gpu_targets, gpu_grads,  output_dim, n_samples, n_blocks, threads_per_block);
@@ -655,7 +683,7 @@ float GBRL::_fit_gpu(dataSet *dataset, float *targets, const int n_iterations){
 }
 
 #endif
-void GBRL::step(const float *obs, const char *categorical_obs, float *grads, const float *feature_weights, const int n_samples, const int n_num_features, const int n_cat_features, deviceType device){
+void GBRL::step(const float *obs, const char *categorical_obs, float *grads, const int n_samples, const int n_num_features, const int n_cat_features, deviceType device){
     if (this->metadata->iteration == 0){
         this->metadata->n_num_features = n_num_features;
         this->metadata->n_cat_features = n_cat_features;
@@ -671,7 +699,7 @@ void GBRL::step(const float *obs, const char *categorical_obs, float *grads, con
         return;
     }
 #endif
-    dataSet dataset{obs, categorical_obs, grads, feature_weights, nullptr, n_samples, device};
+    dataSet dataset{obs, categorical_obs, grads, nullptr, n_samples, device};
 #ifdef USE_CUDA
     if (this->device == gpu)
         this->_step_gpu(&dataset);
@@ -680,7 +708,7 @@ void GBRL::step(const float *obs, const char *categorical_obs, float *grads, con
         Fitter::step_cpu(&dataset, this->edata, this->metadata);
 }
 
-float GBRL::fit(float *obs, char *categorical_obs, float *targets, const float *feature_weights, int iterations, const int n_samples, const int n_num_features, const int n_cat_features, bool shuffle, std::string _loss_type){
+float GBRL::fit(float *obs, char *categorical_obs, float *targets, int iterations, const int n_samples, const int n_num_features, const int n_cat_features, bool shuffle, std::string _loss_type){
     lossType loss_type = stringTolossType(_loss_type);
     int output_dim = metadata->output_dim;
     if (this->metadata->iteration == 0){
@@ -750,7 +778,7 @@ float GBRL::fit(float *obs, char *categorical_obs, float *targets, const float *
 
     float *bias = calculate_mean(training_targets, n_samples, output_dim, metadata->par_th);
     this->set_bias(bias, this->metadata->output_dim);
-    dataSet dataset{training_obs, training_cat_obs, nullptr, feature_weights, nullptr, n_samples, this->device};
+    dataSet dataset{training_obs, training_cat_obs, nullptr, nullptr, n_samples, this->device};
 
     float full_loss = -INFINITY;
 #ifdef USE_CUDA
@@ -892,7 +920,8 @@ int GBRL::loadFromFile(const std::string& filename){
 
     this->device = cpu;
     std::cout << "######## Loaded GBRL model ########" << std::endl;
-    std::cout << "output_dim: " << this->metadata->output_dim;
+    std::cout << "input_dim: " << this->metadata->input_dim;
+    std::cout << " output_dim: " << this->metadata->output_dim;
     std::cout << " max_depth: " << this->metadata->max_depth << " min_data_in_leaf: " << this->metadata->min_data_in_leaf << std::endl;
     std::cout << "generator_type: " << generatorTypeToString(this->metadata->generator_type) << " n_bins: " << this->metadata->n_bins;
     std::cout << " cv_beta: " << this->metadata->cv_beta << " split_score_func: " << scoreFuncToString(this->metadata->split_score_func) << std::endl;
@@ -907,6 +936,7 @@ int GBRL::loadFromFile(const std::string& filename){
 
 void GBRL::print_ensemble_metadata(){
     std::cout << "######## GBRL model ########" << std::endl;
+    std::cout << "input_dim: " << this->metadata->input_dim;
     std::cout << "output_dim: " << this->metadata->output_dim;
     std::cout << " max_depth: " << this->metadata->max_depth << " min_data_in_leaf: " << this->metadata->min_data_in_leaf << std::endl;
     std::cout << "generator_type: " << generatorTypeToString(this->metadata->generator_type) << " n_bins: " << this->metadata->n_bins;
@@ -933,7 +963,7 @@ ensembleData *edata_cpu = nullptr;
     shap_data->base_poly = base_poly;
     shap_data->norm_values = norm;
     float *shap_values = init_zero_mat((this->metadata->n_num_features + this->metadata->n_cat_features)*this->metadata->output_dim * n_samples);
-    dataSet dataset{obs, categorical_obs, nullptr, nullptr, nullptr, n_samples, this->device};
+    dataSet dataset{obs, categorical_obs, nullptr, nullptr, n_samples, this->device};
     // print_shap_data(shap_data, this->metadata);
     get_shap_values(this->metadata, edata_cpu, shap_data, &dataset, shap_values);
     dealloc_shap_data(shap_data);
@@ -948,7 +978,7 @@ ensembleData *edata_cpu = nullptr;
 float* GBRL::ensemble_shap(const float *obs, const char *categorical_obs, const int n_samples, float *norm, float *base_poly, float *offset){
     valid_tree_idx(0, this->metadata);
     float *shap_values = init_zero_mat((this->metadata->n_num_features + this->metadata->n_cat_features)*this->metadata->output_dim * n_samples);
-    dataSet dataset{obs, categorical_obs, nullptr, nullptr, nullptr, n_samples, this->device};
+    dataSet dataset{obs, categorical_obs, nullptr, nullptr, n_samples, this->device};
     ensembleData *edata_cpu = nullptr;
 #ifdef USE_CUDA
     if (this->device == gpu){

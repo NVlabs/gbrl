@@ -39,7 +39,21 @@ def load_cpp_module():
                     spec.loader.exec_module(module)
                     _loaded_cpp_module = module = module
                     return module
-
+                
+    if platform.system() == "Darwin":  # check for .so on Darwin
+        ext = ".so"
+        for dir_path  in possible_paths:
+            if os.path.exists(dir_path):
+            # Scan for files that match the module name and extension
+                for file_name in os.listdir(dir_path):
+                    if file_name.startswith(module_name) and file_name.endswith(ext):
+                        # Dynamically load the matching shared library
+                        file_path = os.path.join(dir_path, file_name)
+                        spec = importlib.util.spec_from_file_location(module_name, file_path)
+                        module = importlib.util.module_from_spec(spec)
+                        spec.loader.exec_module(module)
+                        _loaded_cpp_module = module = module
+                        return module
     raise ImportError(f"Could not find {module_name}{ext} in any of the expected locations: {possible_paths}")
 
 

@@ -25,10 +25,10 @@
 
 class GBRL {
     public:
-        GBRL(int output_dim, int max_depth, int min_data_in_leaf, 
+        GBRL(int input_dim, int output_dim, int max_depth, int min_data_in_leaf, 
              int n_bins, int par_th, float cv_beta, scoreFunc split_score_func, generatorType generator_type, bool use_control_variates, 
              int batch_size, growPolicy grow_policy, int verbose, deviceType device);
-        GBRL(int output_dim, int max_depth, int min_data_in_leaf, 
+        GBRL(int input_dim, int output_dim, int max_depth, int min_data_in_leaf, 
              int n_bins, int par_th, float cv_beta, std::string split_score_func, std::string generator_type, bool use_control_variates, 
              int batch_size, std::string grow_policy, int verbose, std::string device);
         GBRL(const std::string& filename);
@@ -44,14 +44,16 @@ class GBRL {
         int loadFromFile(const std::string& filename);
         void ensemble_check();
 
-        void step(const float *obs, const char *categorical_obs, float *grads, const float *feature_weights, const int n_samples, const int n_num_features, const int n_cat_features, deviceType device);
+        void step(const float *obs, const char *categorical_obs, float *grads, const int n_samples, const int n_num_features, const int n_cat_features, deviceType device);
 #ifdef USE_CUDA
         void _step_gpu(dataSet *dataset);
         float _fit_gpu(dataSet *dataset, float *targets, const int n_iterations);
 #endif
-        float fit(float *obs, char *categorical_obs, float *targets, const float *feature_weights, int iterations, const int n_samples, const int n_num_features, const int n_cat_features, bool shuffle = true, std::string _loss_type = "MultiRMSE");
+        float fit(float *obs, char *categorical_obs, float *targets, int iterations, const int n_samples, const int n_num_features, const int n_cat_features, bool shuffle = true, std::string _loss_type = "MultiRMSE");
         void set_bias(float *bias, const int output_dim);
+        void set_feature_weights(float *feauture_weights, const int input_dim);
         float* get_bias();
+        float* get_feature_weights();
         float* predict(const float *obs, const char *categorical_obs, const int n_samples, const int n_num_features, const int n_cat_features, int start_tree_idx, int stop_tree_idx, deviceType device);
         
         matrixRepresentation* get_matrix_representation(const float *obs, const char *categorical_obs, const int n_samples, const int n_num_features, const int n_cat_features);

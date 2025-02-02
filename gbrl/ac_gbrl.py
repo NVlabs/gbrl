@@ -21,6 +21,7 @@ from gbrl.utils import (setup_optimizer, clip_grad_norm, numerical_dtype,
 class ActorCritic(GBRL):
     def __init__(self, 
                  tree_struct: Dict,
+                 input_dim: int,
                  output_dim: int, 
                  policy_optimizer: Dict,
                  value_optimizer: Dict= None,
@@ -56,6 +57,7 @@ class ActorCritic(GBRL):
         if value_optimizer is not None:
             value_optimizer = setup_optimizer(value_optimizer, prefix='value_')
         super().__init__(tree_struct,
+                         input_dim,
                          output_dim,
                          None,
                          gbrl_params,
@@ -68,13 +70,13 @@ class ActorCritic(GBRL):
         self.bias = bias if bias is not None else np.zeros(self.output_dim if shared_tree_struct else self.output_dim - 1, dtype=numerical_dtype)
         # init model
         if self.shared_tree_struct:
-            self._model = SharedActorCriticWrapper(self.output_dim, self.tree_struct, self.policy_optimizer, self.value_optimizer, self.gbrl_params, self.verbose, self.device) 
+            self._model = SharedActorCriticWrapper(self.input_dim, self.output_dim, self.tree_struct, self.policy_optimizer, self.value_optimizer, self.gbrl_params, self.verbose, self.device) 
+            self._model.reset()
+            self._model.set_bias(self.bias)
         else:
-            self._model = SeparateActorCriticWrapper(self.output_dim, self.tree_struct, self.policy_optimizer, self.value_optimizer, self.gbrl_params, self.verbose, self.device)
-        self._model.reset()
-        self._model.set_bias(self.bias)
-        self.compressor = None
-
+            self._model = SeparateActorCriticWrapper(self.input_dim, self.output_dim, self.tree_struct, self.policy_optimizer, self.value_optimizer, self.gbrl_params, self.verbose, self.device)
+            self._model.reset()
+            self._model.set_policy_bias(self.bias)
         self.policy_grad = None 
         self.value_grad = None
         
@@ -102,6 +104,7 @@ class ActorCritic(GBRL):
             instance.bias = instance._model.get_bias()
         instance.value_optimizer = instance._model.value_optimizer
         instance.policy_optimizer = instance._model.policy_optimizer
+        instance.input_dim = instance._model.input_dim
         instance.output_dim = instance._model.output_dim
         instance.verbose = instance._model.verbose
         instance.tree_struct = instance._model.tree_struct
@@ -260,7 +263,7 @@ class ActorCritic(GBRL):
 
     def __copy__(self) -> "ActorCritic":
         value_optimizer = None if self.value_optimizer is None else self.value_optimizer.copy()
-        copy_ = ActorCritic(self.tree_struct.copy(), self.output_dim, self.policy_optimizer.copy(), value_optimizer, self.shared_tree_struct, self.gbrl_params, self.bias, self.verbose, self.device)
+        copy_ = ActorCritic(self.tree_struct.copy(), self.input_dim, self.output_dim, self.policy_optimizer.copy(), value_optimizer, self.shared_tree_struct, self.gbrl_params, self.bias, self.verbose, self.device)
         if self._model is not None:
             copy_._model = self._model.copy()
         return copy_
@@ -268,6 +271,7 @@ class ActorCritic(GBRL):
 class ParametricActor(GBRL):
     def __init__(self, 
                  tree_struct: Dict,
+                 input_dim: int, 
                  output_dim: int, 
                  policy_optimizer: Dict,
                  gbrl_params: Dict=dict(),
@@ -297,6 +301,7 @@ class ParametricActor(GBRL):
         """
         policy_optimizer = setup_optimizer(policy_optimizer, prefix='policy_')
         super().__init__(tree_struct,
+                         input_dim,
                          output_dim,
                          None,
                          gbrl_params,
@@ -344,6 +349,7 @@ class ParametricActor(GBRL):
         instance._model = GBTWrapper.load(load_name, device)
         instance.bias = instance._model.get_bias()
         instance.policy_optimizer = instance._model.optimizer
+        instance.input_dim = instance._model.input_dim
         instance.output_dim = instance._model.output_dim
         instance.verbose = instance._model.verbose
         instance.tree_struct = instance._model.tree_struct
@@ -381,7 +387,7 @@ class ParametricActor(GBRL):
         return params
     
     def __copy__(self) -> "ParametricActor":
-        copy_ = ParametricActor(self.tree_struct.copy(), self.output_dim, self.policy_optimizer.copy(),  self.gbrl_params, self.bias, self.verbose, self.device)
+        copy_ = ParametricActor(self.tree_struct.copy(), self.input_dim, self.output_dim, self.policy_optimizer.copy(),  self.gbrl_params, self.bias, self.verbose, self.device)
         if self._model is not None:
             copy_._model = self._model.copy()
         return copy_
@@ -389,6 +395,7 @@ class ParametricActor(GBRL):
 class GaussianActor(GBRL):
     def __init__(self, 
                  tree_struct: Dict,
+                 input_dim: int,
                  output_dim: int, 
                  mu_optimizer: Dict,
                  std_optimizer: Dict = None,
@@ -436,6 +443,7 @@ class GaussianActor(GBRL):
         self.log_std_init = log_std_init
 
         super().__init__(tree_struct,
+                         input_dim,
                          output_dim,
                          None, 
                          gbrl_params,
@@ -445,7 +453,7 @@ class GaussianActor(GBRL):
         
         self.policy_dim = policy_dim
         # init model
-        self._model = GBTWrapper(self.output_dim, self.tree_struct, [mu_optimizer, std_optimizer], self.gbrl_params, self.verbose, self.device)
+        self._model = GBTWrapper(self.input_dim, self.output_dim, self.tree_struct, [mu_optimizer, std_optimizer], self.gbrl_params, self.verbose, self.device)
         self._model.reset()
         self._model.set_bias(self.bias)
         
@@ -516,7 +524,7 @@ class GaussianActor(GBRL):
     
     def __copy__(self) -> "GaussianActor":
         std_optimizer = None if self.std_optimizer is None else self.std_optimizer.copy()
-        copy_ = GaussianActor(self.tree_struct.copy(), self.output_dim, self.mu_optimizer.copy(), std_optimizer, self.gbrl_params, self.bias, self.verbose, self.device)
+        copy_ = GaussianActor(self.tree_struct.copy(), self.input_dim, self.output_dim, self.mu_optimizer.copy(), std_optimizer, self.gbrl_params, self.bias, self.verbose, self.device)
         if self._model is not None:
             copy_._model = self._model.copy()
         return copy_
@@ -525,6 +533,7 @@ class GaussianActor(GBRL):
 class ContinuousCritic(GBRL):
     def __init__(self, 
                  tree_struct: Dict,
+                 input_dim: int,
                  output_dim: int, 
                  weights_optimizer: Dict,
                  bias_optimizer: Dict =  None,
@@ -567,6 +576,7 @@ class ContinuousCritic(GBRL):
         bias_optimizer = setup_optimizer(bias_optimizer, prefix='bias_')
 
         super().__init__(tree_struct,
+                         input_dim,
                          output_dim,
                          None, 
                          gbrl_params,
@@ -578,7 +588,7 @@ class ContinuousCritic(GBRL):
         self.bias = bias if bias is not None else np.zeros(self.output_dim, dtype=numerical_dtype)
         self.target_update_interval = target_update_interval
         # init model
-        self._model = GBTWrapper(self.output_dim, self.tree_struct, [weights_optimizer, bias_optimizer], self.gbrl_params, self.verbose, self.device)
+        self._model = GBTWrapper(self.input_dim, self.output_dim, self.tree_struct, [weights_optimizer, bias_optimizer], self.gbrl_params, self.verbose, self.device)
         self._model.reset()
         self._model.set_bias(self.bias)
         
@@ -660,7 +670,7 @@ class ContinuousCritic(GBRL):
         return weights, bias
     
     def __copy__(self) -> "ContinuousCritic":
-        copy_ = ContinuousCritic(self.tree_struct.copy(), self.output_dim, self.weights_optimizer.copy(), self.bias_optimizer.copy() if isinstance(self.critic_optimizer, dict) else {'weights_optimizer': self.critic_optimizer[0], 'bias_optimizer': self.critic_optimizer[1]}, self.gbrl_params, self.target_update_interval, self.bias, self.verbose, self.device)
+        copy_ = ContinuousCritic(self.tree_struct.copy(), self.input_dim, self.output_dim, self.weights_optimizer.copy(), self.bias_optimizer.copy() if isinstance(self.critic_optimizer, dict) else {'weights_optimizer': self.critic_optimizer[0], 'bias_optimizer': self.critic_optimizer[1]}, self.gbrl_params, self.target_update_interval, self.bias, self.verbose, self.device)
         if self._model is not None:
             copy_._model = self._model.copy()
         return copy_
@@ -669,6 +679,7 @@ class ContinuousCritic(GBRL):
 class DiscreteCritic(GBRL):
     def __init__(self, 
                  tree_struct: Dict,
+                 input_dim: int,
                  output_dim: int, 
                  critic_optimizer: Dict,
                  gbrl_params: Dict=dict(),
@@ -698,6 +709,7 @@ class DiscreteCritic(GBRL):
         """
         critic_optimizer = setup_optimizer(critic_optimizer, prefix='critic_')
         super().__init__(tree_struct,
+                         input_dim,
                          output_dim,
                          None, 
                          gbrl_params,
@@ -707,7 +719,7 @@ class DiscreteCritic(GBRL):
         self.target_update_interval = target_update_interval
         self.bias = bias if bias is not None else np.zeros(self.output_dim, dtype=numerical_dtype)
         # init model
-        self._model = GBTWrapper(self.output_dim, self.tree_struct, self.critic_optimizer, self.gbrl_params, self.verbose, self.device)
+        self._model = GBTWrapper(self.input_dim, self.output_dim, self.tree_struct, self.critic_optimizer, self.gbrl_params, self.verbose, self.device)
         self._model.reset()
         self._model.set_bias(self.bias)
 
@@ -767,7 +779,7 @@ class DiscreteCritic(GBRL):
         return self._model.predict(observations, requires_grad=False, stop_idx=max(n_trees - self.target_update_interval, 1), tensor=tensor)
 
     def __copy__(self) -> "DiscreteCritic":
-        copy_ = DiscreteCritic(self.tree_struct.copy(), self.output_dim, self.critic_optimizer.copy(), self.gbrl_params, self.target_update_interval, self.bias, self.verbose, self.device)
+        copy_ = DiscreteCritic(self.tree_struct.copy(), self.input_dim, self.output_dim, self.critic_optimizer.copy(), self.gbrl_params, self.target_update_interval, self.bias, self.verbose, self.device)
         if self._model is not None:
             copy_._model = self._model.copy()
         return copy_

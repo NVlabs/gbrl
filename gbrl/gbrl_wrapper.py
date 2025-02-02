@@ -72,15 +72,17 @@ def preprocess_features(arr: Union[np.ndarray, th.Tensor]) -> Tuple[np.ndarray, 
 
 
 class GBTWrapper:
-    def __init__(self, output_dim: int, tree_struct: Dict, optimizer: Union[Dict, List], gbrl_params: Dict, verbose: int = 0, device: str = 'cpu'):
+    def __init__(self, input_dim: int, output_dim: int, tree_struct: Dict, optimizer: Union[Dict, List], gbrl_params: Dict, verbose: int = 0, device: str = 'cpu'):
         if 'T' in gbrl_params:
             del gbrl_params['T']
-        self.params = {'output_dim': output_dim,
+        self.params = {'input_dim': input_dim,
+                       'output_dim': output_dim,
                        'split_score_func': gbrl_params.get('split_score_func', 'Cosine'), 
                        'generator_type': gbrl_params.get('generator_type', 'Quantile'), 
                        'use_control_variates': gbrl_params.get('control_variates', False), 
                        'verbose': verbose, 'device': device, **tree_struct}
         self.tree_struct = tree_struct
+        self.input_dim = input_dim
         self.output_dim = output_dim
         self.device = device
         self.optimizer = optimizer if isinstance(optimizer, list) or optimizer is None else [optimizer]
@@ -95,6 +97,8 @@ class GBTWrapper:
             feature_weights = to_numpy(feature_weights)
             feature_weights = feature_weights.flatten()
             assert np.all(feature_weights >= 0), "feature weights contains non-positive values"
+        else:
+            feature_weights = np.ascontiguousarray(np.ones(input_dim, dtype=np.single))
         self.feature_weights = feature_weights
 
 
@@ -105,6 +109,7 @@ class GBTWrapper:
                 self.optimizer[i]['init_lr'] = lrs[i]
 
         self.cpp_model = GBRL_CPP(**self.params)
+        self.cpp_model.set_feature_weights(self.feature_weights)
         if self.student_model is not None:
             for i in range(len(self.optimizer)):
                 self.optimizer[i]['T'] -= self.total_iterations
@@ -115,29 +120,17 @@ class GBTWrapper:
                 self.cpp_model.set_optimizer(**opt)
         except RuntimeError as e:
             print(f"Caught an exception in GBRL: {e}")
-        feature_weights = self.gbrl_params.get('feature_weights', None)
-        if feature_weights is not None:
-            feature_weights = to_numpy(feature_weights)
-            feature_weights = feature_weights.flatten()
-            assert np.all(feature_weights >= 0), "feature weights contains non-positive values"
-        self.feature_weights = feature_weights
 
     def step(self, features: Union[np.ndarray, th.Tensor, Tuple], grads: Union[np.ndarray, th.Tensor]) -> None:
         features, grads = ensure_same_type(features, grads)
         if isinstance(features, th.Tensor):
             if self.feature_weights is None:
                 self.feature_weights = th.ones(get_input_dim(features), device=features.device).float()
-            self.cpp_model.step(get_tensor_info(features.float()), None, get_tensor_info(grads.float()), get_tensor_info(self.feature_weights))
+            self.cpp_model.step(get_tensor_info(features.float()), None, get_tensor_info(grads.float()))
         else:
             num_features, cat_features = preprocess_features(features)
             grads = np.ascontiguousarray(grads.reshape((len(grads), self.params['output_dim']))).astype(numerical_dtype)
-            input_dim = 0 if num_features is None else num_features.shape[1]
-            input_dim += 0 if cat_features is None else cat_features.shape[1]
-            if self.feature_weights is None:
-                self.feature_weights = np.ones(input_dim, dtype=numerical_dtype)
-            assert len(self.feature_weights) == input_dim, "feature weights has to have the same number of elements as features"
-            assert np.all(self.feature_weights >= 0), "feature weights contains non-positive values"
-            self.cpp_model.step(num_features, cat_features, grads, self.feature_weights)
+            self.cpp_model.step(num_features, cat_features, grads)
         self.iteration = self.cpp_model.get_iteration()
         self.total_iterations += 1
 
@@ -147,13 +140,7 @@ class GBTWrapper:
         num_features, cat_features = preprocess_features(features)
         targets = to_numpy(targets)
         targets = targets.reshape((len(targets), self.params['output_dim'])).astype(numerical_dtype)
-        input_dim = 0 if num_features is None else num_features.shape[1]
-        input_dim += 0 if cat_features is None else cat_features.shape[1]
-        if self.feature_weights is None:
-            self.feature_weights = np.ones(input_dim, dtype=numerical_dtype)
-        assert len(self.feature_weights) == input_dim, "feature weights has to have the same number of elements as features"
-        assert np.all(self.feature_weights >= 0), "feature weights contains non-positive values"
-        loss = self.cpp_model.fit(num_features, cat_features, targets, self.feature_weights, iterations, shuffle, loss_type)
+        loss = self.cpp_model.fit(num_features, cat_features, targets, iterations, shuffle, loss_type)
         self.iteration = self.cpp_model.get_iteration()
         return loss
 
@@ -202,7 +189,8 @@ class GBTWrapper:
                             'par_th': metadata['par_th'],
                             'batch_size': metadata['batch_size'], 
                             'grow_policy': metadata['grow_policy']}
-            instance.params = {'output_dim': metadata['output_dim'],
+            instance.params = {'input_dim': metadata['input_dim'],
+                            'output_dim': metadata['output_dim'],
                             'split_score_func': metadata['split_score_func'], 
                             'generator_type': metadata['generator_type'], 
                             'use_control_variates': metadata['use_control_variates'], 
@@ -211,6 +199,7 @@ class GBTWrapper:
                             **instance.tree_struct
                             }
             instance.output_dim = metadata['output_dim']
+            instance.input_dim = metadata['input_dim']
             instance.verbose = metadata['verbose']
             instance.gbrl_params = {'split_score_func': metadata['split_score_func'], 
                                     'generator_type': metadata['generator_type'], 
@@ -220,6 +209,7 @@ class GBTWrapper:
             instance.iteration = metadata['iteration']
             instance.total_iterations = metadata['iteration']
             instance.student_model = None
+            instance.feature_weights = instance.cpp_model.get_feature_weights()
             instance.device = instance.params['device']
             return instance
         except RuntimeError as e:
@@ -256,8 +246,29 @@ class GBTWrapper:
         except RuntimeError as e:
             print(f"Caught an exception in GBRL: {e}")
 
+    def set_feature_weights(self, feature_weights: Union[np.ndarray, float]) -> None:
+        if not isinstance(feature_weights, np.ndarray) and not isinstance(feature_weights, float):
+            raise TypeError("Input should be a numpy array or float")
+
+        if isinstance(feature_weights, float):
+            feature_weights = np.array([float])
+
+        if feature_weights.ndim > 1:
+            feature_weights = feature_weights.ravel()
+        elif feature_weights.ndim == 0:
+            feature_weights = np.array([feature_weights.item()])  # Converts 0D arrays to 1D
+        assert len(feature_weights) == self.input_dim, "feature weights has to have the same number of elements as features"
+        assert np.all(feature_weights >= 0), "feature weights contains non-positive values"
+        try:
+            self.cpp_model.set_feature_weights(feature_weights)
+        except RuntimeError as e:
+            print(f"Caught an exception in GBRL: {e}")
+
     def get_bias(self) -> np.ndarray:
         return self.cpp_model.get_bias()
+    
+    def get_feature_weights(self) -> np.ndarray:
+        return self.cpp_model.get_feature_weights()
 
     def get_device(self) -> str:
         return self.cpp_model.get_device()
@@ -418,7 +429,7 @@ class GBTWrapper:
         self.cpp_model.print_ensemble_metadata()
     
     def __copy__(self):
-        copy_ = GBTWrapper(self.output_dim, self.tree_struct.copy(), [opt.copy() if opt is not None else opt for opt in self.optimizer], self.gbrl_params, self.verbose, self.device)
+        copy_ = GBTWrapper(self.input_dim, self.output_dim, self.tree_struct.copy(), [opt.copy() if opt is not None else opt for opt in self.optimizer], self.gbrl_params, self.verbose, self.device)
         copy_.iteration = self.iteration 
         copy_.total_iterations = self.total_iterations
         if self.cpp_model is not None:
@@ -428,14 +439,15 @@ class GBTWrapper:
         return copy_
 
 class SeparateActorCriticWrapper:
-    def __init__(self, output_dim: int, tree_struct: Dict, policy_optimizer: Dict, value_optimizer: Dict, gbrl_params: Dict, verbose: int = 0, device: str = 'cpu'):
+    def __init__(self, input_dim: int, output_dim: int, tree_struct: Dict, policy_optimizer: Dict, value_optimizer: Dict, gbrl_params: Dict, verbose: int = 0, device: str = 'cpu'):
         print('****************************************')
-        print(f'Separate GBRL Tree with output dim: {output_dim}, tree_struct: {tree_struct} policy_optimizer: {policy_optimizer} value_optimizer: {value_optimizer}')
+        print(f'Separate GBRL Tree with input dim: {input_dim}, output dim: {output_dim}, tree_struct: {tree_struct} policy_optimizer: {policy_optimizer} value_optimizer: {value_optimizer}')
         print('****************************************')
-        self.policy_model = GBTWrapper(output_dim - 1, tree_struct, policy_optimizer, gbrl_params, verbose, device)
-        self.value_model = GBTWrapper(1, tree_struct, value_optimizer, gbrl_params, verbose, device)
+        self.policy_model = GBTWrapper(input_dim, output_dim - 1, tree_struct, policy_optimizer, gbrl_params, verbose, device)
+        self.value_model = GBTWrapper(input_dim, 1, tree_struct, value_optimizer, gbrl_params, verbose, device)
         self.tree_struct = tree_struct
         self.total_iterations = 0
+        self.input_dim = input_dim
         self.output_dim = output_dim
         self.policy_optimizer = policy_optimizer
         self.value_optimizer = value_optimizer
@@ -539,6 +551,7 @@ class SeparateActorCriticWrapper:
         instance.value_model.set_device(device)
         instance.tree_struct = instance.policy_model.tree_struct
         instance.total_iterations = instance.policy_model.iteration + instance.value_model.iteration
+        instance.input_dim = instance.policy_model.input_dim
         instance.output_dim = instance.policy_model.output_dim
         instance.policy_optimizer = instance.policy_model.optimizer[0]
         instance.value_optimizer = instance.value_model.optimizer[0]
@@ -559,14 +572,29 @@ class SeparateActorCriticWrapper:
     def get_num_trees(self) -> Tuple[int, int]:
         return self.policy_model.get_num_trees(), self.value_model.get_num_trees()
     
-    def set_bias(self, bias: np.ndarray) -> None:
+    def set_policy_bias(self, bias: np.ndarray) -> None:
         self.policy_model.set_bias(bias)
+    
+    def set_value_bias(self, bias: np.ndarray) -> None:
+        self.value_model.set_bias(bias)
+    
+    def set_policy_feature_weights(self, feature_weights: np.ndarray) -> None:
+        self.policy_model.set_feature_weights(feature_weights)
+    
+    def set_value_feature_weights(self, feature_weights: np.ndarray) -> None:
+        self.value_model.set_feature_weights(feature_weights)
+
+    def get_bias(self) -> Tuple[np.ndarray, np.ndarray]:
+        return self.policy_model.get_bias(), self.value_model.get_bias()
+    
+    def get_feature_weights(self) -> Tuple[np.ndarray, np.ndarray]:
+        return self.policy_model.get_feature_weights(), self.value_model.get_feature_weights()
 
     def copy(self) -> "SeparateActorCriticWrapper":
         return self.__copy__()
     
     def __copy__(self) -> "SeparateActorCriticWrapper":
-        copy_ = SeparateActorCriticWrapper(self.output_dim, self.tree_struct.copy(), self.policy_optimizer.copy(), self.value_optimizer.copy(), self.gbrl_params, self.verbose, self.device)
+        copy_ = SeparateActorCriticWrapper(self.input_dim, self.output_dim, self.tree_struct.copy(), self.policy_optimizer.copy(), self.value_optimizer.copy(), self.gbrl_params, self.verbose, self.device)
         copy_.total_iterations = self.total_iterations
         copy_.policy_model = self.policy_model.copy()
         copy_.value_model = self.value_model.copy()
@@ -574,13 +602,13 @@ class SeparateActorCriticWrapper:
     
 
 class SharedActorCriticWrapper(GBTWrapper):
-    def __init__(self, output_dim: int, tree_struct: Dict, policy_optimizer: Dict, value_optimizer: Dict, gbrl_params: Dict=dict(), verbose: int = 0, device: str = 'cpu'):
+    def __init__(self, input_dim: int, output_dim: int, tree_struct: Dict, policy_optimizer: Dict, value_optimizer: Dict, gbrl_params: Dict=dict(), verbose: int = 0, device: str = 'cpu'):
         print('****************************************')
-        print(f'Shared GBRL Tree with output dim: {output_dim}, tree_struct: {tree_struct} policy_optimizer: {policy_optimizer} value_optimizer: {value_optimizer}')
+        print(f'Shared GBRL Tree with input dim: {input_dim}, output dim: {output_dim}, tree_struct: {tree_struct} policy_optimizer: {policy_optimizer} value_optimizer: {value_optimizer}')
         print('****************************************')
         self.value_optimizer = value_optimizer
         self.policy_optimizer = policy_optimizer
-        super().__init__(output_dim, tree_struct, policy_optimizer, gbrl_params, verbose, device)
+        super().__init__(input_dim, output_dim, tree_struct, policy_optimizer, gbrl_params, verbose, device)
 
     def reset(self) -> None:
         if self.cpp_model is not None:
@@ -589,6 +617,7 @@ class SharedActorCriticWrapper(GBTWrapper):
             if self.value_optimizer:
                 self.value_optimizer['init_lr'] = value_lr
         self.cpp_model = GBRL_CPP(**self.params)
+        self.cpp_model.set_feature_weights(self.feature_weights)
         if self.student_model is not None:
             self.policy_optimizer['T'] -= self.total_iterations
         else:
@@ -609,19 +638,13 @@ class SharedActorCriticWrapper(GBTWrapper):
         grads = concatenate_arrays(theta_grad, value_grad)
         observations, grads = ensure_same_type(observations, grads)
         if isinstance(observations, th.Tensor):
-            if self.feature_weights is None:
-                self.feature_weights = th.ones(get_input_dim(observations), device=observations.device).float()
-            self.cpp_model.step(get_tensor_info(observations.float()), None, get_tensor_info(grads.float()), get_tensor_info(self.feature_weights))
+            self.cpp_model.step(get_tensor_info(observations.float()), None, get_tensor_info(grads.float()))
         else:
             num_observations, cat_observations = preprocess_features(observations)
             grads = np.ascontiguousarray(grads).astype(numerical_dtype)
             input_dim = 0 if num_observations is None else num_observations.shape[1]
             input_dim += 0 if cat_observations is None else cat_observations.shape[1]
-            if self.feature_weights is None:
-                self.feature_weights = np.ones(input_dim, dtype=numerical_dtype)
-            assert len(self.feature_weights) == input_dim, "feature weights has to have the same number of elements as features"
-            assert np.all(self.feature_weights >= 0), "feature weights contains non-positive values"
-            self.cpp_model.step(num_observations, cat_observations, grads, self.feature_weights)
+            self.cpp_model.step(num_observations, cat_observations, grads)
 
         self.iteration = self.cpp_model.get_iteration()
         self.total_iterations += 1
@@ -694,7 +717,7 @@ class SharedActorCriticWrapper(GBTWrapper):
         return self.__copy__()
     
     def __copy__(self) -> "SharedActorCriticWrapper":
-        copy_ = SharedActorCriticWrapper(self.output_dim, self.tree_struct.copy(), self.policy_optimizer.copy(), None if self.value_optimizer is None else self.value_optimizer.copy(), self.gbrl_params, self.verbose, self.device)
+        copy_ = SharedActorCriticWrapper(self.input_dim, self.output_dim, self.tree_struct.copy(), self.policy_optimizer.copy(), None if self.value_optimizer is None else self.value_optimizer.copy(), self.gbrl_params, self.verbose, self.device)
         copy_.iteration = self.iteration 
         copy_.total_iterations = self.total_iterations
         if self.cpp_model is not None:

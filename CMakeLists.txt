@@ -236,7 +236,6 @@ if (USE_CUDA)
 endif()
 # Platform-specific settings and linking
 if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    
     target_link_libraries(gbrl_cpp PRIVATE OpenMP::OpenMP_CXX)
     if (USE_CUDA)
         target_link_libraries(gbrl_cpp PRIVATE CUDA::cudart)
