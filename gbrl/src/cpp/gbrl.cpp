@@ -317,7 +317,7 @@ matrixRepresentation* GBRL::get_matrix_representation(const float *obs, const ch
         }
     }
 
-    dataSet dataset{obs, categorical_obs, nullptr, nullptr, nullptr, n_samples, this->device};
+    dataSet dataset{obs, categorical_obs, nullptr, nullptr, n_samples, this->device};
     matrixRepresentation* matrix = new matrixRepresentation;
 #ifdef USE_CUDA
     if (this->device == gpu){
@@ -798,7 +798,7 @@ float GBRL::fit(float *obs, char *categorical_obs, float *targets, int iteration
     return full_loss;   
 }
 
-int GBRL::exportModel(const std::string& filename, const std::string& modelname, const std::string& export_format, const std::string& prefix){
+int GBRL::exportModel(const std::string& filename, const std::string& modelname, const std::string& export_format, const std::string &export_type, const std::string& prefix){
     std::ofstream header_file(filename, std::ios::binary);
     if (!header_file.is_open() || header_file.fail()) {
         std::cerr << "Error opening file: " << filename << std::endl;
@@ -811,7 +811,7 @@ int GBRL::exportModel(const std::string& filename, const std::string& modelname,
         throw std::runtime_error("Export is supported only for Oblivious trees.");
         return -1;
     }
-    export_ensemble_data(header_file, modelname, this->edata, this->metadata, this->device, this->opts, stringToexportFormat(export_format), prefix);
+    export_ensemble_data(header_file, modelname, this->edata, this->metadata, this->device, this->opts, stringToexportFormat(export_format), stringToexportType(export_type), prefix);
     if (!header_file.good()) {
         std::cerr << "Error occurred at writing time." << std::endl;
         throw std::runtime_error("Writing to file error");

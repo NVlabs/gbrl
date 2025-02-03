@@ -260,14 +260,14 @@ class GBRL:
         """
         self._model.save(save_path) 
 
-    def export_model(self, filename: str, modelname: str = None, format: str = None, prefix: str = None) -> None:
+    def export_model(self, filename: str, modelname: str = None, format: str = None, export_type: str = None, prefix: str = None) -> None:
         """
         Exports model as a C-header file
 
         Args:
             filename (str): Absolute path and name of exported filename.
         """
-        self._model.export(filename, modelname, format, prefix) 
+        self._model.export(filename, modelname, format, export_type, prefix) 
 
     @classmethod
     def load_model(cls, load_name: str, device: str) -> "GBRL":

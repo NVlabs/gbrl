@@ -60,6 +60,11 @@ exportFormat stringToexportFormat(std::string str) {
     if (str == "float") return exportFormat::EXP_FLOAT;
     throw std::runtime_error("Invalid exportFormat! Options are: float/fxp8/fxp16");
 }
+exportType stringToexportType(std::string str) {
+    if (str == "compact") return exportType::COMPACT;
+    if (str == "full") return exportType::FULL;
+    throw std::runtime_error("Invalid exportType Options are: full/compact");
+}
 
 optimizerAlgo stringToAlgoType(std::string str) {
     if (str == "Adam" || str == "adam") return optimizerAlgo::Adam;
@@ -412,7 +417,7 @@ void ensemble_data_dealloc(ensembleData *edata){
     delete edata;
 }
 
-void export_ensemble_data(std::ofstream& header_file, const std::string& model_name, ensembleData *edata, ensembleMetaData *metadata, deviceType device, std::vector<Optimizer*> opts, exportFormat export_format, const std::string &prefix)
+void export_ensemble_data(std::ofstream& header_file, const std::string& model_name, ensembleData *edata, ensembleMetaData *metadata, deviceType device, std::vector<Optimizer*> opts, exportFormat export_format, exportType export_type, const std::string &prefix)
 {
     std::string type_name;
     switch (export_format){
@@ -430,6 +435,12 @@ void export_ensemble_data(std::ofstream& header_file, const std::string& model_n
             return; // Exit the function if the format is invalid
     }
 
+    if (export_type == exportType::COMPACT){
+        if (metadata->max_depth > 6 || metadata->grow_policy != growPolicy::OBLIVIOUS){
+            std::cerr << "Cannot only compact export with max depth <= 6 and oblivious trees" << std::endl;
+            return; // Exit the function if the format is invalid
+        }
+    }
     ensembleData *edata_cpu = nullptr;
 #ifdef USE_CUDA
     if (device == gpu){
@@ -623,12 +634,22 @@ void export_ensemble_data(std::ofstream& header_file, const std::string& model_n
     header_file << "\tunsigned char pass;\n";
     header_file << "\tfor (tree_idx = 0; tree_idx < " << prefix << "N_TREES; ++tree_idx)\n";
     header_file << "\t{\n";
-    header_file << "\t\tcurrent_depth = depths[tree_idx];\n";
-    header_file << "\t\tidx = 0;\n";
-    header_file << "\t\tfor (depth = 0; depth < current_depth; ++depth){\n";
-    header_file << "\t\t\tpass = (unsigned char)(features[feature_indices[cond_ptr + depth]] > feature_values[cond_ptr + depth]);\n";
-    header_file << "\t\t\tidx |= (pass <<  (current_depth - 1 - depth));\n";
-    header_file << "\t\t}\n";
+    if (export_type == exportType::COMPACT){
+        header_file << "\t\tidx = 0;\n";
+        for (int depth = 0; depth < metadata->max_depth; ++depth){
+            
+            header_file << "\t\tpass = (unsigned char)(features[feature_indices[cond_ptr + " << depth << "]] > feature_values[cond_ptr + " << depth << "]);\n";
+            header_file << "\t\tidx |= (pass <<  (" << metadata->max_depth << " - 1 - " << depth << "));\n";
+        }
+    } else {
+        header_file << "\t\tcurrent_depth = depths[tree_idx];\n";
+        header_file << "\t\tidx = 0;\n";
+        header_file << "\t\tfor (depth = 0; depth < current_depth; ++depth){\n";
+        header_file << "\t\t\tpass = (unsigned char)(features[feature_indices[cond_ptr + depth]] > feature_values[cond_ptr + depth]);\n";
+        header_file << "\t\t\tidx |= (pass <<  (current_depth - 1 - depth));\n";
+        header_file << "\t\t}\n";
+    }
+    
     if (metadata->output_dim > 1){
         header_file << "\t\tfor (j = 0 ; j < " << prefix << "N_OUTPUTS; j++)\n";
         header_file << "\t\t\tresults[j] += leaf_values[(leaf_ptr + idx)*" << prefix << "N_OUTPUTS + j];\n";
@@ -636,8 +657,13 @@ void export_ensemble_data(std::ofstream& header_file, const std::string& model_n
         header_file << "\t\tresult += leaf_values[leaf_ptr + idx];\n";
     }
 
-    header_file << "\t\tleaf_ptr += (1 << current_depth);\n";
-    header_file << "\t\tcond_ptr += current_depth;\n";
+    if (export_type == exportType::COMPACT){
+        header_file << "\t\tleaf_ptr += (1 << " << metadata->max_depth << ");\n";
+        header_file << "\t\tcond_ptr += " << metadata->max_depth << ";\n";
+    } else {
+        header_file << "\t\tleaf_ptr += (1 << current_depth);\n";
+        header_file << "\t\tcond_ptr += current_depth;\n";
+    }
     header_file << "\t}\n";
     if (metadata->output_dim > 1){
         header_file << "\tfor (j = 0 ; j < " << prefix << "N_OUTPUTS; j++)\n";
