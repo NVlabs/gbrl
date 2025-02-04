@@ -182,6 +182,7 @@ ensembleData* ensemble_data_alloc(ensembleMetaData *metadata){
     data_size += sizeof(float) * metadata->output_dim;
     memset(edata->bias, 0, metadata->output_dim * sizeof(float));
     edata->feature_weights = new float[metadata->input_dim];
+    data_size += sizeof(float) * metadata->input_dim;
     memset(edata->feature_weights, 0, metadata->input_dim * sizeof(float));
     int split_sizes = (metadata->grow_policy == OBLIVIOUS) ? metadata->max_trees : metadata->max_leaves;
 #ifdef DEBUG
@@ -233,6 +234,7 @@ ensembleData* ensemble_copy_data_alloc(ensembleMetaData *metadata){
     data_size += sizeof(float) * metadata->output_dim;
     memset(edata->bias, 0, metadata->output_dim * sizeof(float));
     edata->feature_weights = new float[metadata->input_dim];
+    data_size += sizeof(float) * metadata->input_dim;
     memset(edata->feature_weights, 0, metadata->input_dim * sizeof(float));
     int split_sizes = (metadata->grow_policy == OBLIVIOUS) ? metadata->n_trees : metadata->n_leaves;
 #ifdef DEBUG
@@ -284,6 +286,7 @@ ensembleData* copy_ensemble_data(ensembleData *other_edata, ensembleMetaData *me
     memcpy(edata->bias, other_edata->bias, metadata->output_dim * sizeof(float));
     edata->feature_weights = new float[metadata->input_dim];
     memcpy(edata->feature_weights, other_edata->feature_weights, metadata->input_dim * sizeof(float));
+    data_size += sizeof(float) * metadata->input_dim;
     int split_sizes = (metadata->grow_policy == OBLIVIOUS) ? metadata->n_trees : metadata->n_leaves;
 #ifdef DEBUG
     edata->n_samples = new int[metadata->n_leaves]; // debugging
@@ -330,10 +333,10 @@ void ensemble_data_dealloc(ensembleData *edata){
 #ifdef DEBUG
     delete[] edata->n_samples;
 #endif
+    delete[] edata->tree_indices;
     delete[] edata->depths;
     delete[] edata->values;
     delete[] edata->feature_indices;
-    delete[] edata->tree_indices;
     delete[] edata->feature_values;
     delete[] edata->edge_weights;
     delete[] edata->is_numerics;

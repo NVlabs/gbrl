@@ -29,6 +29,7 @@ def get_tensor_info(tensor: th.Tensor) -> Tuple[int, Tuple[int, ...], str, str]:
     """
     if not tensor.is_contiguous():
         tensor = tensor.contiguous()
+
     data_ptr = tensor.data_ptr()
     shape = tuple(tensor.size())  # Convert torch.Size to tuple
     dtype = str(tensor.dtype)
