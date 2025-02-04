@@ -129,9 +129,9 @@ void Predictor::predict_cpu(dataSet *dataset, float *preds, const ensembleData *
     if (n_tree_threads > 1 && parallel_predict && n_tree_threads > n_sample_threads){
         std::vector<float *> preds_buffer(n_tree_threads);
         int trees_per_thread = n_trees / n_tree_threads;
-        omp_set_num_threads(n_tree_threads);
         for (int i = 0; i < n_tree_threads; ++i)
             preds_buffer[i] = init_zero_mat(n_samples*output_dim);
+        omp_set_num_threads(n_tree_threads);
         #pragma omp parallel
         {
             int thread_id = omp_get_thread_num();
@@ -227,7 +227,6 @@ void Predictor::predict_over_trees(const float *obs, const char *categorical_obs
     const int* feature_indices = edata->feature_indices;
     const int* tree_indices = edata->tree_indices;
     const char* categorical_values = edata->categorical_values;
-    
 
     while (tree_idx < stop_tree_idx)
     {

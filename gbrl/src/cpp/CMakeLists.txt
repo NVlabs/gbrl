@@ -58,6 +58,11 @@ if (CMAKE_BUILD_TYPE STREQUAL "Debug")
     message(STATUS "Configuring for Debug build.")
     if (CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Darwin")
         set(DEBUG_CXX_FLAGS "-g")
+        if (ASAN)
+            message(STATUS "Configuring for ASAN.")
+            set(DEBUG_CXX_FLAGS "-g -fsanitize=address,undefined -fno-omit-frame-pointer")
+            set(DEBUG_LINK_FLAGS "-fsanitize=address,undefined")
+        endif()
     elseif (MSVC)
         set(DEBUG_CXX_FLAGS "/Zi")  # Debug symbols
         set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /DEBUG") # Generate .pdb
