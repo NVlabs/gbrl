@@ -163,7 +163,7 @@ void evaluate_oblivious_splits_cuda(dataSet *dataset, ensembleData *edata, TreeN
     calc_oblivious_parallelism(candidata->n_candidates, metadata->output_dim, threads_per_block, metadata->split_score_func, depth);
     for (int i = 0; i < n_nodes; ++i){
         if (metadata->split_score_func == Cosine){
-            size_t shared_mem = sizeof(float)*2*(metadata->output_dim + 3)*threads_per_block;
+            size_t shared_mem = sizeof(float)*2*(metadata->output_dim + 2)*threads_per_block;
             split_score_cosine_cuda<<<candidata->n_candidates, threads_per_block, shared_mem>>>(dataset->obs, dataset->categorical_obs, dataset->build_grads, edata->feature_weights, nodes[i], candidata->candidate_indices, candidata->candidate_values, candidata->candidate_categories, candidata->candidate_numeric, metadata->min_data_in_leaf, split_data->oblivious_split_scores + candidata->n_candidates*i, dataset->n_samples, metadata->n_num_features);
         } else if (metadata->split_score_func == L2){
             size_t shared_mem = sizeof(float)*2*(metadata->output_dim + 1)*threads_per_block;
@@ -260,6 +260,8 @@ __global__ void split_score_cosine_cuda(const float* __restrict__ obs, const cha
         return;
     } 
 
+
+
     // Accumulate per thread partial sum
     for(int i=threadIdx.x; i < n_samples; i += blockDim.x) {
         int sample_idx = __ldg(&node->sample_indices[i]); // Access the spec
@@ -299,10 +301,11 @@ __global__ void split_score_cosine_cuda(const float* __restrict__ obs, const cha
         if (denominator > 0.0f) {
             cosine = (l_dot_sum[0] + r_dot_sum[0]) / sqrtf(denominator);
         }
-        else {
-            split_scores[cand_idx] = -INFINITY;
-            return;
-        }
+        // else {
+            // split_scores[cand_idx] = -INFINITY;
+        //     split_scores[cand_idx] = 0.0f;
+        //     return;
+        // }
         int feat_idx = __ldg(&candidate_indices[cand_idx]);
         if (!candidate_numeric[cand_idx])
             feat_idx += n_num_features;

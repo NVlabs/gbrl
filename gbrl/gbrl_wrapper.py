@@ -124,9 +124,11 @@ class GBTWrapper:
     def step(self, features: Union[np.ndarray, th.Tensor, Tuple], grads: Union[np.ndarray, th.Tensor]) -> None:
         features, grads = ensure_same_type(features, grads)
         if isinstance(features, th.Tensor):
-            if self.feature_weights is None:
-                self.feature_weights = th.ones(get_input_dim(features), device=features.device).float()
-            self.cpp_model.step(get_tensor_info(features.float()), None, get_tensor_info(grads.float()))
+            features = features.float() 
+            grads = grads.float()
+            self._save_memory = (features, grads)
+            self.cpp_model.step(get_tensor_info(features), None, get_tensor_info(grads))
+            self._save_memory = None
         else:
             num_features, cat_features = preprocess_features(features)
             grads = np.ascontiguousarray(grads.reshape((len(grads), self.params['output_dim']))).astype(numerical_dtype)
@@ -330,12 +332,16 @@ class GBTWrapper:
         if stop_idx is None:
             stop_idx = 0
         if isinstance(features, th.Tensor):
-            preds_dlpack = self.cpp_model.predict(get_tensor_info(features.float()), None, start_idx, stop_idx)
+            features = features.float()
+            # store features so that data isn't garbage collected while GBRL uses it
+            self._save_memory = features
+            preds_dlpack = self.cpp_model.predict(get_tensor_info(features), None, start_idx, stop_idx)
             preds = th.from_dlpack(preds_dlpack)
             if self.student_model is not None:
-                student_dlpack = self.student_model.predict(get_tensor_info(features.float()), None)   
+                student_dlpack = self.student_model.predict(get_tensor_info(features), None)   
                 preds += th.from_dlpack(student_dlpack)
             preds.requires_grad_(requires_grad)
+            self._save_memory = None
         else:
             num_features, cat_features = preprocess_features(features)
             preds = self.cpp_model.predict(num_features, cat_features, start_idx, stop_idx)
@@ -639,7 +645,12 @@ class SharedActorCriticWrapper(GBTWrapper):
         grads = concatenate_arrays(theta_grad, value_grad)
         observations, grads = ensure_same_type(observations, grads)
         if isinstance(observations, th.Tensor):
-            self.cpp_model.step(get_tensor_info(observations.float()), None, get_tensor_info(grads.float()))
+            observations = observations.float()
+            grads = grads.float()
+            # store data so that data isn't garbage collected while GBRL uses it
+            self._save_memory = (observations, grads)
+            self.cpp_model.step(get_tensor_info(observations), None, get_tensor_info(grads))
+            self._save_memory = None
         else:
             num_observations, cat_observations = preprocess_features(observations)
             grads = np.ascontiguousarray(grads).astype(numerical_dtype)

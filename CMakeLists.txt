@@ -54,6 +54,7 @@ find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
 include(CMakeDependentOption)
 option(USE_CUDA  "Build with GPU acceleration" OFF)
 option(COVERAGE  "Run coverage report" OFF)
+option(ASAN  "Use address-santizier" OFF)
 
 if(COVERAGE)
   message(STATUS "Coverage build")
@@ -230,6 +231,11 @@ target_include_directories(gbrl_cpp PRIVATE ${Python3_INCLUDE_DIRS} ${pybind11_I
 target_compile_definitions(gbrl_cpp PRIVATE MODULE_NAME="gbrl_cpp")
 target_link_libraries(gbrl_cpp PRIVATE ${Python3_LIBRARIES})
 target_link_libraries(gbrl_cpp PRIVATE gbrl_cpp_src)
+
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+    target_link_libraries(gbrl_cpp PRIVATE ${DEBUG_LINK_FLAGS})
+endif()
+
 
 if (USE_CUDA)
     target_link_libraries(gbrl_cpp PRIVATE cuda_gbrl_src)

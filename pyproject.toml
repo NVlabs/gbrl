@@ -45,7 +45,7 @@ requires-python = ">=3.9"
 
 [tool.poetry]
 name = "gbrl"
-version = "1.0.9"
+version = "1.0.11"
 description = "Gradient Boosted Trees for RL"
 authors = ["Benjamin Fuhrer <bfuhrer@nvidia.com>", "Chen Tessler <ctessler@nvidia.com>", "Gal Dalal <galal@nvidia.com>"]
 readme = "README.md"

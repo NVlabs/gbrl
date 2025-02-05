@@ -54,16 +54,27 @@ void get_tensor_info(py::tuple tensor_info, T*& ptr, std::vector<size_t>& shape,
     if (tensor_info.size() != 4) {
         throw std::runtime_error("Expected a tuple of size 4: (data_ptr, shape, dtype, device)");
     }
+    // size_t raw_ptr = tensor_info[0].cast<size_t>();
+    size_t raw_ptr = tensor_info[0].cast<uintptr_t>();
 
-    // Cast data_ptr directly
-    ptr = reinterpret_cast<T*>(tensor_info[0].cast<size_t>());
+    if (raw_ptr == 0 || raw_ptr == (size_t)-1) {  // Check for null or invalid pointer values
+        std::cerr << "ERROR: Extracted an invalid pointer! Setting ptr to nullptr." << std::endl;
+        ptr = nullptr;
+    } else {
+        ptr = reinterpret_cast<T*>(raw_ptr);
+    }
+
+    if (ptr) {
+        if (reinterpret_cast<uintptr_t>(ptr) % alignof(T) != 0) {
+            std::cerr << "ERROR: Pointer is not properly aligned! Possible misaligned memory access." << std::endl;
+        }
+    }
     // Extract shape
     py::tuple shape_tuple = tensor_info[1].cast<py::tuple>();
     shape.clear();
     for (py::handle dim : shape_tuple) {
         shape.push_back(dim.cast<size_t>());
     }
-
     // Extract and verify dtype
     std::string dtype = tensor_info[2].cast<std::string>();
     std::string expected_dtype;

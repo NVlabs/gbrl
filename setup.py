@@ -44,6 +44,8 @@ class CMakeBuild(build_ext):
         ]   
         if os.environ.get('COVERAGE', '0') == '1':
              cmake_args.append('-DCOVERAGE=ON')
+        if os.environ.get('ASAN', '0') == '1':
+             cmake_args.append('-DASAN=ON')
         if sysconfig.get_config_var('LIBRARY') is not None:
             cmake_args.append('-DPYTHON_LIBRARY=' + sysconfig.get_config_var('LIBRARY'))
         if 'CC' in os.environ:
@@ -62,12 +64,6 @@ class CMakeBuild(build_ext):
             cmake_args.append('-DUSE_CUDA=ON')
             if 'CUDACXX' in os.environ:
                 cmake_args.append('-DCMAKE_CUDA_COMPILER=' + os.environ['CUDACXX'])
-        # # Set CMAKE_PREFIX_PATH for LLVM
-        # if platform.system() == 'Darwin':  # MacOS specific logic
-        #     brew_prefix = subprocess.check_output(['brew', '--prefix', 'llvm']).decode().strip()
-        #     print(brew_prefix)
-        #     cmake_args.append(f'-DCMAKE_PREFIX_PATH={brew_prefix}')
-        #     cmake_args.append(f'-DLLVM_DIR={brew_prefix}/lib/cmake/llvm')
             
         build_temp = self.build_temp
         if not os.path.exists(build_temp):
@@ -105,7 +101,7 @@ class CMakeBuild(build_ext):
 
 setup(
     name="gbrl",
-    version = "1.0.10",
+    version = "1.0.11",
     description = "Gradient Boosted Trees for RL",
     author="Benjamin Fuhrer, Chen Tessler, Gal Dalal",
     author_email="bfuhrer@nvidia.com, ctessler@nvidia.com. gdalal@nvidia.com",
