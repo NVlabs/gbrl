@@ -528,19 +528,23 @@ void export_ensemble_data(std::ofstream& header_file, const std::string& model_n
         }
     }
     
-    header_file << "\tunsigned int tree_idx, depth, current_depth, idx, leaf_ptr, cond_ptr";
-    if (metadata->output_dim){
+    header_file << "\tunsigned int tree_idx, idx, leaf_ptr, cond_ptr";
+    if (metadata->output_dim > 1){
         header_file << ", j";
     }
+    if (export_type == exportType::FULL)
+        header_file << ", depth, current_depth";
     header_file << ";\n";
     header_file << "\t/* Model data */\n";
-    header_file << "\tconst unsigned int depths[" << prefix << "N_TREES] = {";
-    for (int i  = 0; i < metadata->n_trees; ++i){
-        header_file << edata_cpu->depths[i];
-        if (i < metadata->n_trees - 1)
-            header_file << ", ";
+    if (export_type == exportType::FULL){
+        header_file << "\tconst unsigned int depths[" << prefix << "N_TREES] = {";
+        for (int i  = 0; i < metadata->n_trees; ++i){
+            header_file << edata_cpu->depths[i];
+            if (i < metadata->n_trees - 1)
+                header_file << ", ";
+        }
+        header_file << "};\n";
     }
-    header_file << "};\n";
     if (metadata->output_dim > 1){
         header_file << "\tconst " << type_name << " bias[" << prefix << "N_OUTPUTS] = {";
         for (int i  = 0; i < metadata->output_dim; ++i){
@@ -560,7 +564,7 @@ void export_ensemble_data(std::ofstream& header_file, const std::string& model_n
         }
 
     } else {
-        header_file << "\tconst " << type_name << " bias = {";
+        header_file << "\tconst " << type_name << " bias = ";
         switch (export_format){
             case EXP_FLOAT:
                 header_file << edata_cpu->bias[0];
@@ -573,9 +577,10 @@ void export_ensemble_data(std::ofstream& header_file, const std::string& model_n
                 break;
         }
     }
-    header_file << "};\n";
+    header_file << ";\n";
 
-    header_file << "\tconst unsigned int feature_indices[" << prefix << "BINARY_FEATURES] = {";
+    std::string max_size = (metadata->input_dim < 255) ? "uint8" : "uint16";
+    header_file << "\tconst " << max_size <<  " feature_indices[" << prefix << "BINARY_FEATURES] = {";
     for (int i  = 0; i < binary_splits; ++i){
         header_file << edata_cpu->feature_indices[i];
         if (i < binary_splits - 1)
@@ -661,7 +666,8 @@ void export_ensemble_data(std::ofstream& header_file, const std::string& model_n
     }
 
     if (export_type == exportType::COMPACT){
-        header_file << "\t\tleaf_ptr += (1 << " << metadata->max_depth << ");\n";
+        int tmp = 1 << metadata->max_depth;
+        header_file << "\t\tleaf_ptr += " << tmp << ";\n";
         header_file << "\t\tcond_ptr += " << metadata->max_depth << ";\n";
     } else {
         header_file << "\t\tleaf_ptr += (1 << current_depth);\n";

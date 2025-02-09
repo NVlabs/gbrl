@@ -310,7 +310,7 @@ class ParametricActor(GBRL):
         self.policy_optimizer = policy_optimizer
         self.bias = bias if bias is not None else np.zeros(self.output_dim, dtype=numerical_dtype)
         # init model
-        self._model = GBTWrapper(self.output_dim, self.tree_struct, self.policy_optimizer, self.gbrl_params, self.verbose, self.device) 
+        self._model = GBTWrapper(self.input_dim, self.output_dim, self.tree_struct, self.policy_optimizer, self.gbrl_params, self.verbose, self.device) 
         self._model.reset()
         self._model.set_bias(self.bias)
 
