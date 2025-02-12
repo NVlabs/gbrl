@@ -16,6 +16,7 @@ from gbrl.gbt import GBRL
 from gbrl.utils import (setup_optimizer, clip_grad_norm, numerical_dtype, 
                     concatenate_arrays, validate_array, constant_like,
                     tensor_to_leaf)
+from gbrl.constraints import Constraint
 
 
 class ActorCritic(GBRL):
@@ -29,7 +30,8 @@ class ActorCritic(GBRL):
                  gbrl_params: Dict=dict(),
                  bias: np.ndarray = None,
                  verbose: int=0,
-                 device: str='cpu'):
+                 device: str='cpu',
+                 constraints: Constraint = None):
         
         """ GBRL model for a shared Actor and Critic ensemble.
 
@@ -62,7 +64,8 @@ class ActorCritic(GBRL):
                          None,
                          gbrl_params,
                          verbose,
-                         device)
+                         device,
+                         None)
         self.policy_optimizer = policy_optimizer
         self.value_optimizer = value_optimizer
 
@@ -70,11 +73,11 @@ class ActorCritic(GBRL):
         self.bias = bias if bias is not None else np.zeros(self.output_dim if shared_tree_struct else self.output_dim - 1, dtype=numerical_dtype)
         # init model
         if self.shared_tree_struct:
-            self._model = SharedActorCriticWrapper(self.input_dim, self.output_dim, self.tree_struct, self.policy_optimizer, self.value_optimizer, self.gbrl_params, self.verbose, self.device) 
+            self._model = SharedActorCriticWrapper(self.input_dim, self.output_dim, self.tree_struct, self.policy_optimizer, self.value_optimizer, self.gbrl_params, self.verbose, self.device, constraints) 
             self._model.reset()
             self._model.set_bias(self.bias)
         else:
-            self._model = SeparateActorCriticWrapper(self.input_dim, self.output_dim, self.tree_struct, self.policy_optimizer, self.value_optimizer, self.gbrl_params, self.verbose, self.device)
+            self._model = SeparateActorCriticWrapper(self.input_dim, self.output_dim, self.tree_struct, self.policy_optimizer, self.value_optimizer, self.gbrl_params, self.verbose, self.device, constraints)
             self._model.reset()
             self._model.set_policy_bias(self.bias)
         self.policy_grad = None 
@@ -277,7 +280,8 @@ class ParametricActor(GBRL):
                  gbrl_params: Dict=dict(),
                  bias: np.ndarray = None,
                  verbose: int=0,
-                 device: str='cpu'):
+                 device: str='cpu',
+                 constraints: Constraint = None):
         """ GBRL model for a ParametricActor ensemble. ParametricActor outputs a single parameter per action dimension.
             Therefore it can be determinstic or stochastic (e.g. Discrete action space).
 
@@ -306,11 +310,12 @@ class ParametricActor(GBRL):
                          None,
                          gbrl_params,
                          verbose,
-                         device)
+                         device,
+                         None)
         self.policy_optimizer = policy_optimizer
         self.bias = bias if bias is not None else np.zeros(self.output_dim, dtype=numerical_dtype)
         # init model
-        self._model = GBTWrapper(self.input_dim, self.output_dim, self.tree_struct, self.policy_optimizer, self.gbrl_params, self.verbose, self.device) 
+        self._model = GBTWrapper(self.input_dim, self.output_dim, self.tree_struct, self.policy_optimizer, self.gbrl_params, self.verbose, self.device, constraints) 
         self._model.reset()
         self._model.set_bias(self.bias)
 
@@ -403,7 +408,8 @@ class GaussianActor(GBRL):
                  gbrl_params: Dict = dict(),
                  bias: np.ndarray = None,
                  verbose: int=0,
-                 device: str='cpu'):
+                 device: str='cpu',
+                 constraints: Constraint = None):
         """ GBRL model for a Actor ensemble used in algorithms such as: SAC.
         Model outputs mu and log_std of a Gaussian distribution. 
         Actor optimizer can be shared for both parameters or separate. 
@@ -448,12 +454,13 @@ class GaussianActor(GBRL):
                          None, 
                          gbrl_params,
                          verbose,
-                         device)
+                         device,
+                         None)
 
         
         self.policy_dim = policy_dim
         # init model
-        self._model = GBTWrapper(self.input_dim, self.output_dim, self.tree_struct, [mu_optimizer, std_optimizer], self.gbrl_params, self.verbose, self.device)
+        self._model = GBTWrapper(self.input_dim, self.output_dim, self.tree_struct, [mu_optimizer, std_optimizer], self.gbrl_params, self.verbose, self.device, constraints)
         self._model.reset()
         self._model.set_bias(self.bias)
         
@@ -541,7 +548,8 @@ class ContinuousCritic(GBRL):
                  target_update_interval: int = 100,
                  bias: np.ndarray = None,
                  verbose: int=0,
-                 device: str='cpu'):         
+                 device: str='cpu',
+                 constraints: Constraint = None):         
         """ GBRL model for a Continuous Critic ensemble.
             Usage example Q-function in SAC.
             Model is designed to output parameters of 3 types of Q-functions:
@@ -581,14 +589,15 @@ class ContinuousCritic(GBRL):
                          None, 
                          gbrl_params,
                          verbose,
-                         device)
+                         device,
+                         None)
         self.weights_optimizer = weights_optimizer
         self.bias_optimizer = bias_optimizer
         self.target_model = None
         self.bias = bias if bias is not None else np.zeros(self.output_dim, dtype=numerical_dtype)
         self.target_update_interval = target_update_interval
         # init model
-        self._model = GBTWrapper(self.input_dim, self.output_dim, self.tree_struct, [weights_optimizer, bias_optimizer], self.gbrl_params, self.verbose, self.device)
+        self._model = GBTWrapper(self.input_dim, self.output_dim, self.tree_struct, [weights_optimizer, bias_optimizer], self.gbrl_params, self.verbose, self.device, constraints)
         self._model.reset()
         self._model.set_bias(self.bias)
         
@@ -686,7 +695,8 @@ class DiscreteCritic(GBRL):
                  target_update_interval: int = 100,
                  bias: np.ndarray = None,
                  verbose: int=0,
-                 device: str='cpu'):  
+                 device: str='cpu',
+                 constraints: Constraint = None):  
         """ GBRL model for a Discrete Critic ensemble.
             Usage example: Q-function in GBRL.
             The target model is approximated as the ensemble without the last <target_update_interval> trees.
@@ -714,12 +724,13 @@ class DiscreteCritic(GBRL):
                          None, 
                          gbrl_params,
                          verbose,
-                         device)
+                         device,
+                         None)
         self.critic_optimizer = critic_optimizer
         self.target_update_interval = target_update_interval
         self.bias = bias if bias is not None else np.zeros(self.output_dim, dtype=numerical_dtype)
         # init model
-        self._model = GBTWrapper(self.input_dim, self.output_dim, self.tree_struct, self.critic_optimizer, self.gbrl_params, self.verbose, self.device)
+        self._model = GBTWrapper(self.input_dim, self.output_dim, self.tree_struct, self.critic_optimizer, self.gbrl_params, self.verbose, self.device, constraints)
         self._model.reset()
         self._model.set_bias(self.bias)
 

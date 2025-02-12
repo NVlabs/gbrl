@@ -14,6 +14,7 @@ import torch as th
 
 from gbrl.gbrl_wrapper import GBTWrapper
 from gbrl.utils import setup_optimizer, clip_grad_norm, validate_array
+from gbrl.constraints import Constraint
 
 
 class GBRL:
@@ -24,7 +25,8 @@ class GBRL:
                  optimizer: Union[Dict, List[Dict]],
                  gbrl_params: Dict = dict(),
                  verbose: int=0,
-                 device: str = 'cpu'):
+                 device: str = 'cpu',
+                 constraints: Constraint = None):
         """General class for gradient boosting trees
 
         Args:
@@ -80,7 +82,7 @@ class GBRL:
         self.device = device
         self.params = None
         if type(self) is GBRL:
-            self._model = GBTWrapper(self.input_dim, self.output_dim, self.tree_struct, self.optimizer, self.gbrl_params, self.verbose, self.device)
+            self._model = GBTWrapper(self.input_dim, self.output_dim, self.tree_struct, self.optimizer, self.gbrl_params, self.verbose, self.device, constraints)
             self._model.reset()
         self.grad = None
         self.input = None
@@ -358,7 +360,7 @@ class GBRL:
         return self.__copy__()
     
     def __copy__(self) -> "GBRL":
-        copy_ = GBRL(self.tree_struct.copy(), self.input_dim, self.output_dim, self.optimizer.copy(), self.gbrl_params, self.verbose)
+        copy_ = GBRL(self.tree_struct.copy(), self.input_dim, self.output_dim, self.optimizer.copy(), self.gbrl_params, self.verbose, self.device)
         if self._model is not None:
             copy_._model = self._model.copy()
         return copy_

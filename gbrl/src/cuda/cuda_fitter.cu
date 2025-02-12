@@ -763,10 +763,8 @@ __global__ void node_cosine_kernel(TreeNodeGPU* node, const float *grads, float 
 TreeNodeGPU* allocate_root_tree_node(dataSet *dataset, ensembleMetaData *metadata){
     cudaError_t error;
     TreeNodeGPU* node;
-    error = cudaMalloc((void**)&node, sizeof(TreeNodeGPU));
+    error = allocateCudaMemory((void**)&node, sizeof(TreeNodeGPU), "when trying to allocate TreeNodeGPU");
     if (error != cudaSuccess) {
-    // Handle the error (e.g., print an error message and exit)
-        std::cout << "Cuda error: " << error << " when trying to allocate TreeNodeGPU." <<std::endl;
         return nullptr;
     }
     // Allocate temporary node on host to set the value
@@ -788,10 +786,8 @@ TreeNodeGPU* allocate_root_tree_node(dataSet *dataset, ensembleMetaData *metadat
     tempNode.categorical_values = nullptr;
 
     int *sample_indices;
-    error = cudaMalloc((void**)&sample_indices, sizeof(int)*dataset->n_samples);
+    error = allocateCudaMemory((void**)&sample_indices, sizeof(int)*dataset->n_samples, "when trying to allocate root sample_indices");
     if (error != cudaSuccess) {
-    // Handle the error (e.g., print an error message and exit)
-        std::cout << "Cuda error: " << error << " when trying to allocate root sample_indices." <<std::endl;
         cudaFree(node);
         return nullptr;
     }
@@ -834,19 +830,7 @@ void allocate_child_tree_node(TreeNodeGPU* host_parent, TreeNodeGPU** device_chi
                 + sizeof(bool) * depth   // is_numerics
                 + sizeof(char) * depth * MAX_CHAR_SIZE; // categorical_values
 
-    cudaError_t error = cudaMalloc((void**)&device_memory_block, conditions_size);
-    if (error != cudaSuccess) {
-        size_t free_mem, total_mem;
-        cudaMemGetInfo(&free_mem, &total_mem);
-        std::cerr << "CUDA allocate child tree node error: " << cudaGetErrorString(error)
-                << " when trying to allocate " << ((conditions_size) / (1024.0 * 1024.0)) << " MB."
-                << std::endl;
-        std::cerr << "Free memory: " << (free_mem / (1024.0 * 1024.0)) << " MB."
-                << std::endl;
-        std::cerr << "Total memory: " << (total_mem / (1024.0 * 1024.0)) << " MB."
-                << std::endl;
-        return;
-    }
+    cudaError_t error = allocateCudaMemory((void**)&device_memory_block, conditions_size, "CUDA allocate child tree node error:");
     cudaMemset(device_memory_block, 0, conditions_size);
     size_t trace = 0;
     host_child.sample_indices = (int*)device_memory_block;
@@ -862,10 +846,9 @@ void allocate_child_tree_node(TreeNodeGPU* host_parent, TreeNodeGPU** device_chi
     host_child.is_numerics = (bool*)(device_memory_block + trace);
     trace += sizeof(bool) * depth;
     host_child.categorical_values = (char*)(device_memory_block + trace);
-
-    error = cudaMalloc((void**)&(*device_child), sizeof(TreeNodeGPU));
+    
+    error = allocateCudaMemory((void**)&(*device_child), sizeof(TreeNodeGPU), "when trying to allocate child");
     if (error != cudaSuccess){
-        std::cerr << "Cuda error: " << error << " when trying to allocate child." <<std::endl;
         cudaFree(device_memory_block);
         *device_child = nullptr;
         return;
@@ -892,7 +875,6 @@ void add_leaf_node(const TreeNodeGPU *node, const int depth, ensembleMetaData *m
     int leaf_idx = metadata->n_leaves, tree_idx = metadata->n_trees; 
     float *count_f;
     cudaMalloc((void**)&count_f, sizeof(float));
-    // cudaMemset(count_f, 0, sizeof(float));
     int n_blocks, threads_per_block;
     get_grid_dimensions(dataset->n_samples, n_blocks, threads_per_block);
     int n_threads = WARP_SIZE*((MAX_CHAR_SIZE + WARP_SIZE - 1) / WARP_SIZE);

@@ -14,7 +14,7 @@ import numpy as np
 import torch as th
 
 from gbrl import GBRL_CPP
-from gbrl.utils import (get_input_dim, get_poly_vectors, 
+from gbrl.utils import (get_poly_vectors, 
                     to_numpy,
                     numerical_dtype, 
                     get_tensor_info,
@@ -22,57 +22,12 @@ from gbrl.utils import (get_input_dim, get_poly_vectors,
                     ensure_same_type,
                     concatenate_arrays,
                     tensor_to_leaf)
-from .utils import get_input_dim, get_poly_vectors, process_array, to_numpy, numerical_dtype
-from .compression import ParametricActorCompression, TreeCompression, SharedActorCriticCompression
 
-
-def features_to_numpy(arr: Union[np.ndarray, th.Tensor]) -> Tuple[np.ndarray, np.ndarray]:
-    if isinstance(arr, th.Tensor):
-        arr = arr.detach().cpu().numpy()
-        return np.ascontiguousarray(arr, dtype=numerical_dtype), None 
-    elif isinstance(arr, tuple):
-        num_arr, _ = process_array(arr[0])
-        _, cat_arr = process_array(arr[1])
-        return num_arr, cat_arr
-    elif isinstance(arr, list):
-        return process_array(np.ndarray(arr))
-    elif isinstance(arr, dict):
-        num_arr, _ = process_array(arr['numerical_data'])
-        _, cat_arr = process_array(arr['categorical_data'])
-        return num_arr, cat_arr
-    else:
-        return process_array(arr)
-
-def preprocess_features(arr: Union[np.ndarray, th.Tensor]) -> Tuple[np.ndarray, np.ndarray]:
-    """Preprocess array such that the dimensions and the data type match.
-    Returns numerical and categorical features. 
-    May return None for each if purely numerical or purely categorical.
-    Args:
-
-    Returns:
-        Tuple[np.ndarray, np.ndarray]
-    """
-    input_dim = get_input_dim(arr)
-    num_arr, cat_arr = features_to_numpy(arr)
-    if num_arr is not None and len(num_arr.shape) == 1:
-        if input_dim == 1:
-            num_arr = num_arr[np.newaxis, :]
-        else:
-            num_arr = num_arr[:, np.newaxis]
-    if num_arr is not None and len(num_arr.shape) > 2:
-        num_arr = num_arr.squeeze()
-    if cat_arr is not None and len(cat_arr.shape) == 1:
-        if input_dim == 1:
-            cat_arr = cat_arr[np.newaxis, :]
-        else:
-            cat_arr = cat_arr[:, np.newaxis]
-    if cat_arr is not None and len(cat_arr.shape) > 2:
-        cat_arr = cat_arr.squeeze()
-    return num_arr, cat_arr
-
+from gbrl.compression import ParametricActorCompression, TreeCompression, SharedActorCriticCompression
+from gbrl.constraints import Constraint
 
 class GBTWrapper:
-    def __init__(self, input_dim: int, output_dim: int, tree_struct: Dict, optimizer: Union[Dict, List], gbrl_params: Dict, verbose: int = 0, device: str = 'cpu'):
+    def __init__(self, input_dim: int, output_dim: int, tree_struct: Dict, optimizer: Union[Dict, List], gbrl_params: Dict, verbose: int = 0, device: str = 'cpu', constraints: Constraint = None):
         if 'T' in gbrl_params:
             del gbrl_params['T']
         self.params = {'input_dim': input_dim,
@@ -100,6 +55,7 @@ class GBTWrapper:
         else:
             feature_weights = np.ascontiguousarray(np.ones(input_dim, dtype=np.single))
         self.feature_weights = feature_weights
+        self.constraints = constraints
 
 
     def reset(self) -> None:
@@ -110,6 +66,7 @@ class GBTWrapper:
 
         self.cpp_model = GBRL_CPP(**self.params)
         self.cpp_model.set_feature_weights(self.feature_weights)
+        self.index_mapping = None
         if self.student_model is not None:
             for i in range(len(self.optimizer)):
                 self.optimizer[i]['T'] -= self.total_iterations
@@ -121,8 +78,19 @@ class GBTWrapper:
         except RuntimeError as e:
             print(f"Caught an exception in GBRL: {e}")
 
+    def _set_constraints(self):
+        if self.constraints is not None and not self.constraints.used:
+            for constraint in self.constraints.get_constraints():
+                self.cpp_model.add_constraint(**constraint)
+            self.constraints.used = True
+
+
     def step(self, features: Union[np.ndarray, th.Tensor, Tuple], grads: Union[np.ndarray, th.Tensor]) -> None:
         features, grads = ensure_same_type(features, grads)
+        if self.constraints is not None and self.total_iterations == 0:
+            self.constraints.parse_dataset(features)
+            self._set_constraints()
+
         if isinstance(features, th.Tensor):
             features = features.float() 
             grads = grads.float()
@@ -358,6 +326,8 @@ class GBTWrapper:
         return preds
     
     def get_matrix_representation(self, features: Union[np.ndarray, th.Tensor]) -> np.ndarray:
+        if isinstance(features, th.Tensor):
+            features = features.detach().cpu().numpy().astype(np.single)
         num_features, cat_features = preprocess_features(features)
         A, V, n_leaves_per_tree, n_leaves, n_trees = self.cpp_model.get_matrix_representation(num_features, cat_features)
         return A, V, n_leaves_per_tree, n_leaves, n_trees
@@ -446,12 +416,12 @@ class GBTWrapper:
         return copy_
 
 class SeparateActorCriticWrapper:
-    def __init__(self, input_dim: int, output_dim: int, tree_struct: Dict, policy_optimizer: Dict, value_optimizer: Dict, gbrl_params: Dict, verbose: int = 0, device: str = 'cpu'):
+    def __init__(self, input_dim: int, output_dim: int, tree_struct: Dict, policy_optimizer: Dict, value_optimizer: Dict, gbrl_params: Dict, verbose: int = 0, device: str = 'cpu', constraints: Constraint = None):
         print('****************************************')
         print(f'Separate GBRL Tree with input dim: {input_dim}, output dim: {output_dim}, tree_struct: {tree_struct} policy_optimizer: {policy_optimizer} value_optimizer: {value_optimizer}')
         print('****************************************')
-        self.policy_model = GBTWrapper(input_dim, output_dim - 1, tree_struct, policy_optimizer, gbrl_params, verbose, device)
-        self.value_model = GBTWrapper(input_dim, 1, tree_struct, value_optimizer, gbrl_params, verbose, device)
+        self.policy_model = GBTWrapper(input_dim, output_dim - 1, tree_struct, policy_optimizer, gbrl_params, verbose, device, constraints)
+        self.value_model = GBTWrapper(input_dim, 1, tree_struct, value_optimizer, gbrl_params, verbose, device, constraints)
         self.tree_struct = tree_struct
         self.total_iterations = 0
         self.input_dim = input_dim
@@ -609,13 +579,13 @@ class SeparateActorCriticWrapper:
     
 
 class SharedActorCriticWrapper(GBTWrapper):
-    def __init__(self, input_dim: int, output_dim: int, tree_struct: Dict, policy_optimizer: Dict, value_optimizer: Dict, gbrl_params: Dict=dict(), verbose: int = 0, device: str = 'cpu'):
+    def __init__(self, input_dim: int, output_dim: int, tree_struct: Dict, policy_optimizer: Dict, value_optimizer: Dict, gbrl_params: Dict=dict(), verbose: int = 0, device: str = 'cpu', constraints: Constraint = None):
         print('****************************************')
         print(f'Shared GBRL Tree with input dim: {input_dim}, output dim: {output_dim}, tree_struct: {tree_struct} policy_optimizer: {policy_optimizer} value_optimizer: {value_optimizer}')
         print('****************************************')
         self.value_optimizer = value_optimizer
         self.policy_optimizer = policy_optimizer
-        super().__init__(input_dim, output_dim, tree_struct, policy_optimizer, gbrl_params, verbose, device)
+        super().__init__(input_dim, output_dim, tree_struct, policy_optimizer, gbrl_params, verbose, device, constraints)
 
     def reset(self) -> None:
         if self.cpp_model is not None:

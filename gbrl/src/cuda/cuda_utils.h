@@ -9,10 +9,17 @@
 #ifndef CUDA_UTILS_H
 #define CUDA_UTILS_H
 
+#include <string>
+
+#include <cuda_runtime.h>
+
+cudaError_t allocateCudaMemory(void** device_ptr, size_t size, const std::string& error_message);
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 void get_grid_dimensions(int elements, int& blocks, int& threads_per_block);
+
 #ifdef __CUDACC__  
 __global__ void selective_copyi(const int num_indices, const int* indices, int* dest, const int* src, const int elements_dim);
 __global__ void selective_copyf(const int num_indices, const int* indices, float* dest, const float* src, const int elements_dim);

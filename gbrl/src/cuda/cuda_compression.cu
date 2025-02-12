@@ -28,17 +28,8 @@ void get_matrix_representation_cuda(dataSet *dataset, ensembleMetaData *metadata
     size_t V_size = (metadata->n_leaves+1) * metadata->output_dim * sizeof(float);
     size_t obs_matrix_size = dataset->n_samples * metadata->n_num_features * sizeof(float);
     size_t cat_obs_matrix_size = dataset->n_samples * metadata->n_cat_features * sizeof(char) * MAX_CHAR_SIZE;
-    cudaError_t alloc_error = cudaMalloc((void**)&device_data, obs_matrix_size + cat_obs_matrix_size + A_size + V_size);
+    cudaError_t alloc_error  = allocateCudaMemory((void**)&device_data, obs_matrix_size + cat_obs_matrix_size + A_size + V_size, "when trying to allocate matrix representation");
     if (alloc_error != cudaSuccess) {
-        size_t free_mem, total_mem;
-        cudaMemGetInfo(&free_mem, &total_mem);
-        std::cerr << "CUDA predict_cuda error: " << cudaGetErrorString(alloc_error)
-                << " when trying to allocate " << ((obs_matrix_size + cat_obs_matrix_size + A_size + V_size) / (1024.0 * 1024.0)) << " MB."
-                << std::endl;
-        std::cerr << "Free memory: " << (free_mem / (1024.0 * 1024.0)) << " MB."
-                << std::endl;
-        std::cerr << "Total memory: " << (total_mem / (1024.0 * 1024.0)) << " MB."
-                << std::endl;
         return;
     }
 
@@ -120,17 +111,8 @@ void get_matrix_representation_cuda(dataSet *dataset, ensembleMetaData *metadata
 ensembleData * compress_ensemble_cuda(ensembleMetaData *metadata, ensembleData *edata, SGDOptimizerGPU** opts, const int n_opts, const int n_compressed_leaves, const int n_compressed_trees, const int *leaf_indices, const int *tree_indices, const int *new_tree_indices, const float *W){
     float *device_W;
     size_t W_size = (metadata->n_leaves + 1) * metadata->output_dim * sizeof(float);
-    cudaError_t alloc_error = cudaMalloc((void**)&device_W, W_size);
+    cudaError_t alloc_error  = allocateCudaMemory((void**)&device_W, W_size, "when trying to allocate compress ensemble");
     if (alloc_error != cudaSuccess) {
-        size_t free_mem, total_mem;
-        cudaMemGetInfo(&free_mem, &total_mem);
-        std::cerr << "CUDA predict_cuda error: " << cudaGetErrorString(alloc_error)
-                << " when trying to allocate " << ((W_size) / (1024.0 * 1024.0)) << " MB."
-                << std::endl;
-        std::cerr << "Free memory: " << (free_mem / (1024.0 * 1024.0)) << " MB."
-                << std::endl;
-        std::cerr << "Total memory: " << (total_mem / (1024.0 * 1024.0)) << " MB."
-                << std::endl;
         return nullptr;
     }
     cudaMemcpy(device_W, W, W_size, cudaMemcpyHostToDevice);

@@ -22,6 +22,7 @@ set(CPP_SOURCES
     split_candidate_generator.cpp
     loss.cpp
     math_ops.cpp
+    feature_constraints.cpp
 )
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/gbrl/include)

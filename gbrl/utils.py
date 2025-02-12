@@ -60,6 +60,7 @@ def process_array(arr: np.ndarray)-> Tuple[np.ndarray, np.ndarray]:
         # Create masks for numerical and categorical columns
         numerical_mask = is_numerical_type
         categorical_mask = ~is_numerical_type
+
         # Check if there are any numerical columns
         if np.any(numerical_mask):
             # Select numerical columns and convert to numerical_dtype
@@ -81,6 +82,41 @@ def process_array(arr: np.ndarray)-> Tuple[np.ndarray, np.ndarray]:
     else:
         raise ValueError(f"Unsupported array data type: {arr.dtype}")
     
+
+def get_index_mapping(arr: Union[np.ndarray, th.Tensor]) -> Dict:
+    """Returns a mapping from original column indices to their new indices after separating numerical and categorical features."""
+    if not isinstance(arr, th.Tensor) and arr.dtype == object:
+        if arr.ndim == 1:
+            # For 1D array, use the array itself as first_row
+            first_row = arr
+        else:
+            # For 2D array, get the first row
+            first_row = arr[0]
+        # Vectorized function to check if a type is numerical
+        is_numerical_type = np.vectorize(
+            lambda x: isinstance(x, (int, float, np.integer, np.floating))
+        )(first_row)
+
+        # Create masks for numerical and categorical columns
+        numerical_mask = is_numerical_type
+        categorical_mask = ~is_numerical_type
+
+        numerical_indices = np.where(numerical_mask)[0]
+        categorical_indices = np.where(categorical_mask)[0]
+        index_mapping = {}
+
+        for new_idx, old_idx in enumerate(numerical_indices):
+            index_mapping[old_idx] = new_idx
+        for new_idx, old_idx in enumerate(categorical_indices):
+            index_mapping[old_idx] = new_idx
+        return index_mapping
+    else:
+        if arr.ndim == 1:
+            return {i: i for i in range(arr.shape[0])}
+        else:
+            return {i: i for i in range(arr.shape[1])}
+    
+
 def to_numpy(arr: Union[np.ndarray, th.Tensor]) -> np.ndarray:
     if isinstance(arr, th.Tensor):
         arr = arr.detach().cpu().numpy()

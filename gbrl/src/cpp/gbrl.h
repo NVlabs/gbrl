@@ -15,6 +15,7 @@
 #include "node.h"
 #include "optimizer.h"
 #include "loss.h"
+#include "feature_constraints.h"
 #include "split_candidate_generator.h"
 #include "types.h"
 
@@ -59,6 +60,7 @@ class GBRL {
         matrixRepresentation* get_matrix_representation(const float *obs, const char *categorical_obs, const int n_samples, const int n_num_features, const int n_cat_features);
         void compress_ensemble(const int n_compressed_leaves, const int n_compressed_trees, const int *leaf_indices, const int *tree_indices, const int *new_tree_indices, const float *W);
         float* get_scheduler_lrs();
+        void add_constraint(int feature_idx, float feature_value, const char *categorical_value, const std::string &const_type, int* dependent_features, int n_features, float constraint_value, bool inequality_direction,  bool is_numeric, float *output_values);
 
         int get_num_trees();
         int get_iteration();
@@ -66,11 +68,13 @@ class GBRL {
         void set_optimizer(optimizerAlgo algo, schedulerFunc scheduler_func, float init_lr, int start_idx, int stop_idx, float stop_lr, int T, float beta_1, float beta_2, float eps, float shrinkage);
 
         void print_tree(int tree_idx);
+        void print_constraints();
         void print_ensemble_metadata();
         void plot_tree(int tree_idx, const std::string &filename);
 
         ensembleData *edata;
         ensembleMetaData *metadata;
+        featureConstraints *constraints = nullptr;
         serializationHeader sheader;
         std::vector<Optimizer*> opts;
         deviceType device = unspecified;

@@ -397,6 +397,18 @@ PYBIND11_MODULE(gbrl_cpp, m) {
             delete[] reinterpret_cast<float*>(ptr);});
         return py::array(size, feature_weights_ptr, capsule);
     }, "Get GBRL model bias");
+    gbrl.def("add_constraint", [](GBRL &self, int feature_idx, float feature_value, const char *categorical_value, const std::string &constraint_type, bool is_numeric, bool op_is_positive, py::object &dependent_features, int n_features, py::object &output_values, float constraint_value){
+        int* dep_features_ptr = nullptr;
+        float* output_values_ptr = nullptr;
+        std::vector<size_t> output_values_shape, dep_features_shape;
+        std::string output_values_device, dep_features_device;
+        handle_input_info<int>(dependent_features, dep_features_ptr, dep_features_shape, dep_features_device, "dep_features", true, "add_constraint");
+        handle_input_info<float>(output_values, output_values_ptr, output_values_shape, output_values_device, "output_values", true, "add_constraint"); 
+        py::gil_scoped_release release; 
+        self.add_constraint(feature_idx, feature_value, categorical_value, constraint_type, dep_features_ptr, n_features, constraint_value, op_is_positive,  is_numeric, output_values_ptr);
+    }, py::arg("feature_idx"), py::arg("feature_value"), py::arg("categorical_value"), py::arg("constraint_type"), py::arg("is_numeric"),
+       py::arg("op_is_positive"), py::arg("dependent_features"), py::arg("n_features"), py::arg("output_values"), py::arg("constraint_value"),
+       "Add constraint");
     gbrl.def("get_optimizers", [](GBRL &self) -> py::list {
         return getOptimizerConfigs(self.opts);
     }, "Get GBRL optimizers");
@@ -497,6 +509,10 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         py::gil_scoped_release release; 
         self.print_tree(tree_idx); 
     }, "Print specified tree index");
+    gbrl.def("print_constraints", [](GBRL &self) {
+        py::gil_scoped_release release; 
+        self.print_constraints(); 
+    }, "Print constraints");
     gbrl.def("get_matrix_representation", [](GBRL &self, py::object &obs, py::object &categorical_obs){
         const float* obs_ptr = nullptr;
         int n_num_features = 0;
@@ -523,7 +539,6 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         }
         
         py::gil_scoped_release release; 
-        
         matrixRepresentation *matrix = self.get_matrix_representation(obs_ptr, cat_obs_ptr, n_samples, n_num_features, n_cat_features);  
         py::gil_scoped_acquire acquire;
        

@@ -39,6 +39,7 @@
 #include "cuda_loss.h"
 #include "cuda_types.h"
 #include "cuda_utils.h"
+#include "cuda_feature_constraints.h"
 #endif
 
 #include "gbrl.h"
@@ -47,6 +48,7 @@
 #include "fitter.h"
 #include "predictor.h"
 #include "compression.h"
+#include "feature_constraints.h"
 #include "loss.h"
 #include "utils.h"
 #include "shap.h"
@@ -69,7 +71,7 @@ GBRL::GBRL(int input_dim, int output_dim, int max_depth, int min_data_in_leaf,
     }
 #endif
     this->to_device(device);
-        
+    this->constraints = init_constraints();     
 }
 
 GBRL::GBRL(int input_dim, int output_dim, int max_depth, int min_data_in_leaf, 
@@ -87,8 +89,7 @@ GBRL::GBRL(int input_dim, int output_dim, int max_depth, int min_data_in_leaf,
     }
 #endif
     this->to_device(stringTodeviceType(device));
-    
-
+    this->constraints = init_constraints();
 }
 
 GBRL::GBRL(const std::string& filename){
@@ -105,11 +106,15 @@ GBRL::GBRL(GBRL& other):
         memcpy(this->metadata, other.metadata, sizeof(ensembleMetaData));
         this->device= other.device;
 #ifdef USE_CUDA
-        if (this->device == gpu)
+        if (this->device == gpu){
             this->edata = ensemble_data_copy_gpu_gpu(this->metadata, other.edata, nullptr);
+            this->constraints = copy_feature_constraint_gpu_gpu(other.constraints, this->metadata->output_dim);
+        }
 #endif
-        if (this->device == cpu)
+        if (this->device == cpu){
             this->edata = copy_ensemble_data(other.edata, this->metadata);
+            this->constraints = copy_feature_constraint(other.constraints, this->metadata->output_dim);
+        }
 
         for(size_t i = 0; i < other.opts.size(); ++i) {
             optimizerAlgo algo = other.opts[i]->getAlgo();
@@ -131,13 +136,17 @@ GBRL::~GBRL() {
     if (this->device == gpu){
         ensemble_data_dealloc_cuda(this->edata);
         freeSGDOptimizer(this->cuda_opt, this->n_cuda_opts);
+        deallocate_constraints_cuda(this->constraints);
     }
 #endif
-    if (this->device == cpu)
+    if (this->device == cpu){
         ensemble_data_dealloc(this->edata);
+        deallocate_constraints(this->constraints);
+    }
     this->edata = nullptr;
     delete this->metadata;
     this->metadata = nullptr;
+    this->constraints = nullptr;
 }
 
 void GBRL::to_device(deviceType device){
@@ -171,11 +180,17 @@ void GBRL::to_device(deviceType device){
         ensemble_data_dealloc(this->edata);
         this->edata = edata_gpu;
         this->device = gpu;
+        featureConstraints *new_constraints = copy_feature_constraint_cpu_gpu(this->constraints, this->metadata->output_dim);
+        deallocate_constraints(this->constraints);
+        this->constraints = new_constraints;
     } else {
          printf("else\n");
         ensembleData* edata_cpu = ensemble_data_copy_gpu_cpu(this->metadata, this->edata, nullptr);
         this->edata = edata_cpu;
         this->device = cpu;
+        featureConstraints *new_constraints = copy_feature_constraint_gpu_cpu(this->constraints, this->metadata->output_dim);
+        deallocate_constraints_cuda(this->constraints);
+        this->constraints = new_constraints;
     }
     if (this->device == gpu && this->metadata->use_cv){
         std::cout << "Cannot use control variates with GPU. Setting use_cv to False." << std::endl;
@@ -705,7 +720,7 @@ void GBRL::step(const float *obs, const char *categorical_obs, float *grads, con
         this->_step_gpu(&dataset);
 #endif
     if (this->device == cpu)
-        Fitter::step_cpu(&dataset, this->edata, this->metadata);
+        Fitter::step_cpu(&dataset, this->edata, this->metadata, this->constraints);
 }
 
 float GBRL::fit(float *obs, char *categorical_obs, float *targets, int iterations, const int n_samples, const int n_num_features, const int n_cat_features, bool shuffle, std::string _loss_type){
@@ -786,7 +801,7 @@ float GBRL::fit(float *obs, char *categorical_obs, float *targets, int iteration
         full_loss = this->_fit_gpu(&dataset, training_targets, iterations);
 #endif
     if (this->device == cpu){
-       full_loss = Fitter::fit_cpu(&dataset, training_targets, this->edata, this->metadata, iterations, loss_type, this->opts);
+       full_loss = Fitter::fit_cpu(&dataset, training_targets, this->edata, this->metadata, iterations, loss_type, this->opts, this->constraints);
     }
 
     if (shuffle){
@@ -838,7 +853,7 @@ int GBRL::saveToFile(const std::string& filename){
     byte = static_cast<char>(this->metadata->use_cv);
     file.write(&byte, sizeof(byte));
 
-    save_ensemble_data(file, this->edata, this->metadata, this->device);
+    save_ensemble_data(file, this->edata, this->metadata, this->constraints, this->device);
 
     int num_opts = static_cast<int>(this->opts.size());
     file.write(reinterpret_cast<char*>(&num_opts), sizeof(int));
@@ -891,6 +906,7 @@ int GBRL::loadFromFile(const std::string& filename){
     }
 
     this->edata = load_ensemble_data(file, this->metadata);
+    this->constraints = load_constraints(file, this->metadata->output_dim);
 
     for (size_t i = 0; i < this->opts.size(); i++)
         delete this->opts[i];
@@ -930,6 +946,8 @@ int GBRL::loadFromFile(const std::string& filename){
     std::cout << " use_cv: " << this->metadata->use_cv << " batch_size: " << this->metadata->batch_size << std::endl;
     std::cout << "Loaded: " << this->metadata->n_leaves << " leaves from " << this->metadata->n_trees << " trees" <<  std::endl;
     std::cout << "Model has: " << num_opts << " optimizers " <<  std::endl;
+
+    this->print_constraints();
     
     return 0;  // Success
 }
@@ -946,6 +964,34 @@ void GBRL::print_ensemble_metadata(){
     std::cout << " use_cv: " << this->metadata->use_cv << " batch_size: " << this->metadata->batch_size << std::endl;
     std::cout << "Loaded: " << this->metadata->n_leaves << " leaves from " << this->metadata->n_trees << " trees" <<  std::endl;
     std::cout << "Model has: " << this->opts.size() << " optimizers " <<  std::endl;
+}
+
+void GBRL::print_constraints(){
+    if (this->constraints->n_cons == 0){
+        std::cout << "GBRL model has no constraints" << std::endl;
+        return;
+    } 
+    std::cout << "GBRL model has " << this->constraints->n_cons  << " constraints" << std::endl;
+    featureConstraints* host_constraints;
+#ifdef USE_CUDA
+    if (this->device == gpu){
+        host_constraints = copy_feature_constraint_gpu_cpu(this->constraints, this->metadata->output_dim);
+    }
+#endif 
+    if (this->device == cpu){
+        host_constraints = this->constraints;
+    }
+    if (host_constraints->th_cons != nullptr)
+        print_threshold_constraints(host_constraints->th_cons);
+    if (host_constraints->hr_cons != nullptr)
+        print_hierarchy_constraints(host_constraints->hr_cons);
+    if (host_constraints->out_cons != nullptr)
+        print_output_constraints(host_constraints->out_cons, this->metadata->output_dim);
+#ifdef USE_CUDA
+    if (this->device == gpu){
+        deallocate_constraints(host_constraints);
+    }
+#endif 
 }
 
 float* GBRL::tree_shap(const int tree_idx, const float *obs, const char *categorical_obs, const int n_samples, float *norm, float *base_poly, float *offset){
@@ -1003,6 +1049,21 @@ float* GBRL::ensemble_shap(const float *obs, const char *categorical_obs, const 
 #endif 
    
     return shap_values;
+}
+
+void GBRL::add_constraint(int feature_idx, float feature_value, const char *categorical_value, const std::string &const_type, int* dependent_features, int n_features, float constraint_value, bool inequality_direction,  bool is_numeric, float *output_values){
+#ifdef USE_CUDA
+    if (this->device == gpu){
+        add_feature_constraint_cuda(this->constraints, feature_idx, feature_value, categorical_value, stringToconstraintType(const_type), dependent_features,
+            n_features, constraint_value, inequality_direction, 
+            is_numeric, this->metadata->output_dim, output_values);
+    }
+#endif 
+    if (this->device == cpu){
+        add_feature_constraint(this->constraints, feature_idx, feature_value, categorical_value, stringToconstraintType(const_type), dependent_features,
+                       n_features, constraint_value, inequality_direction, 
+                       is_numeric, this->metadata->output_dim, output_values);
+    }
 }
 
 void GBRL::print_tree(int tree_idx){

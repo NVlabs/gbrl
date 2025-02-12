@@ -12,6 +12,7 @@
 #include <memory>
 #include <cmath>
 #include <algorithm>
+#include <unordered_set>
 #include <cstring>
 
 #include "node.h"
@@ -142,7 +143,7 @@ int TreeNode::splitNode(const float *obs, const char *categorical_obs, const int
     return 0;
 }
 
-float TreeNode::getSplitScore(dataSet *dataset, const float *feature_weights, scoreFunc split_score_func, const splitCandidate &split_candidate, const int min_data_in_leaf){
+float TreeNode::getSplitScore(dataSet *dataset, scoreFunc split_score_func, const splitCandidate &split_candidate, const int min_data_in_leaf, featureConstraints* constraints, const std::unordered_set<int>& used_features){
     // make sure that we do not re-use the same split candidate along a path
     bool is_numeric = split_candidate.categorical_value == nullptr;
     if (this->depth > 0){
@@ -158,18 +159,34 @@ float TreeNode::getSplitScore(dataSet *dataset, const float *feature_weights, sc
             }
         }
     }
+
+    if (constraints != nullptr && constraints->hr_cons != nullptr){
+        int cumsum = 0;
+        for (int i = 0; i < constraints->hr_cons->n_cons; ++i){
+            if (constraints->hr_cons->feature_indices[i] == split_candidate.feature_idx){
+                if (this->depth == 0)
+                    return -INFINITY;
+                for (int j = 0; j < constraints->hr_cons->dep_count[i]; ++j){
+                    if (used_features.find(constraints->hr_cons->dep_features[cumsum + j]) == used_features.end())
+                        return -INFINITY; // Missing dependency, reject split
+                }
+            }
+            cumsum += constraints->hr_cons->dep_count[i];
+        }
+    }
+    
     switch (split_score_func) {
         case L2: {
             if (is_numeric)
-                return this->splitScoreL2(dataset->obs, feature_weights, dataset->build_grads, split_candidate, min_data_in_leaf);
+                return this->splitScoreL2(dataset->obs, dataset->build_grads, split_candidate, min_data_in_leaf);
             else
-                return this->splitScoreL2Categorical(dataset->categorical_obs, feature_weights, dataset->build_grads, split_candidate, min_data_in_leaf);
+                return this->splitScoreL2Categorical(dataset->categorical_obs, dataset->build_grads, split_candidate, min_data_in_leaf);
         }
         case Cosine: {
             if (is_numeric)
-                return this->splitScoreCosine(dataset->obs, feature_weights, dataset->build_grads, split_candidate, min_data_in_leaf);
+                return this->splitScoreCosine(dataset->obs, dataset->build_grads, split_candidate, min_data_in_leaf);
             else
-                return this->splitScoreCosineCategorical(dataset->categorical_obs, feature_weights, dataset->build_grads,  split_candidate, min_data_in_leaf);
+                return this->splitScoreCosineCategorical(dataset->categorical_obs, dataset->build_grads,  split_candidate, min_data_in_leaf);
         }
         default: {
             std::cerr << "Unknown scoreFunc." << std::endl;
@@ -178,7 +195,7 @@ float TreeNode::getSplitScore(dataSet *dataset, const float *feature_weights, sc
     }
 }
 
-float TreeNode::splitScoreCosine(const float *obs, const float *feature_weights, const float *grads, const splitCandidate &split_candidate, const int min_data_in_leaf){
+float TreeNode::splitScoreCosine(const float *obs, const float *grads, const splitCandidate &split_candidate, const int min_data_in_leaf){
     int left_count = 0, right_count = 0;
     int n_features = this->n_num_features, n_cols = this->output_dim;
     int *left_indices = new int[this->n_samples];
@@ -240,12 +257,11 @@ float TreeNode::splitScoreCosine(const float *obs, const float *feature_weights,
     delete[] right_mean;
     delete[] left_indices;
     delete[] right_indices;
- 
-    int feat_idx = split_candidate.feature_idx;
-    return split_score * feature_weights[feat_idx]; 
+
+    return split_score; 
 }
 
-float TreeNode::splitScoreCosineCategorical(const char *obs, const float *feature_weights, const float *grads, const splitCandidate &split_candidate, const int min_data_in_leaf){
+float TreeNode::splitScoreCosineCategorical(const char *obs, const float *grads, const splitCandidate &split_candidate, const int min_data_in_leaf){
     int left_count = 0, right_count = 0;
     int n_features = this->n_cat_features, n_cols = this->output_dim;
     int *left_indices = new int[this->n_samples];
@@ -309,13 +325,11 @@ float TreeNode::splitScoreCosineCategorical(const char *obs, const float *featur
     delete[] left_indices;
     delete[] right_indices;
 
-    int feat_idx = split_candidate.feature_idx + n_num_features;
-    return split_score * feature_weights[feat_idx]; 
-
+    return split_score; 
 }
 
 
-float TreeNode::splitScoreL2(const float *obs, const float *feature_weights, const float *grads, const splitCandidate &split_candidate, const int min_data_in_leaf){
+float TreeNode::splitScoreL2(const float *obs, const float *grads, const splitCandidate &split_candidate, const int min_data_in_leaf){
     int left_count = 0, right_count = 0;
     int n_cols = this->output_dim, n_features = this->n_num_features;
     const int *_sample_indices = this->sample_indices;
@@ -368,11 +382,11 @@ float TreeNode::splitScoreL2(const float *obs, const float *feature_weights, con
     delete[] left_mean;
     delete[] right_mean;
     float split_score = left_count_f*left_mean_norm + right_count_f*right_mean_norm;
-    int feat_idx = split_candidate.feature_idx;
-    return split_score * feature_weights[feat_idx];
+
+    return split_score;
 }
 
-float TreeNode::splitScoreL2Categorical(const char *obs, const float *feature_weights, const float *grads, const splitCandidate &split_candidate, const int min_data_in_leaf){
+float TreeNode::splitScoreL2Categorical(const char *obs, const float *grads, const splitCandidate &split_candidate, const int min_data_in_leaf){
     int left_count = 0, right_count = 0;
     int n_cols = this->output_dim, n_features = this->n_cat_features;
     const int *_sample_indices = this->sample_indices;
@@ -427,8 +441,7 @@ float TreeNode::splitScoreL2Categorical(const char *obs, const float *feature_we
     delete[] right_mean;
 
     float split_score = left_count_f*left_mean_norm + right_count_f*right_mean_norm;
-    int feat_idx = split_candidate.feature_idx + n_num_features;
-    return split_score * feature_weights[feat_idx];
+    return split_score;
 }
 
 bool TreeNode::isLeaf() const {

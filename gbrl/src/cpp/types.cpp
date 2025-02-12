@@ -16,8 +16,10 @@
 #include "types.h"
 #include "utils.h"
 #include "optimizer.h"
+#include "feature_constraints.h"
 #ifdef USE_CUDA
 #include "cuda_types.h"
+#include "cuda_feature_constraints.h"
 #endif
 
 
@@ -339,16 +341,19 @@ ensembleData* copy_ensemble_data(ensembleData *other_edata, ensembleMetaData *me
 }
 
 ensembleData* copy_compressed_ensemble_data(ensembleData *other_edata, ensembleMetaData *metadata, const int *leaf_indices, const int *tree_indices, const int n_compressed_leaves, const int n_compressed_trees, const int *new_tree_indices){
-    ensembleData *edata = new ensembleData;
+    
     if (metadata == nullptr || other_edata == nullptr){
         std::cerr << "Error metadata is nullptr cannot allocate ensembleData." << std::endl;
         throw std::runtime_error("Error invalid pointer");
-        return nullptr;
     }
+    ensembleData *edata = new ensembleData;
     size_t data_size = 0;
     edata->bias = new float[metadata->output_dim];
     data_size += sizeof(float) * metadata->output_dim;
     memcpy(edata->bias, other_edata->bias, metadata->output_dim * sizeof(float));
+    edata->feature_weights = new float[metadata->input_dim];
+    data_size += sizeof(float) * metadata->input_dim;
+    memcpy(edata->feature_weights, other_edata->feature_weights, metadata->input_dim * sizeof(float));
     int split_sizes = (metadata->grow_policy == OBLIVIOUS) ? n_compressed_trees : n_compressed_leaves;
     const int *split_indices = (metadata->grow_policy == OBLIVIOUS) ? tree_indices : leaf_indices;
 #ifdef DEBUG
@@ -691,19 +696,23 @@ void export_ensemble_data(std::ofstream& header_file, const std::string& model_n
 #endif 
 }
 
-void save_ensemble_data(std::ofstream& file, ensembleData *edata, ensembleMetaData *metadata, deviceType device){
+void save_ensemble_data(std::ofstream& file, ensembleData *edata, ensembleMetaData *metadata, featureConstraints *constraints, deviceType device){
     if (!file.is_open() || file.fail()) {
         std::cerr << "Error file is not open for writing: " << std::endl;
         throw std::runtime_error("Error opening file");
     }
     ensembleData *edata_cpu = nullptr;
+    featureConstraints *host_constraints = nullptr;
 #ifdef USE_CUDA
     if (device == gpu){
         edata_cpu = ensemble_data_copy_gpu_cpu(metadata, edata, nullptr);
+        host_constraints = copy_feature_constraint_gpu_cpu(constraints, metadata->output_dim);
     }
 #endif 
-    if (device == cpu)
+    if (device == cpu){
         edata_cpu = edata;
+        host_constraints = constraints;
+    }
     NULL_CHECK check = edata_cpu->bias != nullptr ? VALID : NULL_OPT;
     file.write(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
     if (edata_cpu->bias != nullptr)
@@ -756,9 +765,11 @@ void save_ensemble_data(std::ofstream& file, ensembleData *edata, ensembleMetaDa
     if (edata_cpu->categorical_values != nullptr)
         file.write(reinterpret_cast<char*>(edata_cpu->categorical_values), metadata->max_depth * sizes * sizeof(char) * MAX_CHAR_SIZE);
 
+    save_constraints(file, host_constraints, metadata->output_dim);
 #ifdef USE_CUDA
     if (device == gpu){
         ensemble_data_dealloc(edata_cpu);
+        deallocate_constraints(host_constraints);
     }
 #endif 
 }
