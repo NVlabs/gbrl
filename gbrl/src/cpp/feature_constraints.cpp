@@ -22,6 +22,10 @@ featureConstraints* init_constraints(){
     constraints->hr_cons = nullptr;
     constraints->out_cons = nullptr;
     constraints->n_cons = 0;
+    constraints->n_th_cons = 0;
+    constraints->n_hr_cons = 0;
+    constraints->n_hr_features = 0;
+    constraints->n_out_cons = 0;
 
     return constraints;
 }
@@ -31,58 +35,59 @@ featureConstraints* copy_feature_constraint(const featureConstraints* constraint
         return nullptr;
     featureConstraints* new_cons = init_constraints();
     if (constraints->th_cons != nullptr)
-        new_cons->th_cons = copy_threshold_constraints(constraints->th_cons);
+        new_cons->th_cons = copy_threshold_constraints(constraints->th_cons, constraints->n_th_cons);
     if (constraints->hr_cons != nullptr)
-        new_cons->hr_cons = copy_hierarchy_constraints(constraints->hr_cons);
+        new_cons->hr_cons = copy_hierarchy_constraints(constraints->hr_cons, constraints->n_hr_cons, constraints->n_hr_features);
     if (constraints->out_cons != nullptr)
-        new_cons->out_cons = copy_output_constraints(constraints->out_cons, output_dim);
+        new_cons->out_cons = copy_output_constraints(constraints->out_cons, constraints->n_out_cons, output_dim);
     new_cons->n_cons = constraints->n_cons;
+    new_cons->n_th_cons = constraints->n_th_cons;
+    new_cons->n_hr_cons = constraints->n_hr_cons;
+    new_cons->n_hr_features = constraints->n_hr_features;
+    new_cons->n_out_cons = constraints->n_out_cons;
 
     return new_cons;
 }
 
-thresholdConstraints* allocate_threshold_constraints(int n_constraints){
-    thresholdConstraints *constraints = new thresholdConstraints;
-    constraints->feature_indices = new int[n_constraints];
-    constraints->feature_values = new float[n_constraints];
-    constraints->constraint_values = new float[n_constraints];
-    constraints->is_numerics = new bool[n_constraints];
-    constraints->inequality_directions = new bool[n_constraints];
-    constraints->satisfied = new bool[n_constraints];
-    memset(constraints->satisfied, 0, n_constraints * sizeof(bool));
-    constraints->categorical_values = new char[n_constraints*MAX_CHAR_SIZE];
-    constraints->n_cons = n_constraints;
+thresholdConstraints* allocate_threshold_constraints(const int n_th_cons){
+    thresholdConstraints *th_cons = new thresholdConstraints;
+    th_cons->feature_indices = new int[n_th_cons];
+    th_cons->feature_values = new float[n_th_cons];
+    th_cons->constraint_values = new float[n_th_cons];
+    th_cons->is_numerics = new bool[n_th_cons];
+    th_cons->inequality_directions = new bool[n_th_cons];
+    th_cons->satisfied = new bool[n_th_cons];
+    memset(th_cons->satisfied, 0, n_th_cons * sizeof(bool));
+    th_cons->categorical_values = new char[n_th_cons*MAX_CHAR_SIZE];
 
-    return constraints;
+    return th_cons;
 }
 
-void deallocate_threshold_constraints(thresholdConstraints* constraints){
-    delete[] constraints->feature_indices;
-    delete[] constraints->feature_values;
-    delete[] constraints->constraint_values;
-    delete[] constraints->is_numerics;
-    delete[] constraints->satisfied;
-    delete[] constraints->inequality_directions;
-    delete[] constraints->categorical_values;
-    delete constraints;
+void deallocate_threshold_constraints(thresholdConstraints* th_cons){
+    delete[] th_cons->feature_indices;
+    delete[] th_cons->feature_values;
+    delete[] th_cons->constraint_values;
+    delete[] th_cons->is_numerics;
+    delete[] th_cons->satisfied;
+    delete[] th_cons->inequality_directions;
+    delete[] th_cons->categorical_values;
+    delete th_cons;
 }
 
-hierarchyConstraints* allocate_hierarchy_constraints(int n_constraints, int n_features){
-    hierarchyConstraints *constraints = new hierarchyConstraints;
-    constraints->feature_indices = new int[n_constraints];
-    constraints->dep_count = new int[n_constraints];
-    constraints->dep_features = new int[n_features];
-    constraints->is_numerics = new bool[n_constraints];
-    constraints->n_cons = n_constraints;
-    constraints->n_features = n_features;
+hierarchyConstraints* allocate_hierarchy_constraints(const int n_hr_cons, const int n_hr_features){
+    hierarchyConstraints *hr_cons = new hierarchyConstraints;
+    hr_cons->feature_indices = new int[n_hr_cons];
+    hr_cons->dep_count = new int[n_hr_cons];
+    hr_cons->dep_features = new int[n_hr_features];
+    hr_cons->is_numerics = new bool[n_hr_cons];
 
-    return constraints;
+    return hr_cons;
 }
 
-float get_threshold_score(float crnt_score, thresholdConstraints* th_cons, const splitCandidate &split_candidate){
+float get_threshold_score(float crnt_score, thresholdConstraints* th_cons, const splitCandidate &split_candidate, const int n_th_cons, bool *th_cons_satisfied){
     if (!th_cons) return crnt_score;
-    for (int i = 0; i < th_cons->n_cons; ++i){
-        if (th_cons->satisfied[i] || split_candidate.feature_idx != th_cons->feature_indices[i]) 
+    for (int i = 0; i < n_th_cons; ++i){
+        if (th_cons_satisfied[i] || split_candidate.feature_idx != th_cons->feature_indices[i]) 
             continue; // Skip already satisfied constraints and irrelevant indices
 
         bool numerical_cond = th_cons->is_numerics[i] && 
@@ -90,41 +95,40 @@ float get_threshold_score(float crnt_score, thresholdConstraints* th_cons, const
         bool categorical_cond = !th_cons->is_numerics[i] && (th_cons->inequality_directions[i] != (strcmp(th_cons->categorical_values + i* MAX_CHAR_SIZE, split_candidate.categorical_value)));
         if (numerical_cond || categorical_cond){
             crnt_score *=th_cons->constraint_values[i];
-            th_cons->satisfied[i] = true;  
+            th_cons_satisfied[i] = true;  
         }
     }
     return crnt_score;
 }
 
-void deallocate_hierarchy_constraints(hierarchyConstraints* constraints){
-    delete[] constraints->feature_indices;
-    delete[] constraints->dep_count;
-    delete[] constraints->dep_features;
-    delete[] constraints->is_numerics;
-    delete constraints;
+void deallocate_hierarchy_constraints(hierarchyConstraints* hr_cons){
+    delete[] hr_cons->feature_indices;
+    delete[] hr_cons->dep_count;
+    delete[] hr_cons->dep_features;
+    delete[] hr_cons->is_numerics;
+    delete hr_cons;
 }
 
-outputConstraints* allocate_output_constraints(int n_constraints, int output_dim){
-    outputConstraints *constraints = new outputConstraints;
-    constraints->feature_indices = new int[n_constraints];
-    constraints->feature_values = new float[n_constraints];
-    constraints->output_values = new float[n_constraints*output_dim];
-    constraints->is_numerics = new bool[n_constraints];
-    constraints->inequality_directions = new bool[n_constraints];
-    constraints->categorical_values = new char[n_constraints*MAX_CHAR_SIZE];
-    constraints->n_cons = n_constraints;
+outputConstraints* allocate_output_constraints(const int n_out_cons, const int output_dim){
+    outputConstraints *out_cons = new outputConstraints;
+    out_cons->feature_indices = new int[n_out_cons];
+    out_cons->feature_values = new float[n_out_cons];
+    out_cons->output_values = new float[n_out_cons*output_dim];
+    out_cons->is_numerics = new bool[n_out_cons];
+    out_cons->inequality_directions = new bool[n_out_cons];
+    out_cons->categorical_values = new char[n_out_cons*MAX_CHAR_SIZE];
 
-    return constraints;
+    return out_cons;
 }
 
-void deallocate_output_constraints(outputConstraints* constraints){
-    delete[] constraints->feature_indices;
-    delete[] constraints->feature_values;
-    delete[] constraints->output_values;
-    delete[] constraints->is_numerics;
-    delete[] constraints->inequality_directions;
-    delete[] constraints->categorical_values;
-    delete constraints;
+void deallocate_output_constraints(outputConstraints* out_cons){
+    delete[] out_cons->feature_indices;
+    delete[] out_cons->feature_values;
+    delete[] out_cons->output_values;
+    delete[] out_cons->is_numerics;
+    delete[] out_cons->inequality_directions;
+    delete[] out_cons->categorical_values;
+    delete out_cons;
 }
 
 void add_feature_constraint(featureConstraints *constraints, int feature_idx, float feature_value,
@@ -143,18 +147,17 @@ void add_feature_constraint(featureConstraints *constraints, int feature_idx, fl
 }
 
 
-thresholdConstraints* copy_threshold_constraints(const thresholdConstraints* th_cons){
+thresholdConstraints* copy_threshold_constraints(const thresholdConstraints* th_cons, const int n_th_cons){
     if (th_cons == nullptr)
         return nullptr;
 
-    int n_cons = th_cons->n_cons;
-    thresholdConstraints *new_th_cons = allocate_threshold_constraints(n_cons);
-    memcpy(new_th_cons->feature_indices, th_cons->feature_indices, n_cons*sizeof(int));
-    memcpy(new_th_cons->inequality_directions, th_cons->inequality_directions, n_cons*sizeof(bool));
-    memcpy(new_th_cons->is_numerics, th_cons->is_numerics,n_cons*sizeof(bool));
-    memcpy(new_th_cons->constraint_values, th_cons->constraint_values, n_cons*sizeof(float));
-    memcpy(new_th_cons->feature_values, th_cons->feature_values, n_cons*sizeof(float));
-    memcpy(new_th_cons->categorical_values, th_cons->categorical_values, n_cons*sizeof(char)*MAX_CHAR_SIZE);
+    thresholdConstraints *new_th_cons = allocate_threshold_constraints(n_th_cons);
+    memcpy(new_th_cons->feature_indices, th_cons->feature_indices, n_th_cons*sizeof(int));
+    memcpy(new_th_cons->inequality_directions, th_cons->inequality_directions, n_th_cons*sizeof(bool));
+    memcpy(new_th_cons->is_numerics, th_cons->is_numerics,n_th_cons*sizeof(bool));
+    memcpy(new_th_cons->constraint_values, th_cons->constraint_values, n_th_cons*sizeof(float));
+    memcpy(new_th_cons->feature_values, th_cons->feature_values, n_th_cons*sizeof(float));
+    memcpy(new_th_cons->categorical_values, th_cons->categorical_values, n_th_cons*sizeof(char)*MAX_CHAR_SIZE);
 
     return new_th_cons;
 }
@@ -163,61 +166,62 @@ void add_threshold_constraint(featureConstraints *constraints, int feature_idx, 
                     const char *categorical_value, bool inequality_direction, bool is_numeric, 
                     float constraint_value){
 
-    int n_cons = (constraints->th_cons == nullptr) ? 1 : constraints->th_cons->n_cons + 1;
-    thresholdConstraints *th_cons = allocate_threshold_constraints(n_cons);
+    int n_th_cons = constraints->n_th_cons + 1;
+    thresholdConstraints *new_th_cons = allocate_threshold_constraints(n_th_cons);
     if (constraints->th_cons != nullptr){ 
-        memcpy(th_cons->feature_indices, constraints->th_cons->feature_indices, (n_cons-1)*sizeof(int));
-        memcpy(th_cons->inequality_directions, constraints->th_cons->inequality_directions, (n_cons-1)*sizeof(bool));
-        memcpy(th_cons->is_numerics, constraints->th_cons->is_numerics, (n_cons-1)*sizeof(bool));
-        memcpy(th_cons->constraint_values, constraints->th_cons->constraint_values, (n_cons-1)*sizeof(float));
-        memcpy(th_cons->feature_values, constraints->th_cons->feature_values, (n_cons-1)*sizeof(float));
-        memcpy(th_cons->categorical_values, constraints->th_cons->categorical_values, (n_cons-1)*sizeof(char)*MAX_CHAR_SIZE);
+        memcpy(new_th_cons->feature_indices, constraints->th_cons->feature_indices, (n_th_cons-1)*sizeof(int));
+        memcpy(new_th_cons->inequality_directions, constraints->th_cons->inequality_directions, (n_th_cons-1)*sizeof(bool));
+        memcpy(new_th_cons->is_numerics, constraints->th_cons->is_numerics, (n_th_cons-1)*sizeof(bool));
+        memcpy(new_th_cons->constraint_values, constraints->th_cons->constraint_values, (n_th_cons-1)*sizeof(float));
+        memcpy(new_th_cons->feature_values, constraints->th_cons->feature_values, (n_th_cons-1)*sizeof(float));
+        memcpy(new_th_cons->categorical_values, constraints->th_cons->categorical_values, (n_th_cons-1)*sizeof(char)*MAX_CHAR_SIZE);
         
         deallocate_threshold_constraints(constraints->th_cons);
     }
-    th_cons->feature_indices[n_cons-1] = feature_idx;
-    th_cons->feature_values[n_cons-1] = feature_value;
-    th_cons->constraint_values[n_cons-1] = constraint_value;
-    th_cons->inequality_directions[n_cons-1] = inequality_direction;
+    new_th_cons->feature_indices[n_th_cons-1] = feature_idx;
+    new_th_cons->feature_values[n_th_cons-1] = feature_value;
+    new_th_cons->constraint_values[n_th_cons-1] = constraint_value;
+    new_th_cons->inequality_directions[n_th_cons-1] = inequality_direction;
     if (categorical_value != nullptr) 
-        memcpy(th_cons->categorical_values + (n_cons-1)*MAX_CHAR_SIZE, categorical_value, sizeof(char)*MAX_CHAR_SIZE);
-    th_cons->is_numerics[n_cons-1] = is_numeric;
-    constraints->th_cons = th_cons;
+        memcpy(new_th_cons->categorical_values + (n_th_cons-1)*MAX_CHAR_SIZE, categorical_value, sizeof(char)*MAX_CHAR_SIZE);
+    new_th_cons->is_numerics[n_th_cons-1] = is_numeric;
+    constraints->th_cons = new_th_cons;
+    constraints->n_th_cons = n_th_cons;
 }
 
 void add_hierarchy_constraint(featureConstraints *constraints, int feature_idx,  bool is_numeric, int* dependent_features, int n_features){
     
-    int n_cons = (constraints->hr_cons == nullptr) ? 1 : constraints->hr_cons->n_cons + 1;
-    int old_n_features = (constraints->hr_cons == nullptr) ? 0 : constraints->hr_cons->n_features;
+    int n_hr_cons = constraints->n_hr_cons + 1;
+    int old_n_features = constraints->n_hr_features;
     int total_n_features = old_n_features + n_features;
-    hierarchyConstraints *hr_cons = allocate_hierarchy_constraints(n_cons, total_n_features);
+    hierarchyConstraints *new_hr_cons = allocate_hierarchy_constraints(n_hr_cons, total_n_features);
     if (constraints->hr_cons != nullptr){ 
-        memcpy(hr_cons->feature_indices, constraints->hr_cons->feature_indices, (n_cons-1)*sizeof(int));
-        memcpy(hr_cons->dep_count, constraints->hr_cons->dep_count, (n_cons-1)*sizeof(int));
-        memcpy(hr_cons->dep_features, constraints->hr_cons->dep_features, old_n_features*sizeof(int));
-        memcpy(hr_cons->is_numerics, constraints->hr_cons->is_numerics, (n_cons-1)*sizeof(bool));
+        memcpy(new_hr_cons->feature_indices, constraints->hr_cons->feature_indices, (n_hr_cons-1)*sizeof(int));
+        memcpy(new_hr_cons->dep_count, constraints->hr_cons->dep_count, (n_hr_cons-1)*sizeof(int));
+        memcpy(new_hr_cons->dep_features, constraints->hr_cons->dep_features, old_n_features*sizeof(int));
+        memcpy(new_hr_cons->is_numerics, constraints->hr_cons->is_numerics, (n_hr_cons-1)*sizeof(bool));
         
         deallocate_hierarchy_constraints(constraints->hr_cons);
     }
-    hr_cons->feature_indices[n_cons-1] = feature_idx;
-    hr_cons->dep_count[n_cons-1] = n_features;
-    hr_cons->is_numerics[n_cons-1] = is_numeric;
-    memcpy(hr_cons->dep_features + old_n_features, dependent_features, sizeof(int)*n_features);
+    new_hr_cons->feature_indices[n_hr_cons-1] = feature_idx;
+    new_hr_cons->dep_count[n_hr_cons-1] = n_features;
+    new_hr_cons->is_numerics[n_hr_cons-1] = is_numeric;
+    memcpy(new_hr_cons->dep_features + old_n_features, dependent_features, sizeof(int)*n_features);
     
-    constraints->hr_cons = hr_cons;
+    constraints->hr_cons = new_hr_cons;
+    constraints->n_hr_cons = n_hr_cons;
+    constraints->n_hr_features = total_n_features;
 }
 
-hierarchyConstraints* copy_hierarchy_constraints(const hierarchyConstraints* hr_cons){
+hierarchyConstraints* copy_hierarchy_constraints(const hierarchyConstraints* hr_cons, const int n_hr_cons, const int n_hr_features){
     if (hr_cons == nullptr)
         return nullptr;
 
-    int n_cons = hr_cons->n_cons;
-    int n_features = hr_cons->n_features;
-    hierarchyConstraints *new_hr_cons = allocate_hierarchy_constraints(n_cons, n_features);
-    memcpy(new_hr_cons->feature_indices, hr_cons->feature_indices, n_cons*sizeof(int));
-    memcpy(new_hr_cons->dep_count, hr_cons->dep_count, n_cons*sizeof(int));
-    memcpy(new_hr_cons->is_numerics, hr_cons->is_numerics,n_cons*sizeof(bool));
-    memcpy(new_hr_cons->dep_features, hr_cons->dep_features, n_features*sizeof(int));
+    hierarchyConstraints *new_hr_cons = allocate_hierarchy_constraints(n_hr_cons, n_hr_features);
+    memcpy(new_hr_cons->feature_indices, hr_cons->feature_indices, n_hr_cons*sizeof(int));
+    memcpy(new_hr_cons->dep_count, hr_cons->dep_count, n_hr_cons*sizeof(int));
+    memcpy(new_hr_cons->is_numerics, hr_cons->is_numerics,n_hr_cons*sizeof(bool));
+    memcpy(new_hr_cons->dep_features, hr_cons->dep_features, n_hr_features*sizeof(int));
 
     return new_hr_cons;
 }
@@ -225,40 +229,40 @@ hierarchyConstraints* copy_hierarchy_constraints(const hierarchyConstraints* hr_
 void add_output_constraint(featureConstraints *constraints, int feature_idx, float feature_value,
                     const char *categorical_value, bool inequality_direction, bool is_numeric, float* output_values, int output_dim){
     
-    int n_cons = (constraints->out_cons == nullptr) ? 1 : constraints->out_cons->n_cons + 1;
-    outputConstraints *out_cons = allocate_output_constraints(n_cons, output_dim);
+    int n_out_cons = constraints->n_out_cons + 1;
+    outputConstraints *new_out_cons = allocate_output_constraints(n_out_cons, output_dim);
     if (constraints->out_cons != nullptr){ 
-        memcpy(out_cons->feature_indices, constraints->out_cons->feature_indices, (n_cons-1)*sizeof(int));
-        memcpy(out_cons->inequality_directions, constraints->out_cons->inequality_directions, (n_cons-1)*sizeof(bool));
-        memcpy(out_cons->is_numerics, constraints->out_cons->is_numerics, (n_cons-1)*sizeof(bool));
-        memcpy(out_cons->output_values, constraints->out_cons->output_values, (n_cons-1)*sizeof(float)*output_dim);
-        memcpy(out_cons->feature_values, constraints->out_cons->feature_values, (n_cons-1)*sizeof(float));
-        memcpy(out_cons->categorical_values, constraints->out_cons->categorical_values, (n_cons-1)*sizeof(char)*MAX_CHAR_SIZE);
+        memcpy(new_out_cons->feature_indices, constraints->out_cons->feature_indices, (n_out_cons-1)*sizeof(int));
+        memcpy(new_out_cons->inequality_directions, constraints->out_cons->inequality_directions, (n_out_cons-1)*sizeof(bool));
+        memcpy(new_out_cons->is_numerics, constraints->out_cons->is_numerics, (n_out_cons-1)*sizeof(bool));
+        memcpy(new_out_cons->output_values, constraints->out_cons->output_values, (n_out_cons-1)*sizeof(float)*output_dim);
+        memcpy(new_out_cons->feature_values, constraints->out_cons->feature_values, (n_out_cons-1)*sizeof(float));
+        memcpy(new_out_cons->categorical_values, constraints->out_cons->categorical_values, (n_out_cons-1)*sizeof(char)*MAX_CHAR_SIZE);
         
         deallocate_output_constraints(constraints->out_cons);
     }
-    out_cons->feature_indices[n_cons-1] = feature_idx;
-    out_cons->feature_values[n_cons-1] = feature_value;
-    memcpy(out_cons->output_values + (n_cons-1)*output_dim, output_values, sizeof(float)*output_dim);
-    out_cons->inequality_directions[n_cons-1] = inequality_direction;
+    new_out_cons->feature_indices[n_out_cons-1] = feature_idx;
+    new_out_cons->feature_values[n_out_cons-1] = feature_value;
+    memcpy(new_out_cons->output_values + (n_out_cons-1)*output_dim, output_values, sizeof(float)*output_dim);
+    new_out_cons->inequality_directions[n_out_cons-1] = inequality_direction;
     if (categorical_value != nullptr)
-        memcpy(out_cons->categorical_values + (n_cons-1)*MAX_CHAR_SIZE, categorical_value, sizeof(char)*MAX_CHAR_SIZE);
-    out_cons->is_numerics[n_cons-1] = is_numeric;
-    constraints->out_cons = out_cons;
+        memcpy(new_out_cons->categorical_values + (n_out_cons-1)*MAX_CHAR_SIZE, categorical_value, sizeof(char)*MAX_CHAR_SIZE);
+    new_out_cons->is_numerics[n_out_cons-1] = is_numeric;
+    constraints->out_cons = new_out_cons;
+    constraints->n_out_cons = n_out_cons;
 }
 
-outputConstraints* copy_output_constraints(const outputConstraints* out_cons, const int output_dim){
+outputConstraints* copy_output_constraints(const outputConstraints* out_cons, const int n_out_cons, const int output_dim){
     if (out_cons == nullptr)
         return nullptr;
 
-    int n_cons = out_cons->n_cons;
-    outputConstraints *new_out_cons = allocate_output_constraints(n_cons, output_dim);
-    memcpy(new_out_cons->feature_indices, out_cons->feature_indices, n_cons*sizeof(int));
-    memcpy(new_out_cons->inequality_directions, out_cons->inequality_directions, n_cons*sizeof(bool));
-    memcpy(new_out_cons->is_numerics, out_cons->is_numerics,n_cons*sizeof(bool));
-    memcpy(new_out_cons->output_values, out_cons->output_values, n_cons*sizeof(float)*output_dim);
-    memcpy(new_out_cons->feature_values, out_cons->feature_values, n_cons*sizeof(float));
-    memcpy(new_out_cons->categorical_values, out_cons->categorical_values, n_cons*sizeof(char)*MAX_CHAR_SIZE);
+    outputConstraints *new_out_cons = allocate_output_constraints(n_out_cons, output_dim);
+    memcpy(new_out_cons->feature_indices, out_cons->feature_indices, n_out_cons*sizeof(int));
+    memcpy(new_out_cons->inequality_directions, out_cons->inequality_directions, n_out_cons*sizeof(bool));
+    memcpy(new_out_cons->is_numerics, out_cons->is_numerics,n_out_cons*sizeof(bool));
+    memcpy(new_out_cons->output_values, out_cons->output_values, n_out_cons*sizeof(float)*output_dim);
+    memcpy(new_out_cons->feature_values, out_cons->feature_values, n_out_cons*sizeof(float));
+    memcpy(new_out_cons->categorical_values, out_cons->categorical_values, n_out_cons*sizeof(char)*MAX_CHAR_SIZE);
 
     return new_out_cons;
 }
@@ -280,9 +284,9 @@ void deallocate_constraints(featureConstraints* constraints){
     delete constraints;
 }
 
-void print_threshold_constraints(thresholdConstraints * th_cons){
-    std::cout << "#### " << th_cons->n_cons  << " threshold constraints #######" << std::endl;
-    for (int i = 0; i < th_cons->n_cons; ++i){
+void print_threshold_constraints(const thresholdConstraints * th_cons, const int n_th_cons){
+    std::cout << "#### " << n_th_cons  << " threshold constraints #######" << std::endl;
+    for (int i = 0; i < n_th_cons; ++i){
         std::cout << "constraint: " << i + 1 << " - feature_idx: " << th_cons->feature_indices[i];
         std::cout << " constraint value: " << th_cons->constraint_values[i];
         if (th_cons->is_numerics[i]){
@@ -310,7 +314,7 @@ void save_constraints(std::ofstream& file, featureConstraints *constraints, int 
     NULL_CHECK check = constraints->th_cons != nullptr ? VALID : NULL_OPT;
     file.write(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
     if (constraints->th_cons != nullptr){
-        int n_th_cons = constraints->th_cons->n_cons;
+        int n_th_cons = constraints->n_th_cons;
         file.write(reinterpret_cast<char*>(&n_th_cons), sizeof(int));
         file.write(reinterpret_cast<char*>(constraints->th_cons->feature_indices), n_th_cons * sizeof(int));
         file.write(reinterpret_cast<char*>(constraints->th_cons->feature_values), n_th_cons * sizeof(float));
@@ -323,8 +327,8 @@ void save_constraints(std::ofstream& file, featureConstraints *constraints, int 
     check = constraints->hr_cons != nullptr ? VALID : NULL_OPT;
     file.write(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
     if (constraints->hr_cons != nullptr){
-        int n_hr_cons = constraints->hr_cons->n_cons;
-        int n_hr_features = constraints->hr_cons->n_features;
+        int n_hr_cons = constraints->n_hr_cons;
+        int n_hr_features = constraints->n_hr_features;
         file.write(reinterpret_cast<char*>(&n_hr_cons), sizeof(int));
         file.write(reinterpret_cast<char*>(&n_hr_features), sizeof(int));
         file.write(reinterpret_cast<char*>(constraints->hr_cons->feature_indices), n_hr_cons * sizeof(int));
@@ -335,7 +339,7 @@ void save_constraints(std::ofstream& file, featureConstraints *constraints, int 
     check = constraints->out_cons != nullptr ? VALID : NULL_OPT;
     file.write(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
     if (constraints->out_cons != nullptr){
-        int n_out_cons = constraints->out_cons->n_cons;
+        int n_out_cons = constraints->n_out_cons;
         file.write(reinterpret_cast<char*>(&n_out_cons), sizeof(int));
         file.write(reinterpret_cast<char*>(constraints->out_cons->feature_indices), n_out_cons * sizeof(int));
         file.write(reinterpret_cast<char*>(constraints->out_cons->feature_values), n_out_cons * sizeof(float));
@@ -362,6 +366,7 @@ featureConstraints* load_constraints(std::ifstream& file, int output_dim){
     if (check == VALID) {
         int n_th_cons;
         file.read(reinterpret_cast<char*>(&n_th_cons), sizeof(int));
+        constraints->n_th_cons = n_th_cons;
         th_cons = allocate_threshold_constraints(n_th_cons);
         file.read(reinterpret_cast<char*>(th_cons->feature_indices), n_th_cons * sizeof(int));
         file.read(reinterpret_cast<char*>(th_cons->feature_values), n_th_cons * sizeof(float));
@@ -376,8 +381,10 @@ featureConstraints* load_constraints(std::ifstream& file, int output_dim){
     if (check == VALID) {
         int n_hr_cons;
         file.read(reinterpret_cast<char*>(&n_hr_cons), sizeof(int));
+        constraints->n_hr_cons = n_hr_cons;
         int n_hr_features;
         file.read(reinterpret_cast<char*>(&n_hr_features), sizeof(int));
+        constraints->n_hr_features = n_hr_features;
         hr_cons = allocate_hierarchy_constraints(n_hr_cons, n_hr_features);
         file.read(reinterpret_cast<char*>(hr_cons->feature_indices), n_hr_cons * sizeof(int));
         file.read(reinterpret_cast<char*>(hr_cons->dep_count), n_hr_cons * sizeof(int));
@@ -388,6 +395,7 @@ featureConstraints* load_constraints(std::ifstream& file, int output_dim){
     if (check == VALID) {
         int n_out_cons;
         file.read(reinterpret_cast<char*>(&n_out_cons), sizeof(int));
+        constraints->n_out_cons = n_out_cons;
         out_cons = allocate_output_constraints(n_out_cons, output_dim);
         file.read(reinterpret_cast<char*>(out_cons->feature_indices), n_out_cons * sizeof(int));
         file.read(reinterpret_cast<char*>(out_cons->feature_values), n_out_cons * sizeof(float));
@@ -408,10 +416,10 @@ featureConstraints* load_constraints(std::ifstream& file, int output_dim){
     return constraints;
 }
 
-void print_hierarchy_constraints(hierarchyConstraints * hr_cons){
-    std::cout << "#### " << hr_cons->n_cons << " hierarchy constraints #######" << std::endl;
+void print_hierarchy_constraints(const hierarchyConstraints * hr_cons, const int n_hr_cons, const int n_hr_features){
+    std::cout << "#### " << n_hr_cons << " hierarchy constraints #######" << std::endl;
     int cumsum = 0;
-    for (int i = 0; i < hr_cons->n_cons; ++i){
+    for (int i = 0; i < n_hr_cons; ++i){
         std::cout << "constraint: " << i + 1 << " - feature_idx: " << hr_cons->feature_indices[i];
         if (hr_cons->is_numerics[i]){
             std::cout << " numerical constraint with ";
@@ -427,12 +435,12 @@ void print_hierarchy_constraints(hierarchyConstraints * hr_cons){
         std::cout << "]" << std::endl;
         cumsum += hr_cons->dep_count[i];
     }
-    std::cout << "total features: " << hr_cons->n_features << std::endl;
+    std::cout << "total features: " << n_hr_features << std::endl;
 }
 
-void print_output_constraints(outputConstraints * out_cons, int output_dim){
-    std::cout << "#### " << out_cons->n_cons << " output constraints #######" << std::endl;
-    for (int i = 0; i < out_cons->n_cons; ++i){
+void print_output_constraints(const outputConstraints *out_cons, const int n_out_cons, const int output_dim){
+    std::cout << "#### " << n_out_cons << " output constraints #######" << std::endl;
+    for (int i = 0; i < n_out_cons; ++i){
         std::cout << "constraint: " << i + 1 << " - feature_idx: " << out_cons->feature_indices[i];
         if (out_cons->is_numerics[i]){
             std::cout << " numerical constraint - feature_value";

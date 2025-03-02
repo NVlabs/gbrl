@@ -561,9 +561,9 @@ void GBRL::_step_gpu(dataSet *dataset){
     candidatesData candidata{n_candidates, candidate_indices, candidate_values, candidate_numerical, candidate_categories};
     splitDataGPU *split_data = allocate_split_data(this->metadata, candidata.n_candidates);  
     if (this->metadata->grow_policy == GREEDY)
-        fit_tree_greedy_cuda(&cuda_dataset, this->edata, this->metadata, &candidata, split_data);
+        fit_tree_greedy_cuda(&cuda_dataset, this->edata, this->metadata, &candidata, split_data, this->constraints);
     else
-        fit_tree_oblivious_cuda(&cuda_dataset, this->edata, this->metadata, &candidata, split_data);
+        fit_tree_oblivious_cuda(&cuda_dataset, this->edata, this->metadata, &candidata, split_data, this->constraints);
     cudaFree(split_data->split_scores);
     delete split_data;
     cudaFree(device_memory_block);
@@ -663,9 +663,9 @@ float GBRL::_fit_gpu(dataSet *dataset, float *targets, const int n_iterations){
        cuda_dataset.obs = trans_obs;
        cuda_dataset.build_grads = gpu_build_grads;
         if (this->metadata->grow_policy == GREEDY)
-            fit_tree_greedy_cuda(&cuda_dataset, this->edata, this->metadata, &candidata, split_data);
+            fit_tree_greedy_cuda(&cuda_dataset, this->edata, this->metadata, &candidata, split_data, this->constraints);
         else
-            fit_tree_oblivious_cuda(&cuda_dataset, this->edata, this->metadata, &candidata, split_data);
+            fit_tree_oblivious_cuda(&cuda_dataset, this->edata, this->metadata, &candidata, split_data, this->constraints);
 
         ++this->metadata->iteration;
 

@@ -22,7 +22,7 @@
 #include "types.h"
 
 
-TreeNode::TreeNode(int *sample_indices, const int n_samples, const int n_num_features, const int n_cat_features, const int output_dim, const int depth, const int node_idx): 
+TreeNode::TreeNode(int *sample_indices, const int n_samples, const int n_num_features, const int n_cat_features, const int output_dim, const int depth, const int node_idx, const int n_th_cons): 
             sample_indices(sample_indices), n_samples(n_samples), n_num_features(n_num_features), n_cat_features(n_cat_features),
             output_dim(output_dim), depth(depth), node_idx(node_idx), feature_value(0.0),
             feature_idx(0){
@@ -31,6 +31,10 @@ TreeNode::TreeNode(int *sample_indices, const int n_samples, const int n_num_fea
         for (int d = 0; d < depth; d++){
             this->split_conditions[d].categorical_value = nullptr;
         }
+    }
+    if (n_th_cons > 0){
+        this->th_cons_satisfied = new bool[n_th_cons];
+        memset(this->th_cons_satisfied, 0, n_th_cons * sizeof(bool));
     }
 }
 
@@ -48,6 +52,9 @@ TreeNode::~TreeNode(){
         delete[] this->split_conditions;
         this->split_conditions = nullptr;
     }
+
+    if (this->th_cons_satisfied != nullptr)
+        delete[] this->th_cons_satisfied;
     
     delete this->left_child;        // Delete left child node
     delete this->right_child;       // Delete right child node
@@ -57,7 +64,7 @@ TreeNode::~TreeNode(){
 
 }
 
-int TreeNode::splitNode(const float *obs, const char *categorical_obs, const int _node_idx, const splitCandidate &split_candidate){
+int TreeNode::splitNode(const float *obs, const char *categorical_obs, const int _node_idx, const splitCandidate &split_candidate, const int n_th_cons){
     std::vector<int> pre_left_indices(this->n_samples), pre_right_indices(this->n_samples);
     int left_count = 0, right_count = 0;
     bool is_categorical = split_candidate.categorical_value != nullptr;
@@ -95,7 +102,7 @@ int TreeNode::splitNode(const float *obs, const char *categorical_obs, const int
     int *left_indices = new int[left_count];
     std::copy(pre_left_indices.begin(), pre_left_indices.begin() + left_count, left_indices);
 
-    this->left_child = new TreeNode(left_indices, left_count, this->n_num_features, this->n_cat_features, this->output_dim, this->depth + 1, _node_idx + 1);
+    this->left_child = new TreeNode(left_indices, left_count, this->n_num_features, this->n_cat_features, this->output_dim, this->depth + 1, _node_idx + 1, n_th_cons);
     if (this->left_child == nullptr) {
         std::cerr << "Memory allocation failed" << std::endl;
         delete[] left_indices;
@@ -103,7 +110,7 @@ int TreeNode::splitNode(const float *obs, const char *categorical_obs, const int
     }
     int *right_indices = new int[right_count];
     std::copy(pre_right_indices.begin(), pre_right_indices.begin() + right_count, right_indices);
-    this->right_child = new TreeNode(right_indices, right_count, this->n_num_features, this->n_cat_features, this->output_dim, this->depth + 1, _node_idx + 2);
+    this->right_child = new TreeNode(right_indices, right_count, this->n_num_features, this->n_cat_features, this->output_dim, this->depth + 1, _node_idx + 2, n_th_cons);
     if (this->right_child == nullptr) {
         std::cerr << "Memory allocation failed" << std::endl;
         delete[] right_indices;
@@ -140,6 +147,10 @@ int TreeNode::splitNode(const float *obs, const char *categorical_obs, const int
         std::copy(split_candidate.categorical_value, split_candidate.categorical_value + MAX_CHAR_SIZE, this->right_child->split_conditions[this->depth].categorical_value);
     }
     this->right_child->split_conditions[this->depth].inequality_direction = true;
+    if (n_th_cons > 0){
+        std::copy(this->th_cons_satisfied, this->th_cons_satisfied + n_th_cons, this->right_child->th_cons_satisfied);
+        std::copy(this->th_cons_satisfied, this->th_cons_satisfied + n_th_cons, this->left_child->th_cons_satisfied);
+    }
     return 0;
 }
 
@@ -162,7 +173,7 @@ float TreeNode::getSplitScore(dataSet *dataset, scoreFunc split_score_func, cons
 
     if (constraints != nullptr && constraints->hr_cons != nullptr){
         int cumsum = 0;
-        for (int i = 0; i < constraints->hr_cons->n_cons; ++i){
+        for (int i = 0; i < constraints->n_hr_cons; ++i){
             if (constraints->hr_cons->feature_indices[i] == split_candidate.feature_idx){
                 if (this->depth == 0)
                     return -INFINITY;

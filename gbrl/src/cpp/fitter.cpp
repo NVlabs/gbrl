@@ -238,15 +238,12 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
     float best_score, parent_score = -INFINITY;
     int n_samples = dataset->n_samples;
 
-    if (constraints != nullptr && constraints->th_cons != nullptr)
-        memset(constraints->th_cons->satisfied, 0, constraints->th_cons->n_cons * sizeof(bool));
-
     int added_leaves = 0;
     int *root_sample_indices = new int[n_samples];
     std::iota(root_sample_indices, root_sample_indices + n_samples, 0);
 
     std::vector<TreeNode*> tree_nodes; 
-    TreeNode *rootNode = new TreeNode(root_sample_indices, n_samples, metadata->n_num_features, metadata->n_cat_features, metadata->output_dim, depth, 0);
+    TreeNode *rootNode = new TreeNode(root_sample_indices, n_samples, metadata->n_num_features, metadata->n_cat_features, metadata->output_dim, depth, 0, constraints->n_th_cons);
     tree_nodes.push_back(rootNode);
 
     int n_candidates = generator.n_candidates;
@@ -311,7 +308,7 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
                     int feat_idx = (split_candidates[j].categorical_value == nullptr) ? split_candidates[j].feature_idx : split_candidates[j].feature_idx + metadata->n_num_features; 
                     score = score * edata->feature_weights[feat_idx] - parent_score;
                     if (constraints != nullptr)
-                        score = get_threshold_score(score, constraints->th_cons, split_candidates[j]);
+                        score = get_threshold_score(score, constraints->th_cons, split_candidates[j], constraints->n_th_cons, crnt_node->th_cons_satisfied);
 // #ifdef DEBUG
 //                     std::cout << " cand: " <<  j << " score: " <<  score << " parent score: " <<  parent_score << " info: " << split_candidates[j] << std::endl;
 // #endif 
@@ -335,7 +332,7 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
         }
 
         if (best_score >= 0 && to_split){           
-            int status = crnt_node->splitNode(dataset->obs, dataset->categorical_obs, node_idx_cntr, split_candidates[chosen_idx]);
+            int status = crnt_node->splitNode(dataset->obs, dataset->categorical_obs, node_idx_cntr, split_candidates[chosen_idx], constraints->n_th_cons);
             if (status == -1){
                 std::cerr << "ERROR couldn't split best score" << std::endl;
                 break;
@@ -358,9 +355,6 @@ int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMe
     allocate_ensemble_memory(metadata, edata);
     edata->tree_indices[metadata->n_trees] = metadata->n_leaves;
 
-    if (constraints != nullptr && constraints->th_cons != nullptr)
-        memset(constraints->th_cons->satisfied, 0, constraints->th_cons->n_cons * sizeof(bool));
-    
     int depth = 0, node_idx_cntr = 0, chosen_idx = 0;
     float best_score;
     int n_samples = dataset->n_samples;
@@ -375,7 +369,7 @@ int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMe
 
     std::vector<TreeNode*> tree_nodes(max_n_leaves); 
     std::vector<TreeNode*> child_tree_nodes(max_n_leaves); 
-    TreeNode *rootNode = new TreeNode(root_sample_indices, n_samples, metadata->n_num_features, metadata->n_cat_features, metadata->output_dim, depth, 0);
+    TreeNode *rootNode = new TreeNode(root_sample_indices, n_samples, metadata->n_num_features, metadata->n_cat_features, metadata->output_dim, depth, 0, constraints->n_th_cons);
     tree_nodes[0] = rootNode;
     float parent_score = 0.0f;
 
@@ -417,14 +411,16 @@ int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMe
             // Process the batch of candidates
             for (int j = start_idx; j < end_idx; ++j) {
                 float score = 0.0f;
+                
                 for (int node_idx = 0; node_idx < (1 << depth); ++node_idx){
                     crnt_node = tree_nodes[node_idx];
                     score += crnt_node->getSplitScore(dataset, metadata->split_score_func, split_candidates[j], metadata->min_data_in_leaf, constraints, used_features);
+                    if (constraints->th_cons != nullptr)
+                        score = get_threshold_score(score, constraints->th_cons, split_candidates[j], constraints->n_th_cons, crnt_node->th_cons_satisfied);
                 }
                 int feat_idx = (split_candidates[j].categorical_value == nullptr) ? split_candidates[j].feature_idx : split_candidates[j].feature_idx + metadata->n_num_features; 
                 score = score*edata->feature_weights[feat_idx] - parent_score;
-                if (constraints != nullptr)
-                    score = get_threshold_score(score, constraints->th_cons, split_candidates[j]);
+                
 // #ifdef DEBUG
 //                 std::cout << " cand: " <<  j << " score: " <<  score << " parent_score: " << parent_score <<  " info: " << split_candidates[j] << std::endl;
 // #endif
@@ -450,7 +446,7 @@ int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMe
         parent_score = best_score;
         for (int node_idx = 0; node_idx < (1 << depth); ++node_idx){
             TreeNode *crnt_node = tree_nodes[node_idx];
-            int status = crnt_node->splitNode(dataset->obs, dataset->categorical_obs, node_idx_cntr, split_candidates[chosen_idx]);
+            int status = crnt_node->splitNode(dataset->obs, dataset->categorical_obs, node_idx_cntr, split_candidates[chosen_idx], constraints->n_th_cons);
             if (status == -1){
                 std::cerr << "ERROR couldn't split best score" << std::endl;
                 break;

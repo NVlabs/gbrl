@@ -15,6 +15,7 @@
 #include "cuda_predictor.h"
 #include "cuda_utils.h"
 #include "cuda_types.h"
+#include "cuda_feature_constraints.h"
 
 #ifdef DEBUG
 __global__ void average_leaf_value_kernel(float* __restrict__ values, const int output_dim, int* __restrict__ n_samples, const int global_idx, const int leaf_idx, float *count){
@@ -124,11 +125,18 @@ __global__ void update_best_candidate_cuda(float *split_scores, int n_candidates
     }
 }
 
-void evaluate_greedy_splits(dataSet *dataset, ensembleData *edata, const TreeNodeGPU *node, candidatesData *candidata, ensembleMetaData *metadata, splitDataGPU* split_data, const int threads_per_block, const int parent_n_samples){
-     if (metadata->split_score_func == Cosine){
-        cudaMemset(split_data->split_scores, 0, split_data->size);
-        int n_blocks, tpb;
-        get_grid_dimensions(parent_n_samples*candidata->n_candidates, n_blocks, tpb);
+void evaluate_greedy_splits(dataSet *dataset, ensembleData *edata, const TreeNodeGPU *node, candidatesData *candidata, ensembleMetaData *metadata, splitDataGPU* split_data, const featureConstraints *constraints, const int threads_per_block, const int parent_n_samples){
+    
+    cudaMemset(split_data->split_scores, 0, split_data->size);
+    if (constraints->hr_cons != nullptr){
+        int dim1, dim2;
+        get_grid_dimensions(candidata->n_candidates, dim1, dim2);
+        check_hierarchical_candidates<<<dim1, dim2>>>(constraints->hr_cons, node, candidata->candidate_indices, split_data->split_scores, candidata->n_candidates);
+        cudaDeviceSynchronize();
+    } 
+    int n_blocks, tpb;
+    get_grid_dimensions(parent_n_samples*candidata->n_candidates, n_blocks, tpb);
+    if (metadata->split_score_func == Cosine){
         split_conditional_sum_kernel<<<n_blocks, tpb>>>(dataset->obs, dataset->categorical_obs, dataset->build_grads, node, candidata->candidate_indices, candidata->candidate_values, candidata->candidate_categories, candidata->candidate_numeric, candidata->n_candidates,  dataset->n_samples, split_data->left_sum, split_data->right_sum, split_data->left_count, split_data->right_count);
         cudaDeviceSynchronize();
         split_contidional_dot_kernel<<<n_blocks, tpb>>>(dataset->obs, dataset->categorical_obs, dataset->build_grads, node, candidata->candidate_indices, candidata->candidate_values, candidata->candidate_categories, candidata->candidate_numeric, candidata->n_candidates, dataset->n_samples,  split_data->left_sum,  split_data->right_sum, split_data->left_count, split_data->right_count, split_data->left_dot, split_data->right_dot);
@@ -137,9 +145,6 @@ void evaluate_greedy_splits(dataSet *dataset, ensembleData *edata, const TreeNod
         split_cosine_score_kernel<<<n_blocks, tpb>>>(node, edata->feature_weights, split_data->split_scores, candidata->candidate_indices, candidata->candidate_values, candidata->candidate_categories, candidata->candidate_numeric, candidata->n_candidates, split_data->left_sum, split_data->right_sum, split_data->left_count, split_data->right_count, split_data->left_dot, split_data->right_dot, metadata->min_data_in_leaf, metadata->n_num_features);
 
      } else if (metadata->split_score_func == L2){
-        cudaMemset(split_data->split_scores, 0, split_data->size);
-        int n_blocks, tpb;
-        get_grid_dimensions(parent_n_samples*candidata->n_candidates, n_blocks, tpb);
         split_conditional_sum_kernel<<<n_blocks, tpb>>>(dataset->obs, dataset->categorical_obs, dataset->build_grads, node, candidata->candidate_indices, candidata->candidate_values, candidata->candidate_categories, candidata->candidate_numeric, candidata->n_candidates,  dataset->n_samples, split_data->left_sum, split_data->right_sum, split_data->left_count, split_data->right_count);
         cudaDeviceSynchronize();
         get_grid_dimensions(candidata->n_candidates, n_blocks, tpb);
@@ -155,13 +160,19 @@ void evaluate_greedy_splits(dataSet *dataset, ensembleData *edata, const TreeNod
     cudaDeviceSynchronize();
 }
 
-void evaluate_oblivious_splits_cuda(dataSet *dataset, ensembleData *edata, TreeNodeGPU ** nodes, const int depth, candidatesData *candidata, ensembleMetaData *metadata, splitDataGPU *split_data){
+void evaluate_oblivious_splits_cuda(dataSet *dataset, ensembleData *edata, TreeNodeGPU ** nodes, const int depth, candidatesData *candidata, ensembleMetaData *metadata, splitDataGPU *split_data, const featureConstraints *constraints){
     
-    int threads_per_block;
+    int threads_per_block, dim1, dim2;
     int n_nodes = (1 << depth);
    
     calc_oblivious_parallelism(candidata->n_candidates, metadata->output_dim, threads_per_block, metadata->split_score_func, depth);
     for (int i = 0; i < n_nodes; ++i){
+        if (constraints->hr_cons != nullptr && i == 0){
+            get_grid_dimensions(candidata->n_candidates, dim1, dim2);
+            check_hierarchical_candidates<<<dim1, dim2>>>(constraints->hr_cons, nodes[i], candidata->candidate_indices, split_data->oblivious_split_scores, candidata->n_candidates);
+            cudaDeviceSynchronize();
+        }
+       
         if (metadata->split_score_func == Cosine){
             size_t shared_mem = sizeof(float)*2*(metadata->output_dim + 2)*threads_per_block;
             split_score_cosine_cuda<<<candidata->n_candidates, threads_per_block, shared_mem>>>(dataset->obs, dataset->categorical_obs, dataset->build_grads, edata->feature_weights, nodes[i], candidata->candidate_indices, candidata->candidate_values, candidata->candidate_categories, candidata->candidate_numeric, metadata->min_data_in_leaf, split_data->oblivious_split_scores + candidata->n_candidates*i, dataset->n_samples, metadata->n_num_features);
@@ -182,10 +193,16 @@ void evaluate_oblivious_splits_cuda(dataSet *dataset, ensembleData *edata, TreeN
     cudaDeviceSynchronize();
 }
 
+
+
 __global__ void split_score_cosine_cuda(const float* __restrict__ obs, const char* __restrict__ categorical_obs, const float* __restrict__ grads, const float* __restrict__ feature_weights, const TreeNodeGPU* __restrict__ node, const int* __restrict__ candidate_indices, const float* __restrict__ candidate_values, const char* __restrict__ candidate_categories, const bool* __restrict__ candidate_numeric, const int min_data_in_leaf, float* __restrict__ split_scores, const int global_n_samples, const int n_num_features){
     extern __shared__ float sdata[];
     int n_samples = __ldg(&node->n_samples), n_cols = __ldg(&node->output_dim);
     int cand_idx = blockIdx.x;
+
+    if (split_scores[cand_idx] == -INFINITY)
+        return;
+
     if (__ldg(&node->depth) > 0 && min_data_in_leaf == 0){
         if (candidate_numeric[cand_idx]){
             for (int i = 0; i < __ldg(&node->depth); ++i){
@@ -319,6 +336,9 @@ __global__ void split_score_l2_cuda(const float* __restrict__ obs, const char* _
 
     int n_samples = node->n_samples, n_cols = node->output_dim;
     int cand_idx = blockIdx.x;
+    if (split_scores[cand_idx] == -INFINITY)
+        return;
+
     if (node->depth > 0 && min_data_in_leaf == 0){
         if (candidate_numeric[cand_idx]){
             for (int i = 0; i < node->depth; ++i){
@@ -408,6 +428,7 @@ __global__ void split_score_l2_cuda(const float* __restrict__ obs, const char* _
 __global__ void split_conditional_sum_kernel(const float* __restrict__ obs, const char* __restrict__ categorical_obs, const float* __restrict__ grads, const TreeNodeGPU* __restrict__ node, const int* __restrict__ candidate_indices, const float* __restrict__ candidate_values,  const char* __restrict__ candidate_categories, const bool* __restrict__ candidate_numeric, const int n_candidates, const int global_n_samples, float* __restrict__ left_sum, float* __restrict__ right_sum, float* __restrict__ left_count, float* __restrict__ right_count){
     // Accumulate per thread partial sum
     int global_idx = threadIdx.x + blockIdx.x*blockDim.x;
+    int output_dim = __ldg(&node->output_dim);
     if (global_idx < __ldg(&node->n_samples) * n_candidates){
         int sample_row = global_idx / n_candidates;
         int cand_idx = global_idx % n_candidates; 
@@ -415,12 +436,12 @@ __global__ void split_conditional_sum_kernel(const float* __restrict__ obs, cons
         bool is_greater = (candidate_numeric[cand_idx] && __ldg(&obs[sample_idx +  global_n_samples * __ldg(&candidate_indices[cand_idx])]) > __ldg(&candidate_values[cand_idx])) || (!candidate_numeric[cand_idx] && strcmpCuda(&categorical_obs[(sample_idx*node->n_cat_features + candidate_indices[cand_idx])* MAX_CHAR_SIZE], candidate_categories + cand_idx * MAX_CHAR_SIZE) == 0);
         
         if (is_greater){
-            for (int d = 0; d < __ldg(&node->output_dim); ++d)
-                atomicAdd(right_sum + cand_idx*__ldg(&node->output_dim) + d, __ldg(&grads[sample_idx*__ldg(&node->output_dim) + d]));
+            for (int d = 0; d < output_dim; ++d)
+                atomicAdd(right_sum + cand_idx*output_dim + d, __ldg(&grads[sample_idx*output_dim + d]));
             atomicAdd(right_count + cand_idx, 1);
         } else {
-            for (int d = 0; d < __ldg(&node->output_dim); ++d)
-                atomicAdd(left_sum + cand_idx*__ldg(&node->output_dim) + d, __ldg(&grads[sample_idx*__ldg(&node->output_dim) + d]));
+            for (int d = 0; d < output_dim; ++d)
+                atomicAdd(left_sum + cand_idx*output_dim + d, __ldg(&grads[sample_idx*output_dim + d]));
             atomicAdd(left_count + cand_idx, 1);
         }
     }
@@ -459,6 +480,9 @@ __global__ void split_cosine_score_kernel(const TreeNodeGPU* __restrict__ node, 
     int n_cols = __ldg(&node->output_dim);
     int cand_row = cand_idx*n_cols;
     float lvalue, rvalue;
+
+    if (split_scores[cand_idx] == -INFINITY)
+        return;
     if (cand_idx < n_candidates){
         if (node->depth > 0 && min_data_in_leaf == 0){
             if (candidate_numeric[cand_idx]){
@@ -515,6 +539,10 @@ __global__ void split_l2_score_kernel(const TreeNodeGPU* __restrict__ node, cons
     int n_cols = __ldg(&node->output_dim);
     int cand_row = cand_idx*n_cols;
     float lvalue, rvalue;
+
+    if (split_scores[cand_idx] == -INFINITY)
+        return;
+        
     if (cand_idx < n_candidates){
         if (node->depth > 0 && min_data_in_leaf == 0){
             if (candidate_numeric[cand_idx]){
@@ -760,7 +788,7 @@ __global__ void node_cosine_kernel(TreeNodeGPU* node, const float *grads, float 
 }
 
 
-TreeNodeGPU* allocate_root_tree_node(dataSet *dataset, ensembleMetaData *metadata){
+TreeNodeGPU* allocate_root_tree_node(dataSet *dataset, ensembleMetaData *metadata, const featureConstraints *constraints){
     cudaError_t error;
     TreeNodeGPU* node;
     error = allocateCudaMemory((void**)&node, sizeof(TreeNodeGPU), "when trying to allocate TreeNodeGPU");
@@ -784,6 +812,7 @@ TreeNodeGPU* allocate_root_tree_node(dataSet *dataset, ensembleMetaData *metadat
     tempNode.inequality_directions = nullptr;
     tempNode.is_numerics = nullptr;
     tempNode.categorical_values = nullptr;
+    tempNode.th_cons_satisfied = nullptr;
 
     int *sample_indices;
     error = allocateCudaMemory((void**)&sample_indices, sizeof(int)*dataset->n_samples, "when trying to allocate root sample_indices");
@@ -791,17 +820,34 @@ TreeNodeGPU* allocate_root_tree_node(dataSet *dataset, ensembleMetaData *metadat
         cudaFree(node);
         return nullptr;
     }
+    if (constraints->n_th_cons > 0){
+        bool *th_cons_satisfied;
+        error = allocateCudaMemory((void**)&th_cons_satisfied, sizeof(bool)*constraints->n_th_cons, "when trying to allocate th_cons_satisfied");
+        if (error != cudaSuccess) {
+            cudaFree(node);
+            cudaFree(sample_indices);
+            return nullptr;
+        }
+        cudaMemset(th_cons_satisfied, 0, sizeof(bool)*constraints->n_th_cons);
+        tempNode.th_cons_satisfied = th_cons_satisfied;
+    }
     int n_blocks = dataset->n_samples / THREADS_PER_BLOCK + 1;
     iota_kernel<<<n_blocks, THREADS_PER_BLOCK>>>(sample_indices, dataset->n_samples);
     cudaDeviceSynchronize();
 
+    if (constraints->th_cons != nullptr){
+        reset_satisfied_kernel<<<1, THREADS_PER_BLOCK>>>(constraints->th_cons, node);
+        cudaDeviceSynchronize();
+    }
+
     cudaMemcpy(node, &tempNode, sizeof(TreeNodeGPU), cudaMemcpyHostToDevice);
     if (sample_indices != nullptr) 
         cudaMemcpy(&(node->sample_indices), &sample_indices, sizeof(int*), cudaMemcpyHostToDevice);
+
     return node;
 }
 
-void allocate_child_tree_node(TreeNodeGPU* host_parent, TreeNodeGPU** device_child){
+void allocate_child_tree_node(TreeNodeGPU* host_parent, TreeNodeGPU** device_child, const featureConstraints *constraints){
     TreeNodeGPU host_child;
     int n_samples = host_parent->n_samples;
     int depth = host_parent->depth + 1;
@@ -820,6 +866,7 @@ void allocate_child_tree_node(TreeNodeGPU* host_parent, TreeNodeGPU** device_chi
     host_child.edge_weights = nullptr;
     host_child.is_numerics = nullptr;
     host_child.categorical_values = nullptr;
+    host_child.th_cons_satisfied = nullptr;
 
     char* device_memory_block;
     size_t conditions_size = sizeof(int) * n_samples // sample_indices
@@ -829,7 +876,8 @@ void allocate_child_tree_node(TreeNodeGPU* host_parent, TreeNodeGPU** device_chi
                 + sizeof(bool) * depth   // inequality_directions
                 + sizeof(bool) * depth   // is_numerics
                 + sizeof(char) * depth * MAX_CHAR_SIZE; // categorical_values
-
+    if (constraints->n_th_cons > 0)
+        conditions_size += constraints->n_th_cons * sizeof(bool);
     cudaError_t error = allocateCudaMemory((void**)&device_memory_block, conditions_size, "CUDA allocate child tree node error:");
     cudaMemset(device_memory_block, 0, conditions_size);
     size_t trace = 0;
@@ -845,6 +893,10 @@ void allocate_child_tree_node(TreeNodeGPU* host_parent, TreeNodeGPU** device_chi
     trace += sizeof(bool) * depth;
     host_child.is_numerics = (bool*)(device_memory_block + trace);
     trace += sizeof(bool) * depth;
+    if (constraints->n_th_cons > 0){
+        host_child.th_cons_satisfied = (bool*)(device_memory_block + trace);
+        trace += constraints->n_th_cons * sizeof(bool);
+    }
     host_child.categorical_values = (char*)(device_memory_block + trace);
     
     error = allocateCudaMemory((void**)&(*device_child), sizeof(TreeNodeGPU), "when trying to allocate child");
@@ -856,18 +908,18 @@ void allocate_child_tree_node(TreeNodeGPU* host_parent, TreeNodeGPU** device_chi
     cudaMemcpy(*device_child, &host_child, sizeof(TreeNodeGPU), cudaMemcpyHostToDevice);
 }
 
-void allocate_child_tree_nodes(dataSet *dataset, TreeNodeGPU* parent_node, TreeNodeGPU* host_parent, TreeNodeGPU** left_child, TreeNodeGPU** right_child, candidatesData *candidata, splitDataGPU *split_data){
+void allocate_child_tree_nodes(dataSet *dataset, TreeNodeGPU* parent_node, TreeNodeGPU* host_parent, TreeNodeGPU** left_child, TreeNodeGPU** right_child, candidatesData *candidata, splitDataGPU *split_dataconst, featureConstraints *constraints){
     int n_samples = host_parent->n_samples;
     int depth = host_parent->depth + 1;
-    allocate_child_tree_node(host_parent, left_child);
-    allocate_child_tree_node(host_parent, right_child);
+    allocate_child_tree_node(host_parent, left_child, constraints);
+    allocate_child_tree_node(host_parent, right_child, constraints);
 
     int n_blocks, threads_per_block;
     get_grid_dimensions(n_samples, n_blocks, threads_per_block);
     partition_samples_kernel<<<n_blocks, threads_per_block>>>(dataset->obs, dataset->categorical_obs, parent_node, *left_child, *right_child, candidata->candidate_indices, candidata->candidate_values, candidata->candidate_categories, candidata->candidate_numeric, split_data->best_idx, split_data->tree_counters, dataset->n_samples) ;
     cudaDeviceSynchronize();
     int n_threads = WARP_SIZE*((MAX_CHAR_SIZE + WARP_SIZE - 1) / WARP_SIZE);
-    update_child_nodes_kernel<<<depth, n_threads>>>(parent_node, *left_child, *right_child, split_data->tree_counters, candidata->candidate_indices, candidata->candidate_values, candidata->candidate_numeric, candidata->candidate_categories, split_data->best_idx, split_data->best_score);
+    update_child_nodes_kernel<<<depth, n_threads>>>(parent_node, *left_child, *right_child, split_data->tree_counters, candidata->candidate_indices, candidata->candidate_values, candidata->candidate_numeric, candidata->candidate_categories, split_data->best_idx, split_data->best_score, constraints->n_th_cons);
     cudaDeviceSynchronize();
 }
 
@@ -1035,7 +1087,9 @@ __global__ void print_vector_kernel(const float *vec, const int size){
 __global__ void update_child_nodes_kernel(const TreeNodeGPU* __restrict__ parent_node, TreeNodeGPU* __restrict__ left_child, TreeNodeGPU* __restrict__ right_child, 
                                           int* __restrict__ tree_counters, const int* __restrict__ candidate_indices, 
                                           const float* __restrict__ candidate_values, const bool* __restrict__ candidate_numeric,
-                                          const char* __restrict__ candidate_categories,  const int* __restrict__ best_idx, const float* __restrict__ best_score){
+                                          const char* __restrict__ candidate_categories,  const int* __restrict__ best_idx, const float* __restrict__ best_score,
+                                          const int n_th_cons
+                                        ){
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (blockIdx.x < parent_node->depth){
@@ -1085,9 +1139,13 @@ __global__ void update_child_nodes_kernel(const TreeNodeGPU* __restrict__ parent
         right_child->n_samples = tree_counters[1];
         tree_counters[2] += 2;
     }
+    if (idx < n_th_cons){
+        left_child->th_cons_satisfied[idx] = parent_node->th_cons_satisfied[idx];
+        right_child->th_cons_satisfied[idx] = parent_node->th_cons_satisfied[idx];
+    }
 }
 
-void fit_tree_oblivious_cuda(dataSet *dataset, ensembleData *edata, ensembleMetaData *metadata, candidatesData *candidata, splitDataGPU *split_data){
+void fit_tree_oblivious_cuda(dataSet *dataset, ensembleData *edata, ensembleMetaData *metadata, candidatesData *candidata, splitDataGPU *split_data, const featureConstraints *constraints){
     allocate_ensemble_memory_cuda(metadata, edata);
     cudaMemcpy(edata->tree_indices + metadata->n_trees, &metadata->n_leaves, sizeof(int), cudaMemcpyHostToDevice);
 
@@ -1095,9 +1153,14 @@ void fit_tree_oblivious_cuda(dataSet *dataset, ensembleData *edata, ensembleMeta
     // for oblivious trees
     TreeNodeGPU **child_tree_nodes = (TreeNodeGPU **)malloc((1 << metadata->max_depth) * sizeof(TreeNodeGPU *));
 
+    if (constraints->th_cons != nullptr){
+        reset_satisfied_kernel<<<1, THREADS_PER_BLOCK>>>(constraints->th_cons);
+        cudaDeviceSynchronize();
+    }
+
     int crnt_node_ptr_idx = 0, host_status;
     TreeNodeGPU *crnt_node;
-    TreeNodeGPU *root_node = allocate_root_tree_node(dataset, metadata);
+    TreeNodeGPU *root_node = allocate_root_tree_node(dataset, metadata, constraints);
     tree_nodes[crnt_node_ptr_idx] = root_node;
     crnt_node_ptr_idx++;
     TreeNodeGPU host_node;
@@ -1109,7 +1172,7 @@ void fit_tree_oblivious_cuda(dataSet *dataset, ensembleData *edata, ensembleMeta
     while(depth < metadata->max_depth){
         cudaMemset(split_data->split_scores, 0, split_data->size);
         
-        evaluate_oblivious_splits_cuda(dataset, edata, tree_nodes, depth, candidata, metadata, split_data);
+        evaluate_oblivious_splits_cuda(dataset, edata, tree_nodes, depth, candidata, metadata, split_data, constraints);
         cudaMemcpy(&host_status, split_data->best_idx, sizeof(int), cudaMemcpyDeviceToHost);
         if (host_status < 0)
             break;
@@ -1139,7 +1202,7 @@ void fit_tree_oblivious_cuda(dataSet *dataset, ensembleData *edata, ensembleMeta
     free(child_tree_nodes);
 }
 
-void fit_tree_greedy_cuda(dataSet *dataset, ensembleData *edata, ensembleMetaData *metadata, candidatesData *candidata, splitDataGPU *split_data){
+void fit_tree_greedy_cuda(dataSet *dataset, ensembleData *edata, ensembleMetaData *metadata, candidatesData *candidata, splitDataGPU *split_data, const featureConstraints *constraints){
     allocate_ensemble_memory_cuda(metadata, edata);
     cudaMemcpy(edata->tree_indices + metadata->n_trees, &metadata->n_leaves, sizeof(int), cudaMemcpyHostToDevice);
       
@@ -1147,12 +1210,14 @@ void fit_tree_greedy_cuda(dataSet *dataset, ensembleData *edata, ensembleMetaDat
     
     int crnt_node_ptr_idx = 0, host_status;
     TreeNodeGPU *crnt_node;
-    TreeNodeGPU *root_node = allocate_root_tree_node(dataset, metadata);
+    TreeNodeGPU *root_node = allocate_root_tree_node(dataset, metadata, constraints);
     tree_nodes[crnt_node_ptr_idx] = root_node;
     crnt_node_ptr_idx++;
 
     float host_score;
     TreeNodeGPU host_node;
+
+
 
     int threads_per_block;
     calc_parallelism(candidata->n_candidates, metadata->output_dim, threads_per_block, metadata->split_score_func);
@@ -1186,7 +1251,7 @@ void fit_tree_greedy_cuda(dataSet *dataset, ensembleData *edata, ensembleMetaDat
                 continue;
             }
             cudaDeviceSynchronize();
-            evaluate_greedy_splits(dataset, edata, crnt_node, candidata, metadata, split_data, threads_per_block, host_node.n_samples);
+            evaluate_greedy_splits(dataset, edata, crnt_node, candidata, metadata, split_data, constraints, threads_per_block, host_node.n_samples);
         }
         cudaMemcpy(&host_score, split_data->best_score, sizeof(float), cudaMemcpyDeviceToHost);
 

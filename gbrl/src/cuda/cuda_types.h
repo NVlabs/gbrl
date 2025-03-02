@@ -61,12 +61,14 @@ struct TreeNodeGPU {
     int output_dim;
     int node_idx;
     float score;
+    int n_th_cons;
     int *sample_indices;
     int* feature_indices;
     float* feature_values;
     float* edge_weights;
     bool* inequality_directions;
     bool* is_numerics;
+    bool* th_con_satisfied;
     char* categorical_values;
 };
 

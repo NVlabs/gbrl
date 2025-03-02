@@ -13,174 +13,142 @@
 #include "feature_constraints.h"
 #include "cuda_utils.h"
 #include "cuda_feature_constraints.h"
+#include "cuda_types.h"
 
 
-thresholdConstraints* allocate_threshold_constraints_cuda(int n_constraints){
+thresholdConstraints* allocate_threshold_constraints_cuda(const int n_cons){
     cudaError_t error;
 
-    thresholdConstraints constraints;
-    constraints.feature_indices = nullptr;
-    constraints.feature_values = nullptr;
-    constraints.constraint_values = nullptr;
-    constraints.is_numerics = nullptr;
-    constraints.inequality_directions = nullptr;
-    constraints.satisfied = nullptr;
-    constraints.categorical_values = nullptr;
-    constraints.n_cons = n_constraints;
-
-    thresholdConstraints *device_constraints;
-    error = allocateCudaMemory((void**)&device_constraints, sizeof(thresholdConstraints), "when trying to allocate thresholdConstraints");
-    if (error != cudaSuccess) {
-        return nullptr;
-    }
+    thresholdConstraints *th_cons = new thresholdConstraints;
+    th_cons->feature_indices = nullptr;
+    th_cons->feature_values = nullptr;
+    th_cons->constraint_values = nullptr;
+    th_cons->is_numerics = nullptr;
+    th_cons->inequality_directions = nullptr;
+    th_cons->satisfied = nullptr;
+    th_cons->categorical_values = nullptr;
 
     char* device_memory_block;
-    size_t alloc_size = sizeof(int) * n_constraints
-                      + sizeof(float) * n_constraints * 2
-                      + sizeof(bool) * n_constraints * 3
-                      + sizeof(char) * MAX_CHAR_SIZE * n_constraints;
+    size_t alloc_size = sizeof(int) * n_cons
+                      + sizeof(float) * n_cons * 2
+                      + sizeof(bool) * n_cons * 3
+                      + sizeof(char) * MAX_CHAR_SIZE * n_cons;
     error = allocateCudaMemory((void**)&device_memory_block, alloc_size, "when trying to allocate data for threshold constraints memory block");
     if (error != cudaSuccess) {
-        cudaFree(device_constraints);
+        delete th_cons;
         return nullptr;
     }
     cudaMemset(device_memory_block, 0, alloc_size);
     size_t trace = 0;
-    constraints.feature_indices = (int*)device_memory_block;
-    trace += sizeof(int) * n_constraints;
-    constraints.feature_values = (float*)(device_memory_block + trace);
-    trace += sizeof(float) * n_constraints;
-    constraints.constraint_values = (float*)(device_memory_block + trace);
-    trace += sizeof(float) * n_constraints;
-    constraints.is_numerics = (bool*)(device_memory_block + trace);
-    trace += sizeof(bool) * n_constraints;
-    constraints.inequality_directions = (bool*)(device_memory_block + trace);
-    trace += sizeof(bool) * n_constraints;
-    constraints.satisfied = (bool*)(device_memory_block + trace);
-    trace += sizeof(bool) * n_constraints;
-    constraints.categorical_values = (char*)(device_memory_block + trace);
+    th_cons->feature_indices = (int*)device_memory_block;
+    trace += sizeof(int) * n_cons;
+    th_cons->feature_values = (float*)(device_memory_block + trace);
+    trace += sizeof(float) * n_cons;
+    th_cons->constraint_values = (float*)(device_memory_block + trace);
+    trace += sizeof(float) * n_cons;
+    th_cons->is_numerics = (bool*)(device_memory_block + trace);
+    trace += sizeof(bool) * n_cons;
+    th_cons->inequality_directions = (bool*)(device_memory_block + trace);
+    trace += sizeof(bool) * n_cons;
+    th_cons->satisfied = (bool*)(device_memory_block + trace);
+    trace += sizeof(bool) * n_cons;
+    th_cons->categorical_values = (char*)(device_memory_block + trace);
 
-    cudaMemcpy(device_constraints, &constraints, sizeof(thresholdConstraints), cudaMemcpyHostToDevice);
-    return device_constraints;
+    return th_cons;
 }
 
 void deallocate_threshold_constraints_cuda(thresholdConstraints *th_cons){
-    thresholdConstraints h_device_th_cons;
-    cudaMemcpy(&h_device_th_cons, th_cons, sizeof(thresholdConstraints), cudaMemcpyDeviceToHost);
-    if (h_device_th_cons.feature_indices != nullptr)
-        cudaFree(h_device_th_cons.feature_indices);
-    cudaFree(th_cons);
+    if (th_cons != nullptr && th_cons->feature_indices != nullptr)
+        cudaFree(th_cons->feature_indices);
+    delete th_cons;
 }
 
-thresholdConstraints* copy_threshold_constraints_cpu_gpu(const thresholdConstraints *original_cons){
-    int n_cons = original_cons->n_cons;
-    thresholdConstraints* device_th_cons = allocate_threshold_constraints_cuda(n_cons); 
-    thresholdConstraints h_device_th_cons;
-    cudaMemcpy(&h_device_th_cons, device_th_cons, sizeof(thresholdConstraints), cudaMemcpyDeviceToHost);
+thresholdConstraints* copy_threshold_constraints_cpu_gpu(const thresholdConstraints *th_cons, const int n_cons){
+    thresholdConstraints* new_th_cons = allocate_threshold_constraints_cuda(n_cons); 
 
-    cudaMemcpy(h_device_th_cons.feature_indices, original_cons->feature_indices, sizeof(int) * n_cons, cudaMemcpyHostToDevice);
-    cudaMemcpy(h_device_th_cons.feature_values, original_cons->feature_values, sizeof(float) * n_cons, cudaMemcpyHostToDevice);
-    cudaMemcpy(h_device_th_cons.constraint_values, original_cons->constraint_values, sizeof(float) * n_cons, cudaMemcpyHostToDevice);
-    cudaMemcpy(h_device_th_cons.is_numerics, original_cons->is_numerics, sizeof(bool) * n_cons, cudaMemcpyHostToDevice);
-    cudaMemcpy(h_device_th_cons.satisfied, original_cons->satisfied, sizeof(bool) * n_cons, cudaMemcpyHostToDevice);
-    cudaMemcpy(h_device_th_cons.inequality_directions, original_cons->inequality_directions, sizeof(bool) * n_cons, cudaMemcpyHostToDevice);
-    cudaMemcpy(h_device_th_cons.categorical_values, original_cons->categorical_values, sizeof(char) * n_cons * MAX_CHAR_SIZE, cudaMemcpyHostToDevice);
+    cudaMemcpy(new_th_cons.feature_indices, th_cons->feature_indices, sizeof(int) * n_cons, cudaMemcpyHostToDevice);
+    cudaMemcpy(new_th_cons.feature_values, th_cons->feature_values, sizeof(float) * n_cons, cudaMemcpyHostToDevice);
+    cudaMemcpy(new_th_cons.constraint_values, th_cons->constraint_values, sizeof(float) * n_cons, cudaMemcpyHostToDevice);
+    cudaMemcpy(new_th_cons.is_numerics, th_cons->is_numerics, sizeof(bool) * n_cons, cudaMemcpyHostToDevice);
+    cudaMemcpy(new_th_cons.satisfied, th_cons->satisfied, sizeof(bool) * n_cons, cudaMemcpyHostToDevice);
+    cudaMemcpy(new_th_cons.inequality_directions, th_cons->inequality_directions, sizeof(bool) * n_cons, cudaMemcpyHostToDevice);
+    cudaMemcpy(new_th_cons.categorical_values, th_cons->categorical_values, sizeof(char) * n_cons * MAX_CHAR_SIZE, cudaMemcpyHostToDevice);
 
-    cudaMemcpy(device_th_cons, &h_device_th_cons, sizeof(thresholdConstraints), cudaMemcpyHostToDevice);
-    return device_th_cons;
+    return new_th_cons;
 }
 
-thresholdConstraints* copy_threshold_constraints_gpu_cpu(const thresholdConstraints *device_th_cons){
-    thresholdConstraints h_device_th_cons;
-    cudaMemcpy(&h_device_th_cons, device_th_cons, sizeof(thresholdConstraints), cudaMemcpyDeviceToHost);
-    int n_cons = h_device_th_cons.n_cons;
+thresholdConstraints* copy_threshold_constraints_gpu_cpu(const thresholdConstraints *th_cons, const int n_cons){
 
-    thresholdConstraints *host_th_cons = allocate_threshold_constraints(n_cons); 
-    cudaMemcpy(host_th_cons->feature_indices, h_device_th_cons.feature_indices, sizeof(int) * n_cons, cudaMemcpyDeviceToHost);
-    cudaMemcpy(host_th_cons->feature_values, h_device_th_cons.feature_values, sizeof(float) * n_cons, cudaMemcpyDeviceToHost);
-    cudaMemcpy(host_th_cons->constraint_values, h_device_th_cons.constraint_values, sizeof(float) * n_cons, cudaMemcpyDeviceToHost);
-    cudaMemcpy(host_th_cons->is_numerics, h_device_th_cons.is_numerics, sizeof(bool) * n_cons, cudaMemcpyDeviceToHost);
-    cudaMemcpy(host_th_cons->satisfied, h_device_th_cons.satisfied, sizeof(bool) * n_cons, cudaMemcpyDeviceToHost);
-    cudaMemcpy(host_th_cons->inequality_directions, h_device_th_cons.inequality_directions, sizeof(bool) * n_cons, cudaMemcpyDeviceToHost);
-    cudaMemcpy(host_th_cons->categorical_values, h_device_th_cons.categorical_values, sizeof(char) * n_cons * MAX_CHAR_SIZE, cudaMemcpyDeviceToHost);
+    thresholdConstraints *new_th_cons = allocate_threshold_constraints(n_cons); 
+    cudaMemcpy(new_th_cons->feature_indices, th_cons.feature_indices, sizeof(int) * n_cons, cudaMemcpyDeviceToHost);
+    cudaMemcpy(new_th_cons->feature_values, th_cons.feature_values, sizeof(float) * n_cons, cudaMemcpyDeviceToHost);
+    cudaMemcpy(new_th_cons->constraint_values, th_cons.constraint_values, sizeof(float) * n_cons, cudaMemcpyDeviceToHost);
+    cudaMemcpy(new_th_cons->is_numerics, th_cons.is_numerics, sizeof(bool) * n_cons, cudaMemcpyDeviceToHost);
+    cudaMemcpy(new_th_cons->satisfied, th_cons.satisfied, sizeof(bool) * n_cons, cudaMemcpyDeviceToHost);
+    cudaMemcpy(new_th_cons->inequality_directions, th_cons.inequality_directions, sizeof(bool) * n_cons, cudaMemcpyDeviceToHost);
+    cudaMemcpy(new_th_cons->categorical_values, th_cons.categorical_values, sizeof(char) * n_cons * MAX_CHAR_SIZE, cudaMemcpyDeviceToHost);
 
-    return host_th_cons;
+    return new_th_cons;
 }
 
-thresholdConstraints* copy_threshold_constraints_gpu_gpu(const thresholdConstraints *device_th_cons){
-    thresholdConstraints h_device_th_cons, host_th_cons;
-    cudaMemcpy(&h_device_th_cons, device_th_cons, sizeof(thresholdConstraints), cudaMemcpyDeviceToHost);
-    int n_cons = h_device_th_cons.n_cons;
+thresholdConstraints* copy_threshold_constraints_gpu_gpu(const thresholdConstraints *th_cons, const int n_cons){
 
-    thresholdConstraints *device_th_cons_new = allocate_threshold_constraints_cuda(n_cons); 
-    cudaMemcpy(&host_th_cons, device_th_cons_new, sizeof(thresholdConstraints), cudaMemcpyDeviceToHost);
-    cudaMemcpy(host_th_cons.feature_indices, h_device_th_cons.feature_indices, sizeof(int) * n_cons, cudaMemcpyDeviceToDevice);
-    cudaMemcpy(host_th_cons.feature_values, h_device_th_cons.feature_values, sizeof(float) * n_cons, cudaMemcpyDeviceToDevice);
-    cudaMemcpy(host_th_cons.constraint_values, h_device_th_cons.constraint_values, sizeof(float) * n_cons, cudaMemcpyDeviceToDevice);
-    cudaMemcpy(host_th_cons.is_numerics, h_device_th_cons.is_numerics, sizeof(bool) * n_cons, cudaMemcpyDeviceToDevice);
-    cudaMemcpy(host_th_cons.satisfied, h_device_th_cons.satisfied, sizeof(bool) * n_cons, cudaMemcpyDeviceToDevice);
-    cudaMemcpy(host_th_cons.inequality_directions, h_device_th_cons.inequality_directions, sizeof(bool) * n_cons, cudaMemcpyDeviceToDevice);
-    cudaMemcpy(host_th_cons.categorical_values, h_device_th_cons.categorical_values, sizeof(char) * n_cons * MAX_CHAR_SIZE, cudaMemcpyDeviceToDevice);
+    thresholdConstraints *new_th_cons = allocate_threshold_constraints_cuda(n_cons); 
+    cudaMemcpy(new_th_cons.feature_indices, th_cons.feature_indices, sizeof(int) * n_cons, cudaMemcpyDeviceToDevice);
+    cudaMemcpy(new_th_cons.feature_values, th_cons.feature_values, sizeof(float) * n_cons, cudaMemcpyDeviceToDevice);
+    cudaMemcpy(new_th_cons.constraint_values, th_cons.constraint_values, sizeof(float) * n_cons, cudaMemcpyDeviceToDevice);
+    cudaMemcpy(new_th_cons.is_numerics, th_cons.is_numerics, sizeof(bool) * n_cons, cudaMemcpyDeviceToDevice);
+    cudaMemcpy(new_th_cons.satisfied, th_cons.satisfied, sizeof(bool) * n_cons, cudaMemcpyDeviceToDevice);
+    cudaMemcpy(new_th_cons.inequality_directions, th_cons.inequality_directions, sizeof(bool) * n_cons, cudaMemcpyDeviceToDevice);
+    cudaMemcpy(new_th_cons.categorical_values, th_cons.categorical_values, sizeof(char) * n_cons * MAX_CHAR_SIZE, cudaMemcpyDeviceToDevice);
 
-    cudaMemcpy(device_th_cons_new, &host_th_cons, sizeof(thresholdConstraints), cudaMemcpyHostToDevice);
-
-    return device_th_cons_new;
+    return new_th_cons;
 }
 
 void add_threshold_constraint_cuda(featureConstraints *constraints, int feature_idx, float feature_value,
                     const char *categorical_value, bool inequality_direction, bool is_numeric, 
                     float constraint_value){
-    thresholdConstraints* host_th_cons = nullptr, *old_host_th_cons = nullptr;
-    int n_cons = 1;
+    thresholdConstraints* new_th_cons = nullptr, *old_th_cons = nullptr;
+    int n_th_cons = constraints->n_th_cons + 1;
+    new_th_cons = allocate_threshold_constraints_cuda(n_th_cons);
     if (constraints->th_cons != nullptr){
-        old_host_th_cons = copy_threshold_constraints_gpu_cpu(constraints->th_cons);
-        n_cons = old_host_th_cons->n_cons + 1;
-    }
-    host_th_cons = allocate_threshold_constraints(n_cons);
-    if (constraints->th_cons != nullptr){
-        memcpy(host_th_cons->feature_indices, old_host_th_cons->feature_indices, (n_cons-1)*sizeof(int));
-        memcpy(host_th_cons->inequality_directions, old_host_th_cons->inequality_directions, (n_cons-1)*sizeof(bool));
-        memcpy(host_th_cons->is_numerics, old_host_th_cons->is_numerics, (n_cons-1)*sizeof(bool));
-        memcpy(host_th_cons->constraint_values, old_host_th_cons->constraint_values, (n_cons-1)*sizeof(float));
-        memcpy(host_th_cons->feature_values, old_host_th_cons->feature_values, (n_cons-1)*sizeof(float));
-        memcpy(host_th_cons->categorical_values, old_host_th_cons->categorical_values, (n_cons-1)*sizeof(char)*MAX_CHAR_SIZE);
-        
+        cudaMemcpy(new_th_cons->feature_indices, th_cons.feature_indices, sizeof(int) * constraints->n_th_cons, cudaMemcpyDeviceToDevice);
+        cudaMemcpy(new_th_cons->feature_values, th_cons.feature_values, sizeof(float) * constraints->n_th_cons, cudaMemcpyDeviceToDevice);
+        cudaMemcpy(new_th_cons->constraint_values, th_cons.constraint_values, sizeof(float) * constraints->n_th_cons, cudaMemcpyDeviceToDevice);
+        cudaMemcpy(new_th_cons->is_numerics, th_cons.is_numerics, sizeof(bool) * constraints->n_th_cons, cudaMemcpyDeviceToDevice);
+        cudaMemcpy(new_th_cons->satisfied, th_cons.satisfied, sizeof(bool) * constraints->n_th_cons, cudaMemcpyDeviceToDevice);
+        cudaMemcpy(new_th_cons->inequality_directions, th_cons.inequality_directions, sizeof(bool) * constraints->n_th_cons, cudaMemcpyDeviceToDevice);
+        cudaMemcpy(new_th_cons->categorical_values, th_cons.categorical_values, sizeof(char) * constraints->n_th_cons * MAX_CHAR_SIZE, cudaMemcpyDeviceToDevice);
+    
         deallocate_threshold_constraints_cuda(constraints->th_cons);
-        deallocate_threshold_constraints(old_host_th_cons);
     }
-    host_th_cons->feature_indices[n_cons-1] = feature_idx;
-    host_th_cons->feature_values[n_cons-1] = feature_value;
-    host_th_cons->constraint_values[n_cons-1] = constraint_value;
-    host_th_cons->inequality_directions[n_cons-1] = inequality_direction;
+    cudaMemcpy(new_th_cons->feature_indices + constraints->n_th_cons, &feature_idx, sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(new_th_cons->feature_values + constraints->n_th_cons, &feature_values, sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(new_th_cons->constraint_values + constraints->n_th_cons, &constraint_value, sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(new_th_cons->is_numerics + constraints->n_th_cons, &is_numeric, sizeof(bool), cudaMemcpyHostToDevice);
+    cudaMemcpy(new_th_cons->inequality_directions + constraints->n_th_cons, &inequality_directions, sizeof(bool), cudaMemcpyHostToDevice);
+    bool satisfied = false;
+    cudaMemcpy(new_th_cons->satisfied + constraints->n_th_cons, &satisfied, sizeof(bool), cudaMemcpyHostToDevice);
     if (categorical_value != nullptr) 
-        memcpy(host_th_cons->categorical_values + (n_cons-1)*MAX_CHAR_SIZE, categorical_value, sizeof(char)*MAX_CHAR_SIZE);
-    host_th_cons->is_numerics[n_cons-1] = is_numeric;
+        cudaMemcpy(new_th_cons->categorical_values + constraints->n_th_cons*MAX_CHAR_SIZE, categorical_value, sizeof(char)*MAX_CHAR_SIZE, cudaMemcpyHostToDevice);
 
-    constraints->th_cons = copy_threshold_constraints_cpu_gpu(host_th_cons);
-    deallocate_threshold_constraints(host_th_cons);
+    constraints->th_cons = new_th_cons;
+    constraints->n_th_cons = n_th_cons;
 }
 
-hierarchyConstraints* allocate_hierarchy_constraints_cuda(int n_constraints, int n_features){
+hierarchyConstraints* allocate_hierarchy_constraints_cuda(const int n_hr_cons, const int n_hr_features){
     cudaError_t error;
 
-    hierarchyConstraints constraints;
-    constraints.feature_indices = nullptr;
-    constraints.dep_count = nullptr;
-    constraints.dep_features = nullptr;
-    constraints.is_numerics = nullptr;
-    constraints.n_cons = n_constraints;
-    constraints.n_features = n_features;
-
-    hierarchyConstraints *device_constraints;
-    error = allocateCudaMemory((void**)&device_constraints, sizeof(hierarchyConstraints), "when trying to allocate hierarchyConstraints");
-    if (error != cudaSuccess) {
-        return nullptr;
-    }
+    hierarchyConstraints *hr_cons = new hierarchyConstraints;
+    constraints->feature_indices = nullptr;
+    constraints->dep_count = nullptr;
+    constraints->dep_features = nullptr;
+    constraints->is_numerics = nullptr;
 
     char* device_memory_block;
-    size_t alloc_size = sizeof(int) * n_constraints * 2
-                      + sizeof(int) * n_features
-                      + sizeof(bool) * n_constraints;
+    size_t alloc_size = sizeof(int) * n_hr_cons * 2
+                      + sizeof(int) * n_hr_features
+                      + sizeof(bool) * n_hr_cons;
     error = allocateCudaMemory((void**)&device_memory_block, alloc_size, "when trying to allocate data for hierarchy constraints memory block");
     if (error != cudaSuccess) {
         cudaFree(device_constraints);
@@ -189,128 +157,95 @@ hierarchyConstraints* allocate_hierarchy_constraints_cuda(int n_constraints, int
     cudaMemset(device_memory_block, 0, alloc_size);
 
     size_t trace = 0;
-    constraints.feature_indices = (int*)device_memory_block;
-    trace += sizeof(int) * n_constraints;
-    constraints.dep_count = (int*)(device_memory_block + trace);
-    trace += sizeof(int) * n_constraints;
-    constraints.dep_features = (int*)(device_memory_block + trace);
-    trace += sizeof(int) * n_features;
-    constraints.is_numerics = (bool*)(device_memory_block + trace);
+    hr_cons->feature_indices = (int*)device_memory_block;
+    trace += sizeof(int) * n_hr_cons;
+    hr_cons->dep_count = (int*)(device_memory_block + trace);
+    trace += sizeof(int) * n_hr_cons;
+    hr_cons->dep_features = (int*)(device_memory_block + trace);
+    trace += sizeof(int) * n_hr_features;
+    hr_cons->is_numerics = (bool*)(device_memory_block + trace);
 
-    cudaMemcpy(device_constraints, &constraints, sizeof(hierarchyConstraints), cudaMemcpyHostToDevice);
-    return device_constraints;
+    return hr_cons;
 }
 
 void deallocate_hierarchy_constraints_cuda(hierarchyConstraints *hr_cons){
-    hierarchyConstraints h_device_hr_cons;
-    cudaMemcpy(&h_device_hr_cons, hr_cons, sizeof(hierarchyConstraints), cudaMemcpyDeviceToHost);
-    if (h_device_hr_cons.feature_indices != nullptr)
-        cudaFree(h_device_hr_cons.feature_indices);
-    cudaFree(hr_cons);
+    if (hr_cons != nullptr && hr_cons->feature_indices != nullptr)
+        cudaFree(hr_cons->feature_indices);
+    delete hr_cons;
 }
 
+hierarchyConstraints* copy_hierarchy_constraints_cpu_gpu(const hierarchyConstraints *hr_const, const int n_hr_cons, const int n_hr_features){
 
-hierarchyConstraints* copy_hierarchy_constraints_cpu_gpu(const hierarchyConstraints *original_cons){
-    int n_cons = original_cons->n_cons;
-    int n_features = original_cons->n_features;
-    hierarchyConstraints* device_hr_cons = allocate_hierarchy_constraints_cuda(n_cons, n_features); 
-    hierarchyConstraints h_device_hr_cons;
-    cudaMemcpy(&h_device_hr_cons, device_hr_cons, sizeof(hierarchyConstraints), cudaMemcpyDeviceToHost);
+    hierarchyConstraints* new_hr_cons = allocate_hierarchy_constraints_cuda(n_hr_cons, n_hr_features); 
 
-    cudaMemcpy(h_device_hr_cons.feature_indices, original_cons->feature_indices, sizeof(int) * n_cons, cudaMemcpyHostToDevice);
-    cudaMemcpy(h_device_hr_cons.dep_count, original_cons->dep_count, sizeof(int) * n_cons, cudaMemcpyHostToDevice);
-    cudaMemcpy(h_device_hr_cons.dep_features, original_cons->dep_features, sizeof(int) * n_features, cudaMemcpyHostToDevice);
-    cudaMemcpy(h_device_hr_cons.is_numerics, original_cons->is_numerics, sizeof(bool) * n_cons, cudaMemcpyHostToDevice);
+    cudaMemcpy(new_hr_cons.feature_indices, hr_const->feature_indices, sizeof(int) * n_hr_cons, cudaMemcpyHostToDevice);
+    cudaMemcpy(new_hr_cons.dep_count, hr_const->dep_count, sizeof(int) * n_hr_cons, cudaMemcpyHostToDevice);
+    cudaMemcpy(new_hr_cons.dep_features, hr_const->dep_features, sizeof(int) * n_hr_features, cudaMemcpyHostToDevice);
+    cudaMemcpy(new_hr_cons.is_numerics, hr_const->is_numerics, sizeof(bool) * n_hr_cons, cudaMemcpyHostToDevice);
 
-    cudaMemcpy(device_hr_cons, &h_device_hr_cons, sizeof(hierarchyConstraints), cudaMemcpyHostToDevice);
-    return device_hr_cons;
+    return new_hr_cons;
 }
 
-hierarchyConstraints* copy_hierarchy_constraints_gpu_cpu(const hierarchyConstraints *device_hr_cons){
-    hierarchyConstraints h_device_hr_cons;
-    cudaMemcpy(&h_device_hr_cons, device_hr_cons, sizeof(hierarchyConstraints), cudaMemcpyDeviceToHost);
-    int n_cons = h_device_hr_cons.n_cons;
-    int n_features = h_device_hr_cons.n_features;
-
-    hierarchyConstraints *host_hr_cons = allocate_hierarchy_constraints(n_cons, n_features); 
-    cudaMemcpy(host_hr_cons->feature_indices, h_device_hr_cons.feature_indices, sizeof(int) * n_cons, cudaMemcpyDeviceToHost);
-    cudaMemcpy(host_hr_cons->dep_count, h_device_hr_cons.dep_count, sizeof(int) * n_cons, cudaMemcpyDeviceToHost);
-    cudaMemcpy(host_hr_cons->dep_features, h_device_hr_cons.dep_features, sizeof(int) * n_features, cudaMemcpyDeviceToHost);
-    cudaMemcpy(host_hr_cons->is_numerics, h_device_hr_cons.is_numerics, sizeof(bool) * n_cons, cudaMemcpyDeviceToHost);
+hierarchyConstraints* copy_hierarchy_constraints_gpu_cpu(const hierarchyConstraints *hr_cons, const int n_hr_cons, const int n_hr_features){
+    hierarchyConstraints *new_hr_cons = allocate_hierarchy_constraints(n_hr_cons, n_hr_features); 
+    cudaMemcpy(new_hr_cons->feature_indices, hr_cons->feature_indices, sizeof(int) * n_hr_cons, cudaMemcpyDeviceToHost);
+    cudaMemcpy(new_hr_cons->dep_count, hr_cons->dep_count, sizeof(int) * n_hr_cons, cudaMemcpyDeviceToHost);
+    cudaMemcpy(new_hr_cons->dep_features, hr_cons->dep_features, sizeof(int) * n_hr_features, cudaMemcpyDeviceToHost);
+    cudaMemcpy(new_hr_cons->is_numerics, hr_cons->is_numerics, sizeof(bool) * n_hr_cons, cudaMemcpyDeviceToHost);
    
-    return host_hr_cons;
+    return new_hr_cons;
 }
 
-hierarchyConstraints* copy_hierarchy_constraints_gpu_gpu(const hierarchyConstraints *device_hr_cons){
-    hierarchyConstraints h_device_hr_cons, host_hr_cons;
-    cudaMemcpy(&h_device_hr_cons, device_hr_cons, sizeof(hierarchyConstraints), cudaMemcpyDeviceToHost);
-    int n_cons = h_device_hr_cons.n_cons;
-    int n_features = h_device_hr_cons.n_features;
+hierarchyConstraints* copy_hierarchy_constraints_gpu_gpu(const hierarchyConstraints *hr_cons, const int n_hr_cons, const int n_hr_features){
 
-    hierarchyConstraints *new_device_hr_cons = allocate_hierarchy_constraints_cuda(n_cons, n_features); 
-    cudaMemcpy(&host_hr_cons, new_device_hr_cons, sizeof(hierarchyConstraints), cudaMemcpyDeviceToHost);
-    cudaMemcpy(host_hr_cons.feature_indices, h_device_hr_cons.feature_indices, sizeof(int) * n_cons, cudaMemcpyDeviceToDevice);
-    cudaMemcpy(host_hr_cons.dep_count, h_device_hr_cons.dep_count, sizeof(int) * n_cons, cudaMemcpyDeviceToDevice);
-    cudaMemcpy(host_hr_cons.dep_features, h_device_hr_cons.dep_features, sizeof(int) * n_features, cudaMemcpyDeviceToDevice);
-    cudaMemcpy(host_hr_cons.is_numerics, h_device_hr_cons.is_numerics, sizeof(bool) * n_cons, cudaMemcpyDeviceToDevice);
+    hierarchyConstraints *new_hr_cons = allocate_hierarchy_constraints_cuda(n_hr_cons, n_hr_features); 
+    cudaMemcpy(new_hr_cons->feature_indices, hr_cons->feature_indices, sizeof(int) * n_hr_cons, cudaMemcpyDeviceToDevice);
+    cudaMemcpy(new_hr_cons->dep_count, hr_cons->dep_count, sizeof(int) * n_hr_cons, cudaMemcpyDeviceToDevice);
+    cudaMemcpy(new_hr_cons->dep_features, hr_cons->dep_features, sizeof(int) * n_hr_features, cudaMemcpyDeviceToDevice);
+    cudaMemcpy(new_hr_cons->is_numerics, hr_cons->is_numerics, sizeof(bool) * n_hr_cons, cudaMemcpyDeviceToDevice);
 
-    cudaMemcpy(new_device_hr_cons, &host_hr_cons, sizeof(hierarchyConstraints), cudaMemcpyHostToDevice);
-   
-    return new_device_hr_cons;
+    return new_hr_cons;
 }
 
 void add_hierarchy_constraint_cuda(featureConstraints *constraints, int feature_idx,  bool is_numeric, int* dependent_features, int n_features){
-    hierarchyConstraints* host_hr_cons = nullptr, *old_host_hr_cons = nullptr;
-    int n_cons = 1;
-    int total_n_features = n_features, old_n_features = 0;
+    int n_hr_cons = constraints->n_hr_cons + 1;
+    int total_n_features = n_features + constraints->n_hr_features;
+
+    hierarchyConstraints *new_hr_cons = allocate_hierarchy_constraints(n_hr_cons, total_n_features);
     if (constraints->hr_cons != nullptr){
-        old_host_hr_cons = copy_hierarchy_constraints_gpu_cpu(constraints->hr_cons);
-        n_cons = old_host_hr_cons->n_cons + 1;
-        old_n_features = old_host_hr_cons->n_features;
-    }
-    total_n_features += old_n_features;
-    host_hr_cons = allocate_hierarchy_constraints(n_cons, total_n_features);
-    if (constraints->hr_cons != nullptr){
-        memcpy(host_hr_cons->feature_indices, old_host_hr_cons->feature_indices, (n_cons-1)*sizeof(int));
-        memcpy(host_hr_cons->dep_count, old_host_hr_cons->dep_count, (n_cons-1)*sizeof(int));
-        memcpy(host_hr_cons->dep_features, old_host_hr_cons->dep_features, old_n_features*sizeof(int));
-        memcpy(host_hr_cons->is_numerics, old_host_hr_cons->is_numerics, (n_cons-1)*sizeof(bool));
+        cudaMemcpy(new_hr_cons->feature_indices, constraints->hr_cons->feature_indices, (n_hr_cons-1)*sizeof(int), cudaMemcpyDeviceToDevice);
+        cudaMemcpy(new_hr_cons->dep_count, constraints->hr_cons->dep_count, (n_hr_cons-1)*sizeof(int)), cudaMemcpyDeviceToDevice;
+        cudaMemcpy(new_hr_cons->dep_features, constraints->hr_cons->dep_features, constraints->n_hr_features*sizeof(int), cudaMemcpyDeviceToDevice);
+        cudaMemcpy(new_hr_cons->is_numerics, constraints->hr_cons->is_numerics, (n_hr_cons-1)*sizeof(bool), cudaMemcpyDeviceToDevice);
         
         deallocate_hierarchy_constraints_cuda(constraints->hr_cons);
-        deallocate_hierarchy_constraints(old_host_hr_cons);
     }
-    host_hr_cons->feature_indices[n_cons-1] = feature_idx;
-    host_hr_cons->dep_count[n_cons-1] = n_features;
-    memcpy(host_hr_cons->dep_features + old_n_features, dependent_features, sizeof(int)*n_features);
-    host_hr_cons->is_numerics[n_cons-1] = is_numeric;
 
-    constraints->hr_cons = copy_hierarchy_constraints_cpu_gpu(host_hr_cons);
-    deallocate_hierarchy_constraints(host_hr_cons);
+    cudaMemcpy(new_hr_cons->feature_indices + constraints->n_hr_cons, &feature_idx, sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(new_hr_cons->dep_count + constraints->n_hr_cons, &dep_count, sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(new_hr_cons->dep_features + constraints->n_hr_cons, dependent_features, sizeof(int)*n_features, cudaMemcpyHostToDevice);
+    cudaMemcpy(new_hr_cons->is_numeric + constraints->n_hr_cons, &is_numeric, sizeof(bool), cudaMemcpyHostToDevice);
+
+    constraints->n_hr_cons = n_hr_cons;
+    constraints->n_hr_features = total_n_features;
 }
 
-outputConstraints* allocate_output_constraints_cuda(int n_constraints, int output_dim){
+outputConstraints* allocate_output_constraints_cuda(const int n_out_cons, const int output_dim){
     cudaError_t error;
 
-    outputConstraints constraints;
-    constraints.feature_indices = nullptr;
-    constraints.feature_values = nullptr;
-    constraints.output_values = nullptr;
-    constraints.is_numerics = nullptr;
-    constraints.inequality_directions = nullptr;
-    constraints.categorical_values = nullptr;
-    constraints.n_cons = n_constraints;
-
-    outputConstraints *device_constraints;
-    error = allocateCudaMemory((void**)&device_constraints, sizeof(outputConstraints), "when trying to allocate outputConstraints");
-    if (error != cudaSuccess) {
-        return nullptr;
-    }
+    outputConstraints *out_cons = new outputConstraints;
+    constraints->feature_indices = nullptr;
+    constraints->feature_values = nullptr;
+    constraints->output_values = nullptr;
+    constraints->is_numerics = nullptr;
+    constraints->inequality_directions = nullptr;
+    constraints->categorical_values = nullptr;
 
     char* device_memory_block;
-    size_t alloc_size = sizeof(int) * n_constraints
-                      + sizeof(float) * n_constraints * (1 + output_dim)
-                      + sizeof(bool) * n_constraints * 2
-                      + sizeof(char) * MAX_CHAR_SIZE * n_constraints;
+    size_t alloc_size = sizeof(int) * n_out_cons
+                      + sizeof(float) * n_out_cons * (1 + output_dim)
+                      + sizeof(bool) * n_out_cons * 2
+                      + sizeof(char) * MAX_CHAR_SIZE * n_out_cons;
     error = allocateCudaMemory((void**)&device_memory_block, alloc_size, "when trying to allocate data for output constraints memory block");
     if (error != cudaSuccess) {
         cudaFree(device_constraints);
@@ -319,112 +254,92 @@ outputConstraints* allocate_output_constraints_cuda(int n_constraints, int outpu
 
     cudaMemset(device_memory_block, 0, alloc_size);
     size_t trace = 0;
-    constraints.feature_indices = (int*)device_memory_block;
-    trace += sizeof(int) * n_constraints;
-    constraints.feature_values = (float*)(device_memory_block + trace);
-    trace += sizeof(float) * n_constraints;
-    constraints.output_values = (float*)(device_memory_block + trace);
-    trace += sizeof(float) * n_constraints * output_dim;
-    constraints.is_numerics = (bool*)(device_memory_block + trace);
-    trace += sizeof(bool) * n_constraints;
-    constraints.inequality_directions = (bool*)(device_memory_block + trace);
-    trace += sizeof(bool) * n_constraints;
-    constraints.categorical_values = (char*)(device_memory_block + trace);
+    out_cons->feature_indices = (int*)device_memory_block;
+    trace += sizeof(int) * n_out_cons;
+    out_cons->feature_values = (float*)(device_memory_block + trace);
+    trace += sizeof(float) * n_out_cons;
+    out_cons->output_values = (float*)(device_memory_block + trace);
+    trace += sizeof(float) * n_out_cons * output_dim;
+    out_cons->is_numerics = (bool*)(device_memory_block + trace);
+    trace += sizeof(bool) * n_out_cons;
+    out_cons->inequality_directions = (bool*)(device_memory_block + trace);
+    trace += sizeof(bool) * n_out_cons;
+    out_cons->categorical_values = (char*)(device_memory_block + trace);
 
-    cudaMemcpy(device_constraints, &constraints, sizeof(outputConstraints), cudaMemcpyHostToDevice);
-    return device_constraints;
+    return out_cons;
 }
 
 void deallocate_output_constraints_cuda(outputConstraints *out_cons){
-    outputConstraints h_device_out_cons;
-    cudaMemcpy(&h_device_out_cons, out_cons, sizeof(outputConstraints), cudaMemcpyDeviceToHost);
-    if (h_device_out_cons.feature_indices != nullptr)
-        cudaFree(h_device_out_cons.feature_indices);
-    cudaFree(out_cons);
+    if (out_cons != nullptr && out_cons->feature_indices != nullptr)
+        cudaFree(out_cons->feature_indices);
+    delete out_cons;
 }
 
-outputConstraints* copy_output_constraints_cpu_gpu(const outputConstraints *original_cons, const int output_dim){
-    int n_cons = original_cons->n_cons;
-    outputConstraints* device_out_cons = allocate_output_constraints_cuda(n_cons, output_dim); 
-    outputConstraints h_device_out_cons;
-    cudaMemcpy(&h_device_out_cons, device_out_cons, sizeof(outputConstraints), cudaMemcpyDeviceToHost);
+outputConstraints* copy_output_constraints_cpu_gpu(const outputConstraints *out_cons, const int n_out_cons, const int output_dim){
+    outputConstraints* new_out_cons = allocate_output_constraints_cuda(n_out_cons, output_dim); 
 
-    cudaMemcpy(h_device_out_cons.feature_indices, original_cons->feature_indices, sizeof(int) * n_cons, cudaMemcpyHostToDevice);
-    cudaMemcpy(h_device_out_cons.feature_values, original_cons->feature_values, sizeof(float) * n_cons, cudaMemcpyHostToDevice);
-    cudaMemcpy(h_device_out_cons.output_values, original_cons->output_values, sizeof(float) * n_cons * output_dim, cudaMemcpyHostToDevice);
-    cudaMemcpy(h_device_out_cons.is_numerics, original_cons->is_numerics, sizeof(bool) * n_cons, cudaMemcpyHostToDevice);
-    cudaMemcpy(h_device_out_cons.inequality_directions, original_cons->inequality_directions, sizeof(bool) * n_cons, cudaMemcpyHostToDevice);
-    cudaMemcpy(h_device_out_cons.categorical_values, original_cons->categorical_values, sizeof(char) * n_cons * MAX_CHAR_SIZE, cudaMemcpyHostToDevice);
+    cudaMemcpy(new_out_cons->feature_indices, out_cons->feature_indices, sizeof(int) * n_out_cons, cudaMemcpyHostToDevice);
+    cudaMemcpy(new_out_cons->feature_values, out_cons->feature_values, sizeof(float) * n_out_cons, cudaMemcpyHostToDevice);
+    cudaMemcpy(new_out_cons->output_values, out_cons->output_values, sizeof(float) * n_out_cons * output_dim, cudaMemcpyHostToDevice);
+    cudaMemcpy(new_out_cons->is_numerics, out_cons->is_numerics, sizeof(bool) * n_out_cons, cudaMemcpyHostToDevice);
+    cudaMemcpy(new_out_cons->inequality_directions, out_cons->inequality_directions, sizeof(bool) * n_out_cons, cudaMemcpyHostToDevice);
+    cudaMemcpy(new_out_cons->categorical_values, out_cons->categorical_values, sizeof(char) * n_out_cons * MAX_CHAR_SIZE, cudaMemcpyHostToDevice);
 
-    cudaMemcpy(device_out_cons, &h_device_out_cons, sizeof(outputConstraints), cudaMemcpyHostToDevice);
-    return device_out_cons;
+    return new_out_cons;
 }
 
-outputConstraints* copy_output_constraints_gpu_cpu(const outputConstraints *device_out_cons, const int output_dim){
-    outputConstraints h_device_out_cons;
-    cudaMemcpy(&h_device_out_cons, device_out_cons, sizeof(outputConstraints), cudaMemcpyDeviceToHost);
-    int n_cons = h_device_out_cons.n_cons;
+outputConstraints* copy_output_constraints_gpu_cpu(const outputConstraints *out_cons, const int n_out_cons, const int output_dim){
 
-    outputConstraints *host_out_cons = allocate_output_constraints(n_cons, output_dim); 
-    cudaMemcpy(host_out_cons->feature_indices, h_device_out_cons.feature_indices, sizeof(int) * n_cons, cudaMemcpyDeviceToHost);
-    cudaMemcpy(host_out_cons->feature_values, h_device_out_cons.feature_values, sizeof(float) * n_cons, cudaMemcpyDeviceToHost);
-    cudaMemcpy(host_out_cons->output_values, h_device_out_cons.output_values, sizeof(float) * n_cons * output_dim, cudaMemcpyDeviceToHost);
-    cudaMemcpy(host_out_cons->is_numerics, h_device_out_cons.is_numerics, sizeof(bool) * n_cons, cudaMemcpyDeviceToHost);
-    cudaMemcpy(host_out_cons->inequality_directions, h_device_out_cons.inequality_directions, sizeof(bool) * n_cons, cudaMemcpyDeviceToHost);
-    cudaMemcpy(host_out_cons->categorical_values, h_device_out_cons.categorical_values, sizeof(char) * n_cons * MAX_CHAR_SIZE, cudaMemcpyDeviceToHost);
+    outputConstraints *new_out_cons = allocate_output_constraints(n_out_cons, output_dim); 
+    cudaMemcpy(new_out_cons->feature_indices, out_cons->feature_indices, sizeof(int) * n_out_cons, cudaMemcpyDeviceToHost);
+    cudaMemcpy(new_out_cons->feature_values, out_cons->feature_values, sizeof(float) * n_out_cons, cudaMemcpyDeviceToHost);
+    cudaMemcpy(new_out_cons->output_values, out_cons->output_values, sizeof(float) * n_out_cons * output_dim, cudaMemcpyDeviceToHost);
+    cudaMemcpy(new_out_cons->is_numerics, out_cons->is_numerics, sizeof(bool) * n_out_cons, cudaMemcpyDeviceToHost);
+    cudaMemcpy(new_out_cons->inequality_directions, out_cons->inequality_directions, sizeof(bool) * n_out_cons, cudaMemcpyDeviceToHost);
+    cudaMemcpy(new_out_cons->categorical_values, out_cons->categorical_values, sizeof(char) * n_out_cons * MAX_CHAR_SIZE, cudaMemcpyDeviceToHost);
 
-    return host_out_cons;
+    return new_out_cons;
 }
 
-outputConstraints* copy_output_constraints_gpu_gpu(const outputConstraints *device_out_cons, const int output_dim){
-    outputConstraints h_device_out_cons, host_out_cons;
-    cudaMemcpy(&h_device_out_cons, device_out_cons, sizeof(outputConstraints), cudaMemcpyDeviceToHost);
-    int n_cons = h_device_out_cons.n_cons;
+outputConstraints* copy_output_constraints_gpu_gpu(const outputConstraints *out_cons, const int n_out_cons, const int output_dim){
 
-    outputConstraints *new_device_out_cons = allocate_output_constraints_cuda(n_cons, output_dim); 
-    cudaMemcpy(&host_out_cons, new_device_out_cons, sizeof(outputConstraints), cudaMemcpyDeviceToHost);
-    cudaMemcpy(host_out_cons.feature_indices, h_device_out_cons.feature_indices, sizeof(int) * n_cons, cudaMemcpyDeviceToDevice);
-    cudaMemcpy(host_out_cons.feature_values, h_device_out_cons.feature_values, sizeof(float) * n_cons, cudaMemcpyDeviceToDevice);
-    cudaMemcpy(host_out_cons.output_values, h_device_out_cons.output_values, sizeof(float) * n_cons * output_dim, cudaMemcpyDeviceToDevice);
-    cudaMemcpy(host_out_cons.is_numerics, h_device_out_cons.is_numerics, sizeof(bool) * n_cons, cudaMemcpyDeviceToDevice);
-    cudaMemcpy(host_out_cons.inequality_directions, h_device_out_cons.inequality_directions, sizeof(bool) * n_cons, cudaMemcpyDeviceToDevice);
-    cudaMemcpy(host_out_cons.categorical_values, h_device_out_cons.categorical_values, sizeof(char) * n_cons * MAX_CHAR_SIZE, cudaMemcpyDeviceToDevice);
+    outputConstraints *new_out_cons = allocate_output_constraints_cuda(n_out_cons, output_dim); 
+    cudaMemcpy(new_out_cons->feature_indices, out_cons->feature_indices, sizeof(int) * n_cons, cudaMemcpyDeviceToDevice);
+    cudaMemcpy(new_out_cons->feature_values, out_cons->feature_values, sizeof(float) * n_cons, cudaMemcpyDeviceToDevice);
+    cudaMemcpy(new_out_cons->output_values, out_cons->output_values, sizeof(float) * n_cons * output_dim, cudaMemcpyDeviceToDevice);
+    cudaMemcpy(new_out_cons->is_numerics, out_cons->is_numerics, sizeof(bool) * n_cons, cudaMemcpyDeviceToDevice);
+    cudaMemcpy(new_out_cons->inequality_directions, out_cons->inequality_directions, sizeof(bool) * n_cons, cudaMemcpyDeviceToDevice);
+    cudaMemcpy(new_out_cons->categorical_values, out_cons->categorical_values, sizeof(char) * n_cons * MAX_CHAR_SIZE, cudaMemcpyDeviceToDevice);
 
-    cudaMemcpy(new_device_out_cons, &host_out_cons, sizeof(outputConstraints), cudaMemcpyHostToDevice);
-    return new_device_out_cons;
+    return new_out_cons;
 }
 
 void add_output_constraint_cuda(featureConstraints *constraints, int feature_idx, float feature_value,
     const char *categorical_value, bool inequality_direction, bool is_numeric, float* output_values, int output_dim){
 
-    outputConstraints* host_out_cons = nullptr, *old_host_out_cons = nullptr;
-    int n_cons = 1;
+    outputConstraints* new_out_cons = nullptr;
+    int n_out_cons = constraints->n_out_cons + 1;
+    new_out_cons = allocate_output_constraints(n_out_cons, output_dim);
     if (constraints->out_cons != nullptr){
-        old_host_out_cons = copy_output_constraints_gpu_cpu(constraints->out_cons, output_dim);
-        n_cons = old_host_out_cons->n_cons + 1;
-    }
-    host_out_cons = allocate_output_constraints(n_cons, output_dim);
-    if (constraints->out_cons != nullptr){
-        memcpy(host_out_cons->feature_indices, old_host_out_cons->feature_indices, (n_cons-1)*sizeof(int));
-        memcpy(host_out_cons->inequality_directions, old_host_out_cons->inequality_directions, (n_cons-1)*sizeof(bool));
-        memcpy(host_out_cons->is_numerics, old_host_out_cons->is_numerics, (n_cons-1)*sizeof(bool));
-        memcpy(host_out_cons->output_values, old_host_out_cons->output_values, (n_cons-1)*sizeof(float) * output_dim);
-        memcpy(host_out_cons->feature_values, old_host_out_cons->feature_values, (n_cons-1)*sizeof(float));
-        memcpy(host_out_cons->categorical_values, old_host_out_cons->categorical_values, (n_cons-1)*sizeof(char)*MAX_CHAR_SIZE);
+        cudaMemcpy(new_out_cons->feature_indices, constraints->out_cons->feature_indices, (n_out_cons-1)*sizeof(int), cudaMemcpyDeviceToDevice);
+        cudaMemcpy(new_out_cons->inequality_directions, constraints->out_cons->inequality_directions, (n_out_cons-1)*sizeof(bool), cudaMemcpyDeviceToDevice);
+        cudaMemcpy(new_out_cons->is_numerics, constraints->out_cons->is_numerics, (n_out_cons-1)*sizeof(bool), cudaMemcpyDeviceToDevice);
+        cudaMemcpy(new_out_cons->output_values, constraints->out_cons->output_values, (n_out_cons-1)*sizeof(float) * output_dim, cudaMemcpyDeviceToDevice);
+        cudaMemcpy(new_out_cons->feature_values, constraints->out_cons->feature_values, (n_out_cons-1)*sizeof(float), cudaMemcpyDeviceToDevice);
+        cudaMemcpy(new_out_cons->categorical_values, constraints->out_cons->categorical_values, (n_out_cons-1)*sizeof(char)*MAX_CHAR_SIZE, cudaMemcpyDeviceToDevice);
         
         deallocate_output_constraints_cuda(constraints->out_cons);
-        deallocate_output_constraints(old_host_out_cons);
     }
-    host_out_cons->feature_indices[n_cons-1] = feature_idx;
-    host_out_cons->feature_values[n_cons-1] = feature_value;
-    memcpy(host_out_cons->output_values + (n_cons-1)*output_dim, output_values, sizeof(float)*output_dim);
-    host_out_cons->inequality_directions[n_cons-1] = inequality_direction;
+    cudaMemcpy(new_out_cons->feature_indices + constraints->n_out_cons, &feature_idx, sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(new_out_cons->feature_values + constraints->n_out_cons, &feature_values, sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(new_out_cons->output_values + constraints->n_out_cons*output_dim, output_values, sizeof(float) * output_dim, cudaMemcpyHostToDevice);
+    cudaMemcpy(new_out_cons->is_numerics + constraints->n_out_cons, &is_numeric, sizeof(bool), cudaMemcpyHostToDevice);
+    cudaMemcpy(new_out_cons->inequality_directions + constraints->n_out_cons, &inequality_directions, sizeof(bool), cudaMemcpyHostToDevice);
     if (categorical_value != nullptr) 
-        memcpy(host_out_cons->categorical_values + (n_cons-1)*MAX_CHAR_SIZE, categorical_value, sizeof(char)*MAX_CHAR_SIZE);
-    host_out_cons->is_numerics[n_cons-1] = is_numeric;
+        cudaMemcpy(new_th_cons->categorical_values + constraints->n_th_cons*MAX_CHAR_SIZE, categorical_value, sizeof(char)*MAX_CHAR_SIZE, cudaMemcpyHostToDevice);
 
-    constraints->out_cons = copy_output_constraints_cpu_gpu(host_out_cons, output_dim);
-    deallocate_output_constraints(host_out_cons);
+    constraints->out_cons = new_out_cons;
+    constraints->n_out_cons = n_out_cons;
 }
 
 void add_feature_constraint_cuda(featureConstraints *constraints, int feature_idx, float feature_value,
@@ -443,48 +358,61 @@ void add_feature_constraint_cuda(featureConstraints *constraints, int feature_id
 }
 
 featureConstraints* copy_feature_constraint_cpu_gpu(const featureConstraints *constraints, const int output_dim){
-    featureConstraints* host_constraints = init_constraints();
+    featureConstraints* new_constraints = init_constraints();
     if (constraints->th_cons != nullptr)
-        host_constraints->th_cons = copy_threshold_constraints_cpu_gpu(constraints->th_cons);
+        new_constraints->th_cons = copy_threshold_constraints_cpu_gpu(constraints->th_cons, constraints->n_th_cons);
     if (constraints->hr_cons != nullptr)
-        host_constraints->hr_cons = copy_hierarchy_constraints_cpu_gpu(constraints->hr_cons);
+        new_constraints->hr_cons = copy_hierarchy_constraints_cpu_gpu(constraints->hr_cons, constraints->n_hr_cons, constraints->n_hr_features);
     if (constraints->out_cons != nullptr)
-        host_constraints->out_cons = copy_output_constraints_cpu_gpu(constraints->out_cons, output_dim);
+        new_constraints->out_cons = copy_output_constraints_cpu_gpu(constraints->out_cons, constraints->n_out_cons, output_dim);
 
-    host_constraints->n_cons = constraints->n_cons;
+    new_constraints->n_cons = constraints->n_cons;
+    new_constraints->n_th_cons = constraints->n_th_cons;
+    new_constraints->n_hr_cons = constraints->n_hr_cons;
+    new_constraints->n_hr_features = constraints->n_hr_features;
+    new_constraints->n_out_cons = constraints->n_out_cons;
 
-    return host_constraints;
+    return new_constraints;
 
 }
 
 featureConstraints* copy_feature_constraint_gpu_cpu(const featureConstraints *constraints, const int output_dim){
-    featureConstraints* host_constraints = init_constraints();
+    featureConstraints* new_constraints = init_constraints();
 
     if (constraints->th_cons != nullptr)
-        host_constraints->th_cons = copy_threshold_constraints_gpu_cpu(constraints->th_cons);
+        new_constraints->th_cons = copy_threshold_constraints_gpu_cpu(constraints->th_cons, constraints->n_th_cons);
     if (constraints->hr_cons != nullptr)
-        host_constraints->hr_cons = copy_hierarchy_constraints_gpu_cpu(constraints->hr_cons);
+        new_constraints->hr_cons = copy_hierarchy_constraints_gpu_cpu(constraints->hr_cons, constraints->n_hr_cons, constraints->n_hr_features);
     if (constraints->out_cons != nullptr)
-        host_constraints->out_cons = copy_output_constraints_gpu_cpu(constraints->out_cons, output_dim);
+        new_constraints->out_cons = copy_output_constraints_gpu_cpu(constraints->out_cons, constraints->n_out_cons, output_dim);
 
-    host_constraints->n_cons = constraints->n_cons;
+    new_constraints->n_cons = constraints->n_cons;
+    new_constraints->n_th_cons = constraints->n_th_cons;
+    new_constraints->n_hr_cons = constraints->n_hr_cons;
+    new_constraints->n_hr_features = constraints->n_hr_features;
+    new_constraints->n_out_cons = constraints->n_out_cons;
 
-    return host_constraints;
+    return new_constraints;
 }
 
 featureConstraints* copy_feature_constraint_gpu_gpu(const featureConstraints* constraints, const int output_dim){
     if (constraints == nullptr)
         return nullptr;
-    featureConstraints* new_cons = init_constraints();
+    featureConstraints* new_constraints = init_constraints();
     if (constraints->th_cons != nullptr)
-        new_cons->th_cons = copy_threshold_constraints_gpu_gpu(constraints->th_cons);
+        new_constraints->th_cons = copy_threshold_constraints_gpu_gpu(constraints->th_cons, constraints->n_th_cons);
     if (constraints->hr_cons != nullptr)
-        new_cons->hr_cons = copy_hierarchy_constraints_gpu_gpu(constraints->hr_cons);
+        new_constraints->hr_cons = copy_hierarchy_constraints_gpu_gpu(constraints->hr_cons, constraints->n_hr_cons, constraints->n_hr_features);
     if (constraints->out_cons != nullptr)
-        new_cons->out_cons = copy_output_constraints_gpu_gpu(constraints->out_cons, output_dim);
-    new_cons->n_cons = constraints->n_cons;
+        new_constraints->out_cons = copy_output_constraints_gpu_gpu(constraints->out_cons, constraints->n_out_cons, output_dim);
+    
+    new_constraints->n_cons = constraints->n_cons;
+    new_constraints->n_th_cons = constraints->n_th_cons;
+    new_constraints->n_hr_cons = constraints->n_hr_cons;
+    new_constraints->n_hr_features = constraints->n_hr_features;
+    new_constraints->n_out_cons = constraints->n_out_cons;
 
-    return new_cons;
+    return new_constraints;
 }
 
 void deallocate_constraints_cuda(featureConstraints* constraints){
@@ -510,4 +438,40 @@ __global__ void reset_satisfied_kernel(thresholdConstraints *th_cons) {
     if (idx < th_cons->n_cons) {
         th_cons->satisfied[idx] = false;  // Set all values to false (0)
     }
+}
+
+__global__ void check_hierarchical_candidates(const n_hr_cons, const TreeNodeGPU* __restrict__ node, const int* __restrict__ dep_count, const int* __restrict__ feature_indices, const int* __restrict__ dep_features, const int* __restrict__ candidate_indices, float* __restrict__ split_scores, const int n_candidates) {
+    int idx = threadIdx.x + blockIdx.x * blockDim.x;
+    int cumsum = 0;
+
+    if (idx >= n_candidates) return;
+
+    int candidate_feature = __ldg(candidate_indices + idx);
+    int node_depth = __ldg(&node->depth);
+    bool found = false;
+
+    for (int i = 0; i < n_hr_cons; ++i){
+        if (feature_indices[i] == candidate_feature){
+            if (node_depth == 0){
+                split_scores[idx] = -INFINITY;
+                return;
+            }
+            for (int k = 0; k < dep_count[i]; ++k){
+                int dep_feature = __ldg(dep_features + cumsum + k);
+                found = false;
+                for (int j = 0; j < node_depth; ++j){
+                    int node_feature = __ldg(&node->feature_indices[j]);
+                    if (node_feature == dep_feature){
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found){
+                    split_scores[idx] = -INFINITY;
+                    return;
+                }
+            }
+        }
+        cumsum += dep_count[i];
+    } 
 }
