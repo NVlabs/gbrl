@@ -56,8 +56,6 @@ thresholdConstraints* allocate_threshold_constraints(const int n_th_cons){
     th_cons->constraint_values = new float[n_th_cons];
     th_cons->is_numerics = new bool[n_th_cons];
     th_cons->inequality_directions = new bool[n_th_cons];
-    th_cons->satisfied = new bool[n_th_cons];
-    memset(th_cons->satisfied, 0, n_th_cons * sizeof(bool));
     th_cons->categorical_values = new char[n_th_cons*MAX_CHAR_SIZE];
 
     return th_cons;
@@ -68,7 +66,6 @@ void deallocate_threshold_constraints(thresholdConstraints* th_cons){
     delete[] th_cons->feature_values;
     delete[] th_cons->constraint_values;
     delete[] th_cons->is_numerics;
-    delete[] th_cons->satisfied;
     delete[] th_cons->inequality_directions;
     delete[] th_cons->categorical_values;
     delete th_cons;
@@ -84,18 +81,18 @@ hierarchyConstraints* allocate_hierarchy_constraints(const int n_hr_cons, const 
     return hr_cons;
 }
 
-float get_threshold_score(float crnt_score, thresholdConstraints* th_cons, const splitCandidate &split_candidate, const int n_th_cons, bool *th_cons_satisfied){
+float get_threshold_score(float crnt_score, thresholdConstraints* th_cons, splitCandidate &split_candidate, const int n_th_cons, bool *th_cons_satisfied){
     if (!th_cons) return crnt_score;
+    bool numeric_cand = split_candidate.categorical_value == nullptr;
     for (int i = 0; i < n_th_cons; ++i){
-        if (th_cons_satisfied[i] || split_candidate.feature_idx != th_cons->feature_indices[i]) 
+        if (th_cons_satisfied[i] || split_candidate.feature_idx != th_cons->feature_indices[i] || th_cons->is_numerics[i] != numeric_cand) 
             continue; // Skip already satisfied constraints and irrelevant indices
 
         bool numerical_cond = th_cons->is_numerics[i] && 
                                 (th_cons->inequality_directions[i] == (split_candidate.feature_value > th_cons->feature_values[i]));
-        bool categorical_cond = !th_cons->is_numerics[i] && (th_cons->inequality_directions[i] != (strcmp(th_cons->categorical_values + i* MAX_CHAR_SIZE, split_candidate.categorical_value)));
+        bool categorical_cond = !th_cons->is_numerics[i] && (th_cons->inequality_directions[i] == (strcmp(th_cons->categorical_values + i* MAX_CHAR_SIZE, split_candidate.categorical_value) == 0));
         if (numerical_cond || categorical_cond){
-            crnt_score *=th_cons->constraint_values[i];
-            th_cons_satisfied[i] = true;  
+            crnt_score *= th_cons->constraint_values[i];
         }
     }
     return crnt_score;
@@ -287,7 +284,7 @@ void deallocate_constraints(featureConstraints* constraints){
 void print_threshold_constraints(const thresholdConstraints * th_cons, const int n_th_cons){
     std::cout << "#### " << n_th_cons  << " threshold constraints #######" << std::endl;
     for (int i = 0; i < n_th_cons; ++i){
-        std::cout << "constraint: " << i + 1 << " - feature_idx: " << th_cons->feature_indices[i];
+        std::cout << "constraint: " << i + 1 << " - mapped feature_idx: " << th_cons->feature_indices[i];
         std::cout << " constraint value: " << th_cons->constraint_values[i];
         if (th_cons->is_numerics[i]){
             std::cout << " numerical constraint - feature_value";
@@ -321,7 +318,6 @@ void save_constraints(std::ofstream& file, featureConstraints *constraints, int 
         file.write(reinterpret_cast<char*>(constraints->th_cons->constraint_values), n_th_cons * sizeof(float));
         file.write(reinterpret_cast<char*>(constraints->th_cons->is_numerics), n_th_cons * sizeof(bool));
         file.write(reinterpret_cast<char*>(constraints->th_cons->inequality_directions), n_th_cons * sizeof(bool));
-        file.write(reinterpret_cast<char*>(constraints->th_cons->satisfied), n_th_cons * sizeof(bool));
         file.write(reinterpret_cast<char*>(constraints->th_cons->categorical_values), n_th_cons * sizeof(char) * MAX_CHAR_SIZE);
     }
     check = constraints->hr_cons != nullptr ? VALID : NULL_OPT;
@@ -373,7 +369,6 @@ featureConstraints* load_constraints(std::ifstream& file, int output_dim){
         file.read(reinterpret_cast<char*>(th_cons->constraint_values), n_th_cons * sizeof(float));
         file.read(reinterpret_cast<char*>(th_cons->is_numerics), n_th_cons * sizeof(bool));
         file.read(reinterpret_cast<char*>(th_cons->inequality_directions), n_th_cons * sizeof(bool));
-        file.read(reinterpret_cast<char*>(th_cons->satisfied), n_th_cons * sizeof(bool));
         file.read(reinterpret_cast<char*>(th_cons->categorical_values), n_th_cons * sizeof(char) * MAX_CHAR_SIZE);
     } 
     
@@ -416,11 +411,11 @@ featureConstraints* load_constraints(std::ifstream& file, int output_dim){
     return constraints;
 }
 
-void print_hierarchy_constraints(const hierarchyConstraints * hr_cons, const int n_hr_cons, const int n_hr_features){
+void print_hierarchy_constraints(const hierarchyConstraints *hr_cons, const int n_hr_cons, const int n_hr_features){
     std::cout << "#### " << n_hr_cons << " hierarchy constraints #######" << std::endl;
     int cumsum = 0;
     for (int i = 0; i < n_hr_cons; ++i){
-        std::cout << "constraint: " << i + 1 << " - feature_idx: " << hr_cons->feature_indices[i];
+        std::cout << "constraint: " << i + 1 << " - mapped feature_idx: " << hr_cons->feature_indices[i];
         if (hr_cons->is_numerics[i]){
             std::cout << " numerical constraint with ";
         } else {
@@ -441,7 +436,7 @@ void print_hierarchy_constraints(const hierarchyConstraints * hr_cons, const int
 void print_output_constraints(const outputConstraints *out_cons, const int n_out_cons, const int output_dim){
     std::cout << "#### " << n_out_cons << " output constraints #######" << std::endl;
     for (int i = 0; i < n_out_cons; ++i){
-        std::cout << "constraint: " << i + 1 << " - feature_idx: " << out_cons->feature_indices[i];
+        std::cout << "constraint: " << i + 1 << " - mapped feature_idx: " << out_cons->feature_indices[i];
         if (out_cons->is_numerics[i]){
             std::cout << " numerical constraint - feature_value";
             if (out_cons->inequality_directions[i])

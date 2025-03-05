@@ -64,7 +64,7 @@ TreeNode::~TreeNode(){
 
 }
 
-int TreeNode::splitNode(const float *obs, const char *categorical_obs, const int _node_idx, const splitCandidate &split_candidate, const int n_th_cons){
+int TreeNode::splitNode(const float *obs, const char *categorical_obs, const int _node_idx, const splitCandidate &split_candidate, const featureConstraints * constraints){
     std::vector<int> pre_left_indices(this->n_samples), pre_right_indices(this->n_samples);
     int left_count = 0, right_count = 0;
     bool is_categorical = split_candidate.categorical_value != nullptr;
@@ -102,7 +102,7 @@ int TreeNode::splitNode(const float *obs, const char *categorical_obs, const int
     int *left_indices = new int[left_count];
     std::copy(pre_left_indices.begin(), pre_left_indices.begin() + left_count, left_indices);
 
-    this->left_child = new TreeNode(left_indices, left_count, this->n_num_features, this->n_cat_features, this->output_dim, this->depth + 1, _node_idx + 1, n_th_cons);
+    this->left_child = new TreeNode(left_indices, left_count, this->n_num_features, this->n_cat_features, this->output_dim, this->depth + 1, _node_idx + 1, constraints->n_th_cons);
     if (this->left_child == nullptr) {
         std::cerr << "Memory allocation failed" << std::endl;
         delete[] left_indices;
@@ -110,7 +110,7 @@ int TreeNode::splitNode(const float *obs, const char *categorical_obs, const int
     }
     int *right_indices = new int[right_count];
     std::copy(pre_right_indices.begin(), pre_right_indices.begin() + right_count, right_indices);
-    this->right_child = new TreeNode(right_indices, right_count, this->n_num_features, this->n_cat_features, this->output_dim, this->depth + 1, _node_idx + 2, n_th_cons);
+    this->right_child = new TreeNode(right_indices, right_count, this->n_num_features, this->n_cat_features, this->output_dim, this->depth + 1, _node_idx + 2, constraints->n_th_cons);
     if (this->right_child == nullptr) {
         std::cerr << "Memory allocation failed" << std::endl;
         delete[] right_indices;
@@ -147,14 +147,27 @@ int TreeNode::splitNode(const float *obs, const char *categorical_obs, const int
         std::copy(split_candidate.categorical_value, split_candidate.categorical_value + MAX_CHAR_SIZE, this->right_child->split_conditions[this->depth].categorical_value);
     }
     this->right_child->split_conditions[this->depth].inequality_direction = true;
-    if (n_th_cons > 0){
-        std::copy(this->th_cons_satisfied, this->th_cons_satisfied + n_th_cons, this->right_child->th_cons_satisfied);
-        std::copy(this->th_cons_satisfied, this->th_cons_satisfied + n_th_cons, this->left_child->th_cons_satisfied);
+
+    if (constraints->n_th_cons > 0 && constraints->th_cons != nullptr){
+        std::copy(this->th_cons_satisfied, this->th_cons_satisfied + constraints->n_th_cons, this->right_child->th_cons_satisfied);
+        std::copy(this->th_cons_satisfied, this->th_cons_satisfied + constraints->n_th_cons, this->left_child->th_cons_satisfied);
+        bool numeric_cand = split_candidate.categorical_value == nullptr;
+        for (int i = 0; i < constraints->n_th_cons; ++i){
+            if (!this->th_cons_satisfied[i] && split_candidate.feature_idx == constraints->th_cons->feature_indices[i] && constraints->th_cons->is_numerics[i] == numeric_cand){
+                bool numerical_cond = constraints->th_cons->is_numerics[i] && 
+                                        (constraints->th_cons->inequality_directions[i] == (split_candidate.feature_value > constraints->th_cons->feature_values[i]));
+                bool categorical_cond = !constraints->th_cons->is_numerics[i] && (constraints->th_cons->inequality_directions[i] != (strcmp(constraints->th_cons->categorical_values + i* MAX_CHAR_SIZE, split_candidate.categorical_value)));
+                if (numerical_cond || categorical_cond){
+                    this->right_child->th_cons_satisfied[i] = true;
+                    this->left_child->th_cons_satisfied[i] = true;
+                }
+            }
+        }
     }
     return 0;
 }
 
-float TreeNode::getSplitScore(dataSet *dataset, scoreFunc split_score_func, const splitCandidate &split_candidate, const int min_data_in_leaf, featureConstraints* constraints, const std::unordered_set<int>& used_features){
+float TreeNode::getSplitScore(const ensembleData *edata, dataSet *dataset, scoreFunc split_score_func, const splitCandidate &split_candidate, const int min_data_in_leaf, featureConstraints* constraints, const std::unordered_set<std::tuple<int, bool>, tuple_hash>& used_features){
     // make sure that we do not re-use the same split candidate along a path
     bool is_numeric = split_candidate.categorical_value == nullptr;
     if (this->depth > 0){
@@ -174,11 +187,12 @@ float TreeNode::getSplitScore(dataSet *dataset, scoreFunc split_score_func, cons
     if (constraints != nullptr && constraints->hr_cons != nullptr){
         int cumsum = 0;
         for (int i = 0; i < constraints->n_hr_cons; ++i){
-            if (constraints->hr_cons->feature_indices[i] == split_candidate.feature_idx){
+            if (constraints->hr_cons->feature_indices[i] == split_candidate.feature_idx && is_numeric == constraints->hr_cons->is_numerics[i]){
                 if (this->depth == 0)
                     return -INFINITY;
                 for (int j = 0; j < constraints->hr_cons->dep_count[i]; ++j){
-                    if (used_features.find(constraints->hr_cons->dep_features[cumsum + j]) == used_features.end())
+                    int const_feature = constraints->hr_cons->dep_features[cumsum + j];
+                    if (used_features.find({edata->feature_mapping[const_feature], edata->mapping_numerics[const_feature]}) == used_features.end())
                         return -INFINITY; // Missing dependency, reject split
                 }
             }

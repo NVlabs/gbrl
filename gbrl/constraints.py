@@ -6,29 +6,29 @@
 # https://nvlabs.github.io/gbrl/license.html
 #
 
-from typing import Union, List, Optional
+from typing import Union, List, Optional, Tuple
 import numpy as np
-import torch as th
 
-from gbrl.utils import get_index_mapping
 
 CONSTRAINTS = ['threshold', 'hierarchy', 'output']
-
 
 class Constraint:
     def __init__(self):
         self.constraints = []
         self.used = False
 
-    def parse_dataset(self, dataset: Union[np.ndarray, th.Tensor]) -> None:
-        index_mapping = get_index_mapping(dataset)
-        for i in range(len(self.constraints)):
-            self.constraints[i]['feature_idx'] = index_mapping[self.constraints[i]['feature_idx']]
+    def parse_mapping(self, mapping: np.ndarray) -> None:
+        if not self.used:
+            for i in range(len(self.constraints)):
+                self.constraints[i]['is_numeric'] = mapping[1][self.constraints[i]['feature_idx']]
+                self.constraints[i]['feature_idx'] = mapping[0][self.constraints[i]['feature_idx']]
+                
+            self.used = True
     
     def get_constraints(self):
         return self.constraints
     def add_constraint(self, constraint_type: str, feature_idx: int, 
-                 feature_value: Optional[Union[float, str]] = None, 
+                 feature_value: Optional[Union[float, str]] = 0, 
                  op_is_positive: bool = True,
                  constraint_value: float = None,
                  output_values: Optional[Union[np.ndarray, List[float]]] = None, 
@@ -59,10 +59,10 @@ class Constraint:
         if constraint_type != 'hierarchy':
             assert dependent_features is None, "Can only set constraints on dependent features using a hierarchy constraint"
         constraint = {'feature_idx': feature_idx, 'feature_value': feature_value if is_numeric else 0.0,
-                            'categorical_value': None if is_numeric else feature_value.encode('utf-8').ljust(128, '\0'),
-                            'constraint_type': constraint_type, 'is_numeric': is_numeric,
-                            'op_is_positive': op_is_positive, 
-                            }
+                        'categorical_value': None if is_numeric else feature_value.encode('utf-8').ljust(128, b'\0'),
+                        'constraint_type': constraint_type, 'is_numeric': is_numeric,
+                        'op_is_positive': op_is_positive, 
+                    }
         if dependent_features is not None:
             if isinstance(dependent_features, np.ndarray):
                 dependent_features = dependent_features.flatten().astype(np.intc)

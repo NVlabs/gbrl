@@ -83,9 +83,9 @@ def process_array(arr: np.ndarray)-> Tuple[np.ndarray, np.ndarray]:
         raise ValueError(f"Unsupported array data type: {arr.dtype}")
     
 
-def get_index_mapping(arr: Union[np.ndarray, th.Tensor]) -> Dict:
+def get_index_mapping(arr: Union[np.ndarray, th.Tensor]) -> Tuple[np.ndarray, np.ndarray]:
     """Returns a mapping from original column indices to their new indices after separating numerical and categorical features."""
-    if not isinstance(arr, th.Tensor) and arr.dtype == object:
+    if not isinstance(arr, th.Tensor):
         if arr.ndim == 1:
             # For 1D array, use the array itself as first_row
             first_row = arr
@@ -103,18 +103,18 @@ def get_index_mapping(arr: Union[np.ndarray, th.Tensor]) -> Dict:
 
         numerical_indices = np.where(numerical_mask)[0]
         categorical_indices = np.where(categorical_mask)[0]
-        index_mapping = {}
+        # Create the index mapping array
+        index_mapping = np.empty_like(np.arange(arr.shape[-1]), dtype=int)
+        index_mapping[numerical_indices] = np.arange(len(numerical_indices))
+        index_mapping[categorical_indices] = np.arange(len(categorical_indices))
 
-        for new_idx, old_idx in enumerate(numerical_indices):
-            index_mapping[old_idx] = new_idx
-        for new_idx, old_idx in enumerate(categorical_indices):
-            index_mapping[old_idx] = new_idx
-        return index_mapping
+        # Boolean mask: True for categorical, False for numerical
+        numerical_mask = np.zeros(arr.shape[-1], dtype=bool)
+        numerical_mask[numerical_indices] = True
+
+        return index_mapping, numerical_mask
     else:
-        if arr.ndim == 1:
-            return {i: i for i in range(arr.shape[0])}
-        else:
-            return {i: i for i in range(arr.shape[1])}
+        return np.arange(arr.shape[-1]), np.ones(arr.shape[-1], dtype=bool)
     
 
 def to_numpy(arr: Union[np.ndarray, th.Tensor]) -> np.ndarray:

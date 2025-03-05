@@ -68,7 +68,7 @@ struct TreeNodeGPU {
     float* edge_weights;
     bool* inequality_directions;
     bool* is_numerics;
-    bool* th_con_satisfied;
+    bool* th_cons_satisfied;
     char* categorical_values;
 };
 

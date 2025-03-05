@@ -196,6 +196,69 @@ py::dict metadataToDict(const ensembleMetaData* metadata){
     return d;
 }
 
+py::dict ensembleDataToDict(const ensembleData* data, const ensembleMetaData* metadata) {
+    py::dict d;
+    if (data != nullptr) {
+        // Convert float pointers to NumPy arrays with ownership transfer
+        auto bias_capsule = py::capsule(data->bias, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
+        d["bias"] = py::array_t<float>({metadata->output_dim}, data->bias, bias_capsule);
+
+        auto feature_mapping_capsule = py::capsule(data->feature_mapping, [](void* ptr) { delete[] reinterpret_cast<int*>(ptr); });
+        d["feature_mapping"] = py::array_t<int>({metadata->input_dim}, data->feature_mapping, feature_mapping_capsule);
+        
+        auto reverse_num_feature_mapping_capsule = py::capsule(data->reverse_num_feature_mapping, [](void* ptr) { delete[] reinterpret_cast<int*>(ptr); });
+        d["reverse_num_feature_mapping"] = py::array_t<int>({metadata->input_dim}, data->reverse_num_feature_mapping, reverse_num_feature_mapping_capsule);
+        
+        auto reverse_cat_feature_mapping_capsule = py::capsule(data->reverse_cat_feature_mapping, [](void* ptr) { delete[] reinterpret_cast<int*>(ptr); });
+        d["reverse_cat_feature_mapping"] = py::array_t<int>({metadata->input_dim}, data->reverse_cat_feature_mapping, reverse_cat_feature_mapping_capsule);
+        
+        auto feature_weights_capsule = py::capsule(data->feature_weights, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
+        d["feature_weights"] = py::array_t<float>({metadata->input_dim}, data->feature_weights, feature_weights_capsule);
+
+        auto tree_indices_capsule = py::capsule(data->tree_indices, [](void* ptr) { delete[] reinterpret_cast<int*>(ptr); });
+        d["tree_indices"] = py::array_t<int>({metadata->n_trees}, data->tree_indices, tree_indices_capsule);
+
+        int split_sizes = (metadata->grow_policy == OBLIVIOUS) ? metadata->n_trees : metadata->n_leaves;
+
+        auto depths_capsule = py::capsule(data->depths, [](void* ptr) { delete[] reinterpret_cast<int*>(ptr); });
+        d["depths"] = py::array_t<int>({split_sizes}, data->depths, depths_capsule);
+
+        auto values_capsule = py::capsule(data->values, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
+        d["values"] = py::array_t<float>({metadata->n_leaves, metadata->output_dim}, data->values, values_capsule);
+
+        auto feature_indices_capsule = py::capsule(data->feature_indices, [](void* ptr) { delete[] reinterpret_cast<int*>(ptr); });
+        d["feature_indices"] = py::array_t<int>({split_sizes, metadata->max_depth}, data->feature_indices, feature_indices_capsule);
+
+        auto feature_values_capsule = py::capsule(data->feature_values, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
+        d["feature_values"] = py::array_t<float>({split_sizes, metadata->max_depth}, data->feature_values, feature_values_capsule);
+
+        auto edge_weights_capsule = py::capsule(data->edge_weights, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
+        d["edge_weights"] = py::array_t<float>({metadata->n_leaves, metadata->max_depth}, data->edge_weights, edge_weights_capsule);
+
+        auto is_numerics_capsule = py::capsule(data->is_numerics, [](void* ptr) { delete[] reinterpret_cast<bool*>(ptr); });
+        d["is_numerics"] = py::array_t<bool>({split_sizes, metadata->max_depth}, data->is_numerics, is_numerics_capsule);
+
+        auto inequality_directions_capsule = py::capsule(data->inequality_directions, [](void* ptr) { delete[] reinterpret_cast<bool*>(ptr); });
+        d["inequality_directions"] = py::array_t<bool>({metadata->n_leaves, metadata->max_depth}, data->inequality_directions, inequality_directions_capsule);
+        
+        auto mapping_numerics_capsule = py::capsule(data->mapping_numerics, [](void* ptr) { delete[] reinterpret_cast<bool*>(ptr); });
+        d["mapping_numerics"] = py::array_t<bool>({metadata->input_dim}, data->mapping_numerics, mapping_numerics_capsule);
+
+        // Convert char* categorical_values to NumPy string array (S128)
+        auto categorical_capsule = py::capsule(data->categorical_values, [](void* ptr) { delete[] reinterpret_cast<char*>(ptr); });
+        d["categorical_values"] = py::array(py::dtype("S128"), {split_sizes, metadata->max_depth}, data->categorical_values, categorical_capsule);
+        
+        d["alloc_data_size"] = data->alloc_data_size;
+
+#ifdef DEBUG
+        auto n_samples_capsule = py::capsule(data->n_samples, [](void* ptr) { delete[] reinterpret_cast<int*>(ptr); });
+        d["n_samples"] = py::array_t<int>({metadata->n_leaves}, data->n_samples, n_samples_capsule);
+#endif
+    }
+    return d;
+}
+
+
 py::dict optimizerToDict(const optimizerConfig* conf){
     py::dict d;
     if (conf != nullptr){
@@ -379,6 +442,24 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         
         self.set_feature_weights(feature_weights_ptr, input_dim); 
     }, "Set GBRL model feature weights");
+    gbrl.def("set_feature_mapping", [](GBRL &self, const py::array_t<int> &feature_mapping, const py::array_t<bool> &mapping_numerics) {
+        if (!feature_mapping.attr("flags").attr("c_contiguous").cast<bool>()) {
+            throw std::runtime_error("Arrays must be C-contiguous");
+        }
+        if (!mapping_numerics.attr("flags").attr("c_contiguous").cast<bool>()) {
+            throw std::runtime_error("Arrays must be C-contiguous");
+        }
+        py::gil_scoped_release release; 
+
+        py::buffer_info info = feature_mapping.request();
+        int* feature_mapping_ptr = static_cast<int*>(info.ptr);
+        int input_dim = static_cast<int>(len(feature_mapping));
+
+        info = mapping_numerics.request();
+        bool* mapping_numerics_ptr = static_cast<bool*>(info.ptr);
+        
+        self.set_feature_mapping(feature_mapping_ptr, mapping_numerics_ptr, input_dim); 
+    }, "Set GBRL model feature mapping");
     gbrl.def("get_bias", [](GBRL &self) -> py::array_t<float> {
         py::gil_scoped_release release; 
         float* bias_ptr = self.get_bias();  
@@ -497,6 +578,12 @@ PYBIND11_MODULE(gbrl_cpp, m) {
     gbrl.def("get_metadata", [](GBRL &self) ->  py::dict {
         return metadataToDict(self.metadata); 
     }, "Return ensemble metadata");  
+    gbrl.def("get_ensemble_data", [](GBRL &self) -> py::dict{
+        py::gil_scoped_release release; 
+        ensembleData *edata = self.get_ensemble_data(); 
+        py::gil_scoped_acquire acquire;
+        return ensembleDataToDict(edata, self.metadata);
+    }, "Return ensemble data");
     gbrl.def("get_device", [](GBRL &self) ->  std::string {
         py::gil_scoped_release release; 
         return self.get_device(); 

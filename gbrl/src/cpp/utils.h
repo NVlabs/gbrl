@@ -18,6 +18,8 @@
 #include <cmath>  // For std::round
 #include <cstdint> // For int16_t
 #include <algorithm> // For std::clamp
+#include <tuple>
+#include <functional>
 
 #include "types.h"
 
@@ -27,6 +29,10 @@ int binaryToDecimal(const BoolVector& binaryPath);
 inline int calculate_num_threads(int total_elements, int min_elements_per_thread) {
     int max_threads = omp_get_max_threads();
     int n_threads = total_elements / min_elements_per_thread;
+    
+    if (n_threads > total_elements)
+        n_threads = total_elements;
+
     if (n_threads <= 1) {
         return 1; // At least one thread
     } else if (n_threads > max_threads) {
@@ -101,5 +107,11 @@ inline int32_t float_to_int32(float value) {
     int32_t result = static_cast<int32_t>(std::round(scaled_value));
     return result;
 }
+
+struct tuple_hash {
+    std::size_t operator()(const std::tuple<int, bool>& t) const {
+        return std::hash<int>()(std::get<0>(t)) ^ (std::hash<bool>()(std::get<1>(t)) << 1);
+    }
+};
 
 #endif 

@@ -45,11 +45,10 @@ void add_feature_constraint_cuda(featureConstraints *constraints, int feature_id
         bool is_numeric, int output_dim, float *output_values);
 featureConstraints* copy_feature_constraint_gpu_cpu(const featureConstraints *constraints, const int output_dim);
 featureConstraints* copy_feature_constraint_cpu_gpu(const featureConstraints *constraints, const int output_dim);
-featureConstraints* copy_feature_constraint_gpu_gpu(const featureConstraints* constraints, const int output_dim);
-void deallocate_constraints_cuda(featureConstraints* constraints);
+featureConstraints* copy_feature_constraint_gpu_gpu(const featureConstraints *constraints, const int output_dim);
+void deallocate_constraints_cuda(featureConstraints *constraints);
 #ifdef __CUDACC__  // This macro is defined by NVCC
-__global__ void reset_satisfied_kernel(thresholdConstraints *th_cons);
-__global__ void check_hierarchical_candidates(const n_hr_cons, const TreeNodeGPU* __restrict__ node, const int* __restrict__ dep_count, const int* __restrict__ feature_indices, const int* __restrict__ dep_features, const int* __restrict__ candidate_indices, float* __restrict__ split_scores, const int n_candidates);
+__global__ void check_hierarchical_candidates(const int n_hr_cons, const TreeNodeGPU* __restrict__ node, const int* __restrict__ dep_count, const bool *is_numerics, const int* __restrict__ feature_indices, const int* __restrict__ dep_features, const int* __restrict__ candidate_indices, const bool* __restrict__ candidate_numeric, const int* __restrict__ feature_mapping, const bool* __restrict__ mapping_numerics, float* __restrict__ split_scores, const int n_candidates);
 #endif
 
 #ifdef __cplusplus

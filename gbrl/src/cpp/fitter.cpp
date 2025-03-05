@@ -135,7 +135,7 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
         Predictor::predict_cpu(dataset, full_preds, edata, metadata, 0, iterations, false, opts);
         float *full_grads = init_zero_mat(dataset->n_samples*metadata->output_dim); 
         float *full_grad_norms = init_zero_mat(dataset->n_samples); 
-        batch_loss = MultiRMSE::get_loss_and_gradients(full_preds, targets, full_grads, dataset->n_samples, metadata->output_dim);
+        batch_loss = MultiRMSE::get_loss_and_gradients(full_preds, targets, full_grads, dataset->n_samples, metadata->output_dim, par_th);
         calculate_squared_norm(full_grad_norms, full_grads, dataset->n_samples, metadata->output_dim, metadata->par_th);
         generator.processCategoricalCandidates(dataset->categorical_obs, full_grad_norms);
         delete[] full_preds;
@@ -143,6 +143,8 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
         delete[] full_grad_norms;
     }
     dataSet batch_dataset;
+
+    printf("batch_size: %d, n_samples %d, last batch preds size: %d\n", batch_size, dataset->n_samples, last_batch_preds_size);
 
     for (int i = 0; i < iterations; ++i){
         batch_dataset.obs = dataset->obs + batch_start_idx*metadata->n_num_features; 
@@ -162,8 +164,9 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
         Predictor::predict_cpu(&batch_dataset, preds, edata, metadata, 0, i, false, opts);
         grads = is_last_batch ? last_batch_grads : batch_grads;
         if (loss_type == MultiRMSE){
-            batch_loss = MultiRMSE::get_loss_and_gradients(preds, shifted_targets, grads, batch_dataset.n_samples, metadata->output_dim);
+            batch_loss = MultiRMSE::get_loss_and_gradients(preds, shifted_targets, grads, batch_dataset.n_samples, metadata->output_dim, par_th);
         }
+
         batch_dataset.grads = grads;
         if (metadata->use_cv && i > 0){
             Fitter::control_variates(&batch_dataset, edata, metadata);
@@ -198,6 +201,7 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
         batch_start_idx += batch_n_samples;
         if (batch_start_idx >= dataset->n_samples)
             batch_start_idx = 0;
+       
         batch_n_samples = batch_start_idx + metadata->batch_size < dataset->n_samples ? metadata->batch_size : dataset->n_samples - batch_start_idx;
         metadata->iteration++;
         if (metadata->verbose > 0){
@@ -217,7 +221,7 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
     Predictor::predict_cpu(dataset, full_preds, edata, metadata, 0, iterations, false, opts);
     float full_loss = INFINITY;
     if (loss_type == MultiRMSE){
-        full_loss = MultiRMSE::get_loss(full_preds, targets, dataset->n_samples, output_dim); 
+        full_loss = MultiRMSE::get_loss(full_preds, targets, dataset->n_samples, output_dim, par_th); 
     }
     delete[] batch_preds;
     delete[] full_preds;
@@ -228,6 +232,7 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
     delete[] last_batch_build_grads;
     delete[] batch_grad_norms;
     delete[] last_batch_grad_norms;
+
     return full_loss;
 }
 
@@ -257,7 +262,7 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
     std::vector<float> best_scores(n_threads, -INFINITY);
     std::vector<int> best_indices(n_threads, -1);
     FloatVector scores(n_candidates);
-    std::unordered_set<int> used_features;
+    std::unordered_set<std::tuple<int, bool>, tuple_hash> used_features;
     int batch_size = n_candidates / n_threads;
 
     while (!tree_nodes.empty())  {
@@ -277,7 +282,7 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
             used_features.clear();
             if (constraints != nullptr && constraints->hr_cons != nullptr) {
                 for (int k = 0; k < crnt_node->depth; ++k) {
-                    used_features.insert(crnt_node->split_conditions[k].feature_idx);
+                    used_features.insert({crnt_node->split_conditions[k].feature_idx, crnt_node->split_conditions[k].categorical_value == nullptr});
                 }
             }
             
@@ -304,14 +309,15 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
                 int end_idx = (thread_num == n_threads - 1) ? n_candidates : start_idx + batch_size;
                 // Process the batch of candidates
                 for (int j = start_idx; j < end_idx; ++j) {
-                    float score = crnt_node->getSplitScore(dataset, metadata->split_score_func, split_candidates[j], metadata->min_data_in_leaf, constraints, used_features);
-                    int feat_idx = (split_candidates[j].categorical_value == nullptr) ? split_candidates[j].feature_idx : split_candidates[j].feature_idx + metadata->n_num_features; 
+                    float score = crnt_node->getSplitScore(edata, dataset, metadata->split_score_func, split_candidates[j], metadata->min_data_in_leaf, constraints, used_features);
+                    int feat_idx = (split_candidates[j].categorical_value == nullptr) ? edata->reverse_num_feature_mapping[split_candidates[j].feature_idx] : edata->reverse_cat_feature_mapping[split_candidates[j].feature_idx];
                     score = score * edata->feature_weights[feat_idx] - parent_score;
-                    if (constraints != nullptr)
+                    if (constraints != nullptr && constraints->n_th_cons > 0)
                         score = get_threshold_score(score, constraints->th_cons, split_candidates[j], constraints->n_th_cons, crnt_node->th_cons_satisfied);
-// #ifdef DEBUG
-//                     std::cout << " cand: " <<  j << " score: " <<  score << " parent score: " <<  parent_score << " info: " << split_candidates[j] << std::endl;
-// #endif 
+#ifdef DEBUG
+                    if (metadata->verbose > 1)
+                        std::cout << "depth: " << depth << " cand: " <<  j << " score: " <<  score << " parent score: " <<  parent_score << " info: " << split_candidates[j];
+#endif 
                     if (score > local_best_score) {
                         local_best_score = score;
                         local_chosen_idx = j;
@@ -332,7 +338,7 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
         }
 
         if (best_score >= 0 && to_split){           
-            int status = crnt_node->splitNode(dataset->obs, dataset->categorical_obs, node_idx_cntr, split_candidates[chosen_idx], constraints->n_th_cons);
+            int status = crnt_node->splitNode(dataset->obs, dataset->categorical_obs, node_idx_cntr, split_candidates[chosen_idx], constraints);
             if (status == -1){
                 std::cerr << "ERROR couldn't split best score" << std::endl;
                 break;
@@ -384,7 +390,7 @@ int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMe
     std::vector<int> best_indices(n_threads, -1);
     FloatVector scores(n_candidates);
     int batch_size = n_candidates / n_threads;
-    std::unordered_set<int> used_features;
+    std::unordered_set<std::tuple<int, bool>, tuple_hash> used_features;
     
     while (depth < metadata->max_depth)  {
         best_score = -INFINITY;
@@ -393,7 +399,7 @@ int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMe
             for (int node_idx = 0; node_idx < (1 << depth); ++node_idx) {
                 crnt_node = tree_nodes[node_idx];
                 for (int k = 0; k < crnt_node->depth; ++k) {
-                    used_features.insert(crnt_node->split_conditions[k].feature_idx);
+                    used_features.insert({crnt_node->split_conditions[k].feature_idx, crnt_node->split_conditions[k].categorical_value == nullptr});
                 }
             }
         }
@@ -414,16 +420,17 @@ int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMe
                 
                 for (int node_idx = 0; node_idx < (1 << depth); ++node_idx){
                     crnt_node = tree_nodes[node_idx];
-                    score += crnt_node->getSplitScore(dataset, metadata->split_score_func, split_candidates[j], metadata->min_data_in_leaf, constraints, used_features);
-                    if (constraints->th_cons != nullptr)
+                    score += crnt_node->getSplitScore(edata, dataset, metadata->split_score_func, split_candidates[j], metadata->min_data_in_leaf, constraints, used_features);
+                    if (constraints != nullptr && constraints->n_th_cons > 0)
                         score = get_threshold_score(score, constraints->th_cons, split_candidates[j], constraints->n_th_cons, crnt_node->th_cons_satisfied);
                 }
-                int feat_idx = (split_candidates[j].categorical_value == nullptr) ? split_candidates[j].feature_idx : split_candidates[j].feature_idx + metadata->n_num_features; 
+                int feat_idx = (split_candidates[j].categorical_value == nullptr) ? edata->reverse_num_feature_mapping[split_candidates[j].feature_idx] : edata->reverse_cat_feature_mapping[split_candidates[j].feature_idx];
                 score = score*edata->feature_weights[feat_idx] - parent_score;
                 
-// #ifdef DEBUG
-//                 std::cout << " cand: " <<  j << " score: " <<  score << " parent_score: " << parent_score <<  " info: " << split_candidates[j] << std::endl;
-// #endif
+#ifdef DEBUG
+                if (metadata->verbose > 1)
+                    std::cout << "depth: " << depth << " cand: " <<  j << " score: " <<  score << " parent_score: " << parent_score <<  " info: " << split_candidates[j] << std::endl;
+#endif
                 if (score > local_best_score) {
                     local_best_score = score;
                     local_chosen_idx = j;
@@ -446,7 +453,7 @@ int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMe
         parent_score = best_score;
         for (int node_idx = 0; node_idx < (1 << depth); ++node_idx){
             TreeNode *crnt_node = tree_nodes[node_idx];
-            int status = crnt_node->splitNode(dataset->obs, dataset->categorical_obs, node_idx_cntr, split_candidates[chosen_idx], constraints->n_th_cons);
+            int status = crnt_node->splitNode(dataset->obs, dataset->categorical_obs, node_idx_cntr, split_candidates[chosen_idx], constraints);
             if (status == -1){
                 std::cerr << "ERROR couldn't split best score" << std::endl;
                 break;

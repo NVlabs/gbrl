@@ -245,7 +245,12 @@ int SplitCandidateGenerator::computeQuantiles(const float *obs, FloatVector &qua
 
 
 std::ostream& operator<<(std::ostream& os, const splitCandidate& obj){
-    os << "splitCandidate feature_idx: " << obj.feature_idx;
+    os << "splitCandidate ";
+    if(obj.categorical_value == nullptr)
+        os << " numerical ";
+    else 
+        os << "categorical ";
+    os << "feature_idx: " << obj.feature_idx;
     if (obj.categorical_value != nullptr){
         os << " == " << std::string(obj.categorical_value) << std::endl; ;
     } else {

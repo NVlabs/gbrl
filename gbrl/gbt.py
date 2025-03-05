@@ -105,12 +105,14 @@ class GBRL:
             bias = bias[:, np.newaxis]
         self._model.set_bias(bias.astype(np.single))
 
-    def set_feature_weights(self, feature_weights: Union[np.ndarray, th.Tensor]):
+    def set_feature_weights(self, feature_weights: Union[np.ndarray, th.Tensor, List]):
         """Sets GBRL feature_weights
 
         Args:
             feature_weights (Union[np.ndarray, th.Tensor])
         """
+        if isinstance(feature_weights, list):
+            feature_weights = np.array(feature_weights, dtype=np.single)
         if isinstance(feature_weights, th.Tensor):
             feature_weights = feature_weights.clone().detach().cpu().numpy()
         # GBRL works with 2D numpy arrays.

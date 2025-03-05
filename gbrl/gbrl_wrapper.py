@@ -21,6 +21,7 @@ from gbrl.utils import (get_poly_vectors,
                     preprocess_features,
                     ensure_same_type,
                     concatenate_arrays,
+                    get_index_mapping,
                     tensor_to_leaf)
 
 from gbrl.compression import ParametricActorCompression, TreeCompression, SharedActorCriticCompression
@@ -39,6 +40,7 @@ class GBTWrapper:
         self.tree_struct = tree_struct
         self.input_dim = input_dim
         self.output_dim = output_dim
+        self.mapping = None
         self.device = device
         self.optimizer = optimizer if isinstance(optimizer, list) or optimizer is None else [optimizer]
         self.student_model = None
@@ -80,6 +82,7 @@ class GBTWrapper:
 
     def _set_constraints(self):
         if self.constraints is not None and not self.constraints.used:
+            self.constraints.parse_mapping(self.mapping)
             for constraint in self.constraints.get_constraints():
                 self.cpp_model.add_constraint(**constraint)
             self.constraints.used = True
@@ -87,8 +90,10 @@ class GBTWrapper:
 
     def step(self, features: Union[np.ndarray, th.Tensor, Tuple], grads: Union[np.ndarray, th.Tensor]) -> None:
         features, grads = ensure_same_type(features, grads)
-        if self.constraints is not None and self.total_iterations == 0:
-            self.constraints.parse_dataset(features)
+        if self.total_iterations == 0:
+            mapping, is_numeric = get_index_mapping(features)
+            self.mapping = (mapping, is_numeric)
+            self.cpp_model.set_feature_mapping(np.ascontiguousarray(mapping), np.ascontiguousarray(is_numeric))
             self._set_constraints()
 
         if isinstance(features, th.Tensor):
@@ -105,6 +110,10 @@ class GBTWrapper:
         self.total_iterations += 1
 
     def fit(self, features: Union[np.ndarray, th.Tensor], targets: Union[np.ndarray, th.Tensor], iterations: int, shuffle: bool = True, loss_type: str = 'MultiRMSE') -> float:
+        if self.total_iterations == 0:
+            mapping, is_numeric = get_index_mapping(features)
+            self.mapping = (mapping, is_numeric)
+            self.cpp_model.set_feature_mapping(np.ascontiguousarray(mapping), np.ascontiguousarray(is_numeric))
         if isinstance(features, th.Tensor):
             features = features.detach().cpu().numpy()
         num_features, cat_features = preprocess_features(features)
@@ -612,6 +621,12 @@ class SharedActorCriticWrapper(GBTWrapper):
                 print(f"Caught an exception in GBRL: {e}")
         
     def step(self, observations: Union[np.ndarray, th.Tensor], theta_grad: np.ndarray, value_grad: np.ndarray=None) -> None:
+        if self.total_iterations == 0:
+            mapping, is_numeric = get_index_mapping(observations)
+            self.mapping = (mapping, is_numeric)
+            self.cpp_model.set_feature_mapping(np.ascontiguousarray(mapping), np.ascontiguousarray(is_numeric))
+            self._set_constraints()
+
         grads = concatenate_arrays(theta_grad, value_grad)
         observations, grads = ensure_same_type(observations, grads)
         if isinstance(observations, th.Tensor):

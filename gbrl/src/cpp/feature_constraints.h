@@ -27,7 +27,6 @@ struct thresholdConstraints {
     float* constraint_values;
     bool*  is_numerics;
     bool*  inequality_directions;
-    bool*  satisfied;
     char*  categorical_values;
 };
 
@@ -68,7 +67,7 @@ void deallocate_hierarchy_constraints(hierarchyConstraints* hr_cons);
 outputConstraints* allocate_output_constraints(const int n_out_cons, int output_dim);
 void deallocate_output_constraints(outputConstraints* out_cons);
 
-float get_threshold_score(float crnt_score, thresholdConstraints* th_cons, const splitCandidate &split_candidate, const int n_th_cons, bool *th_cons_satisfied);
+float get_threshold_score(float crnt_score, thresholdConstraints* th_cons, splitCandidate &split_candidate, const int n_th_cons, bool *th_cons_satisfied);
 void add_feature_constraint(featureConstraints *constraints, int feature_idx, float feature_value,
                     const char *categorical_value, constraintType const_type, int* dependent_features,
                     int n_features, float constraint_value, bool inequality_direction, 

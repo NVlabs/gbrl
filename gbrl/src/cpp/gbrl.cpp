@@ -235,6 +235,53 @@ void GBRL::set_feature_weights(float *feature_weights, const int input_dim){
         std::cout << "Setting GBRL feature weights " << std::endl;
 }
 
+void GBRL::set_feature_mapping(const int *feature_mapping, const bool *mapping_numerics, const int input_dim){
+    if (input_dim != this->metadata->input_dim)
+    {
+        std::cerr << "Given feature_mapping vector has different dimensions than expect. " << " Given: " << input_dim << " expected: " << this->metadata->input_dim << std::endl; 
+        throw std::runtime_error("Incompatible dimensions");
+        return;
+    }
+
+    int *reverse_num_feature_mapping = new int[this->metadata->input_dim];
+    int *reverse_cat_feature_mapping = new int[this->metadata->input_dim];
+
+    int j = 0;
+    int k = 0;
+    for (int i = 0 ; i < this->metadata->input_dim ; ++i){
+        reverse_num_feature_mapping[i] = -1;
+        reverse_cat_feature_mapping[i] = -1;
+        if (mapping_numerics[i]){
+            reverse_num_feature_mapping[j] = i;
+            j++;
+        }
+        else {
+            reverse_cat_feature_mapping[k] = i;
+            k++;
+        }
+    }
+
+#ifdef USE_CUDA
+    if (this->device == gpu){
+        cudaMemcpy(this->edata->feature_mapping, feature_mapping, sizeof(int)*this->metadata->input_dim, cudaMemcpyHostToDevice);
+        cudaMemcpy(this->edata->mapping_numerics, mapping_numerics, sizeof(bool)*this->metadata->input_dim, cudaMemcpyHostToDevice);
+        cudaMemcpy(this->edata->reverse_num_feature_mapping, reverse_num_feature_mapping, sizeof(int)*this->metadata->input_dim, cudaMemcpyHostToDevice);
+        cudaMemcpy(this->edata->reverse_cat_feature_mapping, reverse_cat_feature_mapping, sizeof(int)*this->metadata->input_dim, cudaMemcpyHostToDevice);
+    }
+#endif
+    if (this->device == cpu){
+        memcpy(this->edata->feature_mapping, feature_mapping, sizeof(int)*this->metadata->input_dim);
+        memcpy(this->edata->mapping_numerics, mapping_numerics, sizeof(bool)*this->metadata->input_dim);
+        memcpy(this->edata->reverse_num_feature_mapping, reverse_num_feature_mapping, sizeof(int)*this->metadata->input_dim);
+        memcpy(this->edata->reverse_cat_feature_mapping, reverse_cat_feature_mapping, sizeof(int)*this->metadata->input_dim);
+    }
+        if (this->metadata->verbose > 0)
+            std::cout << "Setting GBRL feature mapping " << std::endl;
+
+    delete[] reverse_num_feature_mapping;
+    delete[] reverse_cat_feature_mapping;
+}
+
 float* GBRL::get_bias(){
     // returns a copy. must deallocated new float pointer!
 #ifdef USE_CUDA
@@ -967,12 +1014,16 @@ void GBRL::print_ensemble_metadata(){
 }
 
 void GBRL::print_constraints(){
+    if (this->metadata->n_trees == 0){
+        std::cout << "Cannot print constraints of an empty ensemble" << std::endl;
+        return;
+    }
     if (this->constraints->n_cons == 0){
         std::cout << "GBRL model has no constraints" << std::endl;
         return;
     } 
     std::cout << "GBRL model has " << this->constraints->n_cons  << " constraints" << std::endl;
-    featureConstraints* host_constraints;
+    featureConstraints* host_constraints = nullptr;
 #ifdef USE_CUDA
     if (this->device == gpu){
         host_constraints = copy_feature_constraint_gpu_cpu(this->constraints, this->metadata->output_dim);
@@ -981,12 +1032,13 @@ void GBRL::print_constraints(){
     if (this->device == cpu){
         host_constraints = this->constraints;
     }
-    if (host_constraints->th_cons != nullptr)
-        print_threshold_constraints(host_constraints->th_cons);
-    if (host_constraints->hr_cons != nullptr)
-        print_hierarchy_constraints(host_constraints->hr_cons);
-    if (host_constraints->out_cons != nullptr)
-        print_output_constraints(host_constraints->out_cons, this->metadata->output_dim);
+
+    if (host_constraints != nullptr && host_constraints->th_cons != nullptr)
+        print_threshold_constraints(host_constraints->th_cons, host_constraints->n_th_cons);
+    if (host_constraints != nullptr && host_constraints->hr_cons != nullptr)
+        print_hierarchy_constraints(host_constraints->hr_cons, host_constraints->n_hr_cons, host_constraints->n_hr_features);
+    if (host_constraints != nullptr && host_constraints->out_cons != nullptr)
+        print_output_constraints(host_constraints->out_cons, host_constraints->n_out_cons, this->metadata->output_dim);
 #ifdef USE_CUDA
     if (this->device == gpu){
         deallocate_constraints(host_constraints);
@@ -1051,6 +1103,19 @@ float* GBRL::ensemble_shap(const float *obs, const char *categorical_obs, const 
     return shap_values;
 }
 
+ensembleData* GBRL::get_ensemble_data(){
+    ensembleData *edata_copy = nullptr;
+#ifdef USE_CUDA
+    if (this->device == gpu){
+        edata_copy = ensemble_data_copy_gpu_cpu(this->metadata, this->edata, nullptr);
+    }
+#endif 
+    if (this->device == cpu)
+        edata_copy = copy_ensemble_data(this->edata, this->metadata);
+
+    return edata_copy;
+}
+
 void GBRL::add_constraint(int feature_idx, float feature_value, const char *categorical_value, const std::string &const_type, int* dependent_features, int n_features, float constraint_value, bool inequality_direction,  bool is_numeric, float *output_values){
 #ifdef USE_CUDA
     if (this->device == gpu){
@@ -1061,8 +1126,8 @@ void GBRL::add_constraint(int feature_idx, float feature_value, const char *cate
 #endif 
     if (this->device == cpu){
         add_feature_constraint(this->constraints, feature_idx, feature_value, categorical_value, stringToconstraintType(const_type), dependent_features,
-                       n_features, constraint_value, inequality_direction, 
-                       is_numeric, this->metadata->output_dim, output_values);
+            n_features, constraint_value, inequality_direction, 
+            is_numeric, this->metadata->output_dim, output_values);
     }
 }
 
@@ -1084,6 +1149,7 @@ void GBRL::print_tree(int tree_idx){
     std::cout << growPolicyToString(this->metadata->grow_policy) <<" DecisionTree idx: " << tree_idx;
     std::cout <<  " output_dim: " << this->metadata->output_dim << " n_bins: " << this->metadata->n_bins;
     std::cout <<  " min_data_in_leaf: " << this->metadata->min_data_in_leaf << " par_th: " << this->metadata->par_th << " max_depth: " << this->metadata->max_depth << std::endl;
+    std::cout << " input_dim: " << this->metadata->input_dim << " with " << this->metadata->n_num_features << " numerical features and " << this->metadata->n_cat_features << " categorical features" << std::endl;
     std::cout << "Leaf Nodes: " << n_leaves << std::endl;
     int ctr = 0;
     for (int leaf_idx = edata_cpu->tree_indices[tree_idx]; leaf_idx < stop_leaf_idx; ++leaf_idx){

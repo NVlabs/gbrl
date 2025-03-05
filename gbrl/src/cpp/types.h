@@ -150,6 +150,9 @@ struct dataSet {
 
 struct ensembleData {
     float *bias;
+    int *feature_mapping;
+    int *reverse_num_feature_mapping;
+    int *reverse_cat_feature_mapping;
     float *feature_weights;
 #ifdef DEBUG
     int *n_samples; // debugging
@@ -161,8 +164,9 @@ struct ensembleData {
     int* feature_indices;
     float* feature_values;
     float *edge_weights;
-    bool* is_numerics;
+    bool* is_numerics; // is a feature split in the ensemble numerical or categorical
     bool* inequality_directions; 
+    bool* mapping_numerics; // is an input feature index numerical or categorical
     char* categorical_values;  
     size_t alloc_data_size;
 };

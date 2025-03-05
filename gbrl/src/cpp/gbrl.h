@@ -53,6 +53,7 @@ class GBRL {
         float fit(float *obs, char *categorical_obs, float *targets, int iterations, const int n_samples, const int n_num_features, const int n_cat_features, bool shuffle = true, std::string _loss_type = "MultiRMSE");
         void set_bias(float *bias, const int output_dim);
         void set_feature_weights(float *feauture_weights, const int input_dim);
+        void set_feature_mapping(const int *feature_mapping, const bool *mapping_numerics, const int input_dim);
         float* get_bias();
         float* get_feature_weights();
         float* predict(const float *obs, const char *categorical_obs, const int n_samples, const int n_num_features, const int n_cat_features, int start_tree_idx, int stop_tree_idx, deviceType device);
@@ -66,11 +67,12 @@ class GBRL {
         int get_iteration();
 
         void set_optimizer(optimizerAlgo algo, schedulerFunc scheduler_func, float init_lr, int start_idx, int stop_idx, float stop_lr, int T, float beta_1, float beta_2, float eps, float shrinkage);
-
         void print_tree(int tree_idx);
         void print_constraints();
         void print_ensemble_metadata();
         void plot_tree(int tree_idx, const std::string &filename);
+
+        ensembleData* get_ensemble_data();
 
         ensembleData *edata;
         ensembleMetaData *metadata;
