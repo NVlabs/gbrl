@@ -11,6 +11,7 @@ __version__ = "1.0.11"
 import importlib.util
 import os
 import platform
+import sys
 
 _loaded_cpp_module = None
 
