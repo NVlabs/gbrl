@@ -158,11 +158,12 @@ if(NOT pybind11_FOUND)
 endif()
 
 find_path(GRAPHVIZ_INCLUDE_DIR         NAMES graphviz/cgraph.h
-          HINTS ${_GRAPHVIZ_INCLUDE_DIR})
+          HINTS ${GRAPHVIZ_INCLUDE_DIR})
 find_library(GRAPHVIZ_GVC_LIBRARY      NAMES gvc 
-             HINTS ${_GRAPHVIZ_LIBRARY_DIR})
+             HINTS ${GRAPHVIZ_LIBRARY_DIR})
 find_library(GRAPHVIZ_CGRAPH_LIBRARY   NAMES cgraph
-             HINTS ${_GRAPHVIZ_LIBRARY_DIR})
+             HINTS ${GRAPHVIZ_LIBRARY_DIR})
+            
 if(GRAPHVIZ_INCLUDE_DIR AND GRAPHVIZ_GVC_LIBRARY AND GRAPHVIZ_CGRAPH_LIBRARY)
     set(GRAPHVIZ_FOUND TRUE)
 else()
@@ -263,9 +264,10 @@ endif()
 # Link Graphviz libraries if available
 if (GRAPHVIZ_FOUND)
     if (CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Darwin")
-        # target_link_libraries(gbrl_cpp PRIVATE gvc cgraph)
         target_link_libraries(gbrl_cpp PRIVATE ${GRAPHVIZ_GVC_LIBRARY} ${GRAPHVIZ_CGRAPH_LIBRARY})
     elseif (WIN32)
-        target_link_libraries(gbrl_cpp PRIVATE gvc.lib cgraph.lib)
+        find_library(GRAPHVIZ_CDT_LIBRARY    NAMES cdt
+                HINTS ${GRAPHVIZ_LIBRARY_DIR})
+        target_link_libraries(gbrl_cpp PRIVATE ${GRAPHVIZ_GVC_LIBRARY} ${GRAPHVIZ_CGRAPH_LIBRARY} ${GRAPHVIZ_CDT_LIBRARY})
     endif()
 endif()

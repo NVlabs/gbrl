@@ -3,27 +3,44 @@ Quickstart
 
 Prerequisites
 -------------
-
-python3.7 or higher 
+Python 3.9 or higher 
+CUDA 12 runtime libraries (for GPU-enabled installation)
 
 Installation
 ------------
+GBRL provides pre-compiled binaries for easy installation. Choose **one** of the following options:
 
-To install GBRL via pip, use the following command:
-
-.. code-block:: console
-   
-   pip install gbrl
-
-To install the CPU-only version, even with a valid CUDA installation, set the CPU_ONLY environment variable:
+**CPU-only installation** (default):
 
 .. code-block:: console
 
-   export CPU_ONLY=1 
    pip install gbrl
 
-Dependencies 
-------------
+**GPU-enabled installation** (requires CUDA 12 runtime libraries):
+
+.. code-block:: console
+
+   pip install gbrl-gpu
+
+Verify installation:
+
+.. code-block:: python
+
+   import gbrl
+   print(gbrl.cuda_available())  # Should return True if GPU installation succeeded
+
+Source Compilation
+==================
+
+Prerequisites
+-------------
+
+- Python 3.9 or higher
+- LLVM/OpenMP (macOS)
+- CUDA Toolkit 11 or 12 (optional, for GPU acceleration; requires NVCC)
+
+Platform-specific Dependencies
+------------------------------
 
 macOS
 ~~~~~~
@@ -38,7 +55,7 @@ GBRL requires LLVM and OpenMP. These can be installed using Homebrew:
 CUDA
 ~~~~ 
 
-GBRL compiles CUDA and requires NVCC. 
+GBRL compiles CUDA and requires NVCC (source compilation supports CUDA 11 and above). 
 
 Ensure that ``CUDA_PATH`` is set. Verify that NVCC exists by running the command
 
@@ -69,15 +86,25 @@ And set ``CUDACXX`` to the location of NVCC.
       cudart.lib
 
 
-   into ``<visual studio path>\BuildTools\MSBuild\Microsoft\VC\<visual studio version>\BuildCustomizations``.
+   into ``<visual studio path>\BuildTools\MSBuild\Microsoft\VC\<visual studio version>\BuildCustomizations`` for Visual Studio 2019 or into 
+   ``<visual studio path>\2022\Community\MSBuild\Microsoft\VC\v170\BuildCustomizations`` for Visual Studio 2022. ``<visual studio path>`` is often found at ``C:\Program Files\Microsoft Visual Studio``.  
+   The CUDA files are often found in ``<cuda_path>\extras\visual_studio_integration\MSBuildExtensions``, where ``<cuda_path>`` is often found at ``C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\<cuda version>``.
 
-After installing GBRL, verify that CUDA is enabled:
- 
-.. code-block:: python
 
-   import gbrl
+Installation
+------------
+Advanced users who wish to compile GBRL from source should follow these instructions.
 
-   print(gbrl.cuda_available())
+Clone the GBRL repository and install:
+
+.. code-block:: console
+
+   git clone <gbrl-repo-url>
+   cd gbrl
+   pip install .
+
+
+
 
 
 Environment Variables
@@ -128,7 +155,7 @@ Explanation:
 - `CUDACXX` specifies the location of, NVCC, the CUDA compiler.
 
 
-Graphviz (optional)
+Graphviz (Optional - only available from source compilation)
 ~~~~~~~~~~~~~~~~~~~
 
 To enable tree visualization, ensure  `Graphviz <https://graphviz.org/download//>`__  and its development headers are installed before compiling.

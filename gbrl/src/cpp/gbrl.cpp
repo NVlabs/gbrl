@@ -25,9 +25,12 @@
 #include <cstring>
 
 #ifdef USE_GRAPHVIZ
-#include <gvc.h>
-#include <cgraph.h>
+extern "C" {
+    #include <gvc.h>
+    #include <cgraph.h>
+}
 #include <cstring>
+
 #endif
 
 #ifdef USE_CUDA
