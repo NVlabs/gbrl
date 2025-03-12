@@ -157,7 +157,6 @@ class GBTWrapper:
             instance.total_iterations = metadata['iteration']
             instance.student_model = None
             instance.feature_weights = instance.cpp_model.get_feature_weights()
-            print(instance.feature_weights)
             instance.device = instance.params['device']
             return instance
         except RuntimeError as e:
