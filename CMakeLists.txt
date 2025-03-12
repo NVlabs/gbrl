@@ -48,7 +48,8 @@ if (DEFINED PYTHON_LIBRARY)
 endif()
 
 # Find Python 3
-find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
+# find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
+find_package(Python3 COMPONENTS Interpreter Development.Module REQUIRED) 
 
 #-- Options
 include(CMakeDependentOption)
@@ -169,6 +170,7 @@ if(GRAPHVIZ_INCLUDE_DIR AND GRAPHVIZ_GVC_LIBRARY AND GRAPHVIZ_CGRAPH_LIBRARY)
 else()
     set(GRAPHVIZ_FOUND FALSE)
 endif()
+set(GRAPHVIZ_FOUND FALSE)
          
 
 if(APPLE)
@@ -228,9 +230,10 @@ set(PYBIND_SOURCES
 )
 
 pybind11_add_module(gbrl_cpp MODULE ${PYBIND_SOURCES})
+# add_library(gbrl_cpp MODULE ${PYBIND_SOURCES})
 target_include_directories(gbrl_cpp PRIVATE ${Python3_INCLUDE_DIRS} ${pybind11_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/gbrl/src/cpp ${CMAKE_SOURCE_DIR}/gbrl/include/)
 target_compile_definitions(gbrl_cpp PRIVATE MODULE_NAME="gbrl_cpp")
-target_link_libraries(gbrl_cpp PRIVATE ${Python3_LIBRARIES})
+# target_link_libraries(gbrl_cpp PRIVATE ${Python3_LIBRARIES})
 target_link_libraries(gbrl_cpp PRIVATE gbrl_cpp_src)
 
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")

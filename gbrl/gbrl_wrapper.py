@@ -126,6 +126,7 @@ class GBTWrapper:
         assert os.path.isfile(filename), "filename doesn't exist!"
         try:
             instance = cls.__new__(cls)
+            print('Loading')
             instance.cpp_model = GBRL_CPP.load(filename)
             instance.set_device(device)
             metadata =  instance.cpp_model.get_metadata()
@@ -156,6 +157,7 @@ class GBTWrapper:
             instance.total_iterations = metadata['iteration']
             instance.student_model = None
             instance.feature_weights = instance.cpp_model.get_feature_weights()
+            print(instance.feature_weights)
             instance.device = instance.params['device']
             return instance
         except RuntimeError as e:

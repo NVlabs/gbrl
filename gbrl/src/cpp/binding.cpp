@@ -372,7 +372,6 @@ PYBIND11_MODULE(gbrl_cpp, m) {
             throw std::runtime_error("Arrays must be C-contiguous");
         }
         py::gil_scoped_release release; 
-
         py::buffer_info info = feature_weights.request();
         float* feature_weights_ptr = static_cast<float*>(info.ptr);
         int input_dim = static_cast<int>(len(feature_weights));

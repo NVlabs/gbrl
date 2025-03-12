@@ -6,7 +6,7 @@
 # https://nvlabs.github.io/gbrl/license.html 
 #
 ##############################################################################
-__version__ = "1.0.11"
+__version__ = "1.0.12"
 
 import importlib.util
 import os
@@ -48,7 +48,7 @@ def load_cpp_module():
             if os.path.exists(dir_path):
             # Scan for files that match the module name and extension
                 for file_name in os.listdir(dir_path):
-                    if file_name.startswith(module_name) and file_name.endswith(ext):
+                    if file_name.startswith(module_name) and file_name.endswith(ext) and python_version in file_name:
                         # Dynamically load the matching shared library
                         file_path = os.path.join(dir_path, file_name)
                         spec = importlib.util.spec_from_file_location(module_name, file_path)
