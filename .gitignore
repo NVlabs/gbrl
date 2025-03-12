@@ -18,3 +18,4 @@ docs/_build/
 *.whl
 *ncu-rep
 *.sh
+local_binaries/

@@ -3,7 +3,8 @@ Quickstart
 
 Prerequisites
 -------------
-Python 3.9 or higher 
+Python 3.9 or higher
+
 CUDA 12 runtime libraries (for GPU-enabled installation)
 
 Installation
@@ -38,6 +39,7 @@ Prerequisites
 - Python 3.9 or higher
 - LLVM/OpenMP (macOS)
 - CUDA Toolkit 11 or 12 (optional, for GPU acceleration; requires NVCC)
+- Graphviz (Optional)
 
 Platform-specific Dependencies
 ------------------------------
@@ -103,10 +105,6 @@ Clone the GBRL repository and install:
    cd gbrl
    pip install .
 
-
-
-
-
 Environment Variables
 ~~~~~~~~~~~~~~~~~~~~~
 
@@ -155,10 +153,10 @@ Explanation:
 - `CUDACXX` specifies the location of, NVCC, the CUDA compiler.
 
 
-Graphviz (Optional - only available from source compilation)
+Graphviz (Optional)
 ~~~~~~~~~~~~~~~~~~~
 
-To enable tree visualization, ensure  `Graphviz <https://graphviz.org/download//>`__  and its development headers are installed before compiling.
+To enable tree visualization, ensure  `Graphviz <https://graphviz.org/download//>`__  and its development headers are installed and in path before compiling.
 
 
 
