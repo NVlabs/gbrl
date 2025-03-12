@@ -22,7 +22,6 @@ float MultiRMSE::get_loss_and_gradients(const float *raw_preds, const float *raw
         n_threads = 1;
    
     int elements_per_thread = n_elements / n_threads;
-    int row, col;
     float grad_value, loss = 0.0f;
     std::vector<float> losses(n_threads, 0.0f);
     #pragma omp parallel num_threads(n_threads)

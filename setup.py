@@ -67,7 +67,6 @@ class CMakeBuild(build_ext):
         build_temp = self.build_temp
         if not os.path.exists(build_temp):
             os.makedirs(build_temp)
-        os.environ["TMPDIR"] = build_temp  # Ensure temp files stay here
         # Run cmake configuration
         self.run_subprocess(['cmake', ext.sourcedir] + cmake_args, build_temp)
         # Build the extension
