@@ -99,7 +99,7 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
     int batch_n_samples = batch_start_idx + batch_size < dataset->n_samples ? batch_size : dataset->n_samples - batch_start_idx;
     bool is_last_batch;
     int batch_preds_size = metadata->batch_size*metadata->output_dim, last_batch_preds_size = (dataset->n_samples % metadata->batch_size)*metadata->output_dim;
-    float batch_loss = HUGE_VALF; 
+    float batch_loss = INFINITY; 
     float *build_grads, *preds, *grads, *norm_grads;
     float *batch_preds = init_zero_mat(batch_preds_size); // Assuming batch_size is the max batch size
     float *batch_build_grads = init_zero_mat(batch_preds_size); // Assuming batch_size is the max batch size
@@ -214,7 +214,7 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
     full_preds = init_zero_mat(dataset->n_samples*metadata->output_dim); 
 
     Predictor::predict_cpu(dataset, full_preds, edata, metadata, 0, iterations, false, opts);
-    float full_loss = HUGE_VALF;
+    float full_loss = INFINITY;
     if (loss_type == MultiRMSE){
         full_loss = MultiRMSE::get_loss(full_preds, targets, dataset->n_samples, output_dim, par_th); 
     }
@@ -234,7 +234,7 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
     allocate_ensemble_memory(metadata, edata);
     edata->tree_indices[metadata->n_trees] = metadata->n_leaves;
     int depth = 0, node_idx_cntr = 0, chosen_idx = 0;
-    float best_score, parent_score = -HUGE_VALF;
+    float best_score, parent_score = -INFINITY;
     int n_samples = dataset->n_samples;
 
     int added_leaves = 0;
@@ -254,7 +254,7 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
 #else
     int n_threads = omp_get_max_threads();
 #endif
-    std::vector<float> best_scores(n_threads, -HUGE_VALF);
+    std::vector<float> best_scores(n_threads, -INFINITY);
     std::vector<int> best_indices(n_threads, -1);
     FloatVector scores(n_candidates);
     int batch_size = n_candidates / n_threads;
@@ -271,7 +271,7 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
             to_split = false;
         }
 
-        best_score = -HUGE_VALF;
+        best_score = -INFINITY;
         if (to_split){
             if (metadata->split_score_func == Cosine){
                 parent_score = scoreCosine(crnt_node->sample_indices, crnt_node->n_samples, dataset->build_grads, metadata->output_dim);
@@ -290,7 +290,7 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
 #else
                 int thread_num = 0;
 #endif
-                float local_best_score = -HUGE_VALF;
+                float local_best_score = -INFINITY;
                 int local_chosen_idx = -1;
                 int start_idx = thread_num * batch_size;
                 int end_idx = (thread_num == n_threads - 1) ? n_candidates : start_idx + batch_size;
@@ -369,13 +369,13 @@ int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMe
 #else 
     int n_threads = 1;
 #endif 
-    std::vector<float> best_scores(n_threads, -HUGE_VALF);
+    std::vector<float> best_scores(n_threads, -INFINITY);
     std::vector<int> best_indices(n_threads, -1);
     FloatVector scores(n_candidates);
     int batch_size = n_candidates / n_threads;
     
     while (depth < metadata->max_depth)  {
-        best_score = -HUGE_VALF;
+        best_score = -INFINITY;
 #ifndef DEBUG
         #pragma omp parallel
         {
@@ -383,7 +383,7 @@ int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMe
 #else 
             int thread_num = 0;
 #endif
-            float local_best_score = -HUGE_VALF;
+            float local_best_score = -INFINITY;
             int local_chosen_idx = -1;
             int start_idx = thread_num * batch_size;
             int end_idx = (thread_num == n_threads - 1) ? n_candidates : start_idx + batch_size;
@@ -416,7 +416,7 @@ int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMe
                 chosen_idx = best_indices[i];
             }
         }  
-        if (best_score == -HUGE_VALF)
+        if (best_score == -INFINITY)
             break; 
         parent_score = best_score;
         for (int node_idx = 0; node_idx < (1 << depth); ++node_idx){

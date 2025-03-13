@@ -23,7 +23,7 @@ class SplitCandidateGenerator {
         void quantileSplitCandidates(const float *obs, int* const* sorted_indices);
         void uniformSplitCandidates(const float *obs);
         void processCategoricalCandidates(const char *categorical_obs, const float *grad_norms);
-        int computeQuantiles(const float *obs, FloatVector &quantiles, const int *sorted_feature_indices, const int feature_idx, splitCandidate *split_candidates, int n_candidates);
+        int computeQuantiles(const float *obs, FloatVector &quantiles, const int *sorted_feature_indices, const int feature_idx, splitCandidate *_split_candidates, int _n_candidates);
         
         int n_samples;
         int n_num_features;

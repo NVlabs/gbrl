@@ -636,7 +636,7 @@ float* calculate_max(const float *mat, const int n_samples, const int n_cols, co
     int n_elements = n_samples * n_cols;
     float *max = new float[n_cols];
     for (int d = 0; d < n_cols; ++d) 
-        max[d] = -HUGE_VALF;
+        max[d] = -INFINITY;
     
     int n_threads = calculate_num_threads(n_elements, par_th);
     if (n_threads > 1){
@@ -644,7 +644,7 @@ float* calculate_max(const float *mat, const int n_samples, const int n_cols, co
         int elements_per_thread = (n_elements) / n_threads;
         float *thread_max = new float[n_threads * n_cols];
         for (int d = 0; d < n_threads * n_cols; ++d) 
-            thread_max[d] = -HUGE_VALF;
+            thread_max[d] = -INFINITY;
 
         #pragma omp parallel
         {
@@ -679,7 +679,7 @@ float* calculate_min(const float *mat, const int n_samples, const int n_cols, co
     int n_elements = n_samples * n_cols;
     float *min = new float[n_cols];
     for (int d = 0; d < n_cols; ++d) 
-        min[d] = HUGE_VALF;
+        min[d] = INFINITY;
     
     int n_threads = calculate_num_threads(n_elements, par_th);
     if (n_threads > 1){
@@ -687,7 +687,7 @@ float* calculate_min(const float *mat, const int n_samples, const int n_cols, co
         int elements_per_thread = (n_elements) / n_threads;
         float *thread_min = new float[n_threads * n_cols];
         for (int d = 0; d < n_threads * n_cols; ++d) 
-            thread_min[d] = HUGE_VALF;
+            thread_min[d] = INFINITY;
 
         #pragma omp parallel
         {
