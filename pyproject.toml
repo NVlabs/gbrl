@@ -37,7 +37,8 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    "Topic :: Software Development :: Libraries :: Python Modules"
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    Scientific/Engineering :: Artificial Intelligence
 ]
 
 dynamic = ["license"]
@@ -62,8 +63,9 @@ scikit-learn = ">=1.5.0"
 scipy = ">=1.7.0"
 shap = ">=0.40.0"
 matplotlib = ">=3.5.0"
-jinja2 = ">=3.1.5"
+jinja2 = ">=3.1.6"
 
-[tool.poetry.group.dev-dependencies]
+[tool.poetry.group.dev]
+[tool.poetry.group.dev.dependencies]
 pytest = "*"
 
