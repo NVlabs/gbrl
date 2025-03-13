@@ -1,0 +1,282 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ActorCritic Class &mdash; GBRL 1.0.12 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=a4fe78c3"></script>
+      <script src="../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="ParametricActor Class" href="ParametricActor.html" />
+    <link rel="prev" title="Actor Critic Module" href="index.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            GBRL
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">User Guide:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../quickstart.html">Quickstart</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../quickstart.html#source-compilation">Source Compilation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../examples.html">Examples</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Documentation:</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../gbt.html">GBRL Module</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="index.html">Actor Critic Module</a><ul class="current">
+<li class="toctree-l2 current"><a class="current reference internal" href="#">ActorCritic Class</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#gbrl.ac_gbrl.ActorCritic"><code class="docutils literal notranslate"><span class="pre">ActorCritic</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.ac_gbrl.ActorCritic.actor_step"><code class="docutils literal notranslate"><span class="pre">ActorCritic.actor_step()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.ac_gbrl.ActorCritic.copy"><code class="docutils literal notranslate"><span class="pre">ActorCritic.copy()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.ac_gbrl.ActorCritic.critic_step"><code class="docutils literal notranslate"><span class="pre">ActorCritic.critic_step()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.ac_gbrl.ActorCritic.get_num_trees"><code class="docutils literal notranslate"><span class="pre">ActorCritic.get_num_trees()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.ac_gbrl.ActorCritic.get_params"><code class="docutils literal notranslate"><span class="pre">ActorCritic.get_params()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.ac_gbrl.ActorCritic.load_model"><code class="docutils literal notranslate"><span class="pre">ActorCritic.load_model()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.ac_gbrl.ActorCritic.predict_values"><code class="docutils literal notranslate"><span class="pre">ActorCritic.predict_values()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.ac_gbrl.ActorCritic.step"><code class="docutils literal notranslate"><span class="pre">ActorCritic.step()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="ParametricActor.html">ParametricActor Class</a></li>
+<li class="toctree-l2"><a class="reference internal" href="GaussianActor.html">GaussianActor Class</a></li>
+<li class="toctree-l2"><a class="reference internal" href="ContinuousCritic.html">ContinuousCritic Class</a></li>
+<li class="toctree-l2"><a class="reference internal" href="DiscreteCritic.html">DiscreteCritic Class</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">GBRL</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="index.html">Actor Critic Module</a></li>
+      <li class="breadcrumb-item active">ActorCritic Class</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/actor_critic/ActorCritic.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="actorcritic-class">
+<h1>ActorCritic Class<a class="headerlink" href="#actorcritic-class" title="Link to this heading"></a></h1>
+<p>This class implements a GBT-based Actor-Critic learner for reinforcement learning.
+The ActorCritic class can be used with a shared-tree structure or a separate tree strucutre.
+Usage examples: GBT-based PPO/AWR implementations.</p>
+<dl class="py class">
+<dt class="sig sig-object py" id="gbrl.ac_gbrl.ActorCritic">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">gbrl.ac_gbrl.</span></span><span class="sig-name descname"><span class="pre">ActorCritic</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tree_struct</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Dict</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">input_dim</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">output_dim</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">policy_optimizer</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Dict</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">value_optimizer</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Dict</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">shared_tree_struct</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gbrl_params</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Dict</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">{}</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">bias</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">ndarray</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">verbose</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">device</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'cpu'</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/gbrl/ac_gbrl.html#ActorCritic"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.ac_gbrl.ActorCritic" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="../gbt.html#gbrl.gbt.GBRL" title="gbrl.gbt.GBRL"><code class="xref py py-class docutils literal notranslate"><span class="pre">GBRL</span></code></a></p>
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.ac_gbrl.ActorCritic.actor_step">
+<span class="sig-name descname"><span class="pre">actor_step</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">observations</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Tensor</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">policy_grad</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Tensor</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">policy_grad_clip</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="reference internal" href="../_modules/gbrl/ac_gbrl.html#ActorCritic.actor_step"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.ac_gbrl.ActorCritic.actor_step" title="Link to this definition"></a></dt>
+<dd><p>Performs a single boosting step for the actor (should only be used if actor and critic use separate models)</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>observations</strong> (<em>Union</em><em>[</em><em>np.ndarray</em><em>, </em><em>th.Tensor</em><em>]</em>)</p></li>
+<li><p><strong>policy_grad_clip</strong> (<em>float</em><em>, </em><em>optional</em>) – Defaults to None.</p></li>
+<li><p><strong>policy_grad</strong> (<em>Optional</em><em>[</em><em>Union</em><em>[</em><em>np.ndarray</em><em>, </em><em>th.Tensor</em><em>]</em><em>]</em><em>, </em><em>optional</em>) – manually calculated gradients. Defaults to None.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>policy gradient</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>np.ndarray</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.ac_gbrl.ActorCritic.copy">
+<span class="sig-name descname"><span class="pre">copy</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#gbrl.ac_gbrl.ActorCritic" title="gbrl.ac_gbrl.ActorCritic"><span class="pre">ActorCritic</span></a></span></span><a class="reference internal" href="../_modules/gbrl/ac_gbrl.html#ActorCritic.copy"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.ac_gbrl.ActorCritic.copy" title="Link to this definition"></a></dt>
+<dd><p>Copy class instance</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>copy of current instance</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="#gbrl.ac_gbrl.ActorCritic" title="gbrl.ac_gbrl.ActorCritic">ActorCritic</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.ac_gbrl.ActorCritic.critic_step">
+<span class="sig-name descname"><span class="pre">critic_step</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">observations</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Tensor</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">value_grad</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Tensor</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">value_grad_clip</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="reference internal" href="../_modules/gbrl/ac_gbrl.html#ActorCritic.critic_step"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.ac_gbrl.ActorCritic.critic_step" title="Link to this definition"></a></dt>
+<dd><p>Performs a single boosting step for the critic (should only be used if actor and critic use separate models)</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>observations</strong> (<em>Union</em><em>[</em><em>np.ndarray</em><em>, </em><em>th.Tensor</em><em>]</em>)</p></li>
+<li><p><strong>value_grad_clip</strong> (<em>float</em><em>, </em><em>optional</em>) – Defaults to None.</p></li>
+<li><p><strong>value_grad</strong> (<em>Optional</em><em>[</em><em>Union</em><em>[</em><em>np.ndarray</em><em>, </em><em>th.Tensor</em><em>]</em><em>]</em><em>, </em><em>optional</em>) – manually calculated gradients. Defaults to None.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>value gradient</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>np.ndarray</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.ac_gbrl.ActorCritic.get_num_trees">
+<span class="sig-name descname"><span class="pre">get_num_trees</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">int</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">int</span><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="../_modules/gbrl/ac_gbrl.html#ActorCritic.get_num_trees"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.ac_gbrl.ActorCritic.get_num_trees" title="Link to this definition"></a></dt>
+<dd><p>Returns number of trees in the ensemble.
+If separate actor and critic return number of trees per ensemble.
+:returns: Union[int, Tuple[int, int]]</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.ac_gbrl.ActorCritic.get_params">
+<span class="sig-name descname"><span class="pre">get_params</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">ndarray</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">ndarray</span><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="../_modules/gbrl/ac_gbrl.html#ActorCritic.get_params"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.ac_gbrl.ActorCritic.get_params" title="Link to this definition"></a></dt>
+<dd><p>Returns predicted actor and critic parameters and their respective gradients</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Tuple[np.ndarray, np.ndarray]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.ac_gbrl.ActorCritic.load_model">
+<em class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">load_model</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">load_name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">device</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#gbrl.ac_gbrl.ActorCritic" title="gbrl.ac_gbrl.ActorCritic"><span class="pre">ActorCritic</span></a></span></span><a class="reference internal" href="../_modules/gbrl/ac_gbrl.html#ActorCritic.load_model"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.ac_gbrl.ActorCritic.load_model" title="Link to this definition"></a></dt>
+<dd><p>Loads GBRL model from a file</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>load_name</strong> (<em>str</em>) – full path to file name</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>loaded ActorCriticModel</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="#gbrl.ac_gbrl.ActorCritic" title="gbrl.ac_gbrl.ActorCritic">ActorCritic</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.ac_gbrl.ActorCritic.predict_values">
+<span class="sig-name descname"><span class="pre">predict_values</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">observations</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Tensor</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">requires_grad</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">start_idx</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">stop_idx</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">tensor</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Tensor</span></span></span><a class="reference internal" href="../_modules/gbrl/ac_gbrl.html#ActorCritic.predict_values"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.ac_gbrl.ActorCritic.predict_values" title="Link to this definition"></a></dt>
+<dd><dl class="simple">
+<dt>Predict only values. If <cite>requires_grad=True</cite> then stores</dt><dd><p>differentiable parameters in self.params
+Return type/device is identical to the input type/device.</p>
+</dd>
+</dl>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>observations</strong> (<em>Union</em><em>[</em><em>np.ndarray</em><em>, </em><em>th.Tensor</em><em>]</em>)</p></li>
+<li><p><strong>requires_grad</strong> (<em>bool</em><em>, </em><em>optional</em>)</p></li>
+<li><p><strong>start_idx</strong> (<em>int</em><em>, </em><em>optional</em>) – start tree index for prediction. Defaults to 0.</p></li>
+<li><p><strong>stop_idx</strong> (<em>_type_</em><em>, </em><em>optional</em>) – stop tree index for prediction (uses all trees in the ensemble if set to 0). Defaults to None.</p></li>
+<li><p><strong>tensor</strong> (<em>bool</em><em>, </em><em>optional</em>) – Return PyTorch Tensor, False returns a numpy array. Defaults to True.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>values</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Union[np.ndarray, th.Tensor]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.ac_gbrl.ActorCritic.step">
+<span class="sig-name descname"><span class="pre">step</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">observations</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Tensor</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">policy_grad</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Tensor</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">value_grad</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Tensor</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">policy_grad_clip</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">value_grad_clip</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="reference internal" href="../_modules/gbrl/ac_gbrl.html#ActorCritic.step"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.ac_gbrl.ActorCritic.step" title="Link to this definition"></a></dt>
+<dd><p>Performs a boosting step for both actor and critic</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>observations</strong> (<em>Union</em><em>[</em><em>np.ndarray</em><em>, </em><em>th.Tensor</em><em>]</em>)</p></li>
+<li><p><strong>policy_grad_clip</strong> (<em>float</em><em>, </em><em>optional</em>) – . Defaults to None.</p></li>
+<li><p><strong>value_grad_clip</strong> (<em>float</em><em>, </em><em>optional</em>) – . Defaults to None.</p></li>
+<li><p><strong>policy_grad</strong> (<em>Optional</em><em>[</em><em>Union</em><em>[</em><em>np.ndarray</em><em>, </em><em>th.Tensor</em><em>]</em><em>]</em><em>, </em><em>optional</em>) – manually calculated gradients. Defaults to None.</p></li>
+<li><p><strong>value_grad</strong> (<em>Optional</em><em>[</em><em>Union</em><em>[</em><em>np.ndarray</em><em>, </em><em>th.Tensor</em><em>]</em><em>]</em><em>, </em><em>optional</em>) – manually calculated gradients. Defaults to None.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="index.html" class="btn btn-neutral float-left" title="Actor Critic Module" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="ParametricActor.html" class="btn btn-neutral float-right" title="ParametricActor Class" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024, NVIDIA Corporation.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

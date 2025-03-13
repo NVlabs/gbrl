@@ -1,0 +1,535 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>gbrl.gbt &mdash; GBRL 1.0.12 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../_static/documentation_options.js?v=a4fe78c3"></script>
+      <script src="../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../index.html" class="icon icon-home">
+            GBRL
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">User Guide:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../quickstart.html">Quickstart</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../quickstart.html#source-compilation">Source Compilation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../examples.html">Examples</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Documentation:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../gbt.html">GBRL Module</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../actor_critic/index.html">Actor Critic Module</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../index.html">GBRL</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">gbrl.gbt</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for gbrl.gbt</h1><div class="highlight"><pre>
+<span></span><span class="c1">##############################################################################</span>
+<span class="c1"># Copyright (c) 2024, NVIDIA Corporation. All rights reserved.</span>
+<span class="c1">#</span>
+<span class="c1"># This work is made available under the Nvidia Source Code License-NC.</span>
+<span class="c1"># To view a copy of this license, visit</span>
+<span class="c1"># https://nvlabs.github.io/gbrl/license.html</span>
+<span class="c1">#</span>
+<span class="c1">##############################################################################</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Dict</span><span class="p">,</span> <span class="n">List</span><span class="p">,</span> <span class="n">Union</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">,</span> <span class="n">Optional</span><span class="p">,</span> <span class="n">Any</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">torch</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">th</span>
+
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">gbrl.gbrl_wrapper</span><span class="w"> </span><span class="kn">import</span> <span class="n">GBTWrapper</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">gbrl.utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">setup_optimizer</span><span class="p">,</span> <span class="n">clip_grad_norm</span><span class="p">,</span> <span class="n">validate_array</span>
+
+
+<div class="viewcode-block" id="GBRL">
+<a class="viewcode-back" href="../../gbt.html#gbrl.gbt.GBRL">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">GBRL</span><span class="p">:</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> 
+                 <span class="n">tree_struct</span><span class="p">:</span> <span class="n">Dict</span><span class="p">,</span>
+                 <span class="n">input_dim</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+                 <span class="n">output_dim</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+                 <span class="n">optimizer</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="n">Dict</span><span class="p">,</span> <span class="n">List</span><span class="p">[</span><span class="n">Dict</span><span class="p">]],</span>
+                 <span class="n">gbrl_params</span><span class="p">:</span> <span class="n">Dict</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(),</span>
+                 <span class="n">verbose</span><span class="p">:</span> <span class="nb">int</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
+                 <span class="n">device</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;cpu&#39;</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;General class for gradient boosting trees</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            tree_struct (Dict): Dictionary containing tree structure information:</span>
+<span class="sd">                max_depth (int): maximum tree depth.</span>
+<span class="sd">                grow_policy (str): &#39;greedy&#39; or &#39;oblivious&#39;.</span>
+<span class="sd">                n_bins (int): number of bins per feature for candidate generation.</span>
+<span class="sd">                min_data_in_leaf (int): minimum number of samples in a leaf.</span>
+<span class="sd">                par_th (int): minimum number of samples for parallelizing on CPU.</span>
+<span class="sd">            output_dim (int): output dimension.</span>
+<span class="sd">            optimizer (Union[Dict, List[Dict]]): dictionary containing optimizer parameters or a list of dictionaries containing optimizer parameters.</span>
+<span class="sd">                SGD optimizer must contain as:</span>
+<span class="sd">                    &#39;algo&#39;: &#39;SGD&#39;</span>
+<span class="sd">                    &#39;lr&#39; Union[float, str]: learning rate value. Constant learning rate is used by default</span>
+<span class="sd">                Adam optimizer must contain (CPU only):</span>
+<span class="sd">                    &#39;algo&#39; (str): &#39;Adam&#39;</span>
+<span class="sd">                    &#39;lr&#39; Union[float, str]: learning rate value. Constant learning rate is used by default</span>
+<span class="sd">                    &#39;beta_1&#39; (float): 0.99</span>
+<span class="sd">                    &#39;beta_2&#39; (float): 0.999</span>
+<span class="sd">                    &#39;eps&#39; (float): 1.0e-8</span>
+<span class="sd">                All optimizers must contain:</span>
+<span class="sd">                    &#39;start_idx&#39; </span>
+<span class="sd">                    &#39;stop_idx&#39;</span>
+<span class="sd">                Setting scheduler type: </span>
+<span class="sd">                Available schedulers are Constant and Linear. Constant is default, Linear is CPU only.</span>
+<span class="sd">                To specify a linear scheduler, 3 additional arguments must be added to an optimizer dict.</span>
+<span class="sd">                    &#39;init_lr&#39; (str): &quot;lin_&lt;value&gt;&quot;</span>
+<span class="sd">                    &#39;stop_lr&#39; (float): minimum lr value </span>
+<span class="sd">                    &#39;T&#39; (int): number of total expected boosting trees, </span>
+<span class="sd">                               used to calculate the linear scheduling internally.</span>
+<span class="sd">                               Can be manually calculated per algorithm according </span>
+<span class="sd">                               to the total number of training steps.</span>
+<span class="sd">             gbrl_params (Dict, optional): GBRL parameters such as:</span>
+<span class="sd">                control_variates (bool): use control variates (variance reduction technique CPU only).</span>
+<span class="sd">                split_score_func (str): &quot;cosine&quot; or &quot;l2&quot;</span>
+<span class="sd">                generator_type - (str): candidate generation method &quot;Quantile&quot; or &quot;Uniform&quot;.</span>
+<span class="sd">                feature_weights - (list[float]): Per-feature multiplication weights used when choosing the best split. Weights should be &gt;= 0</span>
+<span class="sd">            verbose (int, optional): verbosity level. Defaults to 0.</span>
+<span class="sd">            device (str, optional): GBRL device &#39;cpu&#39; or &#39;cuda/gpu&#39;. Defaults to &#39;cpu&#39;.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">optimizer</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">optimizer</span><span class="p">,</span> <span class="nb">dict</span><span class="p">):</span>
+                    <span class="n">optimizer</span> <span class="o">=</span> <span class="p">[</span><span class="n">optimizer</span><span class="p">]</span>
+            <span class="n">optimizer</span> <span class="o">=</span> <span class="p">[</span><span class="n">setup_optimizer</span><span class="p">(</span><span class="n">opt</span><span class="p">)</span> <span class="k">for</span> <span class="n">opt</span> <span class="ow">in</span> <span class="n">optimizer</span><span class="p">]</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">optimizer</span> <span class="o">=</span> <span class="n">optimizer</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">input_dim</span> <span class="o">=</span> <span class="n">input_dim</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">output_dim</span> <span class="o">=</span> <span class="n">output_dim</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">verbose</span> <span class="o">=</span> <span class="n">verbose</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">tree_struct</span> <span class="o">=</span> <span class="n">tree_struct</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_model</span> <span class="o">=</span> <span class="kc">None</span> 
+        <span class="bp">self</span><span class="o">.</span><span class="n">gbrl_params</span> <span class="o">=</span> <span class="n">gbrl_params</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">device</span> <span class="o">=</span> <span class="n">device</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">params</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">if</span> <span class="nb">type</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="ow">is</span> <span class="n">GBRL</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_model</span> <span class="o">=</span> <span class="n">GBTWrapper</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">input_dim</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">output_dim</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">tree_struct</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">optimizer</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">gbrl_params</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">verbose</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_model</span><span class="o">.</span><span class="n">reset</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">grad</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">input</span> <span class="o">=</span> <span class="kc">None</span>
+
+<div class="viewcode-block" id="GBRL.reset_params">
+<a class="viewcode-back" href="../../gbt.html#gbrl.gbt.GBRL.reset_params">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">reset_params</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Resets param attributes</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">params</span> <span class="o">=</span> <span class="kc">None</span></div>
+
+
+<div class="viewcode-block" id="GBRL.set_bias">
+<a class="viewcode-back" href="../../gbt.html#gbrl.gbt.GBRL.set_bias">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">set_bias</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">bias</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">th</span><span class="o">.</span><span class="n">Tensor</span><span class="p">]):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Sets GBRL bias</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            bias (Union[np.ndarray, th.Tensor])</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">bias</span><span class="p">,</span> <span class="n">th</span><span class="o">.</span><span class="n">Tensor</span><span class="p">):</span>
+            <span class="n">bias</span> <span class="o">=</span> <span class="n">bias</span><span class="o">.</span><span class="n">clone</span><span class="p">()</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span><span class="o">.</span><span class="n">numpy</span><span class="p">()</span>
+        <span class="c1"># GBRL works with 2D numpy arrays.</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">bias</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="n">bias</span> <span class="o">=</span> <span class="n">bias</span><span class="p">[:,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_model</span><span class="o">.</span><span class="n">set_bias</span><span class="p">(</span><span class="n">bias</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">single</span><span class="p">))</span></div>
+
+
+<div class="viewcode-block" id="GBRL.set_feature_weights">
+<a class="viewcode-back" href="../../gbt.html#gbrl.gbt.GBRL.set_feature_weights">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">set_feature_weights</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">feature_weights</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">th</span><span class="o">.</span><span class="n">Tensor</span><span class="p">]):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Sets GBRL feature_weights</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            feature_weights (Union[np.ndarray, th.Tensor])</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">feature_weights</span><span class="p">,</span> <span class="n">th</span><span class="o">.</span><span class="n">Tensor</span><span class="p">):</span>
+            <span class="n">feature_weights</span> <span class="o">=</span> <span class="n">feature_weights</span><span class="o">.</span><span class="n">clone</span><span class="p">()</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span><span class="o">.</span><span class="n">numpy</span><span class="p">()</span>
+        <span class="c1"># GBRL works with 2D numpy arrays.</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">feature_weights</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="n">feature_weights</span> <span class="o">=</span> <span class="n">feature_weights</span><span class="p">[:,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_model</span><span class="o">.</span><span class="n">set_feature_weights</span><span class="p">(</span><span class="n">feature_weights</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">single</span><span class="p">))</span></div>
+
+    
+<div class="viewcode-block" id="GBRL.set_bias_from_targets">
+<a class="viewcode-back" href="../../gbt.html#gbrl.gbt.GBRL.set_bias_from_targets">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">set_bias_from_targets</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">targets</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">th</span><span class="o">.</span><span class="n">Tensor</span><span class="p">]):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Sets bias as mean of targets</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            targets (Union[np.ndarray, th.Tensor]): Targets</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">targets</span><span class="p">,</span> <span class="n">th</span><span class="o">.</span><span class="n">Tensor</span><span class="p">):</span>
+            <span class="n">arr</span> <span class="o">=</span> <span class="n">targets</span><span class="o">.</span><span class="n">clone</span><span class="p">()</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span><span class="o">.</span><span class="n">numpy</span><span class="p">()</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">arr</span> <span class="o">=</span> <span class="n">targets</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+        <span class="c1"># GBRL works with 2D numpy arrays.</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">arr</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="n">arr</span> <span class="o">=</span> <span class="n">arr</span><span class="p">[:,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">]</span>
+        <span class="n">mean_arr</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">arr</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">mean_arr</span><span class="p">,</span> <span class="nb">float</span><span class="p">):</span>
+            <span class="n">mean_arr</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">([</span><span class="n">mean_arr</span><span class="p">])</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_model</span><span class="o">.</span><span class="n">set_bias</span><span class="p">(</span><span class="n">mean_arr</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">single</span><span class="p">))</span> <span class="c1"># GBRL only works with float32</span></div>
+
+    
+<div class="viewcode-block" id="GBRL.get_iteration">
+<a class="viewcode-back" href="../../gbt.html#gbrl.gbt.GBRL.get_iteration">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_iteration</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Returns:</span>
+<span class="sd">            int : number of boosting iterations</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_model</span><span class="o">.</span><span class="n">get_iteration</span><span class="p">()</span></div>
+
+
+<div class="viewcode-block" id="GBRL.get_total_iterations">
+<a class="viewcode-back" href="../../gbt.html#gbrl.gbt.GBRL.get_total_iterations">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_total_iterations</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Returns:</span>
+<span class="sd">            int: total number of boosting iterations </span>
+<span class="sd">            (sum of actor and critic if they are not shared otherwise equals </span>
+<span class="sd">            get_iteration())</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_model</span><span class="o">.</span><span class="n">get_total_iterations</span><span class="p">()</span></div>
+
+
+<div class="viewcode-block" id="GBRL.get_schedule_learning_rates">
+<a class="viewcode-back" href="../../gbt.html#gbrl.gbt.GBRL.get_schedule_learning_rates">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_schedule_learning_rates</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Gets learning rate values for optimizers according to schedule of ensemble.</span>
+<span class="sd">        Constant schedule - no change in values.</span>
+<span class="sd">        Linear schedule - learning rate value accordign to number of trees in the ensemble.</span>
+<span class="sd">        Returns:</span>
+<span class="sd">            Tuple[float, float]: learning rate schedule per optimizer.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_model</span><span class="o">.</span><span class="n">get_schedule_learning_rates</span><span class="p">()</span></div>
+
+
+<div class="viewcode-block" id="GBRL.step">
+<a class="viewcode-back" href="../../gbt.html#gbrl.gbt.GBRL.step">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">step</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span>  <span class="n">X</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Union</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">th</span><span class="o">.</span><span class="n">Tensor</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">grad</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Union</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">th</span><span class="o">.</span><span class="n">Tensor</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">max_grad_norm</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Perform a boosting step (fits a single tree on the gradients)</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            X (Union[np.ndarray, th.Tensor]): inputs</span>
+<span class="sd">            max_grad_norm (float, optional): perform gradient clipping by norm. Defaults to None.</span>
+<span class="sd">            grad (Optional[Union[np.ndarray, th.Tensor]], optional): manually calculated gradients. Defaults to None.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">X</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">input</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;Cannot update trees without input. Make sure model is called with requires_grad=True&quot;</span>
+            <span class="n">X</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">input</span>
+        <span class="n">n_samples</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">X</span><span class="p">)</span>
+        <span class="n">grad</span> <span class="o">=</span> <span class="n">grad</span> <span class="k">if</span> <span class="n">grad</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="o">.</span><span class="n">grad</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span> <span class="o">*</span> <span class="n">n_samples</span>
+
+        <span class="n">grad</span> <span class="o">=</span> <span class="n">clip_grad_norm</span><span class="p">(</span><span class="n">grad</span><span class="p">,</span> <span class="n">max_grad_norm</span><span class="p">)</span>
+        <span class="n">validate_array</span><span class="p">(</span><span class="n">grad</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_model</span><span class="o">.</span><span class="n">step</span><span class="p">(</span><span class="n">X</span><span class="p">,</span> <span class="n">grad</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">grad</span> <span class="o">=</span> <span class="n">grad</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">input</span> <span class="o">=</span> <span class="kc">None</span></div>
+
+        
+<div class="viewcode-block" id="GBRL.get_params">
+<a class="viewcode-back" href="../../gbt.html#gbrl.gbt.GBRL.get_params">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_params</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Returns predicted model parameters and their respective gradients</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            Tuple[np.ndarray, np.ndarray]</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">params</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;must run a forward pass first&quot;</span>
+        <span class="n">params</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">params</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">):</span>
+            <span class="n">params</span> <span class="o">=</span> <span class="p">(</span><span class="n">params</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span><span class="o">.</span><span class="n">numpy</span><span class="p">(),</span> <span class="n">params</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span><span class="o">.</span><span class="n">numpy</span><span class="p">())</span> 
+        <span class="k">return</span> <span class="n">params</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">grad</span></div>
+
+    
+<div class="viewcode-block" id="GBRL.fit">
+<a class="viewcode-back" href="../../gbt.html#gbrl.gbt.GBRL.fit">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">fit</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">X</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">th</span><span class="o">.</span><span class="n">Tensor</span><span class="p">],</span> <span class="n">targets</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">th</span><span class="o">.</span><span class="n">Tensor</span><span class="p">],</span> <span class="n">iterations</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">shuffle</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span> <span class="n">loss_type</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;MultiRMSE&#39;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Fit multiple iterations (as in supervised learning)</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            X (Union[np.ndarray, th.Tensor]): inputs</span>
+<span class="sd">            targets (Union[np.ndarray, th.Tensor]): targets</span>
+<span class="sd">            iterations (int): number of boosting iterations</span>
+<span class="sd">            shuffle (bool, optional): Shuffle dataset. Defaults to True.</span>
+<span class="sd">            loss_type (str, optional): Loss to use (only MultiRMSE is currently implemented ). Defaults to &#39;MultiRMSE&#39;.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            float: final loss over all examples.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_model</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">X</span><span class="p">,</span> <span class="n">targets</span><span class="p">,</span> <span class="n">iterations</span><span class="p">,</span> <span class="n">shuffle</span><span class="p">,</span> <span class="n">loss_type</span><span class="p">)</span></div>
+
+    
+<div class="viewcode-block" id="GBRL.get_num_trees">
+<a class="viewcode-back" href="../../gbt.html#gbrl.gbt.GBRL.get_num_trees">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_num_trees</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Returns number of trees in the ensemble</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            int: number of trees in the ensemble</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_model</span><span class="o">.</span><span class="n">get_num_trees</span><span class="p">()</span></div>
+
+    
+<div class="viewcode-block" id="GBRL.tree_shap">
+<a class="viewcode-back" href="../../gbt.html#gbrl.gbt.GBRL.tree_shap">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">tree_shap</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tree_idx</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">features</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">th</span><span class="o">.</span><span class="n">Tensor</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">Union</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Calculates SHAP values for a single tree</span>
+<span class="sd">            Implementation based on - https://github.com/yupbank/linear_tree_shap</span>
+<span class="sd">            See Linear TreeShap, Yu et al, 2023, https://arxiv.org/pdf/2209.08192 </span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            tree_idx (int): tree index</span>
+<span class="sd">            features (Union[np.ndarray, th.Tensor])</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]: SHAP values of shap [n_samples, number of input features, number of outputs]. The output is a tuple of SHAP values per model only in the case of a separate actor-critic model.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_model</span><span class="o">.</span><span class="n">tree_shap</span><span class="p">(</span><span class="n">tree_idx</span><span class="p">,</span> <span class="n">features</span><span class="p">)</span></div>
+
+    
+<div class="viewcode-block" id="GBRL.shap">
+<a class="viewcode-back" href="../../gbt.html#gbrl.gbt.GBRL.shap">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">shap</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">features</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">th</span><span class="o">.</span><span class="n">Tensor</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">Union</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Calculates SHAP values for the entire ensemble</span>
+<span class="sd">            Implementation based on - https://github.com/yupbank/linear_tree_shap</span>
+<span class="sd">            See Linear TreeShap, Yu et al, 2023, https://arxiv.org/pdf/2209.08192 </span>
+<span class="sd">            </span>
+<span class="sd">        Args:</span>
+<span class="sd">            features (Union[np.ndarray, th.Tensor])</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]: SHAP values of shap [n_samples, number of input features, number of outputs]. The output is a tuple of SHAP values per model only in the case of a separate actor-critic model.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_model</span><span class="o">.</span><span class="n">shap</span><span class="p">(</span><span class="n">features</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="GBRL.save_model">
+<a class="viewcode-back" href="../../gbt.html#gbrl.gbt.GBRL.save_model">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">save_model</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">save_path</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Saves model to file</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            filename (str): Absolute path and name of save filename.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_model</span><span class="o">.</span><span class="n">save</span><span class="p">(</span><span class="n">save_path</span><span class="p">)</span> </div>
+
+
+<div class="viewcode-block" id="GBRL.export_model">
+<a class="viewcode-back" href="../../gbt.html#gbrl.gbt.GBRL.export_model">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">export_model</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">filename</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">modelname</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Exports model as a C-header file</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            filename (str): Absolute path and name of exported filename.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_model</span><span class="o">.</span><span class="n">export</span><span class="p">(</span><span class="n">filename</span><span class="p">,</span> <span class="n">modelname</span><span class="p">)</span> </div>
+
+
+<div class="viewcode-block" id="GBRL.load_model">
+<a class="viewcode-back" href="../../gbt.html#gbrl.gbt.GBRL.load_model">[docs]</a>
+    <span class="nd">@classmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">load_model</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">load_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">device</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;GBRL&quot;</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Loads GBRL model from a file</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            load_name (str): full path to file name</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            GBRL instance </span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">instance</span> <span class="o">=</span> <span class="bp">cls</span><span class="o">.</span><span class="fm">__new__</span><span class="p">(</span><span class="bp">cls</span><span class="p">)</span>
+        <span class="n">instance</span><span class="o">.</span><span class="n">_model</span> <span class="o">=</span> <span class="n">GBTWrapper</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">load_name</span><span class="p">,</span> <span class="n">device</span><span class="p">)</span>
+        <span class="n">instance</span><span class="o">.</span><span class="n">optimizer</span> <span class="o">=</span>  <span class="n">instance</span><span class="o">.</span><span class="n">_model</span><span class="o">.</span><span class="n">optimizer</span>
+        <span class="n">instance</span><span class="o">.</span><span class="n">input_dim</span> <span class="o">=</span> <span class="n">instance</span><span class="o">.</span><span class="n">_model</span><span class="o">.</span><span class="n">input_dim</span>
+        <span class="n">instance</span><span class="o">.</span><span class="n">output_dim</span> <span class="o">=</span> <span class="n">instance</span><span class="o">.</span><span class="n">_model</span><span class="o">.</span><span class="n">output_dim</span>
+        <span class="n">instance</span><span class="o">.</span><span class="n">verbose</span> <span class="o">=</span> <span class="n">instance</span><span class="o">.</span><span class="n">_model</span><span class="o">.</span><span class="n">verbose</span>
+        <span class="n">instance</span><span class="o">.</span><span class="n">tree_struct</span> <span class="o">=</span> <span class="n">instance</span><span class="o">.</span><span class="n">_model</span><span class="o">.</span><span class="n">tree_struct</span>
+        <span class="n">instance</span><span class="o">.</span><span class="n">gbrl_params</span> <span class="o">=</span> <span class="n">instance</span><span class="o">.</span><span class="n">_model</span><span class="o">.</span><span class="n">gbrl_params</span>
+        <span class="n">instance</span><span class="o">.</span><span class="n">device</span> <span class="o">=</span> <span class="n">instance</span><span class="o">.</span><span class="n">_model</span><span class="o">.</span><span class="n">get_device</span><span class="p">()</span>
+        <span class="n">instance</span><span class="o">.</span><span class="n">_model</span><span class="o">.</span><span class="n">device</span> <span class="o">=</span> <span class="n">instance</span><span class="o">.</span><span class="n">device</span>
+        <span class="k">return</span> <span class="n">instance</span></div>
+
+
+<div class="viewcode-block" id="GBRL.set_device">
+<a class="viewcode-back" href="../../gbt.html#gbrl.gbt.GBRL.set_device">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">set_device</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">device</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Sets GBRL device (either cpu or cuda)</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            device (str): choices are [&#39;cpu&#39;, &#39;cuda&#39;]</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">assert</span> <span class="n">device</span> <span class="ow">in</span> <span class="p">[</span><span class="s1">&#39;cpu&#39;</span><span class="p">,</span> <span class="s1">&#39;cuda&#39;</span><span class="p">],</span> <span class="s2">&quot;device must be in [&#39;cpu&#39;, &#39;cuda&#39;]&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_model</span><span class="o">.</span><span class="n">set_device</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">device</span> <span class="o">=</span> <span class="n">device</span></div>
+
+
+<div class="viewcode-block" id="GBRL.get_device">
+<a class="viewcode-back" href="../../gbt.html#gbrl.gbt.GBRL.get_device">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_device</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Union</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Returns GBRL device/devices (if multiple GBRL models)</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            Union[str, Tuple[str, str]]: GBRL device per model</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_model</span><span class="o">.</span><span class="n">get_device</span><span class="p">()</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">X</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="n">th</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">],</span> <span class="n">requires_grad</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span> <span class="n">start_idx</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span> <span class="n">stop_idx</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">tensor</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Union</span><span class="p">[</span><span class="n">th</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Returns GBRL&#39;s output as either a Tensor or a numpy array. if `requires_grad=True` then stores </span>
+<span class="sd">           differentiable parameters in self.params. </span>
+<span class="sd">           Return type/device is identical to the input type/device.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            X (Union[th.Tensor, np.ndarray]): Input</span>
+<span class="sd">            requires_grad (bool, optional). Defaults to True.</span>
+<span class="sd">            start_idx (int, optional): start tree index for prediction. Defaults to 0.</span>
+<span class="sd">            stop_idx (_type_, optional): stop tree index for prediction (uses all trees in the ensemble if set to 0). Defaults to None.</span>
+<span class="sd">            tensor (bool, optional): Return PyTorch Tensor, False returns a numpy array. Defaults to True.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            Union[th.Tensor, np.ndarray]: Returns model predictions</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">y_pred</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_model</span><span class="o">.</span><span class="n">predict</span><span class="p">(</span><span class="n">X</span><span class="p">,</span> <span class="n">requires_grad</span><span class="p">,</span> <span class="n">start_idx</span><span class="p">,</span> <span class="n">stop_idx</span><span class="p">,</span> <span class="n">tensor</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">requires_grad</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">grad</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">params</span> <span class="o">=</span> <span class="n">y_pred</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">input</span> <span class="o">=</span> <span class="n">X</span>
+        <span class="k">return</span> <span class="n">y_pred</span>
+
+<div class="viewcode-block" id="GBRL.print_tree">
+<a class="viewcode-back" href="../../gbt.html#gbrl.gbt.GBRL.print_tree">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">print_tree</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tree_idx</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Prints tree information</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            tree_idx (int): tree index to print</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_model</span><span class="o">.</span><span class="n">print_tree</span><span class="p">(</span><span class="n">tree_idx</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="GBRL.plot_tree">
+<a class="viewcode-back" href="../../gbt.html#gbrl.gbt.GBRL.plot_tree">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">plot_tree</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tree_idx</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">filename</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Plots tree using (only works if GBRL was compiled with graphviz)</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            tree_idx (int): tree index to plot</span>
+<span class="sd">            filename (str): .png filename to save</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_model</span><span class="o">.</span><span class="n">plot_tree</span><span class="p">(</span><span class="n">tree_idx</span><span class="p">,</span> <span class="n">filename</span><span class="p">)</span></div>
+
+    
+<div class="viewcode-block" id="GBRL.copy">
+<a class="viewcode-back" href="../../gbt.html#gbrl.gbt.GBRL.copy">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">copy</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;GBRL&quot;</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Copy class instance </span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            GradientBoostingTrees: copy of current instance. The actual type will be the type</span>
+<span class="sd">            of the subclass that calls this method.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">__copy__</span><span class="p">()</span></div>
+
+    
+    <span class="k">def</span><span class="w"> </span><span class="nf">__copy__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;GBRL&quot;</span><span class="p">:</span>
+        <span class="n">copy_</span> <span class="o">=</span> <span class="n">GBRL</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">tree_struct</span><span class="o">.</span><span class="n">copy</span><span class="p">(),</span> <span class="bp">self</span><span class="o">.</span><span class="n">input_dim</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">output_dim</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">optimizer</span><span class="o">.</span><span class="n">copy</span><span class="p">(),</span> <span class="bp">self</span><span class="o">.</span><span class="n">gbrl_params</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">verbose</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_model</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">copy_</span><span class="o">.</span><span class="n">_model</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_model</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">copy_</span></div>
+
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s1">&#39;__main__&#39;</span><span class="p">:</span>
+    <span class="k">pass</span>
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024, NVIDIA Corporation.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
