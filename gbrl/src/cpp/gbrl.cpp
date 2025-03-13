@@ -546,7 +546,7 @@ float GBRL::_fit_gpu(dataSet *dataset, float *targets, const int n_iterations){
         std::cerr << "Total memory: " << (total_mem / (1024.0 * 1024.0)) << " MB."
                 << std::endl;
         throw std::runtime_error("GPU allocation error");
-        return -INFINITY;
+        return -HUGE_VALF;
     }
     cudaMemset(device_memory_block, 0, alloc_size);
     size_t trace = 0;
@@ -669,7 +669,7 @@ float GBRL::fit(float *obs, char *categorical_obs, float *targets, int iteration
     if (n_num_features != metadata->n_num_features || n_cat_features != metadata->n_cat_features){
         std::cerr << "Error. Cannot use ensemble with this dataset. Excepted input with " << metadata->n_num_features << " numerical features followed by " << metadata->n_cat_features << " categorical features, but received " << n_num_features << " numerical features and " << n_cat_features << " categorical features.";
         throw std::runtime_error("Incompatible dataset");
-        return -INFINITY;
+        return -HUGE_VALF;
     }
 
     for (auto& algo:  this->opts){
@@ -730,7 +730,7 @@ float GBRL::fit(float *obs, char *categorical_obs, float *targets, int iteration
     this->set_bias(bias, this->metadata->output_dim);
     dataSet dataset{training_obs, training_cat_obs, nullptr, nullptr, n_samples, this->device};
 
-    float full_loss = -INFINITY;
+    float full_loss = -HUGE_VALF;
 #ifdef USE_CUDA
     if (this->device == gpu)
         full_loss = this->_fit_gpu(&dataset, training_targets, iterations);

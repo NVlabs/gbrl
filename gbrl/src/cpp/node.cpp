@@ -149,12 +149,12 @@ float TreeNode::getSplitScore(dataSet *dataset, const float *feature_weights, sc
         if (is_numeric){
             for (int i = 0; i < this->depth; ++i){
                 if (this->split_conditions[i].categorical_value == nullptr && this->split_conditions[i].feature_value == split_candidate.feature_value && this->split_conditions[i].feature_idx == split_candidate.feature_idx)
-                    return -INFINITY;
+                    return -HUGE_VALF;
             }
         } else {
             for (int i = 0; i < this->depth; ++i){
                 if (this->split_conditions[i].categorical_value != nullptr && strcmp(this->split_conditions[i].categorical_value, split_candidate.categorical_value) == 0 && this->split_conditions[i].feature_idx == split_candidate.feature_idx)
-                    return -INFINITY;
+                    return -HUGE_VALF;
             }
         }
     }
@@ -173,7 +173,7 @@ float TreeNode::getSplitScore(dataSet *dataset, const float *feature_weights, sc
         }
         default: {
             std::cerr << "Unknown scoreFunc." << std::endl;
-            return -INFINITY;
+            return -HUGE_VALF;
         }
     }
 }
@@ -222,7 +222,7 @@ float TreeNode::splitScoreCosine(const float *obs, const float *feature_weights,
         delete[] left_indices;
         delete[] right_indices;
 
-        return -INFINITY;
+        return -HUGE_VALF;
     } 
 
     float left_count_f = static_cast<float>(left_count), right_count_f = static_cast<float>(right_count);
@@ -289,7 +289,7 @@ float TreeNode::splitScoreCosineCategorical(const char *obs, const float *featur
         delete[] left_indices;
         delete[] right_indices;
 
-        return -INFINITY;
+        return -HUGE_VALF;
     } 
 
     float left_count_f = static_cast<float>(left_count), right_count_f = static_cast<float>(right_count);
@@ -351,7 +351,7 @@ float TreeNode::splitScoreL2(const float *obs, const float *feature_weights, con
     if (left_count < min_data_in_leaf || right_count < min_data_in_leaf){
         delete[] left_mean;
         delete[] right_mean;
-        return -INFINITY;
+        return -HUGE_VALF;
     } 
 
     float left_count_f = static_cast<float>(left_count), right_count_f = static_cast<float>(right_count);
@@ -408,7 +408,7 @@ float TreeNode::splitScoreL2Categorical(const char *obs, const float *feature_we
     if (left_count < min_data_in_leaf || right_count < min_data_in_leaf){
         delete[] left_mean;
         delete[] right_mean;
-        return -INFINITY;
+        return -HUGE_VALF;
     } 
 
 

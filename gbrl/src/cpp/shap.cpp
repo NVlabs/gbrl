@@ -45,7 +45,7 @@ shapData* alloc_shap_data(const ensembleMetaData *metadata, const ensembleData *
         feature_indices[i] = -1;
         feature_parent_node[i] = -1;
         weights[i] = 1.0f;
-        feature_values[i] = INFINITY;
+        feature_values[i] = HUGE_VALF;
     }
     int *parents = new int[n_leaves * metadata->max_depth];
     int *max_unique_features = new int[n_leaves * metadata->max_depth];
