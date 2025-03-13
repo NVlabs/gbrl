@@ -9,9 +9,13 @@ builds/
 *.db
 *.gbrl_model
 *.tfevents
+*venv*/
+build/
+*.egg-info
 *.json
 dist/
 docs/_build/
 *.whl
 *ncu-rep
 *.sh
+local_binaries/

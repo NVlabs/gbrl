@@ -8,7 +8,6 @@ from setuptools.command.build_ext import build_ext
 from distutils import log
 import sysconfig
 
-
 class CMakeExtension(Extension):
     """Extension to integrate CMake build"""
     def __init__(self, name, sourcedir=''):
@@ -68,13 +67,18 @@ class CMakeBuild(build_ext):
         build_temp = self.build_temp
         if not os.path.exists(build_temp):
             os.makedirs(build_temp)
-
         # Run cmake configuration
         self.run_subprocess(['cmake', ext.sourcedir] + cmake_args, build_temp)
         # Build the extension
         self.run_subprocess(['cmake', '--build', '.'] + build_args, build_temp)
 
         self.move_built_library(extdir)
+
+        release_dir = os.path.join(os.path.dirname(__file__), "gbrl", "Release")
+
+        if os.path.exists(release_dir):
+            shutil.rmtree(release_dir)
+            print(f"Removed directory: {release_dir}")
 
     def run_subprocess(self, cmd, cwd):
         log.info('Running command: {}'.format(' '.join(cmd)))
@@ -87,6 +91,7 @@ class CMakeBuild(build_ext):
 
     def move_built_library(self, build_temp):
         built_objects = []
+        dest_path = os.path.join(os.path.dirname(__file__), 'gbrl')
         for root, _, files in os.walk(build_temp):
             for file in files:
                 if file.endswith(('.so', '.pyd', '.dll', '.dylib')):
@@ -101,7 +106,7 @@ class CMakeBuild(build_ext):
 
 setup(
     name="gbrl",
-    version = "1.0.11",
+    version = "1.0.12",
     description = "Gradient Boosted Trees for RL",
     author="Benjamin Fuhrer, Chen Tessler, Gal Dalal",
     author_email="bfuhrer@nvidia.com, ctessler@nvidia.com. gdalal@nvidia.com",

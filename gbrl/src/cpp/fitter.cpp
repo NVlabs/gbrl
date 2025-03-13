@@ -134,7 +134,7 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
         Predictor::predict_cpu(dataset, full_preds, edata, metadata, 0, iterations, false, opts);
         float *full_grads = init_zero_mat(dataset->n_samples*metadata->output_dim); 
         float *full_grad_norms = init_zero_mat(dataset->n_samples); 
-        batch_loss = MultiRMSE::get_loss_and_gradients(full_preds, targets, full_grads, dataset->n_samples, metadata->output_dim);
+        batch_loss = MultiRMSE::get_loss_and_gradients(full_preds, targets, full_grads, dataset->n_samples, metadata->output_dim, par_th);
         calculate_squared_norm(full_grad_norms, full_grads, dataset->n_samples, metadata->output_dim, metadata->par_th);
         generator.processCategoricalCandidates(dataset->categorical_obs, full_grad_norms);
         delete[] full_preds;
@@ -161,7 +161,7 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
         Predictor::predict_cpu(&batch_dataset, preds, edata, metadata, 0, i, false, opts);
         grads = is_last_batch ? last_batch_grads : batch_grads;
         if (loss_type == MultiRMSE){
-            batch_loss = MultiRMSE::get_loss_and_gradients(preds, shifted_targets, grads, batch_dataset.n_samples, metadata->output_dim);
+            batch_loss = MultiRMSE::get_loss_and_gradients(preds, shifted_targets, grads, batch_dataset.n_samples, metadata->output_dim, par_th);
         }
         batch_dataset.grads = grads;
         if (metadata->use_cv && i > 0){
@@ -216,7 +216,7 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
     Predictor::predict_cpu(dataset, full_preds, edata, metadata, 0, iterations, false, opts);
     float full_loss = INFINITY;
     if (loss_type == MultiRMSE){
-        full_loss = MultiRMSE::get_loss(full_preds, targets, dataset->n_samples, output_dim); 
+        full_loss = MultiRMSE::get_loss(full_preds, targets, dataset->n_samples, output_dim, par_th); 
     }
     delete[] batch_preds;
     delete[] full_preds;

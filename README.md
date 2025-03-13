@@ -3,8 +3,6 @@ GBRL is a Python-based Gradient Boosting Trees (GBT) library, similar to popular
 
 [![License](https://img.shields.io/badge/license-NVIDIA-green.svg)](https://github.com/NVlabs/gbrl/blob/master/LICENSE)
 [![PyPI version](https://badge.fury.io/py/gbrl.svg)](https://badge.fury.io/py/gbrl)
-<!-- [![Python Coverage](https://codecov.io/gh/Nvlabs/gbrl/branch/master/graph/badge.svg?flag=python)](https://codecov.io/gh/Nvlabs/gbrl)
-[![C++ Coverage](https://codecov.io/gh/Nvlabs/gbrl/branch/master/graph/badge.svg?flag=cpp)](https://codecov.io/gh/Nvlabs/gbrl) -->
 
 ## Overview
 
