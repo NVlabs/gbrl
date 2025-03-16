@@ -3,8 +3,6 @@ GBRL is a Python-based Gradient Boosting Trees (GBT) library, similar to popular
 
 [![License](https://img.shields.io/badge/license-NVIDIA-green.svg)](https://github.com/NVlabs/gbrl/blob/master/LICENSE)
 [![PyPI version](https://badge.fury.io/py/gbrl.svg)](https://badge.fury.io/py/gbrl)
-<!-- [![Python Coverage](https://codecov.io/gh/Nvlabs/gbrl/branch/master/graph/badge.svg?flag=python)](https://codecov.io/gh/Nvlabs/gbrl)
-[![C++ Coverage](https://codecov.io/gh/Nvlabs/gbrl/branch/master/graph/badge.svg?flag=cpp)](https://codecov.io/gh/Nvlabs/gbrl) -->
 
 ## Overview
 
@@ -27,15 +25,17 @@ The following results, obtained using the `GBRL_SB3` repository, demonstrate the
 ![PPO GBRL results in stable_baselines3](https://github.com/NVlabs/gbrl/raw/master/docs/images/relative_ppo_performance.png)
 
 ## Getting started
-### Prerequisites
+### Dependencies
 - Python 3.9 or higher
-- LLVM and OpenMP (macOS).
 
 ### Installation
-To install GBRL via pip, use the following command:
-```
-pip install gbrl
-```
+GBRL provides pre-compiled binaries for easy installation. Choose **one** of the following options:
+
+**CPU-only installation** (default):  
+```pip install gbrl```
+
+**GPU-enabled installation** (requires CUDA 12 runtime libraries):  
+```pip install gbrl-gpu```
 
 For further installation details and dependencies see the documentation. 
 

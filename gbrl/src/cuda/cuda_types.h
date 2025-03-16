@@ -28,7 +28,6 @@
 
 #define INITAL_MAX_GPU_TREES 250000 //250k
 #define GPU_TREES_BATCH  100000 // 100 K
-
 struct SGDOptimizerGPU{
     int start_idx;
     int stop_idx;

@@ -12,6 +12,7 @@ import importlib.util
 import os
 import platform
 import sys
+import sys
 
 _loaded_cpp_module = None
 
@@ -19,6 +20,7 @@ def load_cpp_module():
     global _loaded_cpp_module
     module_name = "gbrl_cpp"
     python_version = f"cpython-{sys.version_info.major}{sys.version_info.minor}"
+    python_version_short = f"cp{sys.version_info.major}{sys.version_info.minor}"
     if platform.system() == "Windows":
         ext = ".pyd"
     elif platform.system() == "Darwin":  # macOS
@@ -33,7 +35,7 @@ def load_cpp_module():
         if os.path.exists(dir_path):
         # Scan for files that match the module name and extension
             for file_name in os.listdir(dir_path):
-                if file_name.startswith(module_name) and file_name.endswith(ext) and python_version in file_name:
+                if file_name.startswith(module_name) and file_name.endswith(ext) and (python_version in file_name or python_version_short in file_name):
                     # Dynamically load the matching shared library
                     file_path = os.path.join(dir_path, file_name)
                     spec = importlib.util.spec_from_file_location(module_name, file_path)
@@ -48,7 +50,7 @@ def load_cpp_module():
             if os.path.exists(dir_path):
             # Scan for files that match the module name and extension
                 for file_name in os.listdir(dir_path):
-                    if file_name.startswith(module_name) and file_name.endswith(ext):
+                    if file_name.startswith(module_name) and file_name.endswith(ext) and (python_version in file_name or python_version_short in file_name):
                         # Dynamically load the matching shared library
                         file_path = os.path.join(dir_path, file_name)
                         spec = importlib.util.spec_from_file_location(module_name, file_path)

@@ -160,6 +160,7 @@ class GBTWrapper:
         assert os.path.isfile(filename), "filename doesn't exist!"
         try:
             instance = cls.__new__(cls)
+            print('Loading')
             instance.cpp_model = GBRL_CPP.load(filename)
             instance.set_device(device)
             metadata =  instance.cpp_model.get_metadata()

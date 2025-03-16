@@ -28,24 +28,24 @@ class GBRL {
     public:
         GBRL(int input_dim, int output_dim, int max_depth, int min_data_in_leaf, 
              int n_bins, int par_th, float cv_beta, scoreFunc split_score_func, generatorType generator_type, bool use_control_variates, 
-             int batch_size, growPolicy grow_policy, int verbose, deviceType device);
+             int batch_size, growPolicy grow_policy, int verbose, deviceType _device);
         GBRL(int input_dim, int output_dim, int max_depth, int min_data_in_leaf, 
              int n_bins, int par_th, float cv_beta, std::string split_score_func, std::string generator_type, bool use_control_variates, 
-             int batch_size, std::string grow_policy, int verbose, std::string device);
+             int batch_size, std::string grow_policy, int verbose, std::string _device);
         GBRL(const std::string& filename);
         GBRL(GBRL& other);
         ~GBRL();
         float* tree_shap(const int tree_idx, const float *obs, const char *categorical_obs, const int n_samples, float *norm, float *base_poly, float *offset);
         float* ensemble_shap(const float *obs, const char *categorical_obs, const int n_samples, float *norm, float *base_poly, float *offset);
         static bool cuda_available();
-        void to_device(deviceType device);
+        void to_device(deviceType _device);
         std::string get_device();
         int saveToFile(const std::string& filename);
         int exportModel(const std::string& filename, const std::string& modelname, const std::string& export_format, const std::string &export_type, const std::string& prefix);
         int loadFromFile(const std::string& filename);
         void ensemble_check();
 
-        void step(const float *obs, const char *categorical_obs, float *grads, const int n_samples, const int n_num_features, const int n_cat_features, deviceType device);
+        void step(const float *obs, const char *categorical_obs, float *grads, const int n_samples, const int n_num_features, const int n_cat_features, deviceType _device);
 #ifdef USE_CUDA
         void _step_gpu(dataSet *dataset);
         float _fit_gpu(dataSet *dataset, float *targets, const int n_iterations);
@@ -56,7 +56,7 @@ class GBRL {
         void set_feature_mapping(const int *feature_mapping, const bool *mapping_numerics, const int input_dim);
         float* get_bias();
         float* get_feature_weights();
-        float* predict(const float *obs, const char *categorical_obs, const int n_samples, const int n_num_features, const int n_cat_features, int start_tree_idx, int stop_tree_idx, deviceType device);
+        float* predict(const float *obs, const char *categorical_obs, const int n_samples, const int n_num_features, const int n_cat_features, int start_tree_idx, int stop_tree_idx, deviceType _device);
         
         matrixRepresentation* get_matrix_representation(const float *obs, const char *categorical_obs, const int n_samples, const int n_num_features, const int n_cat_features);
         void compress_ensemble(const int n_compressed_leaves, const int n_compressed_trees, const int *leaf_indices, const int *tree_indices, const int *new_tree_indices, const float *W);

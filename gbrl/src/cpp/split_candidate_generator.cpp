@@ -72,7 +72,7 @@ void SplitCandidateGenerator::uniformSplitCandidates(const float *obs){
 
 
 void SplitCandidateGenerator::quantileSplitCandidates(const float *obs, int* const* sorted_indices){
-    int n_candidates = 0;
+    int _n_candidates = 0;
     int n_threads = calculate_num_threads(this->n_num_features, this->par_th);
     if (n_threads > 1){
         omp_set_num_threads(n_threads);
@@ -95,18 +95,18 @@ void SplitCandidateGenerator::quantileSplitCandidates(const float *obs, int* con
 
         for (int i = 0; i < n_threads; ++i){
             for (int j = 0; j < thread_n_candidates[i]; ++j){
-                this->split_candidates[n_candidates + j] = thread_split_candidates[i][j];
+                this->split_candidates[_n_candidates + j] = thread_split_candidates[i][j];
             }
-            n_candidates += thread_n_candidates[i];
+            _n_candidates += thread_n_candidates[i];
             delete[] thread_split_candidates[i];
         }
     } else{
         FloatVector quantiles = FloatVector(this->n_bins, 0.0f);
         for (int feature_idx = 0; feature_idx < this->n_num_features; ++feature_idx) {
-            n_candidates = computeQuantiles(obs, quantiles, sorted_indices[feature_idx], feature_idx, this->split_candidates, n_candidates);
+            _n_candidates = computeQuantiles(obs, quantiles, sorted_indices[feature_idx], feature_idx, this->split_candidates, _n_candidates);
         }  
     }    
-    this->n_candidates = n_candidates;
+    this->n_candidates = _n_candidates;
 }
 
 void SplitCandidateGenerator::processCategoricalCandidates(const char *categorical_obs, const float *grad_norms){
@@ -144,17 +144,17 @@ void SplitCandidateGenerator::processCategoricalCandidates(const char *categoric
         n_unique = this->n_cat_features*this->n_bins;
     }
     
-    int n_candidates = this->n_candidates;
+    int _n_candidates = this->n_candidates;
     for (int i = 0; i < n_unique; ++i){
         // convert each unique element's string back to char* and copy exactly MAX_CHAR_SIZE of it to the correct position in categorical value
         categoryInfo cat_info = unique_cats[cat_vec[i].first];
-        this->split_candidates[n_candidates].feature_idx = cat_info.feature_idx;
-        this->split_candidates[n_candidates].feature_value = INFINITY;
-        this->split_candidates[n_candidates].categorical_value = new char[MAX_CHAR_SIZE]; 
-        memcpy(this->split_candidates[n_candidates].categorical_value, cat_info.feature_name.c_str(), sizeof(char)*MAX_CHAR_SIZE);
-        n_candidates++;
+        this->split_candidates[_n_candidates].feature_idx = cat_info.feature_idx;
+        this->split_candidates[_n_candidates].feature_value = INFINITY;
+        this->split_candidates[_n_candidates].categorical_value = new char[MAX_CHAR_SIZE]; 
+        memcpy(this->split_candidates[_n_candidates].categorical_value, cat_info.feature_name.c_str(), sizeof(char)*MAX_CHAR_SIZE);
+        _n_candidates++;
     }
-    this->n_candidates = n_candidates;
+    this->n_candidates = _n_candidates;
 }
 
 
@@ -208,7 +208,7 @@ int processCategoricalCandidates_func(const char *categorical_obs, const float *
     return n_candidates;
 }
 
-int SplitCandidateGenerator::computeQuantiles(const float *obs, FloatVector &quantiles, const int *sorted_feature_indices, const int feature_idx, splitCandidate *split_candidates, int n_candidates){
+int SplitCandidateGenerator::computeQuantiles(const float *obs, FloatVector &quantiles, const int *sorted_feature_indices, const int feature_idx, splitCandidate *_split_candidates, int _n_candidates){
     
     int cumulative_count = 0;
     int actual_bins = this->n_bins + 1;
@@ -233,14 +233,14 @@ int SplitCandidateGenerator::computeQuantiles(const float *obs, FloatVector &qua
         const int split_point = sorted_feature_indices[cumulative_count - 1];
         // Set quantile based on ideal distribution
         quantiles[i] = obs[split_point*this->n_num_features + feature_idx];
-        if (n_candidates == 0 || (split_candidates[n_candidates - 1].feature_idx == feature_idx && split_candidates[n_candidates- 1].feature_value != quantiles[i]) || (split_candidates[n_candidates - 1].feature_idx != feature_idx )){
-            split_candidates[n_candidates].feature_idx = feature_idx;
-            split_candidates[n_candidates].feature_value = quantiles[i];
-            split_candidates[n_candidates].categorical_value = nullptr;
-            ++n_candidates;
+        if (n_candidates == 0 || (_split_candidates[_n_candidates - 1].feature_idx == feature_idx && _split_candidates[_n_candidates- 1].feature_value != quantiles[i]) || (_split_candidates[_n_candidates - 1].feature_idx != feature_idx )){
+            _split_candidates[_n_candidates].feature_idx = feature_idx;
+            _split_candidates[_n_candidates].feature_value = quantiles[i];
+            _split_candidates[_n_candidates].categorical_value = nullptr;
+            ++_n_candidates;
         }
     }                      
-    return n_candidates;          
+    return _n_candidates;          
 }
 
 

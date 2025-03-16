@@ -48,7 +48,7 @@ if (DEFINED PYTHON_LIBRARY)
 endif()
 
 # Find Python 3
-find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
+find_package(Python3 COMPONENTS Interpreter Development.Module REQUIRED) 
 
 #-- Options
 include(CMakeDependentOption)
@@ -158,11 +158,12 @@ if(NOT pybind11_FOUND)
 endif()
 
 find_path(GRAPHVIZ_INCLUDE_DIR         NAMES graphviz/cgraph.h
-          HINTS ${_GRAPHVIZ_INCLUDE_DIR})
+          HINTS ${GRAPHVIZ_INCLUDE_DIR})
 find_library(GRAPHVIZ_GVC_LIBRARY      NAMES gvc 
-             HINTS ${_GRAPHVIZ_LIBRARY_DIR})
+             HINTS ${GRAPHVIZ_LIBRARY_DIR})
 find_library(GRAPHVIZ_CGRAPH_LIBRARY   NAMES cgraph
-             HINTS ${_GRAPHVIZ_LIBRARY_DIR})
+             HINTS ${GRAPHVIZ_LIBRARY_DIR})
+            
 if(GRAPHVIZ_INCLUDE_DIR AND GRAPHVIZ_GVC_LIBRARY AND GRAPHVIZ_CGRAPH_LIBRARY)
     set(GRAPHVIZ_FOUND TRUE)
 else()
@@ -200,10 +201,11 @@ endif()
 # Ensure OpenMP flags and directories are applied
 if (OpenMP_FOUND)
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}")
     if (MSVC)
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /openmp:experimental")
+    else() 
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
     endif()
 endif()
 
@@ -229,7 +231,6 @@ set(PYBIND_SOURCES
 pybind11_add_module(gbrl_cpp MODULE ${PYBIND_SOURCES})
 target_include_directories(gbrl_cpp PRIVATE ${Python3_INCLUDE_DIRS} ${pybind11_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/gbrl/src/cpp ${CMAKE_SOURCE_DIR}/gbrl/include/)
 target_compile_definitions(gbrl_cpp PRIVATE MODULE_NAME="gbrl_cpp")
-target_link_libraries(gbrl_cpp PRIVATE ${Python3_LIBRARIES})
 target_link_libraries(gbrl_cpp PRIVATE gbrl_cpp_src)
 
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
@@ -263,9 +264,10 @@ endif()
 # Link Graphviz libraries if available
 if (GRAPHVIZ_FOUND)
     if (CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Darwin")
-        # target_link_libraries(gbrl_cpp PRIVATE gvc cgraph)
         target_link_libraries(gbrl_cpp PRIVATE ${GRAPHVIZ_GVC_LIBRARY} ${GRAPHVIZ_CGRAPH_LIBRARY})
     elseif (WIN32)
-        target_link_libraries(gbrl_cpp PRIVATE gvc.lib cgraph.lib)
+        find_library(GRAPHVIZ_CDT_LIBRARY    NAMES cdt
+                HINTS ${GRAPHVIZ_LIBRARY_DIR})
+        target_link_libraries(gbrl_cpp PRIVATE ${GRAPHVIZ_GVC_LIBRARY} ${GRAPHVIZ_CGRAPH_LIBRARY} ${GRAPHVIZ_CDT_LIBRARY})
     endif()
 endif()

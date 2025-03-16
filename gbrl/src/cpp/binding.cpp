@@ -406,10 +406,10 @@ PYBIND11_MODULE(gbrl_cpp, m) {
             n_cat_features = static_cast<int>(info_categorical_obs.shape[1]);
         }
         
-        py::gil_scoped_release release; 
         py::buffer_info info_targets = targets.request();
         float* targets_ptr = static_cast<float*>(info_targets.ptr);
         int n_samples = static_cast<int>(info_targets.shape[0]);
+        py::gil_scoped_release release; 
         return self.fit(obs_ptr, cat_obs_ptr, targets_ptr, iterations, n_samples, n_num_features, n_cat_features, shuffle, loss_type); 
     },  py::arg("obs"),
         py::arg("categorical_obs"),
@@ -422,24 +422,22 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         if (!bias.attr("flags").attr("c_contiguous").cast<bool>()) {
             throw std::runtime_error("Arrays must be C-contiguous");
         }
-        py::gil_scoped_release release; 
-
+        
         py::buffer_info info = bias.request();
         float* bias_ptr = static_cast<float*>(info.ptr);
         int output_dim = static_cast<int>(len(bias));
-        
+        py::gil_scoped_release release; 
         self.set_bias(bias_ptr, output_dim); 
     }, "Set GBRL model bias");
     gbrl.def("set_feature_weights", [](GBRL &self, const py::array_t<float> &feature_weights) {
         if (!feature_weights.attr("flags").attr("c_contiguous").cast<bool>()) {
             throw std::runtime_error("Arrays must be C-contiguous");
         }
-        py::gil_scoped_release release; 
-
-        py::buffer_info info = feature_weights.request();
+        
+        py::buffer_info info = feature_weights.request(false);
         float* feature_weights_ptr = static_cast<float*>(info.ptr);
         int input_dim = static_cast<int>(len(feature_weights));
-        
+        py::gil_scoped_release release; 
         self.set_feature_weights(feature_weights_ptr, input_dim); 
     }, "Set GBRL model feature weights");
     gbrl.def("set_feature_mapping", [](GBRL &self, const py::array_t<int> &feature_mapping, const py::array_t<bool> &mapping_numerics) {
