@@ -427,9 +427,10 @@ class GBTWrapper:
 
 class SeparateActorCriticWrapper:
     def __init__(self, input_dim: int, output_dim: int, tree_struct: Dict, policy_optimizer: Dict, value_optimizer: Dict, gbrl_params: Dict, verbose: int = 0, device: str = 'cpu', constraints: Constraint = None):
-        print('****************************************')
-        print(f'Separate GBRL Tree with input dim: {input_dim}, output dim: {output_dim}, tree_struct: {tree_struct} policy_optimizer: {policy_optimizer} value_optimizer: {value_optimizer}')
-        print('****************************************')
+        if verbose > 0:
+            print('****************************************')
+            print(f'Separate GBRL Tree with input dim: {input_dim}, output dim: {output_dim}, tree_struct: {tree_struct} policy_optimizer: {policy_optimizer} value_optimizer: {value_optimizer}')
+            print('****************************************')
         self.policy_model = GBTWrapper(input_dim, output_dim - 1, tree_struct, policy_optimizer, gbrl_params, verbose, device, constraints)
         self.value_model = GBTWrapper(input_dim, 1, tree_struct, value_optimizer, gbrl_params, verbose, device, constraints)
         self.tree_struct = tree_struct
@@ -587,12 +588,149 @@ class SeparateActorCriticWrapper:
         copy_.value_model = self.value_model.copy()
         return copy_
     
+class SeparateConstrainedActorCriticWrapper(SeparateActorCriticWrapper):
+    def __init__(self, input_dim: int, output_dim: int, tree_struct: Dict, policy_optimizer: Dict, value_optimizer: Dict, cost_optimizer: Dict, gbrl_params: Dict, verbose: int = 0, device: str = 'cpu', constraints: Constraint = None):
+        super().__init__(input_dim, output_dim -1 , tree_struct, policy_optimizer, value_optimizer, gbrl_params, 0, device, constraints)
+        print('****************************************')
+        print(f'Separate Constrained GBRL Tree with input dim: {input_dim}, output dim: {output_dim}, tree_struct: {tree_struct} policy_optimizer: {policy_optimizer} value_optimizer: {value_optimizer} cost_optimizer: {cost_optimizer}')
+        print('****************************************')
+        self.cost_model = GBTWrapper(input_dim, 1, tree_struct, value_optimizer, gbrl_params, verbose, device, constraints)
+        self.cost_optimizer = cost_optimizer
+        self.output_dim = output_dim
+ 
+    def step(self, observations: Union[np.ndarray, th.Tensor], theta_grad: Union[np.ndarray, th.Tensor], value_grad: Union[np.ndarray, th.Tensor], cost_grad: Union[np.ndarray, th.Tensor]):
+        super().step(observations, theta_grad, value_grad)
+        self.step_cost(observations, cost_grad)
+        
+    def step_cost(self, observations: Union[np.ndarray, th.Tensor], cost_grad: Union[np.ndarray, th.Tensor]):
+        self.cost_model.step(observations, cost_grad)
+
+    def set_device(self, device:str) -> None:
+        super().set_device(device)
+        self.cost_model.set_device(device)
+    
+    def compress(self, trees_to_keep: int, gradient_steps: int, features: Union[np.ndarray, th.Tensor], actions: th.Tensor, log_std: th.Tensor = None, method: str = 'first_k', dist_type: str = 'supervised_learning', optimizer_kwargs: Optional[Dict[str, Any]] = None, 
+                 least_squares_W: bool = True, temperature: float = 1.0, lambda_reg: float = 1.0, policy_only: bool = False, **kwargs) -> None:
+        assert dist_type != 'supervised_learning', 'Cannot use supervised learning as a dist_type for an actor'
+        policy_loss, value_loss = super().compress(trees_to_keep, gradient_steps, features, actions, log_std, method, dist_type, optimizer_kwargs, least_squares_W, temperature, lambda_reg, **kwargs)
+        cost_loss = 0
+        if not policy_only:
+            cost_loss = self.cost_model.compress(trees_to_keep, gradient_steps, features, None, log_std, method, 'supervised_learning', optimizer_kwargs, True, temperature, lambda_reg, **kwargs)
+        return policy_loss, value_loss, cost_loss
+    
+    def tree_shap(self, tree_idx: int, observations: Union[np.ndarray, th.Tensor]) -> Tuple[np.ndarray, np.ndarray]:
+        policy_shap, value_shap = super().tree_shap(tree_idx, observations)
+        cost_shap = self.cost_model.tree_shap(tree_idx, observations)
+        return policy_shap, value_shap, cost_shap
+    
+    def get_device(self) -> Tuple[str, str]:
+        return self.policy_model.get_device(), self.value_model.get_device(), self.cost_model.get_device()
+
+    def get_schedule_learning_rates(self) -> Tuple[int, int]:
+        policy_lr = self.policy_model.get_schedule_learning_rates()
+        value_lr = self.value_model.get_schedule_learning_rates()
+        cost_lr = self.cost_model.get_schedule_learning_rates()
+        return policy_lr, value_lr, cost_lr
+    
+    def predict(self, observations: Union[np.ndarray, th.Tensor], requires_grad: bool = True, start_idx: int = 0, stop_idx: int = None, tensor: bool = True) -> Tuple[np.ndarray, np.ndarray]:
+        preds, preds_value = super().predict(observations, requires_grad, start_idx, stop_idx, tensor)
+        preds_cost = self.cost_model.predict(observations, requires_grad, start_idx, stop_idx, tensor).squeeze()
+        return preds, preds_value, tensor_to_leaf(preds_cost, requires_grad=requires_grad)
+
+    def predict_cost(self, observations: Union[np.ndarray, th.Tensor], requires_grad: bool = True, start_idx: int = 0, stop_idx: int = None, tensor: bool = True):
+        return self.cost_model.predict(observations, requires_grad, start_idx, stop_idx, tensor)
+    
+    def reset(self) -> None:
+        self.policy_model.reset()
+        self.value_model.reset()
+        self.cost_model.reset()
+
+    def save(self, filename: str) -> None:
+        self.policy_model.save(filename + '_policy')
+        self.value_model.save(filename + '_value')
+        self.cost_model.save(filename + '_cost')
+
+    def export(self, filename: str, format: str, export_type: str, prefix: str) -> None:
+        self.policy_model.export(filename + '_policy', format, export_type, prefix)
+        self.value_model.export(filename + '_value', format, export_type, prefix)
+        self.cost_model.export(filename + '_cost', format, export_type, prefix)
+    
+    def print_tree(self, tree_idx: int) -> None:
+        print("Policy ensemble")
+        self.policy_model.print_tree(tree_idx)
+        print("Value ensemble")
+        self.value_model.print_tree(tree_idx)
+        print("Cost ensemble")
+        self.cost_model.print_tree(tree_idx)
+    
+    def plot_tree(self, tree_idx: int, filename: str) -> None:
+        print("Policy ensemble")
+        self.policy_model.plot_tree(tree_idx, filename.rstrip(".") + "_policy")
+        print("Value ensemble")
+        self.value_model.plot_tree(tree_idx,  filename.rstrip(".") + "_value")
+        print("Cost ensemble")
+        self.cost_model.plot_tree(tree_idx,  filename.rstrip(".") + "_cost")
+
+    @classmethod
+    def load(cls, filename: str, device: str) -> "SeparateConstrainedActorCriticWrapper":
+        instance = cls.__new__(cls)
+        instance.policy_model = GBTWrapper.load(filename + '_policy', device)
+        instance.value_model = GBTWrapper.load(filename + '_value', device)
+        instance.cost_model = GBTWrapper.load(filename + '_cost', device)
+        instance.policy_model.set_device(device)
+        instance.value_model.set_device(device)
+        instance.cost_model.set_device(device)
+        instance.tree_struct = instance.policy_model.tree_struct
+        instance.total_iterations = instance.policy_model.iteration + instance.value_model.iteration
+        instance.input_dim = instance.policy_model.input_dim
+        instance.output_dim = instance.policy_model.output_dim
+        instance.policy_optimizer = instance.policy_model.optimizer[0]
+        instance.value_optimizer = instance.value_model.optimizer[0]
+        instance.cost_optimizer = instance.cost_model.optimizer[0]
+        instance.gbrl_params = instance.policy_model.gbrl_params
+        instance.verbose = instance.policy_model.verbose
+        instance.device = instance.policy_model.get_device()
+        return instance
+
+    def distil_cost(self, obs: Union[np.ndarray, th.Tensor], targets: np.ndarray, params: Dict) -> Tuple[int, Dict]:
+        return self.cost_model.distil(obs, targets, params)
+
+    def get_iteration(self) -> Tuple[int, int]:
+        return self.policy_model.get_iteration(), self.value_model.get_iteration(), self.cost_model.get_iteration()
+    
+    def get_num_trees(self) -> Tuple[int, int]:
+        return self.policy_model.get_num_trees(), self.value_model.get_num_trees(), self.cost_model.get_num_trees()
+    
+    def set_cost_bias(self, bias: np.ndarray) -> None:
+        self.cost_model.set_bias(bias)
+    
+    def set_cost_feature_weights(self, feature_weights: np.ndarray) -> None:
+        self.cost_model.set_feature_weights(feature_weights)
+
+    def get_bias(self) -> Tuple[np.ndarray, np.ndarray]:
+        return self.policy_model.get_bias(), self.value_model.get_bias(), self.cost_model.get_bias()
+    
+    def get_feature_weights(self) -> Tuple[np.ndarray, np.ndarray]:
+        return self.policy_model.get_feature_weights(), self.value_model.get_feature_weights(), self.cost_model.get_feature_weights()
+
+    def copy(self) -> "SeparateConstrainedActorCriticWrapper":
+        return self.__copy__()
+    
+    def __copy__(self) -> "SeparateConstrainedActorCriticWrapper":
+        copy_ = SeparateConstrainedActorCriticWrapper(self.input_dim, self.output_dim, self.tree_struct.copy(), self.policy_optimizer.copy(), self.value_optimizer.copy(), self.cost_optimizer.copy(), self.gbrl_params, self.verbose, self.device)
+        copy_.total_iterations = self.total_iterations
+        copy_.policy_model = self.policy_model.copy()
+        copy_.value_model = self.value_model.copy()
+        copy_.cost_model = self.cost_model.copy()
+        return copy_
+    
 
 class SharedActorCriticWrapper(GBTWrapper):
     def __init__(self, input_dim: int, output_dim: int, tree_struct: Dict, policy_optimizer: Dict, value_optimizer: Dict, gbrl_params: Dict=dict(), verbose: int = 0, device: str = 'cpu', constraints: Constraint = None):
-        print('****************************************')
-        print(f'Shared GBRL Tree with input dim: {input_dim}, output dim: {output_dim}, tree_struct: {tree_struct} policy_optimizer: {policy_optimizer} value_optimizer: {value_optimizer}')
-        print('****************************************')
+        if verbose > 0:
+            print('****************************************')
+            print(f'Shared GBRL Tree with input dim: {input_dim}, output dim: {output_dim}, tree_struct: {tree_struct} policy_optimizer: {policy_optimizer} value_optimizer: {value_optimizer}')
+            print('****************************************')
         self.value_optimizer = value_optimizer
         self.policy_optimizer = policy_optimizer
         super().__init__(input_dim, output_dim, tree_struct, policy_optimizer, gbrl_params, verbose, device, constraints)
@@ -716,6 +854,162 @@ class SharedActorCriticWrapper(GBTWrapper):
     
     def __copy__(self) -> "SharedActorCriticWrapper":
         copy_ = SharedActorCriticWrapper(self.input_dim, self.output_dim, self.tree_struct.copy(), self.policy_optimizer.copy(), None if self.value_optimizer is None else self.value_optimizer.copy(), self.gbrl_params, self.verbose, self.device)
+        copy_.iteration = self.iteration 
+        copy_.total_iterations = self.total_iterations
+        if self.cpp_model is not None:
+            copy_.model = GBRL_CPP(self.cpp_model)
+        if self.student_model is not None:
+            copy_.student_model = GBRL_CPP(self.student_model)
+        return copy_
+    
+class SharedConstrainedActorCriticWrapper(SharedActorCriticWrapper):
+    def __init__(self, input_dim: int, output_dim: int, tree_struct: Dict, policy_optimizer: Dict, value_optimizer: Dict, cost_optimizer: Dict, gbrl_params: Dict=dict(), verbose: int = 0, device: str = 'cpu', constraints: Constraint = None):
+        print('****************************************')
+        print(f'Shared Constrained GBRL Tree with input dim: {input_dim}, output dim: {output_dim}, tree_struct: {tree_struct} policy_optimizer: {policy_optimizer} value_optimizer: {value_optimizer}, cost_optimizer: {cost_optimizer} gbrl_params')
+        print('****************************************')
+        super().__init__(input_dim, output_dim, tree_struct, policy_optimizer, value_optimizer, gbrl_params, verbose, device, constraints)
+        self.cost_optimizer = cost_optimizer
+
+    def reset(self) -> None:
+        if self.cpp_model is not None:
+            policy_lr, value_lr, cost_lr = self.get_schedule_learning_rates()
+            self.policy_optimizer['init_lr'] = policy_lr
+            if self.value_optimizer:
+                self.value_optimizer['init_lr'] = value_lr
+            if self.cost_optimizer:
+                self.cost_optimizer['init_lr'] = cost_lr
+        self.cpp_model = GBRL_CPP(**self.params)
+        self.cpp_model.set_feature_weights(self.feature_weights)
+        if self.student_model is not None:
+            self.policy_optimizer['T'] -= self.total_iterations
+        else:
+            self.total_iterations = 0
+        try:
+            self.cpp_model.set_optimizer(**self.policy_optimizer)
+        except RuntimeError as e:
+            print(f"Caught an exception in GBRL: {e}")
+        if self.value_optimizer:
+            if self.student_model is not None:
+                self.value_optimizer['T'] -= self.total_iterations
+            try:
+                self.cpp_model.set_optimizer(**self.value_optimizer)
+            except RuntimeError as e:
+                print(f"Caught an exception in GBRL: {e}")
+        if self.cost_optimizer:
+            if self.student_model is not None:
+                self.cost_optimizer['T'] -= self.total_iterations
+            try:
+                self.cpp_model.set_optimizer(**self.cost_optimizer)
+            except RuntimeError as e:
+                print(f"Caught an exception in GBRL: {e}")
+        
+    def step(self, observations: Union[np.ndarray, th.Tensor], theta_grad: np.ndarray, value_grad: np.ndarray, cost_grad: np.ndarray) -> None:
+        if self.total_iterations == 0:
+            mapping, is_numeric = get_index_mapping(observations)
+            self.mapping = (mapping, is_numeric)
+            self.cpp_model.set_feature_mapping(np.ascontiguousarray(mapping), np.ascontiguousarray(is_numeric))
+            self._set_constraints()
+
+        grads = concatenate_arrays(theta_grad, value_grad)
+        grads = concatenate_arrays(grads, cost_grad)
+        observations, grads = ensure_same_type(observations, grads)
+        if isinstance(observations, th.Tensor):
+            observations = observations.float()
+            grads = grads.float()
+            # store data so that data isn't garbage collected while GBRL uses it
+            self._save_memory = (observations, grads)
+            self.cpp_model.step(get_tensor_info(observations), None, get_tensor_info(grads))
+            self._save_memory = None
+        else:
+            num_observations, cat_observations = preprocess_features(observations)
+            grads = np.ascontiguousarray(grads).astype(numerical_dtype)
+            input_dim = 0 if num_observations is None else num_observations.shape[1]
+            input_dim += 0 if cat_observations is None else cat_observations.shape[1]
+            self.cpp_model.step(num_observations, cat_observations, grads)
+
+        self.iteration = self.cpp_model.get_iteration()
+        self.total_iterations += 1
+
+    def distil(self, obs: Union[np.ndarray, th.Tensor], policy_targets: np.ndarray, value_targets: np.ndarray, cost_targets: np.ndarray, params: Dict, verbose: int) -> Tuple[float, Dict]:
+        targets = policy_targets.squeeze() 
+        if self.value_optimizer is not None:
+            targets = np.concatenate([policy_targets, value_targets[:, np.newaxis]], axis=1)
+        if self.cost_optimizer is not None:
+            targets = np.concatenate([targets, cost_targets[:, np.newaxis]], axis=1)
+        return super().distil(obs, targets, params, verbose)
+                                     
+    def predict(self, observations: Union[np.ndarray, th.Tensor], requires_grad: bool = True, start_idx: int = 0, stop_idx: int = None, tensor: bool = True) -> Tuple[np.ndarray, np.ndarray]:
+        preds = super().predict(observations, requires_grad, start_idx, stop_idx, tensor)
+        pred_values = tensor_to_leaf(preds[:, -2], requires_grad=requires_grad)
+        pred_cost = tensor_to_leaf(preds[:, -1], requires_grad=requires_grad)
+        preds = tensor_to_leaf(preds[:, :-2], requires_grad=requires_grad)
+        return preds, pred_values, pred_cost
+    
+    def predict_policy(self, observations: Union[np.ndarray, th.Tensor], requires_grad: bool = True, start_idx: int = 0, stop_idx: int = None, tensor: bool = True):
+        preds, _, _ = self.predict(observations, requires_grad, start_idx, stop_idx, tensor)
+        return preds
+    
+    def predict_critic(self, observations: Union[np.ndarray, th.Tensor], requires_grad: bool = True, start_idx: int = 0, stop_idx: int = None, tensor: bool = True):
+        _, pred_values, _ = self.predict(observations, requires_grad, start_idx, stop_idx, tensor)
+        return pred_values
+    
+    def predict_cost(self, observations: Union[np.ndarray, th.Tensor], requires_grad: bool = True, start_idx: int = 0, stop_idx: int = None, tensor: bool = True):
+        _, _,  pred_cost = self.predict(observations, requires_grad, start_idx, stop_idx, tensor)
+        return pred_cost
+    
+    @classmethod
+    def load(cls, filename: str, device: str) -> "SharedConstrainedActorCriticWrapper":
+        filename = filename.rstrip('.')
+        if '.gbrl_model' not in filename:
+            filename += '.gbrl_model'
+        assert os.path.isfile(filename), "filename doesn't exist!"
+        try:
+            instance = cls.__new__(cls)
+            print('Loading')
+            instance.cpp_model = GBRL_CPP.load(filename)
+            instance.set_device(device)
+            metadata =  instance.cpp_model.get_metadata()
+            instance.tree_struct = {'max_depth': metadata['max_depth'], 
+                            'min_data_in_leaf': metadata['min_data_in_leaf'],
+                            'n_bins': metadata['n_bins'], 
+                            'par_th': metadata['par_th'],
+                            'batch_size': metadata['batch_size'], 
+                            'grow_policy': metadata['grow_policy']}
+            instance.params = {'input_dim': metadata['input_dim'],
+                            'output_dim': metadata['output_dim'],
+                            'split_score_func': metadata['split_score_func'], 
+                            'generator_type': metadata['generator_type'], 
+                            'use_control_variates': metadata['use_control_variates'], 
+                            'verbose': metadata['verbose'], 
+                            'device': instance.cpp_model.get_device(),
+                            **instance.tree_struct
+                            }
+            instance.output_dim = metadata['output_dim']
+            instance.input_dim = metadata['input_dim']
+            instance.verbose = metadata['verbose']
+            instance.gbrl_params = {'split_score_func': metadata['split_score_func'], 
+                                    'generator_type': metadata['generator_type'], 
+                                    'use_control_variates': metadata['use_control_variates'], 
+                                    }
+            instance.optimizer = instance.cpp_model.get_optimizers()
+            instance.iteration = metadata['iteration']
+            instance.total_iterations = metadata['iteration']
+            instance.student_model = None
+            instance.feature_weights = instance.cpp_model.get_feature_weights()
+            instance.device = instance.params['device']
+        except RuntimeError as e:
+            print(f"Caught an exception in GBRL: {e}")
+            return None
+        instance.policy_optimizer = instance.optimizer[0]
+        instance.value_optimizer = None if len(instance.optimizer) == 1 else instance.optimizer[1]
+        instance.cost_optimizer = None if len(instance.optimizer) != 2 else instance.optimizer[2]
+        return instance
+
+    def copy(self) -> "SharedConstrainedActorCriticWrapper":
+        return self.__copy__()
+    
+    def __copy__(self) -> "SharedConstrainedActorCriticWrapper":
+        copy_ = SharedConstrainedActorCriticWrapper(self.input_dim, self.output_dim, self.tree_struct.copy(), self.policy_optimizer.copy(), None if self.value_optimizer is None else self.value_optimizer.copy(), None if self.cost_optimizer is None else self.cost_optimizer.copy(), self.gbrl_params, self.verbose, self.device)
         copy_.iteration = self.iteration 
         copy_.total_iterations = self.total_iterations
         if self.cpp_model is not None:
