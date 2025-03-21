@@ -62,7 +62,7 @@ class ParametricActor(BaseGBT):
         bias = bias if bias is not None else np.zeros(output_dim,
                                                       dtype=numerical_dtype)
         # init model
-        self.learner = GBTLearner(output_dim, tree_struct, policy_optimizer,
+        self.learner = GBTLearner(input_dim, output_dim, tree_struct, policy_optimizer,
                                   params, verbose, device)
         self.learner.reset()
         self.learner.set_bias(bias)
