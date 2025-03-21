@@ -7,22 +7,25 @@
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
 import sys
-import os 
+import os
 
 ROOT_PATH = os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, ROOT_PATH) 
-sys.path.insert(0, ROOT_PATH + '/gbrl') 
+sys.path.insert(0, ROOT_PATH + '/gbrl')
 
 with open(ROOT_PATH + '/gbrl/__init__.py') as file_handler:
     __version__ = file_handler.readlines()[8].split('"')[1]
 
 from unittest.mock import MagicMock
+
+
 class Mock(MagicMock):
     __all__ = []
 
     @classmethod
     def __getattr__(cls, name):
         return MagicMock()
+
 
 sys.modules['gbrl.gbrl_cpp'] = Mock()
 project = 'GBRL'
@@ -54,5 +57,15 @@ exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
 html_theme = 'sphinx_rtd_theme'
-html_static_path = ['_static']
+html_static_path = []
+# html_static_path = ['_static']
 
+html_context = {
+    "display_github": True,
+    "version": version
+}
+
+html_theme_options = {
+    "language_selector": True,
+    "version_selector": True,
+}

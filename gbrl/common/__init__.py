@@ -6,6 +6,3 @@
 # https://nvlabs.github.io/gbrl/license.html
 #
 ##############################################################################
-# shrinkage is not implemented yet
-VALID_OPTIMIZER_ARGS = ['init_lr', 'scheduler', 'shrinkage', 'algo', 'beta_1', 'beta_2', 'eps', 'T', 'start_idx', 'stop_idx']
-APPROVED_OPTIMIZERS = ["Adam", "SGD"]
