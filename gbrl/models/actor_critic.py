@@ -93,7 +93,6 @@ class ActorCritic(BaseGBT):
             self.learner.set_bias(bias, model_idx=0)
         self.policy_grad = None
         self.value_grad = None
-        self.params = None
 
     @classmethod
     def load_learner(cls, load_name: str, device: str) -> "ActorCritic":
@@ -121,6 +120,7 @@ class ActorCritic(BaseGBT):
         instance.policy_grad = None
         instance.value_grad = None
         instance.params = None
+        instance.input = None
         return instance
 
     def predict_values(self, observations: NumericalData,

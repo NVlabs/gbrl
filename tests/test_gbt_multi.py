@@ -21,7 +21,7 @@ from torch.nn.functional import mse_loss
 from sklearn import datasets
 
 from gbrl import cuda_available
-from gbrl.models.gbt import GBRL
+from gbrl.models.gbt import GBTModel
 from gbrl.models.actor_critic import ActorCritic
 
 
@@ -123,13 +123,13 @@ class TestGBTMulti(unittest.TestCase):
         X, y = self.data
         params = dict({"control_variates": False,
                        "split_score_func": "Cosine"})
-        model = GBRL(input_dim=self.input_dim,
-                     output_dim=self.out_dim,
-                     tree_struct=self.tree_struct,
-                     optimizers=self.sgd_optimizer,
-                     params=params,
-                     verbose=0,
-                     device='cpu')
+        model = GBTModel(input_dim=self.input_dim,
+                         output_dim=self.out_dim,
+                         tree_struct=self.tree_struct,
+                         optimizers=self.sgd_optimizer,
+                         params=params,
+                         verbose=0,
+                         device='cpu')
         model.set_bias_from_targets(y)
         loss = rmse_model(model, X, y, self.n_epochs)
         value = 2.0
@@ -146,13 +146,13 @@ class TestGBTMulti(unittest.TestCase):
 
         params = dict({"control_variates": False, "split_score_func": "L2",
                        "generator_type": "Uniform"})
-        model = GBRL(input_dim=self.input_dim,
-                     output_dim=self.out_dim,
-                     tree_struct=tree_struct,
-                     optimizers=self.sgd_optimizer,
-                     params=params,
-                     verbose=0,
-                     device='cpu')
+        model = GBTModel(input_dim=self.input_dim,
+                         output_dim=self.out_dim,
+                         tree_struct=tree_struct,
+                         optimizers=self.sgd_optimizer,
+                         params=params,
+                         verbose=0,
+                         device='cpu')
         model.learner.step(X, y)
         gbrl_shap = model.tree_shap(0, X[0, :])
         clf = DecisionTreeRegressor(max_depth=3).fit(X, y)
@@ -171,13 +171,13 @@ class TestGBTMulti(unittest.TestCase):
                      }
         params = dict({"control_variates": False,
                        "split_score_func": "Cosine"})
-        model = GBRL(input_dim=self.input_dim,
-                     output_dim=self.out_dim,
-                     tree_struct=self.tree_struct,
-                     optimizers=optimizer,
-                     params=params,
-                     verbose=0,
-                     device='cpu')
+        model = GBTModel(input_dim=self.input_dim,
+                         output_dim=self.out_dim,
+                         tree_struct=self.tree_struct,
+                         optimizers=optimizer,
+                         params=params,
+                         verbose=0,
+                         device='cpu')
         model.set_bias_from_targets(y)
         loss = rmse_model(model, X, y, self.n_epochs)
         value = 50.0
@@ -191,13 +191,13 @@ class TestGBTMulti(unittest.TestCase):
         X, y = self.data
         params = dict({"control_variates": False,
                        "split_score_func": "Cosine"})
-        model = GBRL(input_dim=self.input_dim,
-                     output_dim=self.out_dim,
-                     tree_struct=self.tree_struct,
-                     optimizers=self.sgd_optimizer,
-                     params=params,
-                     verbose=0,
-                     device='cuda')
+        model = GBTModel(input_dim=self.input_dim,
+                         output_dim=self.out_dim,
+                         tree_struct=self.tree_struct,
+                         optimizers=self.sgd_optimizer,
+                         params=params,
+                         verbose=0,
+                         device='cuda')
         model.set_bias_from_targets(y)
         loss = rmse_model(model, X, y, self.n_epochs, device='cuda')
         value = 2.0
@@ -213,13 +213,13 @@ class TestGBTMulti(unittest.TestCase):
                        'grow_policy': 'oblivious'}
         params = dict({"control_variates": False,
                        "split_score_func": "Cosine"})
-        model = GBRL(input_dim=self.input_dim,
-                     output_dim=self.out_dim,
-                     tree_struct=tree_struct,
-                     optimizers=self.sgd_optimizer,
-                     params=params,
-                     verbose=0,
-                     device='cpu')
+        model = GBTModel(input_dim=self.input_dim,
+                         output_dim=self.out_dim,
+                         tree_struct=tree_struct,
+                         optimizers=self.sgd_optimizer,
+                         params=params,
+                         verbose=0,
+                         device='cpu')
         model.set_bias_from_targets(y)
         loss = rmse_model(model, X, y, self.n_epochs)
         self.assertTrue(loss < 12, f'Expected loss = {loss} < 12')
@@ -237,13 +237,13 @@ class TestGBTMulti(unittest.TestCase):
                        'grow_policy': 'oblivious'}
         params = dict({"control_variates": False,
                        "split_score_func": "Cosine"})
-        model = GBRL(input_dim=self.input_dim,
-                     output_dim=self.out_dim,
-                     tree_struct=tree_struct,
-                     optimizers=self.sgd_optimizer,
-                     params=params,
-                     verbose=0,
-                     device='cuda')
+        model = GBTModel(input_dim=self.input_dim,
+                         output_dim=self.out_dim,
+                         tree_struct=tree_struct,
+                         optimizers=self.sgd_optimizer,
+                         params=params,
+                         verbose=0,
+                         device='cuda')
         model.set_bias_from_targets(y)
         loss = rmse_model(model, X, y, self.n_epochs, device='cuda')
         value = 12
@@ -255,13 +255,13 @@ class TestGBTMulti(unittest.TestCase):
         print("Running Multi test_l2_cpu")
         X, y = self.data
         params = dict({"control_variates": False, "split_score_func": "L2"})
-        model = GBRL(input_dim=self.input_dim,
-                     output_dim=self.out_dim,
-                     tree_struct=self.tree_struct,
-                     optimizers=self.sgd_optimizer,
-                     params=params,
-                     verbose=0,
-                     device='cpu')
+        model = GBTModel(input_dim=self.input_dim,
+                         output_dim=self.out_dim,
+                         tree_struct=self.tree_struct,
+                         optimizers=self.sgd_optimizer,
+                         params=params,
+                         verbose=0,
+                         device='cpu')
         model.set_bias_from_targets(y)
         loss = rmse_model(model, X, y, self.n_epochs)
         value = 0.5
@@ -274,13 +274,13 @@ class TestGBTMulti(unittest.TestCase):
         print("Running Multi test_l2_gpu")
         X, y = self.data
         params = dict({"control_variates": False, "split_score_func": "L2"})
-        model = GBRL(input_dim=self.input_dim,
-                     output_dim=self.out_dim,
-                     tree_struct=self.tree_struct,
-                     optimizers=self.sgd_optimizer,
-                     params=params,
-                     verbose=0,
-                     device='cuda')
+        model = GBTModel(input_dim=self.input_dim,
+                         output_dim=self.out_dim,
+                         tree_struct=self.tree_struct,
+                         optimizers=self.sgd_optimizer,
+                         params=params,
+                         verbose=0,
+                         device='cuda')
         model.set_bias_from_targets(y)
         loss = rmse_model(model, X, y, self.n_epochs, device='cuda')
         value = 0.5
@@ -295,13 +295,13 @@ class TestGBTMulti(unittest.TestCase):
                        'par_th': 2,
                        'grow_policy': 'oblivious'}
         params = dict({"control_variates": False, "split_score_func": "L2"})
-        model = GBRL(input_dim=self.input_dim,
-                     output_dim=self.out_dim,
-                     tree_struct=tree_struct,
-                     optimizers=self.sgd_optimizer,
-                     params=params,
-                     verbose=0,
-                     device='cpu')
+        model = GBTModel(input_dim=self.input_dim,
+                         output_dim=self.out_dim,
+                         tree_struct=tree_struct,
+                         optimizers=self.sgd_optimizer,
+                         params=params,
+                         verbose=0,
+                         device='cpu')
         model.set_bias_from_targets(y)
         loss = rmse_model(model, X, y, self.n_epochs)
         value = 10.0
@@ -467,13 +467,13 @@ class TestGBTMulti(unittest.TestCase):
                        'par_th': 2,
                        'grow_policy': 'oblivious'}
         params = dict({"control_variates": False, "split_score_func": "L2"})
-        model = GBRL(input_dim=self.input_dim,
-                     output_dim=self.out_dim,
-                     tree_struct=tree_struct,
-                     optimizers=self.sgd_optimizer,
-                     params=params,
-                     verbose=0,
-                     device='cuda')
+        model = GBTModel(input_dim=self.input_dim,
+                         output_dim=self.out_dim,
+                         tree_struct=tree_struct,
+                         optimizers=self.sgd_optimizer,
+                         params=params,
+                         verbose=0,
+                         device='cuda')
         model.set_bias_from_targets(y)
         loss = rmse_model(model, X, y, self.n_epochs, device='cuda')
         value = 10.0
@@ -484,15 +484,15 @@ class TestGBTMulti(unittest.TestCase):
     def test_loading(self):
         X, y = self.data
 
-        model = GBRL.load_learner(os.path.join(self.test_dir,
-                                               'test_cosine_cpu'),
-                                  device='cpu')
+        model = GBTModel.load_learner(os.path.join(self.test_dir,
+                                                   'test_cosine_cpu'),
+                                      device='cpu')
         y_pred = model(X, requires_grad=False, tensor=False)
         loss = np.sqrt(np.mean((y_pred.squeeze() - y.squeeze())**2))
         self.assertTrue(loss < 2.0, f'Expected loss = {loss} < 2.0')
 
-        model = GBRL.load_learner(os.path.join(self.test_dir, 'test_l2_cpu'),
-                                  device='cpu')
+        model = GBTModel.load_learner(os.path.join(self.test_dir, 'test_l2_cpu'),
+                                      device='cpu')
         y_pred = model(X, requires_grad=False, tensor=False)
         loss = np.sqrt(np.mean((y_pred.squeeze() - y.squeeze())**2))
         self.assertTrue(loss < 0.5, f'Expected loss = {loss} < 0.5')
@@ -523,27 +523,27 @@ class TestGBTMulti(unittest.TestCase):
                         f'Expected loss = {value_loss} < {value_value}')
 
         if (cuda_available()):
-            model = GBRL.load_learner(
+            model = GBTModel.load_learner(
                 os.path.join(self.test_dir, 'test_cosine_gpu'), device='cuda')
             y_pred = model(X, requires_grad=False, tensor=False)
             loss = np.sqrt(np.mean((y_pred.squeeze() - y.squeeze())**2))
             self.assertTrue(loss < 2.0, f'Expected loss = {loss} < 2.0')
 
-            model = GBRL.load_learner(
+            model = GBTModel.load_learner(
                 os.path.join(self.test_dir, 'test_cosine_oblivious_gpu'),
                 device='cuda')
             y_pred = model(X, requires_grad=False, tensor=False)
             loss = np.sqrt(np.mean((y_pred.squeeze() - y.squeeze())**2))
             self.assertTrue(loss < 12.0, f'Expected loss = {loss} < 12.0')
 
-            model = GBRL.load_learner(os.path.join(self.test_dir,
-                                                   'test_l2_gpu'),
-                                      device='cuda')
+            model = GBTModel.load_learner(os.path.join(self.test_dir,
+                                                       'test_l2_gpu'),
+                                          device='cuda')
             y_pred = model(X, requires_grad=False, tensor=False)
             loss = np.sqrt(np.mean((y_pred.squeeze() - y.squeeze())**2))
             self.assertTrue(loss < 0.5, f'Expected loss = {loss} < 0.5')
 
-            model = GBRL.load_learner(
+            model = GBTModel.load_learner(
                 os.path.join(self.test_dir, 'test_l2_oblivious_gpu'),
                 device='cuda')
             y_pred = model(X, requires_grad=False, tensor=False)
@@ -575,7 +575,7 @@ class TestGBTMulti(unittest.TestCase):
             self.assertTrue(value_loss < value_value,
                             f'Expected loss = {value_loss} < {value_value}')
 
-        model = GBRL.load_learner(
+        model = GBTModel.load_learner(
             os.path.join(self.test_dir, 'test_cosine_adam_cpu'),
             device='cpu')
         y_pred = model(X, requires_grad=False, tensor=False)

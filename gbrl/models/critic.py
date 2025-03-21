@@ -14,7 +14,7 @@ from gbrl.common.utils import NumericalData
 
 from gbrl.learners.gbt_learner import GBTLearner
 from gbrl.models.base import BaseGBT
-from gbrl.common.utils import (clip_grad_norm, concatenate_arrays,
+from gbrl.common.utils import (clip_grad_norm, concatenate_arrays, ensure_leaf_tensor_or_array,
                                numerical_dtype,
                                setup_optimizer, validate_array)
 
@@ -25,15 +25,13 @@ class ContinuousCritic(BaseGBT):
     Designed for Q-function approximation in continuous action spaces,
     such as SAC.
     Model is designed to output parameters of 3 types of Q-functions:
-        - linear Q(theta(s), a) = <w_theta, a> + b_theta, (<> denotes
-        a dot product).
-        - quadratic Q(theta(s), a) = -(<w_theta, a> - b_theta)**2 +
-        c_theta.
-        - tanh Q(theta(s), a) = b_theta*tanh(<w_theta, a>)
+    - linear Q(theta(s), a) = <w_theta, a> + b_theta, (<> denotes a dot product).
+    - quadratic Q(theta(s), a) = -(<w_theta, a> - b_theta)**2 + c_theta.
+    - tanh Q(theta(s), a) = b_theta*tanh(<w_theta, a>)
+
     This allows to pass derivatives w.r.t to action a while the Q
     parameters are a function of a GBT model theta.
-    The target model is approximated as the ensemble without the last
-    <target_update_interval> trees.
+    The target model is approximated as the ensemble without the last <target_update_interval> trees.
     """
     def __init__(self,
                  tree_struct: Dict,
@@ -47,29 +45,30 @@ class ContinuousCritic(BaseGBT):
                  verbose: int = 0,
                  device: str = 'cpu'):
         """
-            Initializes the Continuous Critic model.
+        Initializes the Continuous Critic model.
+
         Args:
-         tree_struct (Dict): Dictionary containing tree structure information:
-                max_depth (int): maximum tree depth.
-                grow_policy (str): 'greedy' or 'oblivious'.
-                n_bins (int): number of bins per feature for candidate generation.
-                min_data_in_leaf (int): minimum number of samples in a leaf.
-                par_th (int): minimum number of samples for parallelizing on CPU.
-        output_dim (int): output dimension.
-        weights_optimizer Dict: dictionary containing policy optimizer
-        parameters. (see GBRL for optimizer details)
-        bias_optimizer Dict: dictionary containing policy optimizer parameters.
-        (see GBRL for optimizer details)
-        params (Dict, optional): GBRL parameters such as:
-            control_variates (bool): use control variates (variance reduction technique CPU only).
-            split_score_func (str): "cosine" or "l2"
-            generator_type- (str): candidate generation method "Quantile" or "Uniform".
-            feature_weights - (list[float]): Per-feature multiplication
-            weights used when choosing the best split. Weights should be >= 0
-        target_update_interval (int): target update interval
-        bias (np.ndarray, optional): manually set a bias. Defaults to None = np.zeros.
-        verbose (int, optional): verbosity level. Defaults to 0.
-        device (str, optional): GBRL device 'cpu' or 'cuda/gpu'. Defaults to 'cpu'.
+            tree_struct (Dict): Dictionary containing tree structure information:
+                    max_depth (int): maximum tree depth.
+                    grow_policy (str): 'greedy' or 'oblivious'.
+                    n_bins (int): number of bins per feature for candidate generation.
+                    min_data_in_leaf (int): minimum number of samples in a leaf.
+                    par_th (int): minimum number of samples for parallelizing on CPU.
+            output_dim (int): output dimension.
+            weights_optimizer Dict: dictionary containing policy optimizer
+            parameters. (see GBRL for optimizer details)
+            bias_optimizer Dict: dictionary containing policy optimizer parameters.
+            (see GBRL for optimizer details)
+            params (Dict, optional): GBRL parameters such as:
+                control_variates (bool): use control variates (variance reduction technique CPU only).
+                split_score_func (str): "cosine" or "l2"
+                generator_type- (str): candidate generation method "Quantile" or "Uniform".
+                feature_weights - (list[float]): Per-feature multiplication
+                weights used when choosing the best split. Weights should be >= 0
+            target_update_interval (int): target update interval
+            bias (np.ndarray, optional): manually set a bias. Defaults to None = np.zeros.
+            verbose (int, optional): verbosity level. Defaults to 0.
+            device (str, optional): GBRL device 'cpu' or 'cuda/gpu'. Defaults to 'cpu'.
         """
 
         self.weights_optimizer = setup_optimizer(weights_optimizer,
@@ -97,7 +96,7 @@ class ContinuousCritic(BaseGBT):
         Args:
             observations (NumericalData):
             q_grad_clip (float, optional):. Defaults to None.
-        weight_grad (Optional[NumericalData], optional): manually calculated gradients. Defaults to None.
+            weight_grad (Optional[NumericalData], optional): manually calculated gradients. Defaults to None.
             bias_grad (Optional[NumericalData], optional): manually calculated gradients. Defaults to None.
         """
         if observations is None:
@@ -133,13 +132,14 @@ class ContinuousCritic(BaseGBT):
 
         Returns:
             Tuple[th.Tensor, th.Tensor]: weights and bias parameters to thetype of Q-functions
+
         """
         n_trees = self.learner.get_num_trees()
         theta = self.learner.predict(observations, requires_grad=False,
                                      stop_idx=max(n_trees - self.target_update_interval, 1), tensor=tensor)
-        weights, bias = theta[:, self.weights_optimizer['start_idx']: self.weights_optimizer['stop_idx']],
-        theta[:, self.bias_optimizer['start_idx']:
-              self.bias_optimizer['stop_idx']]
+        weights = theta[:, self.weights_optimizer['start_idx']:self.weights_optimizer['stop_idx']]
+        bias = theta[:, self.bias_optimizer['start_idx']:self.bias_optimizer['stop_idx']]
+
         return weights, bias
 
     def __call__(self, observations: NumericalData,
@@ -168,8 +168,11 @@ class ContinuousCritic(BaseGBT):
 
         theta = self.learner.predict(observations, requires_grad, start_idx,
                                      stop_idx, tensor)
-        weights = theta[:, self.weights_optimizer['start_idx']: self.weights_optimizer['stop_idx']],
-        bias = theta[:, self.bias_optimizer['start_idx']: self.bias_optimizer['stop_idx']]
+        weights = theta[:, self.weights_optimizer['start_idx']: self.weights_optimizer['stop_idx']].squeeze()
+        bias = theta[:, self.bias_optimizer['start_idx']: self.bias_optimizer['stop_idx']].squeeze()
+        weights = ensure_leaf_tensor_or_array(weights, tensor=True,
+                                              requires_grad=requires_grad, device=self.learner.device)
+        bias = ensure_leaf_tensor_or_array(bias, tensor=True, requires_grad=requires_grad, device=self.learner.device)
         if requires_grad:
             self.grad = None
             self.params = weights, bias

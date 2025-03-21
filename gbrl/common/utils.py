@@ -259,7 +259,7 @@ def concatenate_arrays(arr_a: Union[th.Tensor, np.ndarray],
 
     # Check if we need to add an axis to match dimensionality
     def add_axis_if_needed(array, target_ndim, axis):
-        if array.ndim < target_ndim:
+        if array.ndim < target_ndim or array.ndim == 1:
             if isinstance(array, th.Tensor):
                 array = array.unsqueeze(axis)
             else:  # For NumPy array

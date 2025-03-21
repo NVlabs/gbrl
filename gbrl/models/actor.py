@@ -97,22 +97,6 @@ class ParametricActor(BaseGBT):
         self.grad = policy_grad
         self.input = None
 
-    @classmethod
-    def load_learner(cls, load_name: str, device: str) -> "ParametricActor":
-        """
-        Loads a ParametricActor model from a file.
-
-        Args:
-            load_name (str): Full path to the saved model file.
-            device (str): Device to load the model onto ('cpu' or 'cuda').
-
-        Returns:
-            ParametricActor: Loaded ParametricActor model.
-        """
-        instance = cls.__new__(cls)
-        instance.learner = GBTLearner.load(load_name, device)
-        return instance
-
     def __call__(self, observations: NumericalData,
                  requires_grad: bool = True, start_idx: int = 0,
                  stop_idx: int = None, tensor: bool = True) -> NumericalData:
@@ -298,13 +282,14 @@ class GaussianActor(BaseGBT):
         """
         theta = self.learner.predict(observations, requires_grad, start_idx,
                                      stop_idx, tensor)
-        mean_actions = theta if not self.fixed_std else theta[:,
-                                                              :self.policy_dim]
-        log_std = constant_like(theta, self.log_std_init) if \
-            not self.fixed_std else theta[:, self.policy_dim:]
-        log_std = ensure_leaf_tensor_or_array(log_std, requires_grad=False if
-                                              not self.fixed_std else
-                                              requires_grad)
+        mean_actions = theta if self.fixed_std else theta[:, :self.policy_dim]
+        if not self.fixed_std:
+            mean_actions = ensure_leaf_tensor_or_array(mean_actions, tensor=True, requires_grad=requires_grad, device=self.learner.device)
+        log_std = constant_like(theta, self.log_std_init) if self.fixed_std else theta[:, self.policy_dim:]
+        log_std = ensure_leaf_tensor_or_array(log_std, tensor=True, requires_grad=False if
+                                              self.fixed_std else
+                                              requires_grad,
+                                              device=self.learner.device)
         if requires_grad:
             self.grad = None
             self.params = mean_actions, log_std

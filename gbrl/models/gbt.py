@@ -6,7 +6,7 @@
 # https://nvlabs.github.io/gbrl/license.html
 #
 ##############################################################################
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Union
 
 import numpy as np
 import torch as th
@@ -17,7 +17,11 @@ from gbrl.common.utils import (NumericalData, clip_grad_norm, setup_optimizer,
                                validate_array)
 
 
-class GBRL(BaseGBT):
+class GBTModel(BaseGBT):
+    """
+    General class for gradient boosting trees
+
+    """
     def __init__(self,
                  tree_struct: Dict,
                  input_dim: int,
@@ -26,7 +30,8 @@ class GBRL(BaseGBT):
                  params: Dict = dict(),
                  verbose: int = 0,
                  device: str = 'cpu'):
-        """General class for gradient boosting trees
+        """
+        Initializes the GBT model.
 
         Args:
             tree_struct (Dict): Dictionary containing
@@ -143,19 +148,6 @@ class GBRL(BaseGBT):
         self.grad = grad
         self.input = None
 
-    def get_params(self) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Returns predicted model parameters and their respective gradients
-
-        Returns:
-            Tuple[np.ndarray, np.ndarray]
-        """
-        assert self.params is not None, "must run a forward pass first"
-        params = self.params
-        if isinstance(self.params, tuple):
-            params = (params[0].detach().cpu().numpy(), params[1].detach().cpu().numpy())
-        return params, self.grad
-
     def fit(self, X: NumericalData,
             targets: NumericalData,
             iterations: int, shuffle: bool = True,
@@ -176,7 +168,7 @@ class GBRL(BaseGBT):
         return self.learner.fit(X, targets, iterations, shuffle, loss_type)
 
     @classmethod
-    def load_learner(cls, load_name: str, device: str) -> "GBRL":
+    def load_learner(cls, load_name: str, device: str) -> "GBTModel":
         """Loads GBRL model from a file
 
         Args:
@@ -233,7 +225,7 @@ class GBRL(BaseGBT):
         """
         self.learner.plot_tree(tree_idx, filename)
 
-    def copy(self) -> "GBRL":
+    def copy(self) -> "GBTModel":
         """Copy class instance
 
         Returns:
@@ -242,10 +234,10 @@ class GBRL(BaseGBT):
         """
         return self.__copy__()
 
-    def __copy__(self) -> "GBRL":
+    def __copy__(self) -> "GBTModel":
         learner = self.learner.copy()
-        copy_ = GBRL(learner.tree_struct, learner.input_dim,
-                     learner.output_dim, learner.optimizers,
-                     learner.params, learner.verbose, learner.device)
+        copy_ = GBTModel(learner.tree_struct, learner.input_dim,
+                         learner.output_dim, learner.optimizers,
+                         learner.params, learner.verbose, learner.device)
         copy_.learner = learner
         return copy_

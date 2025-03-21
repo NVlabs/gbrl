@@ -13,6 +13,7 @@ import numpy as np
 import torch as th
 
 from gbrl.common.utils import NumericalData
+from gbrl.learners.gbt_learner import GBTLearner
 
 
 class BaseGBT(ABC):
@@ -20,6 +21,9 @@ class BaseGBT(ABC):
         """General class for gradient boosting trees
         """
         self.learner = None
+        self.grad = None
+        self.params = None
+        self.input = None
 
     def set_bias(self, *args, **kwargs) -> None:
         """Sets GBRL bias"""
@@ -139,17 +143,37 @@ class BaseGBT(ABC):
         self.learner.export(filename, modelname)
 
     @classmethod
-    @abstractmethod
+    @classmethod
     def load_learner(cls, load_name: str, device: str) -> "BaseGBT":
-        """Loads GBRL model from a file
+        """
+        Loads a BaseGBT model from a file.
 
         Args:
-            load_name (str): full path to file name
+            load_name (str): Full path to the saved model file.
+            device (str): Device to load the model onto ('cpu' or 'cuda').
 
         Returns:
-            GBRL instance
+            BaseGBT: Loaded ParametricActor model.
         """
-        pass
+        instance = cls.__new__(cls)
+        instance.learner = GBTLearner.load(load_name, device)
+        instance.grad = None
+        instance.params = None
+        instance.input = None
+        return instance
+
+    def get_params(self) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Returns predicted model parameters and their respective gradients
+
+        Returns:
+            Tuple[np.ndarray, np.ndarray]
+        """
+        assert self.params is not None, "must run a forward pass first"
+        params = self.params
+        if isinstance(self.params, tuple):
+            params = (params[0].detach().cpu().numpy(), params[1].detach().cpu().numpy())
+        return params, self.grad
 
     def set_device(self, device: str):
         """Sets GBRL device (either cpu or cuda)
