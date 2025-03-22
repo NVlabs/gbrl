@@ -18,8 +18,8 @@ GBRL is a Python-based Gradient Boosting Trees (GBT) library, similar to popular
    :maxdepth: 2
    :caption: Documentation:
 
-   gbt
-   actor_critic/index
+   models/index
+   learners/index
 
 Indices and tables
 ==================

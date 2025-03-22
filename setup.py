@@ -1,12 +1,14 @@
 import os
-import sys
-import subprocess
 import platform
 import shutil
-from setuptools import setup, Extension, find_packages
-from setuptools.command.build_ext import build_ext
-from distutils import log
+import subprocess
+import sys
 import sysconfig
+from distutils import log
+
+from setuptools import Extension, find_packages, setup
+from setuptools.command.build_ext import build_ext
+
 
 class CMakeExtension(Extension):
     """Extension to integrate CMake build"""
@@ -14,6 +16,7 @@ class CMakeExtension(Extension):
         super().__init__(name, sources=[])
         self.sourcedir = os.path.abspath(sourcedir)
         print(self.sourcedir)
+
 
 class CMakeBuild(build_ext):
     """Build extension using CMake"""
@@ -33,20 +36,22 @@ class CMakeBuild(build_ext):
             self.build_extension(ext)
 
     def build_extension(self, ext):
-        extdir = os.path.abspath(os.path.dirname(self.get_ext_fullpath(ext.name)))
+        extdir = os.path.abspath(os.path.dirname(
+            self.get_ext_fullpath(ext.name)))
         cfg = 'Debug' if self.cmake_verbose else 'Release'
         cmake_args = [
             '-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=' + extdir,
             '-DPYTHON_EXECUTABLE=' + sys.executable,
             '-DPYTHON_INCLUDE_DIR=' + sysconfig.get_path('include'),
             '-DCMAKE_BUILD_TYPE=' + cfg,
-        ]   
+        ]
         if os.environ.get('COVERAGE', '0') == '1':
-             cmake_args.append('-DCOVERAGE=ON')
+            cmake_args.append('-DCOVERAGE=ON')
         if os.environ.get('ASAN', '0') == '1':
-             cmake_args.append('-DASAN=ON')
+            cmake_args.append('-DASAN=ON')
         if sysconfig.get_config_var('LIBRARY') is not None:
-            cmake_args.append('-DPYTHON_LIBRARY=' + sysconfig.get_config_var('LIBRARY'))
+            cmake_args.append('-DPYTHON_LIBRARY=' + sysconfig.get_config_var(
+                'LIBRARY'))
         if 'CC' in os.environ:
             cmake_args.append('-DCMAKE_C_COMPILER=' + os.environ['CC'])
         if 'CXX' in os.environ:
@@ -59,11 +64,14 @@ class CMakeBuild(build_ext):
             cmake_args.append('--debug-trycompile')
             build_args.append('--verbose')
 
-        if ('CPU_ONLY' not in os.environ and platform.system() != 'Darwin') or ('CPU_ONLY' in os.environ and os.environ['CPU_ONLY'] != '1'):
+        if ('CPU_ONLY' not in os.environ and
+            platform.system() != 'Darwin') or ('CPU_ONLY' in os.environ and
+                                               os.environ['CPU_ONLY'] != '1'):
             cmake_args.append('-DUSE_CUDA=ON')
             if 'CUDACXX' in os.environ:
-                cmake_args.append('-DCMAKE_CUDA_COMPILER=' + os.environ['CUDACXX'])
-            
+                cmake_args.append('-DCMAKE_CUDA_COMPILER=' +
+                                  os.environ['CUDACXX'])
+
         build_temp = self.build_temp
         if not os.path.exists(build_temp):
             os.makedirs(build_temp)
@@ -74,7 +82,8 @@ class CMakeBuild(build_ext):
 
         self.move_built_library(extdir)
 
-        release_dir = os.path.join(os.path.dirname(__file__), "gbrl", "Release")
+        release_dir = os.path.join(os.path.dirname(__file__), "gbrl",
+                                   "Release")
 
         if os.path.exists(release_dir):
             shutil.rmtree(release_dir)
@@ -104,20 +113,17 @@ class CMakeBuild(build_ext):
             log.info(f'Moving {built_object} to {dest_path}')
             self.copy_file(built_object, dest_path)
 
+
 setup(
     name="gbrl",
-    version = "1.0.12",
-    description = "Gradient Boosted Trees for RL",
+    version="1.1.0",
+    description="Gradient Boosted Trees for RL",
     author="Benjamin Fuhrer, Chen Tessler, Gal Dalal",
     author_email="bfuhrer@nvidia.com, ctessler@nvidia.com. gdalal@nvidia.com",
     license="NVIDIA Proprietary Software",
     ext_modules=[CMakeExtension('gbrl/gbrl_cpp', sourcedir='.')],
     cmdclass=dict(build_ext=CMakeBuild),
-    packages=find_packages(include=["gbrl"]),  # List of all packages to include
+    packages=find_packages(include=["gbrl", "gbrl.*"],
+                           exclude=["gbrl.src", "gbrl.src.*"]),
     include_package_data=True,
 )
-
-
-
-
-
