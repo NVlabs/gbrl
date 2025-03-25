@@ -7,11 +7,12 @@
 #
 ##############################################################################
 from abc import ABC, abstractmethod
-from typing import Dict, List, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch as th
 
+from gbrl.common.constraints import Constraint, process_constraints
 from gbrl.common.utils import NumericalData, to_numpy
 
 
@@ -34,7 +35,8 @@ class BaseLearner(ABC):
         feature_weights (np.ndarray): Feature importance weights.
     """
     def __init__(self, input_dim: int, output_dim: int, tree_struct: Dict,
-                 params: Dict, verbose: int = 0, device: str = 'cpu'):
+                 params: Dict, verbose: int = 0, device: str = 'cpu',
+                 constraints: Optional[Union[Constraint, List[Dict]]] = None):
         """
         Initializes the BaseLearner.
 
@@ -46,8 +48,8 @@ class BaseLearner(ABC):
             params (Dict): Dictionary containing additional model parameters.
             verbose (int, optional): Verbosity level (0 = silent, 1 = debug).
             Defaults to 0.
-            device (str, optional): Device to run the model on
-            ('cpu' or 'cuda'). Defaults to 'cpu'.
+            device (str, optional): Device to run the model on ('cpu' or 'cuda'). Defaults to 'cpu'.
+            constraints (Union[Constraint, List[Dict], optional): feature constraints. Defaults to None.
         """
         self.tree_struct = tree_struct
         self.input_dim = input_dim
@@ -76,6 +78,8 @@ class BaseLearner(ABC):
             weights = np.ones(input_dim, dtype=np.single)
             feature_weights = np.ascontiguousarray(weights)
         self.feature_weights = feature_weights
+        self.constraints = process_constraints(constraints)
+        self.mapping = None
 
     @abstractmethod
     def reset(self) -> None:
@@ -107,18 +111,21 @@ class BaseLearner(ABC):
         """
         pass
 
-    def export(self, filename: str, modelname: str = None) -> None:
-        # exports model to C
-        filename = filename.rstrip('.')
-        filename += '.h'
-        assert self.cpp_model is not None, "Can't export non-existent model!"
-        if modelname is None:
-            modelname = ""
-        try:
-            status = self.cpp_model.export(filename, modelname)
-            assert status == 0, "Failed to export model"
-        except RuntimeError as e:
-            print(f"Caught an exception in GBRL: {e}")
+    @abstractmethod
+    def export(self, filename: str, modelname: str = None, format: str = None, export_type: str = 'full', 
+               prefix: str = None, *args, **kwargs) -> None:
+        """
+        Exports the model to a C header file.
+
+        Args:
+            filename (str): The filename to export the model to.
+            modelname (str, optional): The name of the model in the C code. Defaults to None.
+            format (str, optional): export datatype must either ['float', 'fxp8', 'fxp16'], defaults to 'full'.
+            export_type (str, optional): Either full or compact export (compact uses explicit numbers for better 
+            efficiency on low-compute devices). Defaults to 'full'
+            prefix (str, optional): Defaults to ''.
+        """
+        pass
 
     @classmethod
     @abstractmethod

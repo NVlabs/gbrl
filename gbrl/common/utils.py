@@ -92,10 +92,11 @@ def process_array(arr: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
 
     else:
         raise ValueError(f"Unsupported array data type: {arr.dtype}")
-    
+
 
 def get_index_mapping(arr: Union[np.ndarray, th.Tensor]) -> Tuple[np.ndarray, np.ndarray]:
-    """Returns a mapping from original column indices to their new indices after separating numerical and categorical features."""
+    """Returns a mapping from original column indices to their new \
+        indices after separating numerical and categorical features."""
     if not isinstance(arr, th.Tensor):
         if arr.ndim == 1:
             # For 1D array, use the array itself as first_row
@@ -126,7 +127,7 @@ def get_index_mapping(arr: Union[np.ndarray, th.Tensor]) -> Tuple[np.ndarray, np
         return index_mapping, numerical_mask
     else:
         return np.arange(arr.shape[-1]), np.ones(arr.shape[-1], dtype=bool)
-    
+
 
 def to_numpy(arr: Union[np.ndarray, th.Tensor]) -> np.ndarray:
     if isinstance(arr, th.Tensor):
@@ -420,7 +421,7 @@ def ensure_leaf_tensor_or_array(array: NumericalData,
     if tensor:
         if isinstance(array, np.ndarray):
             array = th.from_numpy(array).to(device)
-        else:
+        if not array.is_leaf:
             array = array.detach()
         array.requires_grad_(requires_grad)
     elif not tensor and isinstance(array, th.Tensor):

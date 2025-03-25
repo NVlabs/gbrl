@@ -6,12 +6,11 @@
 # https://nvlabs.github.io/gbrl/license.html
 #
 ##############################################################################
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 import importlib.util
 import os
 import platform
-import sys
 import sys
 
 _loaded_cpp_module = None

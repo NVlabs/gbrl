@@ -7,16 +7,19 @@
 #
 ##############################################################################
 import os
-from typing import Dict, List, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch as th
 
 from gbrl import GBRL_CPP
-from gbrl.learners.base import BaseLearner
+from gbrl.common.compression import ParametricActorCompression, TreeCompression
+from gbrl.common.constraints import Constraint
 from gbrl.common.utils import (NumericalData, ensure_leaf_tensor_or_array,
-                               ensure_same_type, get_poly_vectors, get_tensor_info,
+                               ensure_same_type, get_index_mapping,
+                               get_poly_vectors, get_tensor_info,
                                numerical_dtype, preprocess_features, to_numpy)
+from gbrl.learners.base import BaseLearner
 
 
 class GBTLearner(BaseLearner):
@@ -28,7 +31,8 @@ class GBTLearner(BaseLearner):
     """
     def __init__(self, input_dim: int, output_dim: int, tree_struct: Dict,
                  optimizers: Union[Dict, List], params: Dict,
-                 verbose: int = 0, device: str = 'cpu'):
+                 verbose: int = 0, device: str = 'cpu',
+                 constraints: Optional[Union[Constraint, List[Dict]]] = None):
         """
         Initializes the GBTLearner.
 
@@ -40,8 +44,9 @@ class GBTLearner(BaseLearner):
             params (Dict): A dictionary containing model parameters.
             verbose (int, optional): Verbosity level. Defaults to 0.
             device (str, optional): The device to run the model on. Defaults to 'cpu'.
+            constraints (Union[Constraint, List[Dict], optional): feature constraints. Defaults to None.
         """
-        super().__init__(input_dim, output_dim, tree_struct, params, verbose, device)
+        super().__init__(input_dim, output_dim, tree_struct, params, verbose, device, constraints)
         if not isinstance(optimizers, list):
             optimizers = [optimizers]
         self.optimizers = optimizers
@@ -80,6 +85,12 @@ class GBTLearner(BaseLearner):
             grads (NumericalData): Gradients.
         """
         features, grads = ensure_same_type(features, grads)
+        if self.total_iterations == 0:
+            mapping, is_numeric = get_index_mapping(features)
+            self.mapping = (mapping, is_numeric)
+            self._cpp_model.set_feature_mapping(np.ascontiguousarray(mapping), np.ascontiguousarray(is_numeric))
+            self._set_constraints()
+
         if isinstance(features, th.Tensor):
             features = features.float()
             grads = grads.float()
@@ -138,21 +149,36 @@ class GBTLearner(BaseLearner):
         status = self._cpp_model.save(filename)
         assert status == 0, "Failed to save model"
 
-    def export(self, filename: str, modelname: str = None) -> None:
+    def export(self, filename: str, modelname: str = None, format: str = None, export_type: str = 'full',
+               prefix: str = None) -> None:
         """
         Exports the model to a C header file.
 
         Args:
             filename (str): The filename to export the model to.
             modelname (str, optional): The name of the model in the C code. Defaults to None.
+            format (str, optional): export datatype must either ['float', 'fxp8', 'fxp16'], defaults to 'full'.
+            export_type (str, optional): Either full or compact export (compact uses explicit numbers for better 
+            efficiency on low-compute devices). Defaults to 'full'
+            prefix (str, optional): Defaults to ''.
         """
+        # exports model to C
+        if format is None:
+            format = 'float'
+        assert format in ['float', 'fxp8', 'fxp16'], "export format must be either ['float', 'fxp8', 'fxp16']"
+        assert export_type in ['full', 'compact'], "export format must be either ['full', 'compact']"
+        if prefix is None:
+            prefix = ""
+        else:
+            if prefix[-1] != '_':
+                prefix += '_'
         filename = filename.rstrip('.')
         filename += '.h'
         assert self._cpp_model is not None, "Can't export non-existent model!"
         if modelname is None:
             modelname = ""
         try:
-            status = self._cpp_model.export(filename, modelname)
+            status = self._cpp_model.export(filename, modelname, format, export_type, prefix)
             assert status == 0, "Failed to export model"
         except RuntimeError as e:
             print(f"Caught an exception in GBRL: {e}")
@@ -365,6 +391,16 @@ class GBTLearner(BaseLearner):
         return self._cpp_model.tree_shap(tree_idx, num_features, cat_features,
                                          norm_values, base_poly, offset)
 
+    def _set_constraints(self) -> None:
+        """
+        Adds constraints to the underlying C++ model if they haven't been applied yet.
+        """
+        if self.constraints is not None and not self.constraints.used:
+            self.constraints.parse_mapping(self.mapping)
+            for constraint in self.constraints.get_constraints():
+                self._cpp_model.add_constraint(**constraint)
+            self.constraints.used = True
+
     def shap(self, features: NumericalData) -> np.ndarray:
         """
         Computes SHAP values for the entire ensemble.
@@ -496,6 +532,98 @@ class GBTLearner(BaseLearner):
                 break
         self.reset()
         return tr_loss, params
+
+    def get_matrix_representation(self, features: NumericalData) -> \
+            Tuple[np.ndarray, np.ndarray, np.ndarray, int, int]:
+        """
+        Converts input features into matrix representations required for compression.
+
+        Args:
+            features (NumericalData): Input feature batch of shape (n_samples, n_features),
+                either as a NumPy array or a PyTorch tensor.
+
+        Returns:
+            Tuple[np.ndarray, np.ndarray, np.ndarray, int, int]: A tuple containing:
+                - A (np.ndarray): Feature-to-leaf assignment matrix.
+                - V (np.ndarray): Leaf value matrix.
+                - n_leaves_per_tree (np.ndarray): Number of leaves in each tree.
+                - n_leaves (int): Total number of leaves.
+                - n_trees (int): Total number of trees.
+        """
+        if isinstance(features, th.Tensor):
+            features = features.detach().cpu().numpy().astype(np.single)
+        num_features, cat_features = preprocess_features(features)
+        A, V, n_leaves_per_tree, n_leaves, n_trees = self._cpp_model.get_matrix_representation(num_features,
+                                                                                               cat_features)
+        return A, V, n_leaves_per_tree, n_leaves, n_trees
+
+    def compress(self, trees_to_keep: int, gradient_steps: int, features: NumericalData,
+                 actions: th.Tensor = None, log_std: th.Tensor = None,
+                 method: str = 'first_k', dist_type: str = 'supervised_learning',
+                 optimizer_kwargs: Optional[Dict[str, Any]] = None,
+                 least_squares_W: bool = True, temperature: float = 1.0, lambda_reg: float = 1.0, **kwargs):
+        """
+        Compresses the tree ensemble by selecting and retraining a subset of trees.
+
+        Args:
+            trees_to_keep (int): Number of trees to retain in the compressed model.
+            gradient_steps (int): Number of optimization steps during compression.
+            features (NumericalData): Input feature matrix (n_samples, n_features).
+            actions (th.Tensor, optional): Target actions (for policy compression). Required if dist_type
+                is not 'supervised_learning'.
+            log_std (th.Tensor, optional): Log standard deviation (only used for certain policy types).
+            method (str): Tree selection method. Defaults to 'first_k'.
+            dist_type (str): Compression type ('supervised_learning', 'actor', etc.).
+            optimizer_kwargs (dict, optional): Optimizer configuration.
+            least_squares_W (bool): Whether to use least-squares to estimate weights (for supervised compression).
+            temperature (float): Temperature parameter for soft selection.
+            lambda_reg (float): L2 regularization coefficient on weights.
+            **kwargs: Additional keyword arguments passed to the compressor.
+
+        Returns:
+            float: Final loss value after compression.
+        """
+        assert actions is not None or dist_type == \
+            'supervised_learning', "Cannot compress a policy using supervised learning compression methods"
+        A, V, n_leaves_per_tree, n_leaves, n_trees = self.get_matrix_representation(features)
+        A, V = th.tensor(A, dtype=th.float32, device=self.device), th.tensor(V, dtype=th.float32,
+                                                                             device=self.device)
+        n_leaves_per_tree = th.tensor(n_leaves_per_tree, device=self.device)
+        k = self.get_num_trees() - trees_to_keep
+        compression_params = {'k': k, 'gradient_steps': gradient_steps,
+                              'method': method,
+                              'optimizer_kwargs': optimizer_kwargs,
+                              'temperature': temperature, 'n_leaves': n_leaves, 'n_trees': n_trees,
+                              'n_leaves_per_tree': n_leaves_per_tree,
+                              'lambda_reg': lambda_reg,
+                              'output_dim': self.output_dim,
+                              'device': self.device}
+        compression_params.update(kwargs)
+
+        if actions is not None:
+            compression_params['dist_type'] = dist_type
+            compressor = ParametricActorCompression(**compression_params)
+            parameters, losses = compressor.compress(A, V, actions, log_std)
+        else:
+            compression_params['least_squares_W'] = least_squares_W
+            compressor = TreeCompression(**compression_params)
+            parameters, losses = compressor.compress(A, V)
+        leaves_selection, tree_selection, W, n_compressed_trees, n_compressed_leaves = parameters
+        # indices of selected leaves / trees in original indexing
+        compressed_leaf_indices = np.where(leaves_selection > 0)[0].astype(np.int32)
+        compressed_tree_indices = np.where(tree_selection > 0)[0].astype(np.int32)
+        # indices of the start of each leaf according to the compressed model
+        new_tree_indices = np.zeros(n_compressed_trees)
+        new_tree_indices[1:] = np.cumsum(n_leaves_per_tree[compressed_tree_indices].detach().cpu().numpy())[:-1]
+
+        self._cpp_model.compress(n_compressed_leaves, n_compressed_trees, compressed_leaf_indices,
+                                 compressed_tree_indices, new_tree_indices.astype(np.int32), W)
+        print(f"Finished compressing - compressed model has {self.get_num_trees()} trees")
+        del compressor
+        del A
+        del V
+        del n_leaves_per_tree
+        return losses[-1]
 
     def print_ensemble_metadata(self):
         """Prints the metadata of the ensemble."""

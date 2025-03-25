@@ -6,7 +6,7 @@
 # https://nvlabs.github.io/gbrl/license.html
 #
 ##############################################################################
-from typing import Dict, Optional
+from typing import Dict, List, Optional, Union
 
 import numpy as np
 from gbrl.common.utils import NumericalData
@@ -16,6 +16,7 @@ from gbrl.models.base import BaseGBT
 from gbrl.common.utils import (clip_grad_norm, concatenate_arrays, constant_like,
                                ensure_leaf_tensor_or_array, numerical_dtype,
                                setup_optimizer, validate_array)
+from gbrl.common.constraints import Constraint
 
 
 class ParametricActor(BaseGBT):
@@ -33,7 +34,8 @@ class ParametricActor(BaseGBT):
                  params: Dict = dict(),
                  bias: np.ndarray = None,
                  verbose: int = 0,
-                 device: str = 'cpu'):
+                 device: str = 'cpu',
+                 constraints: Optional[Union[Constraint, List[Dict]]] = None):
         """
         Initializes the ParametricActor model.
 
@@ -54,8 +56,8 @@ class ParametricActor(BaseGBT):
             params (Dict, optional): Additional GBRL parameters.
             bias (np.ndarray, optional): Bias initialization, defaults to zero.
             verbose (int, optional): Verbosity level. Defaults to 0.
-            device (str, optional): Compute device ('cpu' or 'cuda'). Defaults
-            to 'cpu'.
+            device (str, optional): Compute device ('cpu' or 'cuda'). Defaults to 'cpu'.
+            constraints (Union[Constraint, List[Dict], optional): feature constraints. Defaults to None.
         """
         policy_optimizer = setup_optimizer(policy_optimizer, prefix='policy_')
         super().__init__()
@@ -63,7 +65,7 @@ class ParametricActor(BaseGBT):
                                                       dtype=numerical_dtype)
         # init model
         self.learner = GBTLearner(input_dim, output_dim, tree_struct, policy_optimizer,
-                                  params, verbose, device)
+                                  params, verbose, device, constraints)
         self.learner.reset()
         self.learner.set_bias(bias)
         self.params = None
@@ -159,7 +161,8 @@ class GaussianActor(BaseGBT):
                  params: Dict = dict(),
                  bias: np.ndarray = None,
                  verbose: int = 0,
-                 device: str = 'cpu'):
+                 device: str = 'cpu',
+                 constraints: Optional[Union[Constraint, List[Dict]]] = None):
         """
         Initializes the GaussianActor model.
 
@@ -170,8 +173,7 @@ class GaussianActor(BaseGBT):
                 n_bins (int): number of bins per feature for candidate
                 generation.
                 min_data_in_leaf (int): minimum number of samples in a leaf.
-                par_th (int): minimum number of samples for parallelizing on
-                CPU.
+                par_th (int): minimum number of samples for parallelizing on CPU.
         output_dim (int): output dimension.
         mu_optimizer Dict: dictionary containing Gaussian mean optimizer
         parameters. (see GradientBoostingTrees for optimizer details)
@@ -189,8 +191,8 @@ class GaussianActor(BaseGBT):
         bias (np.ndarray, optional): manually set a bias. Defaults to None =
         np.zeros.
         verbose (int, optional): verbosity level. Defaults to 0.
-        device (str, optional): GBRL device 'cpu' or 'cuda/gpu'. Defaults to
-        'cpu'.
+        device (str, optional): GBRL device 'cpu' or 'cuda/gpu'. Defaults to 'cpu'.
+        constraints (Union[Constraint, List[Dict], optional): feature constraints. Defaults to None.
         """
         super().__init__()
         mu_optimizer = setup_optimizer(mu_optimizer, prefix='mu_')
@@ -210,7 +212,7 @@ class GaussianActor(BaseGBT):
         # init model
         self.learner = GBTLearner(input_dim, output_dim, tree_struct,
                                   [mu_optimizer, std_optimizer], params,
-                                  verbose, device)
+                                  verbose, device, constraints)
         self.learner.reset()
         self.learner.set_bias(bias)
 
@@ -284,7 +286,8 @@ class GaussianActor(BaseGBT):
                                      stop_idx, tensor)
         mean_actions = theta if self.fixed_std else theta[:, :self.policy_dim]
         if not self.fixed_std:
-            mean_actions = ensure_leaf_tensor_or_array(mean_actions, tensor=True, requires_grad=requires_grad, device=self.learner.device)
+            mean_actions = ensure_leaf_tensor_or_array(mean_actions, tensor=True, requires_grad=requires_grad,
+                                                       device=self.learner.device)
         log_std = constant_like(theta, self.log_std_init) if self.fixed_std else theta[:, self.policy_dim:]
         log_std = ensure_leaf_tensor_or_array(log_std, tensor=True, requires_grad=False if
                                               self.fixed_std else

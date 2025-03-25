@@ -113,7 +113,7 @@ class TestGBTSingle(unittest.TestCase):
         value = 5
         self.assertTrue(loss < value, f'Expected loss = {loss} < {value}')
 
-        A, V, n_leaves_per_tree, n_leaves, n_trees = model._model.get_matrix_representation(X)
+        A, V, n_leaves_per_tree, n_leaves, n_trees = model.learner.get_matrix_representation(X)
         preds_representation = (A@V).squeeze()
         self.assertTrue(np.allclose(preds_representation, model(X, tensor=False)))
 
@@ -125,7 +125,7 @@ class TestGBTSingle(unittest.TestCase):
         n_compressed_trees = int(tree_selection.sum())
         selection_mask = th.repeat_interleave(tree_selection, th.tensor(n_leaves_per_tree, device='cpu'))
         n_compressed_leaves = int(selection_mask.sum())
-        
+
         selection_mask = selection_mask.detach().cpu().numpy()
         tree_selection = tree_selection.detach().cpu().numpy()
         compressed_leaf_indices = np.where(selection_mask > 0)[0].astype(np.int32)
@@ -133,9 +133,11 @@ class TestGBTSingle(unittest.TestCase):
         # indices of the start of each leaf according to the compressed model
         new_tree_indices = np.zeros(n_compressed_trees)
         new_tree_indices[1:] = np.cumsum(n_leaves_per_tree[compressed_tree_indices])[:-1]
-        model._model.cpp_model.compress(n_compressed_leaves, n_compressed_trees, compressed_leaf_indices, compressed_tree_indices, new_tree_indices.astype(np.int32), W)
+        model.learner._cpp_model.compress(n_compressed_leaves, n_compressed_trees, compressed_leaf_indices,
+                                          compressed_tree_indices, new_tree_indices.astype(np.int32), W)
         compressed_y = model(X, tensor=False)
-        self.assertTrue(np.allclose(compressed_y, y_pred_k), "Discarding trees should be equal to prediction without them")
+        self.assertTrue(np.allclose(compressed_y, y_pred_k),
+                        "Discarding trees should be equal to prediction without them")
 
         model.learner.reset()
         model.set_bias_from_targets(y)
@@ -296,7 +298,7 @@ class TestGBTSingle(unittest.TestCase):
         value = 2
         self.assertTrue(loss < value, f'Expected loss = {loss} < {value}')
 
-        A, V, n_leaves_per_tree, n_leaves, n_trees = model._model.get_matrix_representation(X)
+        A, V, n_leaves_per_tree, n_leaves, n_trees = model.learner.get_matrix_representation(X)
         preds_representation = (A@V).squeeze()
         self.assertTrue(np.allclose(preds_representation, model(X, tensor=False)))
         model.save_learner(os.path.join(self.test_dir, 'test_cosine_gpu'))
@@ -307,7 +309,7 @@ class TestGBTSingle(unittest.TestCase):
         n_compressed_trees = int(tree_selection.sum())
         selection_mask = th.repeat_interleave(tree_selection, th.tensor(n_leaves_per_tree, device='cuda'))
         n_compressed_leaves = int(selection_mask.sum())
-        
+
         selection_mask = selection_mask.detach().cpu().numpy()
         tree_selection = tree_selection.detach().cpu().numpy()
         compressed_leaf_indices = np.where(selection_mask > 0)[0].astype(np.int32)
@@ -315,10 +317,11 @@ class TestGBTSingle(unittest.TestCase):
         # indices of the start of each leaf according to the compressed model
         new_tree_indices = np.zeros(n_compressed_trees)
         new_tree_indices[1:] = np.cumsum(n_leaves_per_tree[compressed_tree_indices])[:-1]
-        model._model.cpp_model.compress(n_compressed_leaves, n_compressed_trees, compressed_leaf_indices, compressed_tree_indices, new_tree_indices.astype(np.int32), W)
+        model.learner._cpp_model.compress(n_compressed_leaves, n_compressed_trees, compressed_leaf_indices,
+                                          compressed_tree_indices, new_tree_indices.astype(np.int32), W)
         compressed_y = model(X, tensor=False)
-        self.assertTrue(np.allclose(compressed_y, y_pred_k), "Discarding trees should be equal to prediction without them")
-        
+        self.assertTrue(np.allclose(compressed_y, y_pred_k),
+                        "Discarding trees should be equal to prediction without them")
 
         model.learner.reset()
         model.set_bias_from_targets(y)
@@ -362,7 +365,7 @@ class TestGBTSingle(unittest.TestCase):
         loss = rmse_model(model, X, y, self.n_epochs)
         value = 13
         self.assertTrue(loss < value, f'Expected loss = {loss} < {value}')
-        A, V, _, _, _ = model._model.get_matrix_representation(X)
+        A, V, _, _, _ = model.learner.get_matrix_representation(X)
         preds_representation = (A@V).squeeze()
         self.assertTrue(np.allclose(preds_representation, model(X, tensor=False)))
         model.save_learner(os.path.join(self.test_dir,
@@ -409,7 +412,7 @@ class TestGBTSingle(unittest.TestCase):
         loss = rmse_model(model, X, y, self.n_epochs, device='cuda')
         value = 12
         self.assertTrue(loss < value, f'Expected loss = {loss} < {value}')
-        A, V, _, _, _ = model._model.get_matrix_representation(X)
+        A, V, _, _, _ = model.learner.get_matrix_representation(X)
         preds_representation = (A@V).squeeze()
         self.assertTrue(np.allclose(preds_representation, model(X, tensor=False)))
         model.save_learner(os.path.join(self.test_dir,
@@ -434,7 +437,7 @@ class TestGBTSingle(unittest.TestCase):
         value = 5000
         self.assertTrue(loss < value,
                         f'Expected Categorical loss = {loss} < {value}')
-        A, V, _, _, _ = model._model.get_matrix_representation(X_categorical)
+        A, V, _, _, _ = model.learner.get_matrix_representation(X_categorical)
         preds_representation = (A@V).squeeze()
         self.assertTrue(np.allclose(preds_representation, model(X_categorical, tensor=False)))
 
@@ -489,7 +492,7 @@ class TestGBTSingle(unittest.TestCase):
                     verbose=0,
                     device='cuda')
         model.set_bias_from_targets(y)
-        loss = rmse_model(model, X, y, self.n_epochs, device='cuda')        
+        loss = rmse_model(model, X, y, self.n_epochs, device='cuda')
 
         self.assertTrue(loss < 0.5, f'Expected loss = {loss} < 0.5')
         model.save_learner(os.path.join(self.test_dir, 'test_l2_gpu'))
@@ -663,6 +666,6 @@ class TestGBTSingle(unittest.TestCase):
 
 
 if __name__ == '__main__':
-    # unittest.main()
-    unittest.main(argv=['first-arg-is-ignored', 'TestGBTSingle.test_l2_gpu'])
+    unittest.main()
+    # unittest.main(argv=['first-arg-is-ignored', 'TestGBTSingle.test_l2_gpu'])
     # unittest.main(argv=['first-arg-is-ignored', 'TestGBTSingle.test_cosine_cpu'])

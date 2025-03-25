@@ -22,16 +22,16 @@ from gbrl.learners.gbt_learner import GBTLearner
 from gbrl.learners.multi_gbt_learner import MultiGBTLearner
 
 
-class SharedActorCriticLearner(GBTLearner):
+class SharedCostActorCriticLearner(GBTLearner):
     """
-    SharedActorCriticLearner is a variant of GBTLearner where a single tree is
-    used for both
-    actor (policy) and critic (value) learning. It utilizes gradient boosting
+    SharedCostActorCriticLearner is a variant of GBTLearner where a single tree is
+    used for the
+    actor (policy), reward critic (value), and cost critic learning. It utilizes gradient boosting
     trees (GBTs)
-    to estimate both policy and value function parameters efficiently.
+    to estimate the policy and both value functions parameters efficiently.
     """
     def __init__(self, input_dim: int, output_dim: int, tree_struct: Dict,
-                 policy_optimizer: Dict, value_optimizer: Dict,
+                 policy_optimizer: Dict, value_optimizer: Dict, cost_optimizer: Dict,
                  params: Dict = dict(), verbose: int = 0, device: str = 'cpu',
                  constraints: Optional[Union[Constraint, List[Dict]]] = None):
         """
@@ -42,7 +42,8 @@ class SharedActorCriticLearner(GBTLearner):
             output_dim (int): Number of output dimensions.
             tree_struct (Dict): Dictionary containing tree structure parameters.
             policy_optimizer (Dict): Dictionary with optimization parameters for the policy.
-            value_optimizer (Dict): Dictionary with optimization parameters for the critic.
+            value_optimizer (Dict): Dictionary with optimization parameters for the reward critic.
+            cost_optimizer (Dict): Dictionary with optimization parameters for the cost critic.
             params (Dict, optional): Additional model parameters. Defaults to an empty dictionary.
             verbose (int, optional): Verbosity level. Defaults to 0.
             device (str, optional): Device to run the model on. Defaults to 'cpu'.
@@ -53,15 +54,20 @@ class SharedActorCriticLearner(GBTLearner):
             print(f'Shared GBRL Tree with input dim: {input_dim}, '
                   f'output dim: {output_dim}, tree_struct: {tree_struct} '
                   f'policy_optimizer: {policy_optimizer} '
-                  f'value_optimizer: {value_optimizer}')
+                  f'value_optimizer: {value_optimizer} '
+                  f'cost_optimizer: {cost_optimizer}'
+                  )
             print('****************************************')
+        if cost_optimizer['stop_idx'] != output_dim:
+            output_dim = cost_optimizer['stop_idx']
         super().__init__(input_dim, output_dim, tree_struct,
-                         [policy_optimizer, value_optimizer],
+                         [policy_optimizer, value_optimizer, cost_optimizer],
                          params, verbose, device,
                          constraints)
 
     def step(self, obs: NumericalData,
-             theta_grad: np.ndarray, value_grad: np.ndarray) -> None:
+             theta_grad: np.ndarray, value_grad: np.ndarray,
+             cost_grad: np.ndarray) -> None:
         """
         Performs a gradient update step for both policy and value function.
 
@@ -69,8 +75,10 @@ class SharedActorCriticLearner(GBTLearner):
             obs (NumericalData): Input observations.
             theta_grad (np.ndarray): Gradient of the policy parameters.
             value_grad (np.ndarray): Gradient of the value function parameters.
+            cost_grad (np.ndarray): Gradient of the cost value function parameters.
         """
         grads = concatenate_arrays(theta_grad, value_grad)
+        grads = concatenate_arrays(grads, cost_grad)
         obs, grads = ensure_same_type(obs, grads)
         if self.total_iterations == 0:
             mapping, is_numeric = get_index_mapping(obs)
@@ -100,6 +108,7 @@ class SharedActorCriticLearner(GBTLearner):
 
     def distil(self, obs: NumericalData,
                policy_targets: np.ndarray, value_targets: np.ndarray,
+               cost_targets: np.ndarray,
                params: Dict, verbose: int) -> Tuple[float, Dict]:
         """
         Distills the trained model into a student model.
@@ -107,8 +116,8 @@ class SharedActorCriticLearner(GBTLearner):
         Args:
             obs (NumericalData): Input observations.
             policy_targets (np.ndarray): Target values for the policy (actor).
-            value_targets (np.ndarray): Target values for the value function
-            (critic).
+            value_targets (np.ndarray): Target values for the value function (critic).
+            cost_targets (np.ndarray): Target values for the cost value function (cost critic).
             params (Dict): Distillation parameters.
             verbose (int): Verbosity level.
 
@@ -117,13 +126,14 @@ class SharedActorCriticLearner(GBTLearner):
             for distillation
         """
         targets = np.concatenate([policy_targets,
-                                  value_targets[:, np.newaxis]], axis=1)
+                                  value_targets[:, np.newaxis],
+                                  cost_targets[:, np.newaxis]], axis=1)
         return super().distil(obs, targets, params, verbose)
 
     def predict(self, obs: NumericalData,
                 requires_grad: bool = True, start_idx: int = 0,
                 stop_idx: int = None, tensor: bool = True) -> \
-            Tuple[np.ndarray, np.ndarray]:
+            Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Predicts both policy and value function outputs.
 
@@ -139,12 +149,13 @@ class SharedActorCriticLearner(GBTLearner):
             True.
 
         Returns:
-            Tuple[np.ndarray, np.ndarray]: Predicted policy and value outputs.
+            Tuple[np.ndarray, np.ndarray, np.ndarray]: Predicted policy and critic outputs.
         """
         preds = super().predict(obs, requires_grad, start_idx, stop_idx, tensor)
-        pred_values = ensure_leaf_tensor_or_array(preds[:, -1], tensor, requires_grad, self.device)
-        preds = ensure_leaf_tensor_or_array(preds[:, :-1], tensor, requires_grad, self.device)
-        return preds, pred_values
+        preds_policy = ensure_leaf_tensor_or_array(preds[:, :-2], tensor, requires_grad, self.device)
+        pred_values = ensure_leaf_tensor_or_array(preds[:, -2], tensor, requires_grad, self.device)
+        pred_costs = ensure_leaf_tensor_or_array(preds[:, -1], tensor, requires_grad, self.device)
+        return preds_policy, pred_values, pred_costs
 
     def predict_policy(self, obs: NumericalData,
                        requires_grad: bool = True, start_idx: int = 0,
@@ -166,8 +177,7 @@ class SharedActorCriticLearner(GBTLearner):
         Returns:
             np.ndarray: Predicted policy outputs.
         """
-        preds, _ = self.predict(obs, requires_grad, start_idx, stop_idx,
-                                tensor)
+        preds, _, _ = self.predict(obs, requires_grad, start_idx, stop_idx, tensor)
         return preds
 
     def predict_critic(self, obs: NumericalData,
@@ -186,9 +196,29 @@ class SharedActorCriticLearner(GBTLearner):
         Returns:
             np.ndarray: Predicted value function outputs.
         """
-        _, pred_values = self.predict(obs, requires_grad, start_idx, stop_idx,
-                                      tensor)
+        _, pred_values, _ = self.predict(obs, requires_grad, start_idx, stop_idx,
+                                         tensor)
         return pred_values
+
+    def predict_cost(self, obs: NumericalData,
+                     requires_grad: bool = True, start_idx: int = 0,
+                     stop_idx: int = None, tensor: bool = True):
+        """
+        Predicts the cost value function (cost critic) output for the given observations.
+
+        Args:
+            obs (NumericalData): Input observations.
+            requires_grad (bool, optional): Whether to compute gradients. Defaults to True.
+            start_idx (int, optional): Start index for prediction. Defaults to 0.
+            stop_idx (int, optional): Stop index for prediction. Defaults to None.
+            tensor (bool, optional): Whether to return a tensor. Defaults to True.
+
+        Returns:
+            np.ndarray: Predicted value function outputs.
+        """
+        _, _, pred_costs = self.predict(obs, requires_grad, start_idx, stop_idx,
+                                        tensor)
+        return pred_costs
 
     def compress(self, trees_to_keep: int, gradient_steps: int, features: NumericalData,
                  actions: th.Tensor = None, log_std: th.Tensor = None,
@@ -254,19 +284,20 @@ class SharedActorCriticLearner(GBTLearner):
         print(f"Finished compressing - compressed model has {self.get_num_trees()} trees")
         return losses[-1]
 
-    def __copy__(self) -> "SharedActorCriticLearner":
+    def __copy__(self) -> "SharedCostActorCriticLearner":
         """
-        Creates a copy of the SharedActorCriticLearner instance.
+        Creates a copy of the SharedCostActorCriticLearner instance.
 
         Returns:
-            SharedActorCriticLearner: A copy of the current instance.
+            SharedCostActorCriticLearner: A copy of the current instance.
         """
-        copy_ = SharedActorCriticLearner(self.input_dim, self.output_dim,
-                                         self.tree_struct.copy(),
-                                         self.optimizers[0].copy(),
-                                         self.optimizers[1].copy(),
-                                         self.params, self.verbose,
-                                         self.device)
+        copy_ = SharedCostActorCriticLearner(self.input_dim, self.output_dim,
+                                             self.tree_struct.copy(),
+                                             self.optimizers[0].copy(),
+                                             self.optimizers[1].copy(),
+                                             self.optimizers[2].copy(),
+                                             self.params, self.verbose,
+                                             self.device)
         copy_.iteration = self.iteration
         copy_.total_iterations = self.total_iterations
         if self._cpp_model is not None:
@@ -276,20 +307,21 @@ class SharedActorCriticLearner(GBTLearner):
         return copy_
 
 
-class SeparateActorCriticLearner(MultiGBTLearner):
+class SeparateCostActorCriticLearner(MultiGBTLearner):
     """
-    Implements a separate actor-critic learner using two independent gradient
+    Implements a separate cost actor-critic learner using three independent gradient
     boosted trees.
 
     This class extends MultiGBTLearner by maintaining two separate models:
     - One for policy learning (Actor).
     - One for value estimation (Critic).
+    - One for cost value estimation (Cost Critic).
 
-    It provides separate `step_actor` and `step_critic` methods for updating
+    It provides separate `step_actor` `step_critic` `step_cost` methods for updating
     the respective models.
     """
     def __init__(self, input_dim: int, output_dim: int, tree_struct: Dict,
-                 policy_optimizer: Dict, value_optimizer: Dict,
+                 policy_optimizer: Dict, value_optimizer: Dict, cost_optimizer: Dict,
                  params: Dict = dict(), verbose: int = 0, device: str = 'cpu',
                  constraints: Optional[Union[Constraint, List[Dict]]] = None):
         """
@@ -302,6 +334,7 @@ class SeparateActorCriticLearner(MultiGBTLearner):
             tree_struct (Dict): Dictionary containing tree structure parameters.
             policy_optimizer (Dict): Optimizer configuration for the policy (actor).
             value_optimizer (Dict): Optimizer configuration for the value function (critic).
+            cost_optimizer (Dict): Optimizer configuration for the cost value function (cost critic).
             params (Dict, optional): Additional model parameters. Defaults to an empty dictionary.
             verbose (int, optional): Verbosity level for debugging. Defaults to 0.
             device (str, optional): Device to run the model on ('cpu' or 'cuda'). Defaults to 'cpu'.
@@ -312,15 +345,18 @@ class SeparateActorCriticLearner(MultiGBTLearner):
             print(f'Separate GBRL Tree with input dim: {input_dim}, '
                   f'output dim: {output_dim}, tree_struct: {tree_struct} '
                   f'policy_optimizer: {policy_optimizer} '
-                  f'value_optimizer: {value_optimizer}')
+                  f'value_optimizer: {value_optimizer} '
+                  f'cost_optimizer: {cost_optimizer}'
+                  )
             print('****************************************')
         super().__init__(input_dim, [output_dim - 1, 1], tree_struct,
-                         [policy_optimizer, value_optimizer],
-                         params, 2, verbose, device,
+                         [policy_optimizer, value_optimizer, cost_optimizer],
+                         params, 3, verbose, device,
                          constraints)
 
     def step(self, obs: NumericalData,
              theta_grad: NumericalData, value_grad: NumericalData,
+             cost_grad: NumericalData,
              model_idx: Optional[int] = None) -> None:
         """
         Performs a single gradient update step on both the policy and value
@@ -330,10 +366,11 @@ class SeparateActorCriticLearner(MultiGBTLearner):
             obs (NumericalData): Input observations.
             theta_grad (NumericalData): Gradient update for the policy (actor).
             value_grad (NumericalData): Gradient update for the value function (critic).
+            cost_grad (NumericalData): Gradient update for the cost value function (cost critic).
             model_idx (Optional[int], optional): Index of the model to update.
             If None, updates both models.
         """
-        super().step(obs, [theta_grad, value_grad], model_idx=model_idx)
+        super().step(obs, [theta_grad, value_grad, cost_grad], model_idx=model_idx)
 
     def step_actor(self, obs: NumericalData,
                    theta_grad: NumericalData) -> None:
@@ -357,8 +394,20 @@ class SeparateActorCriticLearner(MultiGBTLearner):
         """
         super().step(obs, value_grad, model_idx=1)
 
+    def step_cost(self, obs: NumericalData,
+                  cost_grad: NumericalData) -> None:
+        """
+        Performs a gradient update step for the cost value function (cost critic) model.
+
+        Args:
+            obs (NumericalData): Input observations.
+            cost_grad (NumericalData).
+        """
+        super().step(obs, cost_grad, model_idx=2)
+
     def distil(self, obs: NumericalData,
                policy_targets: np.ndarray, value_targets: np.ndarray,
+               cost_targets: np.ndarray,
                params: Dict, verbose: int) -> Tuple[List[float], List[Dict]]:
         """
         Distills the trained model into a student model.
@@ -367,19 +416,20 @@ class SeparateActorCriticLearner(MultiGBTLearner):
             obs (NumericalData): Input observations.
             policy_targets (np.ndarray): Target values for the policy (actor).
             value_targets (np.ndarray): Target values for the value function (critic).
+            cost_targets (np.ndarray): Target values for the cost value function (cost critic).
             params (Dict): Distillation parameters.
             verbose (int): Verbosity level.
 
         Returns:
             Tuple[List[float], List[Dict]]: The final loss values and updated parameters for distillation.
         """
-        return super().distil(obs, [policy_targets, value_targets], params,
+        return super().distil(obs, [policy_targets, value_targets, cost_targets], params,
                               verbose)
 
     def predict(self, obs: NumericalData,
                 requires_grad: bool = True, start_idx: int = 0,
                 stop_idx: int = None, tensor: bool = True) -> \
-            Tuple[np.ndarray, np.ndarray]:
+            Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Predicts both the policy and value outputs for the given observations.
 
@@ -391,7 +441,7 @@ class SeparateActorCriticLearner(MultiGBTLearner):
             tensor (bool, optional): Whether to return a tensor. Defaults to True.
 
         Returns:
-            Tuple[np.ndarray, np.ndarray]: Predicted policy outputs and value function outputs.
+            Tuple[np.ndarray, np.ndarray, np.ndarray]: Predicted policy outputs and value functions outputs.
         """
         return super().predict(obs, requires_grad, start_idx, stop_idx, tensor)
 
@@ -411,8 +461,7 @@ class SeparateActorCriticLearner(MultiGBTLearner):
         Returns:
             NumericalData: Predicted policy outputs.
         """
-        return super().predict(obs, requires_grad, start_idx, stop_idx, tensor,
-                               model_idx=0)
+        return super().predict(obs, requires_grad, start_idx, stop_idx, tensor, model_idx=0)
 
     def predict_critic(self, obs: NumericalData,
                        requires_grad: bool = True, start_idx: int = 0,
@@ -430,25 +479,42 @@ class SeparateActorCriticLearner(MultiGBTLearner):
         Returns:
             NumericalData: Predicted value function outputs.
         """
-        return super().predict(obs, requires_grad, start_idx, stop_idx, tensor,
-                               model_idx=1)
+        return super().predict(obs, requires_grad, start_idx, stop_idx, tensor, model_idx=1)
 
-    def __copy__(self) -> "SeparateActorCriticLearner":
+    def predict_cost(self, obs: NumericalData,
+                     requires_grad: bool = True, start_idx: int = 0,
+                     stop_idx: int = None, tensor: bool = True) -> NumericalData:
         """
-        Creates a copy of the SeparateActorCriticLearner instance.
+        Predicts the cost value function (cost critic) output for the given observations.
+
+        Args:
+            obs (NumericalData): Input observations.
+            requires_grad (bool, optional): Whether to compute gradients. Defaults to True.
+            start_idx (int, optional): Start index for prediction. Defaults to 0.
+            stop_idx (int, optional): Stop index for prediction. Defaults to None.
+            tensor (bool, optional): Whether to return a tensor. Defaults to True.
 
         Returns:
-            SeparateActorCriticLearner: A new instance with the same parameters and structure.
+            NumericalData: Predicted value function outputs.
+        """
+        return super().predict(obs, requires_grad, start_idx, stop_idx, tensor, model_idx=2)
+
+    def __copy__(self) -> "SeparateCostActorCriticLearner":
+        """
+        Creates a copy of the SeparateCostActorCriticLearner instance.
+
+        Returns:
+            SeparateCostActorCriticLearner: A new instance with the same parameters and structure.
         """
         opts = [opt.copy() if opt is not None else opt
                 for opt in self.optimizers
                 ]
-        copy_ = SeparateActorCriticLearner(self.input_dim, self.output_dim,
-                                           self.tree_struct.copy(),
-                                           opts, self.params,
-                                           self.n_learners,
-                                           self.verbose,
-                                           self.device)
+        copy_ = SeparateCostActorCriticLearner(self.input_dim, self.output_dim,
+                                               self.tree_struct.copy(),
+                                               opts, self.params,
+                                               self.n_learners,
+                                               self.verbose,
+                                               self.device)
         copy_.iteration = self.iteration
         copy_.total_iterations = self.total_iterations
         if self._cpp_models is not None:

@@ -6,7 +6,7 @@
 # https://nvlabs.github.io/gbrl/license.html
 #
 ##############################################################################
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch as th
@@ -17,6 +17,126 @@ from gbrl.models.base import BaseGBT
 from gbrl.common.utils import (clip_grad_norm, concatenate_arrays, ensure_leaf_tensor_or_array,
                                numerical_dtype,
                                setup_optimizer, validate_array)
+from gbrl.common.constraints import Constraint
+
+
+class ValueCritic(BaseGBT):
+    """
+    GBRL model for a generic value function Critic.
+    Model is designed to output parameters the value functions directly.
+    """
+    def __init__(self,
+                 tree_struct: Dict,
+                 input_dim: int,
+                 value_optimizer: Dict,
+                 params: Dict = dict(),
+                 bias: np.ndarray = None,
+                 verbose: int = 0,
+                 device: str = 'cpu',
+                 constraints: Optional[Union[Constraint, List[Dict]]] = None):
+        """
+        Initializes the Value Critic model.
+
+        Args:
+            tree_struct (Dict): Dictionary containing tree structure information:
+                    max_depth (int): maximum tree depth.
+                    grow_policy (str): 'greedy' or 'oblivious'.
+                    n_bins (int): number of bins per feature for candidate generation.
+                    min_data_in_leaf (int): minimum number of samples in a leaf.
+                    par_th (int): minimum number of samples for parallelizing on CPU.
+            input (int): output dimension.
+            optimizer Dict: dictionary containing value optimizer parameters. (see GBRL for optimizer details)
+            params (Dict, optional): GBRL parameters such as:
+                control_variates (bool): use control variates (variance reduction technique CPU only).
+                split_score_func (str): "cosine" or "l2"
+                generator_type- (str): candidate generation method "Quantile" or "Uniform".
+                feature_weights - (list[float]): Per-feature multiplication
+                weights used when choosing the best split. Weights should be >= 0
+            bias (np.ndarray, optional): manually set a bias. Defaults to None = np.zeros.
+            verbose (int, optional): verbosity level. Defaults to 0.
+            device (str, optional): GBRL device 'cpu' or 'cuda/gpu'. Defaults to 'cpu'.
+            constraints (Union[Constraint, List[Dict], optional): feature constraints. Defaults to None.
+        """
+
+        value_optimizer = setup_optimizer(value_optimizer, prefix='value_')
+
+        super().__init__()
+        self.target_learner = None
+        bias = bias if bias is not None else np.zeros(1, dtype=numerical_dtype)
+        # init model
+        self.learner = GBTLearner(input_dim, 1, tree_struct,
+                                  value_optimizer,
+                                  params, verbose, device,
+                                  constraints)
+        self.learner.reset()
+        self.learner.set_bias(bias)
+
+    def step(self, observations: Optional[NumericalData] = None,
+             value_grad: Optional[NumericalData] = None,
+             value_grad_clip: Optional[float] = None) -> None:
+        """
+        Performs a single boosting step
+
+        Args:
+            observations (NumericalData):
+            value_grad (Optional[NumericalData], optional): manually calculated gradients. Defaults to None.
+            value_grad_clip (float, optional):. Defaults to None.
+        """
+        if observations is None:
+            assert self.input is not None, ("Cannot update trees without input."
+                                            "Make sure model is called with requires_grad=True")
+            observations = self.input
+        n_samples = len(observations)
+        value_grad = value_grad if value_grad is not None else self.params.grad.detach() * n_samples
+
+        value_grad = clip_grad_norm(value_grad, value_grad_clip)
+
+        validate_array(value_grad)
+
+        self.learner.step(observations, value_grad)
+        self.grad = value_grad
+        self.input = None
+
+    def __call__(self, observations: NumericalData,
+                 requires_grad: bool = True,
+                 start_idx: int = 0, stop_idx: int = None,
+                 tensor: bool = True) -> NumericalData:
+        """
+        Predict the values of a value function Critic as tensors.
+        if `requires_grad=True` then stores ifferentiable parameters in self.params.
+           Return type/device is identical to the input type/device.
+
+        Args:
+            observations (NumericalData)
+            requires_grad (bool, optional). Defaults to True.
+            start_idx (int, optional): start tree index for prediction. Defaults to 0.
+            stop_idx (_type_, optional): stop tree index for prediction (uses
+            all trees in the ensemble if set to 0). Defaults to None.
+            tensor (bool, optional): Return PyTorch Tensor, False returns a numpy array. Defaults to True.
+
+        Returns:
+            Tuple[NumericalData, NumericalData]
+        """
+        values = self.learner.predict(observations, requires_grad, start_idx, stop_idx, tensor)
+
+        if requires_grad:
+            self.grad = None
+            self.params = values
+            self.input = observations
+        return values
+
+    def __copy__(self) -> "ValueCritic":
+        """
+        Creates a copy of the VCritic model.
+        """
+        learner = self.learner.copy()
+        copy_ = ValueCritic(learner.tree_struct, learner.input_dim,
+                            learner.optimizers[0],
+                            learner.params,
+                            learner.get_bias(), learner.verbose,
+                            learner.device)
+        copy_.learner = learner
+        return copy_
 
 
 class ContinuousCritic(BaseGBT):
@@ -43,7 +163,8 @@ class ContinuousCritic(BaseGBT):
                  target_update_interval: int = 100,
                  bias: np.ndarray = None,
                  verbose: int = 0,
-                 device: str = 'cpu'):
+                 device: str = 'cpu',
+                 constraints: Optional[Union[Constraint, List[Dict]]] = None):
         """
         Initializes the Continuous Critic model.
 
@@ -55,9 +176,9 @@ class ContinuousCritic(BaseGBT):
                     min_data_in_leaf (int): minimum number of samples in a leaf.
                     par_th (int): minimum number of samples for parallelizing on CPU.
             output_dim (int): output dimension.
-            weights_optimizer Dict: dictionary containing policy optimizer
+            weights_optimizer Dict: dictionary containing optimizer
             parameters. (see GBRL for optimizer details)
-            bias_optimizer Dict: dictionary containing policy optimizer parameters.
+            bias_optimizer Dict: dictionary containing optimizer parameters.
             (see GBRL for optimizer details)
             params (Dict, optional): GBRL parameters such as:
                 control_variates (bool): use control variates (variance reduction technique CPU only).
@@ -69,6 +190,7 @@ class ContinuousCritic(BaseGBT):
             bias (np.ndarray, optional): manually set a bias. Defaults to None = np.zeros.
             verbose (int, optional): verbosity level. Defaults to 0.
             device (str, optional): GBRL device 'cpu' or 'cuda/gpu'. Defaults to 'cpu'.
+            constraints (Union[Constraint, List[Dict], optional): feature constraints. Defaults to None.
         """
 
         self.weights_optimizer = setup_optimizer(weights_optimizer,
@@ -82,7 +204,8 @@ class ContinuousCritic(BaseGBT):
         # init model
         self.learner = GBTLearner(input_dim, output_dim, tree_struct,
                                   [self.weights_optimizer, self.bias_optimizer],
-                                  params, verbose, device)
+                                  params, verbose, device,
+                                  constraints)
         self.learner.reset()
         self.learner.set_bias(bias)
 
@@ -131,7 +254,7 @@ class ContinuousCritic(BaseGBT):
             tensor (bool, optional): Return PyTorch Tensor, False returns a numpy array. Defaults to True.
 
         Returns:
-            Tuple[th.Tensor, th.Tensor]: weights and bias parameters to thetype of Q-functions
+            Tuple[NumericalData, NumericalData]: weights and bias parameters to thetype of Q-functions
 
         """
         n_trees = self.learner.get_num_trees()
@@ -187,7 +310,7 @@ class ContinuousCritic(BaseGBT):
         copy_ = ContinuousCritic(learner.tree_struct, learner.input_dim,
                                  learner.output_dim, learner.optimizers[0],
                                  learner.optimizers[1], learner.params,
-                                 learner.get.bias(), learner.verbose,
+                                 learner.get_bias(), learner.verbose,
                                  learner.device)
         copy_.learner = learner
         return copy_
@@ -208,7 +331,8 @@ class DiscreteCritic(BaseGBT):
                  target_update_interval: int = 100,
                  bias: np.ndarray = None,
                  verbose: int = 0,
-                 device: str = 'cpu'):
+                 device: str = 'cpu',
+                 constraints: Optional[Union[Constraint, List[Dict]]] = None):
         """
             Initializes the Discrete Critic model.
 
@@ -220,7 +344,7 @@ class DiscreteCritic(BaseGBT):
                 min_data_in_leaf (int): minimum number of samples in a leaf.
                 par_th (int): minimum number of samples for parallelizing on CPU.
         output_dim (int): output dimension.
-        critic_optimizer Dict: dictionary containing policy optimizer
+        critic_optimizer Dict: dictionary containing optimizer
         parameters. (see GradientBoostingTrees for optimizer details).
         params (Dict, optional): GBRL parameters such as:
             control_variates (bool): use control variates (variance reduction technique CPU only).
@@ -230,6 +354,7 @@ class DiscreteCritic(BaseGBT):
             weights used when choosing the best split. Weights should be >= 0
         verbose (int, optional): verbosity level. Defaults to 0.
         device (str, optional): GBRL device 'cpu' or 'cuda/gpu'. Defaults to 'cpu'.
+        constraints (Union[Constraint, List[Dict], optional): feature constraints. Defaults to None.
         """
         critic_optimizer = setup_optimizer(critic_optimizer, prefix='critic_')
         super().__init__()
@@ -239,7 +364,8 @@ class DiscreteCritic(BaseGBT):
         bias = bias if bias is not None else np.zeros(output_dim, dtype=numerical_dtype)
         # init model
         self.learner = GBTLearner(input_dim, output_dim, tree_struct,
-                                  self.critic_optimizer, params, verbose, device)
+                                  self.critic_optimizer, params, verbose, device,
+                                  constraints)
         self.learner.reset()
         self.learner.set_bias(bias)
 

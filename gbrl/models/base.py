@@ -7,12 +7,12 @@
 #
 ##############################################################################
 from abc import ABC, abstractmethod
-from typing import Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch as th
 
-from gbrl.common.utils import NumericalData
+from gbrl.common.utils import NumericalData, numerical_dtype
 from gbrl.learners.gbt_learner import GBTLearner
 
 
@@ -29,18 +29,20 @@ class BaseGBT(ABC):
         """Sets GBRL bias"""
         raise NotImplementedError
 
-    def set_feature_weights(self, feature_weights: NumericalData) -> None:
+    def set_feature_weights(self, feature_weights: Union[NumericalData, List[float]]) -> None:
         """Sets GBRL feature_weights
 
         Args:
-            feature_weights (NumericalData)
+            feature_weights (Union[NumericalData, List[float]])
         """
+        if isinstance(feature_weights, list):
+            feature_weights = np.array(feature_weights)
         if isinstance(feature_weights, th.Tensor):
             feature_weights = feature_weights.clone().detach().cpu().numpy()
         # GBRL works with 2D numpy arrays.
-        if len(feature_weights.shape) == 1:
+        if feature_weights.ndim == 1:
             feature_weights = feature_weights[:, np.newaxis]
-        self.learner.set_feature_weights(feature_weights.astype(np.single))
+        self.learner.set_feature_weights(feature_weights.astype(numerical_dtype))
 
     def get_iteration(self) -> Union[int, Tuple[int, ...]]:
         """
@@ -133,16 +135,21 @@ class BaseGBT(ABC):
         """
         self.learner.save(save_path)
 
-    def export_learner(self, filename: str, modelname: str = None) -> None:
+    def export_learner(self, filename: str, modelname: str = None, format: str = None, export_type: str = 'full',
+                       prefix: str = None, *args, **kwargs) -> None:
         """
-        Exports learner model as a C-header file
+        Exports the model to a C header file.
 
         Args:
-            filename (str): Absolute path and name of exported filename.
+            filename (str): The filename to export the model to.
+            modelname (str, optional): The name of the model in the C code. Defaults to None.
+            format (str, optional): export datatype must either ['float', 'fxp8', 'fxp16'], defaults to 'full'.
+            export_type (str, optional): Either full or compact export (compact uses explicit numbers for better
+            efficiency on low-compute devices). Defaults to 'full'
+            prefix (str, optional): Defaults to ''.
         """
-        self.learner.export(filename, modelname)
+        self.learner.export(filename, modelname, format, export_type, prefix, *args, **kwargs)
 
-    @classmethod
     @classmethod
     def load_learner(cls, load_name: str, device: str) -> "BaseGBT":
         """
@@ -217,6 +224,43 @@ class BaseGBT(ABC):
             filename (str): .png filename to save
         """
         self.learner.plot_tree(tree_idx, filename, *args, **kwargs)
+
+    def compress(self, trees_to_keep: int, gradient_steps: int, features: Union[np.ndarray, th.Tensor],
+                 actions: th.Tensor = None, log_std: th.Tensor = None,
+                 method: str = 'first_k', dist_type: str = 'supervised_learning',
+                 optimizer_kwargs: Optional[Dict[str, Any]] = None,
+                 least_squares_W: bool = True, temperature: float = 1.0,
+                 lambda_reg: float = 1.0, **kwargs) -> None:
+        """
+        Compresses the tree ensemble by selecting and retraining a subset of trees.
+
+        Depending on whether actions are provided, the compression is done via supervised learning
+        or using policy-aware compression (e.g., for actor models).
+
+        Args:
+            trees_to_keep (int): Number of trees to retain in the compressed model.
+            gradient_steps (int): Number of optimization steps during compression.
+            features (Union[np.ndarray, th.Tensor]): Input feature matrix (n_samples, n_features).
+            actions (th.Tensor, optional): Target actions (for policy compression). Required if dist_type
+                is not 'supervised_learning'.
+            log_std (th.Tensor, optional): Log standard deviation (only used for certain policy types).
+            method (str): Tree selection method. Defaults to 'first_k'.
+            dist_type (str): Compression type ('supervised_learning', 'actor', etc.).
+            optimizer_kwargs (dict, optional): Optimizer configuration.
+            least_squares_W (bool): Whether to use least-squares to estimate weights (for supervised compression).
+            temperature (float): Temperature parameter for soft selection.
+            lambda_reg (float): L2 regularization coefficient on weights.
+            **kwargs: Additional keyword arguments passed to the compressor.
+
+        Returns:
+            Union[float, List[float]]: Final loss value after compression.
+        """
+        return self.learner.compress(trees_to_keep=trees_to_keep, gradient_steps=gradient_steps,
+                                     features=features, actions=actions,
+                                     log_std=log_std, method=method, dist_type=dist_type,
+                                     optimizer_kwargs=optimizer_kwargs,
+                                     least_squares_W=least_squares_W, temperature=temperature,
+                                     lambda_reg=lambda_reg, **kwargs)
 
     def copy(self) -> "BaseGBT":
         """

@@ -6,11 +6,12 @@
 # https://nvlabs.github.io/gbrl/license.html
 #
 
-from typing import Union, List, Optional, Tuple
+from typing import Dict, Union, List, Optional
 import numpy as np
 
 
 CONSTRAINTS = ['threshold', 'hierarchy', 'output']
+
 
 class Constraint:
     def __init__(self):
@@ -22,53 +23,59 @@ class Constraint:
             for i in range(len(self.constraints)):
                 self.constraints[i]['is_numeric'] = mapping[1][self.constraints[i]['feature_idx']]
                 self.constraints[i]['feature_idx'] = mapping[0][self.constraints[i]['feature_idx']]
-                
+
             self.used = True
-    
+
     def get_constraints(self):
         return self.constraints
-    def add_constraint(self, constraint_type: str, feature_idx: int, 
-                 feature_value: Optional[Union[float, str]] = 0, 
-                 op_is_positive: bool = True,
-                 constraint_value: float = None,
-                 output_values: Optional[Union[np.ndarray, List[float]]] = None, 
-                 dependent_features: Optional[Union[np.ndarray, List[int]]] = None) -> None: 
+
+    def add_constraint(self, constraint_type: str, feature_idx: int,
+                       feature_value: Optional[Union[float, str]] = 0,
+                       op_is_positive: bool = True,
+                       constraint_value: float = None,
+                       output_values: Optional[Union[np.ndarray, List[float]]] = None,
+                       dependent_features: Optional[Union[np.ndarray, List[int]]] = None) -> None:
         """Represents a constraint that can be one of three types:
-        
+
         - **THRESHOLD:** Enforces a condition on a feature's value.
           - `op_is_positive = True` means `>` for numeric features and `==` for categorical features.
           - `op_is_positive = False` means `<=` for numeric features and `!=` for categorical features.
-        
+
         - **HIERARCHY:** Enforces that a feature must be split before other dependent features.
           - `dependent_features` is a list of feature indices that must come after this one.
-        
+
         - **OUTPUT:** Forces a specific action when the constraint is met.
           - `output_value` is a NumPy array containing the action constraints.
 
         Args:
             constraint_type (str): "THRESHOLD", "HIERARCHY", or "OUTPUT".
             feature_index (int): Index of the feature being constrained.
-            feature_value (Optional[Union[float, str]], optional):  Threshold value (numeric or categorical).. Defaults to None.
+            feature_value (Optional[Union[float, str]], optional):  Threshold value (numeric or categorical).
+            Defaults to None.
             op_is_positive (bool, optional): Defines the operation for the Threshold value. Defaults to True.
-            output_value (Optional[Union[np.ndarray, List[float]]], optional): Specifies the constraints node values for OUTPUT constraints. Defaults to None.
-            dependent_features (Optional[Union[np.ndarray, List[int]]], optional): List of dependent features for HIERARCHY constraints. Defaults to None.
-        """        
+            output_value (Optional[Union[np.ndarray, List[float]]], optional): Specifies the constraints node values
+            for OUTPUT constraints. Defaults to None.
+            dependent_features (Optional[Union[np.ndarray, List[int]]], optional): List of dependent features for
+            HIERARCHY constraints. Defaults to None.
+        """
         constraint_type = constraint_type.lower()
         is_numeric = not isinstance(feature_value, str)
         assert constraint_type in CONSTRAINTS, f"Constraint type must be one of {CONSTRAINTS}"
         if constraint_type != 'hierarchy':
-            assert dependent_features is None, "Can only set constraints on dependent features using a hierarchy constraint"
+            assert dependent_features is None, \
+                "Can only set constraints on dependent features using a hierarchy constraint"
         constraint = {'feature_idx': feature_idx, 'feature_value': feature_value if is_numeric else 0.0,
-                        'categorical_value': None if is_numeric else feature_value.encode('utf-8').ljust(128, b'\0'),
-                        'constraint_type': constraint_type, 'is_numeric': is_numeric,
-                        'op_is_positive': op_is_positive, 
-                    }
+                      'categorical_value': None if is_numeric else feature_value.encode('utf-8').ljust(128, b'\0'),
+                      'constraint_type': constraint_type, 'is_numeric': is_numeric,
+                      'op_is_positive': op_is_positive,
+                      }
+
         if dependent_features is not None:
             if isinstance(dependent_features, np.ndarray):
                 dependent_features = dependent_features.flatten().astype(np.intc)
             else:
                 dependent_features = np.asarray(dependent_features, dtype=np.intc)
-                    
+
         constraint['dependent_features'] = dependent_features
         constraint['n_features'] = 0 if dependent_features is None else len(dependent_features)
 
@@ -82,3 +89,23 @@ class Constraint:
             assert constraint_value >= 0, "constraint value must be a positive float"
         constraint['constraint_value'] = constraint_value if constraint_value is not None else 0.0
         self.constraints.append(constraint)
+
+
+def process_constraints(constraints: Union[Constraint, List[Dict]] = None):
+    """
+    Convert a list of constraints to a proper constraint class instance
+
+
+    Args:
+        constraints (Union[Constraint, List[Dict]], optional): list of constraints. Defaults to None.
+
+    Returns:
+        Constraint: proper constraint class
+    """
+    if constraints is None or isinstance(constraints, Constraint):
+        return constraints
+
+    cons = Constraint()
+    for constraint in constraints:
+        cons.add_constraint(**constraint)
+    return cons

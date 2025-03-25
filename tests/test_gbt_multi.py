@@ -122,14 +122,6 @@ class TestGBTMulti(unittest.TestCase):
         print("Running Multi test_cosine_cpu")
         X, y = self.data
         k = 50
-        gbrl_params = dict({"control_variates": False, "split_score_func": "Cosine"})
-        model = GBRL(input_dim=self.input_dim,
-                            output_dim=self.out_dim,
-                            tree_struct=self.tree_struct,
-                            optimizer=self.sgd_optimizer,
-                            gbrl_params=gbrl_params,
-                            verbose=0,
-                            device='cpu')
         params = dict({"control_variates": False,
                        "split_score_func": "Cosine"})
         model = GBTModel(input_dim=self.input_dim,
@@ -143,10 +135,11 @@ class TestGBTMulti(unittest.TestCase):
         loss = rmse_model(model, X, y, self.n_epochs)
         value = 2.0
         self.assertTrue(loss < value, f'Expected loss = {loss} < {value}')
-        A, V, n_leaves_per_tree, n_leaves, n_trees = model._model.get_matrix_representation(X)
+        A, V, n_leaves_per_tree, n_leaves, n_trees = model.learner.get_matrix_representation(X)
         preds_representation = (A@V).squeeze()
         self.assertTrue(np.allclose(preds_representation, model(X, tensor=False)))
-        model.save_model(os.path.join(self.test_dir, 'test_cosine_cpu'))
+        model.save_learner(os.path.join(self.test_dir, 'test_cosine_cpu'))
+
         y_pred_k = model(X, tensor=False, start_idx=k)
         W = np.zeros((n_leaves + 1, self.out_dim), dtype=np.single)
         tree_selection = th.zeros(n_trees, dtype=th.float32, device='cpu')
@@ -154,7 +147,7 @@ class TestGBTMulti(unittest.TestCase):
         n_compressed_trees = int(tree_selection.sum())
         selection_mask = th.repeat_interleave(tree_selection, th.tensor(n_leaves_per_tree, device='cpu'))
         n_compressed_leaves = int(selection_mask.sum())
-        
+
         selection_mask = selection_mask.detach().cpu().numpy()
         tree_selection = tree_selection.detach().cpu().numpy()
         compressed_leaf_indices = np.where(selection_mask > 0)[0].astype(np.int32)
@@ -162,11 +155,11 @@ class TestGBTMulti(unittest.TestCase):
         # indices of the start of each leaf according to the compressed model
         new_tree_indices = np.zeros(n_compressed_trees)
         new_tree_indices[1:] = np.cumsum(n_leaves_per_tree[compressed_tree_indices])[:-1]
-        model._model.cpp_model.compress(n_compressed_leaves, n_compressed_trees, compressed_leaf_indices, compressed_tree_indices, new_tree_indices.astype(np.int32), W)
+        model.learner._cpp_model.compress(n_compressed_leaves, n_compressed_trees, compressed_leaf_indices,
+                                          compressed_tree_indices, new_tree_indices.astype(np.int32), W)
         compressed_y = model(X, tensor=False)
-        self.assertTrue(np.allclose(compressed_y, y_pred_k), "Discarding trees should be equal to prediction without them")
-        
-        model.save_learner(os.path.join(self.test_dir, 'test_cosine_cpu'))
+        self.assertTrue(np.allclose(compressed_y, y_pred_k),
+                        "Discarding trees should be equal to prediction without them")
 
     def test_shap_cpu(self):
         print("Running test_shap_cpu")
@@ -190,7 +183,7 @@ class TestGBTMulti(unittest.TestCase):
         clf = DecisionTreeRegressor(max_depth=3).fit(X, y)
         target_shap = shap.TreeExplainer(clf).shap_values(X[0])
         self.assertTrue(np.allclose(gbrl_shap, target_shap, rtol=1e-3),
-                        'GBRL sHAP values are not close to target '
+                        'GBTModel sHAP values are not close to target '
                         'SHAP values')
 
     def test_cosine_adam_cpu(self):
@@ -235,7 +228,7 @@ class TestGBTMulti(unittest.TestCase):
         loss = rmse_model(model, X, y, self.n_epochs, device='cuda')
         value = 2.0
         self.assertTrue(loss < value, f'Expected loss = {loss} < {value}')
-        A, V, n_leaves_per_tree, n_leaves, n_trees = model._model.get_matrix_representation(X)
+        A, V, n_leaves_per_tree, n_leaves, n_trees = model.learner.get_matrix_representation(X)
         preds_representation = (A@V).squeeze()
         self.assertTrue(np.allclose(preds_representation, model(X, tensor=False)))
         model.save_learner(os.path.join(self.test_dir, 'test_cosine_gpu'))
@@ -246,7 +239,7 @@ class TestGBTMulti(unittest.TestCase):
         n_compressed_trees = int(tree_selection.sum())
         selection_mask = th.repeat_interleave(tree_selection, th.tensor(n_leaves_per_tree, device='cuda'))
         n_compressed_leaves = int(selection_mask.sum())
-        
+
         selection_mask = selection_mask.detach().cpu().numpy()
         tree_selection = tree_selection.detach().cpu().numpy()
         compressed_leaf_indices = np.where(selection_mask > 0)[0].astype(np.int32)
@@ -254,10 +247,11 @@ class TestGBTMulti(unittest.TestCase):
         # indices of the start of each leaf according to the compressed model
         new_tree_indices = np.zeros(n_compressed_trees)
         new_tree_indices[1:] = np.cumsum(n_leaves_per_tree[compressed_tree_indices])[:-1]
-        model._model.cpp_model.compress(n_compressed_leaves, n_compressed_trees, compressed_leaf_indices, compressed_tree_indices, new_tree_indices.astype(np.int32), W)
+        model.learner._cpp_model.compress(n_compressed_leaves, n_compressed_trees, compressed_leaf_indices,
+                                          compressed_tree_indices, new_tree_indices.astype(np.int32), W)
         compressed_y = model(X, tensor=False)
-        self.assertTrue(np.allclose(compressed_y, y_pred_k), "Discarding trees should be equal to prediction without them")
-        
+        self.assertTrue(np.allclose(compressed_y, y_pred_k),
+                        "Discarding trees should be equal to prediction without them")
 
     def test_cosine_oblivious_cpu(self):
         print("Running Multi test_cosine_oblivious_cpu")
@@ -278,7 +272,7 @@ class TestGBTMulti(unittest.TestCase):
         model.set_bias_from_targets(y)
         loss = rmse_model(model, X, y, self.n_epochs)
         self.assertTrue(loss < 12, f'Expected loss = {loss} < 12')
-        A, V, _, _, _ = model._model.get_matrix_representation(X)
+        A, V, _, _, _ = model.learner.get_matrix_representation(X)
         preds_representation = (A@V).squeeze()
         self.assertTrue(np.allclose(preds_representation, model(X, tensor=False)))
         model.save_learner(os.path.join(self.test_dir,
@@ -306,7 +300,7 @@ class TestGBTMulti(unittest.TestCase):
         loss = rmse_model(model, X, y, self.n_epochs, device='cuda')
         value = 12
         self.assertTrue(loss < value, f'Expected loss = {loss} < {value}')
-        A, V, _, _, _ = model._model.get_matrix_representation(X)
+        A, V, _, _, _ = model.learner.get_matrix_representation(X)
         preds_representation = (A@V).squeeze()
         self.assertTrue(np.allclose(preds_representation, model(X, tensor=False)))
         model.save_learner(os.path.join(self.test_dir,

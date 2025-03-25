@@ -8,15 +8,17 @@
 ##############################################################################
 import json
 import os
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch as th
 
 from gbrl import GBRL_CPP
 from gbrl.learners.base import BaseLearner
+from gbrl.common.constraints import Constraint
+from gbrl.common.compression import ParametricActorCompression, TreeCompression
 from gbrl.common.utils import (NumericalData, ensure_leaf_tensor_or_array,
-                               ensure_same_type, get_poly_vectors, get_tensor_info,
+                               ensure_same_type, get_index_mapping, get_poly_vectors, get_tensor_info,
                                numerical_dtype, preprocess_features, to_numpy)
 
 
@@ -31,7 +33,8 @@ class MultiGBTLearner(BaseLearner):
     def __init__(self, input_dim: Union[int, List[int]], output_dim: Union[int, List[int]],
                  tree_struct: Dict, optimizers: Union[Dict, List[Dict]],
                  params: Dict, n_learners: int,
-                 verbose: int = 0, device: str = 'cpu'):
+                 verbose: int = 0, device: str = 'cpu',
+                 constraints: Optional[Union[Constraint, List[Dict]]] = None):
         """
         Initializes the MultiGBTLearner.
 
@@ -45,6 +48,7 @@ class MultiGBTLearner(BaseLearner):
             n_learners (int): Number of GBT learners.
             verbose (int, optional): Verbosity level. Defaults to 0.
             device (str, optional): The device to run the model on. Defaults to 'cpu'.
+            constraints (Union[Constraint, List[Dict], optional): feature constraints. Defaults to None.
         """
 
         assert len(optimizers) == 1 or len(optimizers) == n_learners
@@ -57,7 +61,7 @@ class MultiGBTLearner(BaseLearner):
             if isinstance(input_dim, int):
                 input_dim = [input_dim] * n_learners
 
-        super().__init__(input_dim, output_dim, tree_struct, params, verbose, device)
+        super().__init__(input_dim, output_dim, tree_struct, params, verbose, device, constraints)
         if isinstance(optimizers, dict):
             optimizers = [optimizers for _ in range(n_learners)]
         self.optimizers = optimizers
@@ -104,6 +108,19 @@ class MultiGBTLearner(BaseLearner):
         """
         assert model_idx is not None or (isinstance(grads, list) and
                                          len(grads) == self.n_learners)
+
+        if self.total_iterations == 0:
+            mapping, is_numeric = get_index_mapping(features)
+            mapping = np.ascontiguousarray(mapping)
+            is_numeric = np.ascontiguousarray(is_numeric)
+
+            self.mapping = (mapping, is_numeric)
+            if model_idx is None:
+                for i in range(self.n_learners):
+                    self._cpp_models[i].set_feature_mapping(mapping, is_numeric)
+            else:
+                self._cpp_models[model_idx].set_feature_mapping(mapping, is_numeric)
+            self._set_constraints(model_idx)
 
         def process_data(features, grads, output_dim):
             """Helper function to ensure consistent feature and gradient processing."""
@@ -197,27 +214,28 @@ class MultiGBTLearner(BaseLearner):
             losses.append(loss)
         return losses
 
-    def save(self, filename: str, custom_names: Optional[List] = None) -> None:
+    def save(self, filename: str, suffix: Optional[List] = None) -> None:
         """
         Saves the models to a file.
 
         Args:
             filename (str): The filename to save the model to.
+            suffix (List(str)): list of filename suffixes.
         """
         filename = filename.rstrip('.')
-        assert custom_names is None or len(custom_names) == self.n_learners, "Custom names must be per learner"
+        assert suffix is None or len(suffix) == self.n_learners, "Custom names must be per learner"
         for i in range(self.n_learners):
-            if custom_names is None:
-                savename = filename + f'_{i}.gbrl_model'
+            if suffix is None:
+                save_name = filename + f'_{i}.gbrl_model'
             else:
-                savename = filename + f'_{custom_names[i]}.gbrl_model'
+                save_name = filename + f'_{suffix[i]}.gbrl_model'
             assert self._cpp_models[i] is not None, "Can't save non-existent model!"
-            status = self._cpp_models[i].save(savename)
+            status = self._cpp_models[i].save(save_name)
             assert status == 0, "Failed to save model"
 
         metadata = {
             "n_learners": self.n_learners,
-            'custom_names': custom_names,
+            'custom_names': suffix,
             }
         meta_filename = filename + ".gbrl_meta"
         with open(meta_filename, "w") as meta_file:
@@ -225,23 +243,55 @@ class MultiGBTLearner(BaseLearner):
 
         print(f"Saved {self.n_learners} models with metadata to {meta_filename}")
 
-    def export(self, filename: str, modelname: str = None) -> None:
+    def export(self, filename: str, modelname: str = None, format: str = None, export_type: str = 'full',
+               prefix: str = None, suffix: Optional[List] = None, model_idx: Optional[int] = None) -> None:
         """
         Exports the model to a C header file.
 
         Args:
             filename (str): The filename to export the model to.
-            modelname (str, optional): The name of the model in the C code.
-            Defaults to None.
+            modelname (str, optional): The name of the model in the C code. Defaults to None.
+            format (str, optional): export datatype must either ['float', 'fxp8', 'fxp16'], defaults to 'full'.
+            export_type (str, optional): Either full or compact export (compact uses explicit numbers for better 
+            efficiency on low-compute devices). Defaults to 'full'
+            prefix (str, optional): Defaults to ''.
+            suffix (List(str)): list of filename suffixes.
+            model_idx (int, optional): The index of the model.
         """
+        # exports model to C
+        assert suffix is None or len(suffix) == self.n_learners, "Custom names must be per learner"
+        if format is None:
+            format = 'float'
+        assert format in ['float', 'fxp8', 'fxp16'], "export format must be either ['float', 'fxp8', 'fxp16']"
+        assert export_type in ['full', 'compact'], "export format must be either ['full', 'compact']"
+        if prefix is None:
+            prefix = ""
+        else:
+            if prefix[-1] != '_':
+                prefix += '_'
+
         filename = filename.rstrip('.')
-        for i in range(self.n_learners):
-            exportname = filename + f'_{i}.h'
-            assert self._cpp_models[i] is not None, "Can't export non-existent model!"
+        if model_idx is None:
+            for i in range(self.n_learners):
+                if suffix is None:
+                    export_name = filename + f'_{i}.h'
+                else:
+                    export_name = filename + f'_{suffix[i]}.h'
+                assert self._cpp_models[i] is not None, "Can't export non-existent model!"
+                if modelname is None:
+                    modelname = ""
+                try:
+                    status = self._cpp_models[i].export(export_name, modelname, format, export_type, prefix)
+                    assert status == 0, "Failed to export model"
+                except RuntimeError as e:
+                    print(f"Caught an exception in GBRL: {e}")
+        else:
+            filename += '.h'
+            assert self._cpp_models[model_idx] is not None, "Can't export non-existent model!"
             if modelname is None:
                 modelname = ""
             try:
-                status = self._cpp_models[i].export(exportname, modelname)
+                status = self._cpp_models[model_idx].export(filename, modelname, format, export_type, prefix)
                 assert status == 0, "Failed to export model"
             except RuntimeError as e:
                 print(f"Caught an exception in GBRL: {e}")
@@ -559,6 +609,24 @@ class MultiGBTLearner(BaseLearner):
                                                              offset))
         return shap_values
 
+    def _set_constraints(self, model_idx: Optional[int] = None) -> None:
+        """
+        Adds constraints to the underlying C++ model if they haven't been applied yet.
+        Constraints are added to all models unless model idx is specified.
+
+        Args:
+            model_idx (int, optional): The index of the model.
+        """
+        if self.constraints is not None and not self.constraints.used:
+            self.constraints.parse_mapping(self.mapping)
+            for constraint in self.constraints.get_constraints():
+                if model_idx is None:
+                    for i in range(self.n_learners):
+                        self._cpp_models[i].add_constraint(**constraint)
+                else:
+                    self._cpp_models[model_idx].add_constraint(**constraint)
+            self.constraints.used = True
+
     def shap(self, features: NumericalData,
              model_idx: Optional[int] = None) -> Union[np.ndarray, Tuple[np.ndarray, ...]]:
         """
@@ -738,6 +806,137 @@ class MultiGBTLearner(BaseLearner):
             self.student_models.append(student_model)
         self.reset()
         return tr_losses, distil_params
+
+    def get_matrix_representation(self, features: NumericalData, model_idx: Optional[int] = None) -> \
+            Tuple[Union[np.ndarray, List[np.ndarray]], Union[np.ndarray, List[np.ndarray]],
+                  Union[np.ndarray, List[np.ndarray]], Union[int, List[int]],
+                  Union[int, List[int]]]:
+        """
+        Converts input features into matrix representations required for compression.
+
+        Args:
+            features (NumericalData): Input feature batch of shape (n_samples, n_features),
+                either as a NumPy array or a PyTorch tensor.
+            model_idx (int, optional): The index of the model.
+
+        Returns:
+            Tuple[np.ndarray, np.ndarray, np.ndarray, int, int]: A tuple containing:
+                - A (Union[np.ndarray, List[np.ndarray]]): Feature-to-leaf assignment matrix.
+                - V (Union[np.ndarray, List[np.ndarray]]): Leaf value matrix.
+                - n_leaves_per_tree (Union[np.ndarray, List[np.ndarray]]): Number of leaves in each tree.
+                - n_leaves (Union[int, List[int]]): Total number of leaves.
+                - n_trees (Union[int, List[int]]): Total number of trees.
+        """
+        if isinstance(features, th.Tensor):
+            features = features.detach().cpu().numpy().astype(np.single)
+        num_features, cat_features = preprocess_features(features)
+        if model_idx is None:
+            A, V, n_leaves_per_tree, n_leaves, n_trees = [], [], [], [], []
+            for i in range(self.n_learners):
+                representation = self._cpp_models[i].get_matrix_representation(num_features, cat_features)
+                A.append(representation[0])
+                V.append(representation[1])
+                n_leaves_per_tree.append(representation[2])
+                n_leaves.append(representation[3])
+                n_trees.append(representation[4])
+        else:
+            A, V, n_leaves_per_tree, n_leaves, n_trees = \
+                self._cpp_models[model_idx].get_matrix_representation(num_features, cat_features)
+        return A, V, n_leaves_per_tree, n_leaves, n_trees
+
+    def compress(self, trees_to_keep: int, gradient_steps: int, features: NumericalData,
+                 actions: th.Tensor = None, log_std: th.Tensor = None,
+                 method: str = 'first_k', dist_type: str = 'supervised_learning',
+                 optimizer_kwargs: Optional[Dict[str, Any]] = None,
+                 least_squares_W: bool = True, temperature: float = 1.0, lambda_reg: float = 1.0,
+                 model_idx: Optional[int] = None, **kwargs):
+        """
+        Compresses the tree ensemble by selecting and retraining a subset of trees.
+
+        Args:
+            trees_to_keep (int): Number of trees to retain in the compressed model.
+            gradient_steps (int): Number of optimization steps during compression.
+            features (NumericalData): Input feature matrix (n_samples, n_features).
+            actions (th.Tensor, optional): Target actions (for policy compression). Required if dist_type
+                is not 'supervised_learning'.
+            log_std (th.Tensor, optional): Log standard deviation (only used for certain policy types).
+            method (str): Tree selection method. Defaults to 'first_k'.
+            dist_type (str): Compression type ('supervised_learning', 'actor', etc.).
+            optimizer_kwargs (dict, optional): Optimizer configuration.
+            least_squares_W (bool): Whether to use least-squares to estimate weights (for supervised compression).
+            temperature (float): Temperature parameter for soft selection.
+            lambda_reg (float): L2 regularization coefficient on weights.
+            model_idx (int, optional): The index of the model.
+            **kwargs: Additional keyword arguments passed to the compressor.
+
+        Returns:
+            Union[float, list[float]]: Final loss value after compression.
+        """
+
+        def _compress(A, V, n_leaves_per_tree, compression_params, cpp_model, model_idx):
+            A = th.tensor(A, dtype=th.float32, device=self.device)
+            V = th.tensor(V, dtype=th.float32, device=self.device)
+            n_leaves_per_tree = th.tensor(n_leaves_per_tree, device=self.device)
+
+            compression_params.update(kwargs)
+
+            if actions is not None:
+                compression_params['dist_type'] = dist_type
+                compressor = ParametricActorCompression(**compression_params)
+                parameters, losses = compressor.compress(A, V, actions, log_std)
+            else:
+                compression_params['least_squares_W'] = least_squares_W
+                compressor = TreeCompression(**compression_params)
+                parameters, losses = compressor.compress(A, V)
+            leaves_selection, tree_selection, W, n_compressed_trees, n_compressed_leaves = parameters
+            # indices of selected leaves / trees in original indexing
+            compressed_leaf_indices = np.where(leaves_selection > 0)[0].astype(np.int32)
+            compressed_tree_indices = np.where(tree_selection > 0)[0].astype(np.int32)
+            # indices of the start of each leaf according to the compressed model
+            new_tree_indices = np.zeros(n_compressed_trees)
+            new_tree_indices[1:] = np.cumsum(n_leaves_per_tree[compressed_tree_indices].detach().cpu().numpy())[:-1]
+
+            cpp_model.compress(n_compressed_leaves, n_compressed_trees, compressed_leaf_indices,
+                               compressed_tree_indices, new_tree_indices.astype(np.int32), W)
+            print(f"Finished compressing model {model_idx} - compressed model has {self.get_num_trees()} trees")
+            del compressor
+            return losses[-1]
+
+        A, V, n_leaves_per_tree, n_leaves, n_trees = self.get_matrix_representation(features, model_idx)
+        if model_idx is None:
+            losses = []
+            for i in range(self.n_learners):
+                k = self.get_num_trees(model_idx=i) - trees_to_keep
+                compression_params = {'k': k, 'gradient_steps': gradient_steps, 'method': method,
+                                      'optimizer_kwargs': optimizer_kwargs,
+                                      'temperature': temperature, 'n_leaves': n_leaves[i],
+                                      'n_trees': n_trees[i],
+                                      'n_leaves_per_tree': n_leaves_per_tree[i],
+                                      'lambda_reg': lambda_reg,
+                                      'output_dim': self.output_dim,
+                                      'device': self.device}
+                compression_params.update(kwargs)
+                loss = _compress(A[i], V[i], n_leaves_per_tree[i], compression_params,
+                                 self._cpp_models[i], i)
+                losses.append(loss)
+        else:
+            k = self.get_num_trees(model_idx=model_idx) - trees_to_keep
+            compression_params = {'k': k, 'gradient_steps': gradient_steps, 'method': method,
+                                  'optimizer_kwargs': optimizer_kwargs,
+                                  'temperature': temperature, 'n_leaves': n_leaves,
+                                  'n_trees': n_trees,
+                                  'n_leaves_per_tree': n_leaves_per_tree,
+                                  'lambda_reg': lambda_reg,
+                                  'output_dim': self.output_dim,
+                                  'device': self.device}
+            compression_params.update(kwargs)
+            losses = _compress(A, V, n_leaves_per_tree, compression_params,
+                               self._cpp_models[model_idx], model_idx)
+
+        del A
+        del V
+        del n_leaves_per_tree
+        return losses
 
     def print_ensemble_metadata(self, model_idx: Optional[int] = None) -> None:
         """
