@@ -400,8 +400,7 @@ class MultiGBTLearner(BaseLearner):
         """
         if model_idx is not None:
             return self._cpp_models[model_idx].get_iteration()
-        return (cpp_model.get_iteration()
-                for cpp_model in self._cpp_models)
+        return tuple([cpp_model.get_iteration() for cpp_model in self._cpp_models])
 
     def get_num_trees(self, model_idx: Optional[int] = None) -> Union[int, Tuple[int, int]]:
         """

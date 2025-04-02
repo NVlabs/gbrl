@@ -73,7 +73,7 @@ GBRL::GBRL(int input_dim, int output_dim, int max_depth, int min_data_in_leaf,
         this->metadata->max_leaves_batch = GPU_TREES_BATCH * (1 << max_depth);
     }
 #endif
-    this->to_device(device);
+    this->to_device(_device);
     this->constraints = init_constraints();     
 }
 

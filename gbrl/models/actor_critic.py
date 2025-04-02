@@ -148,6 +148,7 @@ class ActorCritic(BaseGBT):
         if requires_grad:
             self.policy_grad = None
             self.params = theta
+            self.input = observations
         return theta
 
     def predict_values(self, observations: NumericalData,
@@ -173,6 +174,7 @@ class ActorCritic(BaseGBT):
         if requires_grad:
             self.value_grad = None
             self.params = values
+            self.input = observations
         return values
 
     def __call__(self, observations: NumericalData,
@@ -261,7 +263,7 @@ class ActorCritic(BaseGBT):
                                             "Make sure model is called with requires_grad=True")
             observations = self.input
         n_samples = len(observations)
-        policy_grad = policy_grad if policy_grad is not None else self.params[0].grad.detach() * n_samples
+        policy_grad = policy_grad if policy_grad is not None else self.params.grad.detach() * n_samples
         policy_grad = clip_grad_norm(policy_grad, policy_grad_clip)
         validate_array(policy_grad)
 
@@ -291,7 +293,7 @@ class ActorCritic(BaseGBT):
             observations = self.input
         n_samples = len(observations)
 
-        value_grad = value_grad if value_grad is not None else self.params[1].grad.detach() * n_samples
+        value_grad = value_grad if value_grad is not None else self.params.grad.detach() * n_samples
         value_grad = clip_grad_norm(value_grad, value_grad_clip)
 
         validate_array(value_grad)
