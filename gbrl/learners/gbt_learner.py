@@ -7,16 +7,17 @@
 #
 ##############################################################################
 import os
-from typing import Dict, List, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch as th
 
 from gbrl import GBRL_CPP
-from gbrl.learners.base import BaseLearner
 from gbrl.common.utils import (NumericalData, ensure_leaf_tensor_or_array,
-                               ensure_same_type, get_poly_vectors, get_tensor_info,
-                               numerical_dtype, preprocess_features, to_numpy)
+                               ensure_same_type, get_poly_vectors,
+                               get_tensor_info, numerical_dtype,
+                               preprocess_features, to_numpy)
+from gbrl.learners.base import BaseLearner
 
 
 class GBTLearner(BaseLearner):
@@ -71,19 +72,31 @@ class GBTLearner(BaseLearner):
         except RuntimeError as e:
             print(f"Caught an exception in GBRL: {e}")
 
-    def step(self, features: Union[np.ndarray, th.Tensor, Tuple], grads: NumericalData) -> None:
+    def step(self, features: Union[np.ndarray, th.Tensor, Tuple], grads: NumericalData,
+             compliance: Optional[NumericalData] = None) -> None:
         """
         Performs a single gradient update step (e.g, adding a single decision tree).
 
         Args:
             features (Union[np.ndarray, th.Tensor, Tuple]): Input features.
             grads (NumericalData): Gradients.
+            compliance (Optional[NumericalData]): guidelines compliance vector.
         """
         features, grads = ensure_same_type(features, grads)
+        if compliance is not None:
+            features, compliance = ensure_same_type(features, compliance)
+
         if isinstance(features, th.Tensor):
             features = features.float()
             grads = grads.float()
-            self._save_memory = (features, grads)
+
+            if compliance is not None:
+                compliance = compliance.float()
+                self._save_memory = (features, grads, compliance)
+                compliance = get_tensor_info(compliance)
+            else:
+                self._save_memory = (features, grads)
+
             num_features = get_tensor_info(features)
             cat_features = None
             grads = get_tensor_info(grads)
@@ -93,7 +106,11 @@ class GBTLearner(BaseLearner):
             grads = np.ascontiguousarray(grads.reshape((len(grads), self.params['output_dim'])))
             grads = grads.astype(numerical_dtype)
 
-        self._cpp_model.step(num_features, cat_features, grads)
+            if compliance is not None:
+                compliance = np.ascontiguousarray(compliance.reshape((len(compliance), 1)))
+                compliance = compliance.astype(numerical_dtype)
+
+        self._cpp_model.step(num_features, cat_features, grads, compliance)
         self.iteration = self._cpp_model.get_iteration()
         self.total_iterations += 1
 

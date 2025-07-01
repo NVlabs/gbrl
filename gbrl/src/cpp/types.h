@@ -125,6 +125,7 @@ struct ensembleMetaData {
     int n_num_features;
     int n_cat_features;
     int iteration;
+    float compliance_weight;
 };
 
 struct dataSet {
@@ -132,6 +133,7 @@ struct dataSet {
     const char *categorical_obs;
     float *grads;
     const float *build_grads;
+    const float *compliance;
     int n_samples;
     deviceType device;
 };
@@ -187,7 +189,7 @@ std::string deviceTypeToString(deviceType type);
 std::string algoTypeToString(optimizerAlgo algo);
 std::string schedulerTypeToString(schedulerFunc func);
 
-ensembleMetaData* ensemble_metadata_alloc(int max_trees, int max_leaves, int max_trees_batch, int max_leaves_batch, int input_dim, int output_dim, int max_depth, int min_data_in_leaf, int n_bins, int par_th, float cv_beta, int verbose, int batch_size, bool use_cv, scoreFunc split_score_func, generatorType generator_type, growPolicy grow_policy);
+ensembleMetaData* ensemble_metadata_alloc(int max_trees, int max_leaves, int max_trees_batch, int max_leaves_batch, int input_dim, int output_dim, int max_depth, int min_data_in_leaf, int n_bins, int par_th, float cv_beta, int verbose, int batch_size, bool use_cv, scoreFunc split_score_func, generatorType generator_type, growPolicy grow_policy, float compliance_weight);
 ensembleData* ensemble_data_alloc(ensembleMetaData *metadata);
 ensembleData* ensemble_copy_data_alloc(ensembleMetaData *metadata);
 ensembleData* copy_ensemble_data(ensembleData *other_edata, ensembleMetaData *metadata);

@@ -50,6 +50,7 @@ struct splitDataGPU{
     float *right_dot;
     float *oblivious_split_scores;
     size_t size;
+    float compliance_mean;
 };
 
 struct TreeNodeGPU {
@@ -60,6 +61,7 @@ struct TreeNodeGPU {
     int output_dim;
     int node_idx;
     float score;
+    float compliance_score;
     int *sample_indices;
     int* feature_indices;
     float* feature_values;

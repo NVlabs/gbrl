@@ -144,7 +144,7 @@ std::string schedulerTypeToString(schedulerFunc func) {
     }
 }
 
-ensembleMetaData* ensemble_metadata_alloc(int max_trees, int max_leaves, int max_trees_batch, int max_leaves_batch, int input_dim, int output_dim, int max_depth, int min_data_in_leaf, int n_bins, int par_th, float cv_beta, int verbose, int batch_size, bool use_cv, scoreFunc split_score_func, generatorType generator_type, growPolicy grow_policy){
+ensembleMetaData* ensemble_metadata_alloc(int max_trees, int max_leaves, int max_trees_batch, int max_leaves_batch, int input_dim, int output_dim, int max_depth, int min_data_in_leaf, int n_bins, int par_th, float cv_beta, int verbose, int batch_size, bool use_cv, scoreFunc split_score_func, generatorType generator_type, growPolicy grow_policy, float compliance_weight){
     ensembleMetaData *metadata = new ensembleMetaData;
     metadata->input_dim = input_dim; 
     metadata->output_dim = output_dim; 
@@ -168,6 +168,7 @@ ensembleMetaData* ensemble_metadata_alloc(int max_trees, int max_leaves, int max
     metadata->n_num_features = 0;
     metadata->n_cat_features = 0;
     metadata->iteration = 0;
+    metadata->compliance_weight = compliance_weight;
     return metadata;
 }
 

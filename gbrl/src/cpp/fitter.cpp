@@ -234,7 +234,7 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
     allocate_ensemble_memory(metadata, edata);
     edata->tree_indices[metadata->n_trees] = metadata->n_leaves;
     int depth = 0, node_idx_cntr = 0, chosen_idx = 0;
-    float best_score, parent_score = -INFINITY;
+    float best_score, parent_score = -INFINITY, parent_compliance_score = 0.0f;
     int n_samples = dataset->n_samples;
 
     int added_leaves = 0;
@@ -281,6 +281,9 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
                 std::cerr << "error invalid split score func!" << std::endl;
                 continue;
             }
+
+            if (dataset->compliance != nullptr)
+                parent_compliance_score = scoreL2(crnt_node->sample_indices, crnt_node->n_samples, dataset->compliance, 1);
             if (crnt_node->depth == 0)
                 parent_score = 0.0f;
 #ifndef DEBUG
@@ -299,6 +302,11 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
                     float score = crnt_node->getSplitScore(dataset, edata->feature_weights, metadata->split_score_func, split_candidates[j], metadata->min_data_in_leaf);
                     int feat_idx = (split_candidates[j].categorical_value == nullptr) ? split_candidates[j].feature_idx : split_candidates[j].feature_idx + metadata->n_num_features; 
                     score = score * edata->feature_weights[feat_idx] - parent_score;
+                    
+                    if (dataset->compliance != nullptr){
+                        float compliance_score = crnt_node->getComplianceScore(dataset, split_candidates[j], metadata->min_data_in_leaf, parent_compliance_score);
+                        score -= metadata->compliance_weight * compliance_score;
+                    }
 // #ifdef DEBUG
 //                     std::cout << " cand: " <<  j << " score: " <<  score << " parent score: " <<  parent_score << " info: " << split_candidates[j] << std::endl;
 // #endif 
@@ -393,9 +401,14 @@ int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMe
                 for (int node_idx = 0; node_idx < (1 << depth); ++node_idx){
                     TreeNode *crnt_node = tree_nodes[node_idx];
                     score += crnt_node->getSplitScore(dataset, edata->feature_weights, metadata->split_score_func, split_candidates[j], metadata->min_data_in_leaf);
+                    if (dataset->compliance != nullptr){
+                        float compliance_score = crnt_node->getComplianceScore(dataset, split_candidates[j], metadata->min_data_in_leaf, 0.0f);
+                        score -= metadata->compliance_weight * compliance_score;
+                    }
                 }
                 int feat_idx = (split_candidates[j].categorical_value == nullptr) ? split_candidates[j].feature_idx : split_candidates[j].feature_idx + metadata->n_num_features; 
                 score = score*edata->feature_weights[feat_idx] - parent_score;
+
 // #ifdef DEBUG
 //                 std::cout << " cand: " <<  j << " score: " <<  score << " parent_score: " << parent_score <<  " info: " << split_candidates[j] << std::endl;
 // #endif

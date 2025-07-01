@@ -191,6 +191,7 @@ py::dict metadataToDict(const ensembleMetaData* metadata){
         d["par_th"] = metadata->par_th;
         d["batch_size"] = metadata->batch_size;
         d["grow_policy"] = growPolicyToString(metadata->grow_policy);
+        d["compliance_weight"] = metadata->compliance_weight;
         d["iteration"] = metadata->iteration;
     }
     return d;
@@ -226,7 +227,7 @@ py::list getOptimizerConfigs(const std::vector<Optimizer*>& opts) {
 
 PYBIND11_MODULE(gbrl_cpp, m) {
     py::class_<GBRL> gbrl(m, "GBRL");
-    gbrl.def(py::init<int, int, int, int, int, int, float, std::string, std::string, bool, int, std::string, int, std::string>(),
+    gbrl.def(py::init<int, int, int, int, int, int, float, std::string, std::string, bool, int, std::string, float, int, std::string>(),
          py::arg("input_dim")=1, 
          py::arg("output_dim")=1, 
          py::arg("max_depth")=4, 
@@ -239,6 +240,7 @@ PYBIND11_MODULE(gbrl_cpp, m) {
          py::arg("use_control_variates")=false, 
          py::arg("batch_size")=5000, 
          py::arg("grow_policy")="greedy", 
+         py::arg("compliance_weight")=1.0,
          py::arg("verbose")=0,
          py::arg("device")="cpu",
          "Constructor of the GBRL class");
@@ -253,12 +255,13 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         self.to_device(stringTodeviceType(str_device)); 
     },  py::arg("device"),
     "Set GBRL device ['cpu', 'cuda']");
-    gbrl.def("step", [](GBRL &self, py::object &obs, py::object &categorical_obs, py::object &grads) {
+    gbrl.def("step", [](GBRL &self, py::object &obs, py::object &categorical_obs, py::object &grads, py::object &compliance) {
         const float* obs_ptr = nullptr;
         const char* cat_obs_ptr= nullptr;
         float* grads_ptr = nullptr;
-        std::vector<size_t> obs_shape, cat_obs_shape, grads_shape;
-        std::string obs_device, cat_obs_device, grads_device;
+        const float* compliance_ptr = nullptr;
+        std::vector<size_t> obs_shape, cat_obs_shape, grads_shape, compliance_shape;
+        std::string obs_device, cat_obs_device, grads_device, compliance_device;
         int n_samples, n_num_features = 0, n_cat_features = 0;
         handle_input_info<float>(grads, grads_ptr, grads_shape, grads_device, "grads", false, "step");
         if (grads_shape.size() == 1){
@@ -310,11 +313,29 @@ PYBIND11_MODULE(gbrl_cpp, m) {
             }
         }
 
+        handle_input_info<const float>(compliance, compliance_ptr, compliance_shape, compliance_device, "compliance", true, "step");
+        if (compliance_ptr != nullptr){
+            int n_compliance_samples = 0;
+            n_compliance_samples = static_cast<int>(compliance_shape[0]);
+
+            if (n_compliance_samples != n_samples){
+                std::stringstream ss;
+                ss << "Number of compliance samples " << n_compliance_samples << " != number of gradient samples " << n_samples;
+                throw std::runtime_error(ss.str());
+            }
+            if (compliance_device != grads_device){
+                std::stringstream ss;
+                ss << "compliance device: " << compliance_device << " != Gradient device " << grads_device;
+                throw std::runtime_error(ss.str());
+            }
+        }
+
         py::gil_scoped_release release; 
-        self.step(obs_ptr, cat_obs_ptr, grads_ptr, n_samples, n_num_features, n_cat_features, stringTodeviceType(grads_device)); 
+        self.step(obs_ptr, cat_obs_ptr, grads_ptr, compliance_ptr, n_samples, n_num_features, n_cat_features, stringTodeviceType(grads_device)); 
     },  py::arg("obs"),
         py::arg("categorical_obs"),
         py::arg("grads"),
+        py::arg("compliance"),
     "Fit a decision tree with the given observations and gradients");
     gbrl.def("fit", [](GBRL &self, py::object &obs, py::object &categorical_obs, py::array_t<float> &targets, int iterations, bool shuffle, std::string loss_type) -> float {
         if (!targets.attr("flags").attr("c_contiguous").cast<bool>()) {

@@ -72,7 +72,8 @@ class ParametricActor(BaseGBT):
 
     def step(self, observations: Optional[NumericalData] = None,
              policy_grad: Optional[NumericalData] = None,
-             policy_grad_clip: Optional[float] = None,) -> None:
+             policy_grad_clip: Optional[float] = None,
+             compliance: Optional[NumericalData] = None) -> None:
         """
         Performs a single boosting iteration.
 
@@ -80,7 +81,8 @@ class ParametricActor(BaseGBT):
             observations (NumericalData):
             policy_grad_clip (float, optional): . Defaults to None.
             policy_grad (Optional[NumericalData], optional): manually
-            calculated gradients. Defaults to None.
+                calculated gradients. Defaults to None.
+            compliance (Optional[NumericalData]): guidelines compliance vector.
         """
         if observations is None:
             assert self.input is not None, "Cannot update trees without input."
@@ -93,7 +95,7 @@ class ParametricActor(BaseGBT):
         policy_grad = clip_grad_norm(policy_grad, policy_grad_clip)
         validate_array(policy_grad)
 
-        self.learner.step(observations, policy_grad)
+        self.learner.step(observations, policy_grad, compliance)
         self.grad = policy_grad
         self.input = None
 
@@ -218,20 +220,22 @@ class GaussianActor(BaseGBT):
              mu_grad: Optional[NumericalData] = None,
              log_std_grad: Optional[NumericalData] = None,
              mu_grad_clip: Optional[float] = None,
-             log_std_grad_clip: Optional[float] = None) -> None:
+             log_std_grad_clip: Optional[float] = None,
+             compliance: Optional[NumericalData] = None) -> None:
         """
         Performs a single boosting iteration.
 
         Args:
             observations (NumericalData): Input observations.
             mu_grad (Optional[NumericalData], optional):
-            Manually computed mean gradients.
+                Manually computed mean gradients.
             log_std_grad (Optional[NumericalData], optional):
-            Manually computed log standard deviation gradients.
+                Manually computed log standard deviation gradients.
             mu_grad_clip (Optional[float], optional): Gradient clipping for
-            mean. Defaults to None.
+                mean. Defaults to None.
             log_std_grad_clip (Optional[float], optional): Gradient clipping
-            for log standard deviation. Defaults to None.
+                for log standard deviation. Defaults to None.
+            compliance (Optional[NumericalData]): guidelines compliance vector.
         """
         if observations is None:
             assert self.input is not None, "Cannot update trees without input."
@@ -252,7 +256,7 @@ class GaussianActor(BaseGBT):
 
         validate_array(theta_grad)
 
-        self.learner.step(observations, theta_grad)
+        self.learner.step(observations, theta_grad, compliance)
         self.grad = mu_grad
         if not self.fixed_std:
             self.grad = (mu_grad, log_std_grad)

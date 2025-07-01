@@ -181,7 +181,8 @@ class ActorCritic(BaseGBT):
              policy_grad: Optional[NumericalData] = None,
              value_grad: Optional[NumericalData] = None,
              policy_grad_clip: Optional[float] = None,
-             value_grad_clip: Optional[float] = None) -> None:
+             value_grad_clip: Optional[float] = None,
+             compliance: Optional[NumericalData] = None) -> None:
         """
         Performs a boosting step for both the actor and critic.
 
@@ -193,6 +194,7 @@ class ActorCritic(BaseGBT):
             value_grad (Optional[NumericalData], optional): Manually computed gradients for the value function.
             policy_grad_clip (Optional[float], optional):Gradient clipping value for policy updates.
             value_grad_clip (Optional[float], optional): Gradient clipping value for value updates.
+            compliance (Optional[NumericalData]): guidelines compliance vector.
         """
         if observations is None:
             assert self.input is not None, ("Cannot update trees without input."
@@ -209,14 +211,15 @@ class ActorCritic(BaseGBT):
         validate_array(policy_grad)
         validate_array(value_grad)
 
-        self.learner.step(observations, policy_grad, value_grad)
+        self.learner.step(observations, policy_grad, value_grad, compliance)
         self.policy_grad = policy_grad
         self.value_grad = value_grad
         self.input = None
 
-    def actor_step(self, observations: Optional[NumericalData]
-                   = None, policy_grad: Optional[NumericalData]
-                   = None, policy_grad_clip: Optional[float] = None) -> None:
+    def actor_step(self, observations: Optional[NumericalData]= None,
+                   policy_grad: Optional[NumericalData]= None,
+                   policy_grad_clip: Optional[float] = None,
+                   compliance: Optional[NumericalData] = None,) -> None:
         """
         Performs a single boosting step for the actor (should only be used
         if actor and critic use separate models)
@@ -225,6 +228,7 @@ class ActorCritic(BaseGBT):
             observations (NumericalData):
             policy_grad_clip (float, optional): Defaults to None.
             policy_grad (Optional[NumericalData], optional): manually calculated gradients. Defaults to None.
+            compliance (Optional[NumericalData]): guidelines compliance vector.
 
         Returns:
             np.ndarray: policy gradient
@@ -240,12 +244,13 @@ class ActorCritic(BaseGBT):
         policy_grad = clip_grad_norm(policy_grad, policy_grad_clip)
         validate_array(policy_grad)
 
-        self.learner.step_actor(observations, policy_grad)
+        self.learner.step_actor(observations, policy_grad, compliance)
         self.policy_grad = policy_grad
 
     def critic_step(self, observations: Optional[NumericalData] = None,
                     value_grad: Optional[NumericalData] = None,
-                    value_grad_clip: Optional[float] = None) -> None:
+                    value_grad_clip: Optional[float] = None,
+                    compliance: Optional[NumericalData] = None) -> None:
         """
         Performs a single boosting step for the critic (should only be used
         if actor and critic use separate models)
@@ -254,6 +259,7 @@ class ActorCritic(BaseGBT):
             observations (NumericalData):
             value_grad_clip (float, optional): Defaults to None.
             value_grad (Optional[NumericalData], optional): manually calculated gradients. Defaults to None.
+            compliance (Optional[NumericalData]): guidelines compliance vector.
 
         Returns:
             np.ndarray: value gradient
@@ -270,7 +276,7 @@ class ActorCritic(BaseGBT):
         value_grad = clip_grad_norm(value_grad, value_grad_clip)
 
         validate_array(value_grad)
-        self.learner.step_critic(observations, value_grad)
+        self.learner.step_critic(observations, value_grad, compliance)
         self.value_grad = value_grad
 
     def get_params(self) -> Tuple[np.ndarray, np.ndarray]:

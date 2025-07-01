@@ -279,6 +279,8 @@ splitDataGPU* allocate_split_data(ensembleMetaData *metadata, const int n_candid
                 << std::endl;
         return nullptr;
     }
+
+    split_data->compliance_mean = 0.0f;
     cudaMemset(data_alloc, 0, data_alloc_size);
     size_t trace = 0;
     split_data->split_scores = (float *)(data_alloc + trace);

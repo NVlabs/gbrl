@@ -178,6 +178,50 @@ float TreeNode::getSplitScore(dataSet *dataset, const float *feature_weights, sc
     }
 }
 
+
+float TreeNode::getComplianceScore(dataSet *dataset, const splitCandidate &split_candidate, const int min_data_in_leaf, const float parent_g_score){
+    // make sure that we do not re-use the same split candidate along a path
+    int left_count = 0, right_count = 0;
+    int n_features = this->n_num_features + this->n_cat_features;
+    const int *_sample_indices = this->sample_indices;
+    bool is_numeric = split_candidate.categorical_value == nullptr;
+
+    float left_mean = 0.0f; 
+    float right_mean = 0.0f; 
+
+    int sample_idx;
+
+    for (int n = 0; n < this->n_samples; ++n){
+        sample_idx = _sample_indices[n];
+        bool split_right = is_numeric && dataset->obs[sample_idx*n_features + split_candidate.feature_idx] > split_candidate.feature_value;
+        split_right |= (!is_numeric && strcmp(&dataset->categorical_obs[(sample_idx*n_features + split_candidate.feature_idx) * MAX_CHAR_SIZE], split_candidate.categorical_value) == 0); 
+        if (split_right){
+            right_mean += dataset->compliance[sample_idx];
+            ++right_count;
+        } else {
+            left_mean += dataset->compliance[sample_idx];
+            ++left_count;
+        }
+    }
+
+    if (left_count < min_data_in_leaf || right_count < min_data_in_leaf){
+        return 0.0f; // Not enough data in either side
+    } 
+
+    float left_count_f = static_cast<float>(left_count), right_count_f = static_cast<float>(right_count);
+    float left_count_recip = (left_count > 0 ) ? 1.0f / left_count : 0.0f;
+    float right_count_recip = (right_count > 0) ? 1.0f / right_count_f : 0.0f;
+
+    left_mean *= left_count_recip;
+    right_mean *= right_count_recip;
+
+    float left_mean_norm = left_mean * left_mean;
+    float right_mean_norm = right_mean * right_mean;
+
+    float g_score = left_count_f*left_mean_norm + right_count_f*right_mean_norm;
+    return g_score - parent_g_score;
+}
+
 float TreeNode::splitScoreCosine(const float *obs, const float *feature_weights, const float *grads, const splitCandidate &split_candidate, const int min_data_in_leaf){
     int left_count = 0, right_count = 0;
     int n_features = this->n_num_features, n_cols = this->output_dim;
