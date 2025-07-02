@@ -180,7 +180,23 @@ float TreeNode::getSplitScore(dataSet *dataset, const float *feature_weights, sc
 }
 
 
-float TreeNode::getSplitComplianceScore(dataSet *dataset, const splitCandidate &split_candidate, const int min_data_in_leaf){
+float TreeNode::getSplitComplianceScore(dataSet *dataset, const splitCandidate &split_candidate, scoreFunc split_score_func, const int min_data_in_leaf){
+    switch (split_score_func) {
+        case L2: {
+            return this->getSplitL2ComplianceScore(dataset, split_candidate, min_data_in_leaf);
+        }
+        case Cosine: {
+            return this->getSplitCosineComplianceScore(dataset, split_candidate, min_data_in_leaf);
+        }
+        default: {
+            std::cerr << "Unknown scoreFunc." << std::endl;
+            return 0.0f;
+        }
+    }
+}
+
+
+float TreeNode::getSplitL2ComplianceScore(dataSet *dataset, const splitCandidate &split_candidate, const int min_data_in_leaf){
     // make sure that we do not re-use the same split candidate along a path
     int left_count = 0, right_count = 0;
     int n_features = this->n_num_features + this->n_cat_features;
@@ -220,6 +236,59 @@ float TreeNode::getSplitComplianceScore(dataSet *dataset, const splitCandidate &
     float right_mean_norm = right_mean * right_mean;
 
     float split_compliance_score = left_count_f*left_mean_norm + right_count_f*right_mean_norm;
+    return this->compliance_score - split_compliance_score; // act as penalty
+}
+
+
+float TreeNode::getSplitCosineComplianceScore(dataSet *dataset, const splitCandidate &split_candidate, const int min_data_in_leaf){
+    int left_count = 0, right_count = 0;
+    int n_features = this->n_num_features + this->n_cat_features;
+    const int *_sample_indices = this->sample_indices;
+    bool is_numeric = split_candidate.categorical_value == nullptr;
+
+    float *left_mean = new float[1];
+    left_mean[0] = 0.0f;
+    float *right_mean = new float[1];
+    right_mean[0] = 0.0f;
+
+    int *left_indices = new int[this->n_samples];
+    int *right_indices = new int[this->n_samples];
+
+    int sample_idx;
+
+    for (int n = 0; n < this->n_samples; ++n){
+        sample_idx = _sample_indices[n];
+        bool split_right = is_numeric && dataset->obs[sample_idx*n_features + split_candidate.feature_idx] > split_candidate.feature_value;
+        split_right |= (!is_numeric && strcmp(&dataset->categorical_obs[(sample_idx*n_features + split_candidate.feature_idx) * MAX_CHAR_SIZE], split_candidate.categorical_value) == 0); 
+        if (split_right){
+            right_mean[0] += dataset->compliance[sample_idx];
+            right_indices[right_count] = sample_idx;
+            ++right_count;
+        } else {
+            left_mean[0] += dataset->compliance[sample_idx];
+            left_indices[left_count] = sample_idx;
+            ++left_count;
+        }
+    }
+
+    if (left_count < min_data_in_leaf || right_count < min_data_in_leaf){
+        delete[] left_indices;
+        delete[] right_indices;
+        return 0.0f; // Not enough data in either side
+    } 
+
+    float left_count_f = static_cast<float>(left_count), right_count_f = static_cast<float>(right_count);
+    float left_count_recip = (left_count > 0 ) ? 1.0f / left_count_f : 0.0f;
+    float right_count_recip = (right_count > 0) ? 1.0f / right_count_f : 0.0f;
+
+    left_mean[0] *= left_count_recip;
+    right_mean[0] *= right_count_recip;
+
+    float split_compliance_score = cosine_score(right_indices, left_indices, dataset->compliance, right_mean, left_mean, right_count, left_count, 1);
+
+    delete[] left_indices;
+    delete[] right_indices;
+ 
     return this->compliance_score - split_compliance_score; // act as penalty
 }
 

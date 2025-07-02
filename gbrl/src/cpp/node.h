@@ -26,7 +26,9 @@ class TreeNode {
         float splitScoreCosineCategorical(const char *obs, const float *feature_weights, const float *grads, const splitCandidate &split_candidate, const int min_data_in_leaf);
         float splitScoreL2(const float *obs, const float *feature_weights, const float *grads, const splitCandidate &split_candidate, const int min_data_in_leaf);
         float splitScoreL2Categorical(const char *obs, const float *feature_weights, const float *grads, const splitCandidate &split_candidate, const int min_data_in_leaf);
-        float getSplitComplianceScore(dataSet *dataset, const splitCandidate &split_candidate, const int min_data_in_leaf);
+        float getSplitComplianceScore(dataSet *dataset, const splitCandidate &split_candidate, scoreFunc split_score_func, const int min_data_in_leaf);
+        float getSplitL2ComplianceScore(dataSet *dataset, const splitCandidate &split_candidate, const int min_data_in_leaf);
+        float getSplitCosineComplianceScore(dataSet *dataset, const splitCandidate &split_candidate, const int min_data_in_leaf);
         bool isLeaf() const;
         static void printTree(TreeNode *node);
         friend std::ostream& operator<<(std::ostream& os, const TreeNode& obj);
