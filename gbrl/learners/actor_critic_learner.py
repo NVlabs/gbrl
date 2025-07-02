@@ -60,33 +60,48 @@ class SharedActorCriticLearner(GBTLearner):
                          [policy_optimizer, value_optimizer],
                          params, verbose, device)
 
-    def step(self, obs: NumericalData,
-             theta_grad: np.ndarray, value_grad: np.ndarray) -> None:
+    def step(self, obs: NumericalData, theta_grad: NumericalData, value_grad: NumericalData,
+             compliance: Optional[NumericalData] = None,
+             ) -> None:
         """
         Performs a gradient update step for both policy and value function.
 
         Args:
             obs (NumericalData): Input observations.
-            theta_grad (np.ndarray): Gradient of the policy parameters.
-            value_grad (np.ndarray): Gradient of the value function parameters.
+            theta_grad (NumericalData): Gradient of the policy parameters.
+            value_grad (NumericalData): Gradient of the value function parameters.
+            compliance (Optional[NumericalData]): guidelines compliance vector.
         """
         grads = concatenate_arrays(theta_grad, value_grad)
         obs, grads = ensure_same_type(obs, grads)
+        if compliance is not None:
+            obs, grads = ensure_same_type(obs, compliance)
         if isinstance(obs, th.Tensor):
             obs = obs.float()
             grads = grads.float()
+            obs = get_tensor_info(obs)
+            grads = get_tensor_info(grads)
             # store data so that data isn't garbage collected
             # while GBRL uses it
-            self._save_memory = (obs, grads)
-            self._cpp_model.step(get_tensor_info(obs),
-                                 None, get_tensor_info(grads))
+            if compliance is not None:
+                compliance = compliance.float()
+                compliance = get_tensor_info(compliance)
+                self._save_memory = (obs, grads, compliance)
+            else:
+                self._save_memory = (obs, grads)
+
+            self._cpp_model.step(obs, None, grads, compliance)
             self._save_memory = None
         else:
             num_obs, cat_obs = preprocess_features(obs)
             grads = np.ascontiguousarray(grads).astype(numerical_dtype)
             input_dim = 0 if num_obs is None else num_obs.shape[1]
             input_dim += 0 if cat_obs is None else cat_obs.shape[1]
-            self._cpp_model.step(num_obs, cat_obs, grads)
+
+            if compliance is not None:
+                compliance = np.ascontiguousarray(compliance).astype(numerical_dtype)
+
+            self._cpp_model.step(num_obs, cat_obs, grads, compliance)
 
         self.iteration = self._cpp_model.get_iteration()
         self.total_iterations += 1
@@ -250,6 +265,7 @@ class SeparateActorCriticLearner(MultiGBTLearner):
 
     def step(self, obs: NumericalData,
              theta_grad: NumericalData, value_grad: NumericalData,
+             compliance: Optional[NumericalData] = None,
              model_idx: Optional[int] = None) -> None:
         """
         Performs a single gradient update step on both the policy and value
@@ -259,10 +275,11 @@ class SeparateActorCriticLearner(MultiGBTLearner):
             obs (NumericalData): Input observations.
             theta_grad (NumericalData): Gradient update for the policy (actor).
             value_grad (NumericalData): Gradient update for the value function (critic).
+            compliance (Optional[NumericalData]): guidelines compliance vector.
             model_idx (Optional[int], optional): Index of the model to update.
             If None, updates both models.
         """
-        super().step(obs, [theta_grad, value_grad], model_idx=model_idx)
+        super().step(obs, [theta_grad, value_grad], model_idx=model_idx, compliance=compliance)
 
     def step_actor(self, obs: NumericalData,
                    theta_grad: NumericalData) -> None:

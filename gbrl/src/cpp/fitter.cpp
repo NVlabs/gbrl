@@ -142,6 +142,7 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
         delete[] full_grad_norms;
     }
     dataSet batch_dataset;
+    batch_dataset.compliance = nullptr; // compliance is not used in fit
 
     for (int i = 0; i < iterations; ++i){
         batch_dataset.obs = dataset->obs + batch_start_idx*metadata->n_num_features; 

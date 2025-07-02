@@ -135,6 +135,7 @@ class MultiGBTLearner(BaseLearner):
         
         if model_idx is not None:
             num_features, cat_features, grads = process_data(features, grads,
+                                                             compliance,
                                                              output_dim if not
                                                              isinstance(output_dim,
                                                                         list) else output_dim[model_idx])
@@ -152,6 +153,7 @@ class MultiGBTLearner(BaseLearner):
             assert isinstance(grads, list) and len(grads) == self.n_learners
             for i in range(self.n_learners):
                 num_features, cat_features, grads[i] = process_data(features, grads[i],
+                                                                    compliance,
                                                                     output_dim if not
                                                                     isinstance(output_dim,
                                                                                list) else output_dim[i])
