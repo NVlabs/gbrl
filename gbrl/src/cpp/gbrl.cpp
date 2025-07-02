@@ -472,7 +472,7 @@ void GBRL::_step_gpu(dataSet *dataset){
 
     float *gpu_obs;
     float *gpu_grads;
-    float *gpu_compliance =  nullptr;
+    float *gpu_compliance = nullptr;
     if (dataset->device == cpu){
         gpu_obs = (float*)(device_memory_block + trace);
         trace += obs_size;

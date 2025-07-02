@@ -234,7 +234,7 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
     allocate_ensemble_memory(metadata, edata);
     edata->tree_indices[metadata->n_trees] = metadata->n_leaves;
     int depth = 0, node_idx_cntr = 0, chosen_idx = 0;
-    float best_score, parent_score = -INFINITY, parent_compliance_score = 0.0f;
+    float best_score, parent_score = -INFINITY;
     int n_samples = dataset->n_samples;
 
     int added_leaves = 0;
@@ -283,7 +283,7 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
             }
 
             if (dataset->compliance != nullptr)
-                parent_compliance_score = scoreL2(crnt_node->sample_indices, crnt_node->n_samples, dataset->compliance, 1);
+                crnt_node->compliance_score = scoreL2(crnt_node->sample_indices, crnt_node->n_samples, dataset->compliance, 1);
             if (crnt_node->depth == 0)
                 parent_score = 0.0f;
 #ifndef DEBUG
@@ -304,7 +304,10 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
                     score = score * edata->feature_weights[feat_idx] - parent_score;
                     
                     if (dataset->compliance != nullptr){
-                        float compliance_score = crnt_node->getComplianceScore(dataset, split_candidates[j], metadata->min_data_in_leaf, parent_compliance_score);
+                        float compliance_score = crnt_node->getSplitComplianceScore(dataset, split_candidates[j], metadata->min_data_in_leaf);
+#ifdef DEBUG
+                    std::cout << " cand: " <<  j << " score: " <<  score << " parent score: " <<  parent_score << " compliance score * weight: " << metadata->compliance_weight * compliance_score << " info: " << split_candidates[j] << std::endl;
+#endif 
                         score -= metadata->compliance_weight * compliance_score;
                     }
 // #ifdef DEBUG
@@ -370,6 +373,9 @@ int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMe
     tree_nodes[0] = rootNode;
     float parent_score = 0.0f;
 
+    if (dataset->compliance != nullptr)
+        rootNode->compliance_score = scoreL2(rootNode->sample_indices, rootNode->n_samples, dataset->compliance, 1);
+
     int n_candidates = generator.n_candidates;
     splitCandidate *split_candidates = generator.split_candidates;
 #ifndef DEBUG
@@ -398,16 +404,20 @@ int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMe
             // Process the batch of candidates
             for (int j = start_idx; j < end_idx; ++j) {
                 float score = 0.0f;
+                float compliance_score = 0.0f;
                 for (int node_idx = 0; node_idx < (1 << depth); ++node_idx){
                     TreeNode *crnt_node = tree_nodes[node_idx];
                     score += crnt_node->getSplitScore(dataset, edata->feature_weights, metadata->split_score_func, split_candidates[j], metadata->min_data_in_leaf);
                     if (dataset->compliance != nullptr){
-                        float compliance_score = crnt_node->getComplianceScore(dataset, split_candidates[j], metadata->min_data_in_leaf, 0.0f);
-                        score -= metadata->compliance_weight * compliance_score;
+                        compliance_score += crnt_node->getSplitComplianceScore(dataset, split_candidates[j], metadata->min_data_in_leaf);
                     }
                 }
                 int feat_idx = (split_candidates[j].categorical_value == nullptr) ? split_candidates[j].feature_idx : split_candidates[j].feature_idx + metadata->n_num_features; 
                 score = score*edata->feature_weights[feat_idx] - parent_score;
+#ifdef DEBUG
+                std::cout << " cand: " <<  j << " score: " <<  score << " parent_score: " << parent_score <<  " compliance: " << metadata->compliance_weight * compliance_score <<  " info: " << split_candidates[j] << std::endl;
+#endif            
+                score -= metadata->compliance_weight * compliance_score;
 
 // #ifdef DEBUG
 //                 std::cout << " cand: " <<  j << " score: " <<  score << " parent_score: " << parent_score <<  " info: " << split_candidates[j] << std::endl;
@@ -431,7 +441,7 @@ int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMe
         }  
         if (best_score == -INFINITY)
             break; 
-        parent_score = best_score;
+        // parent_score = best_score;
         for (int node_idx = 0; node_idx < (1 << depth); ++node_idx){
             TreeNode *crnt_node = tree_nodes[node_idx];
             int status = crnt_node->splitNode(dataset->obs, dataset->categorical_obs, node_idx_cntr, split_candidates[chosen_idx]);
@@ -439,6 +449,10 @@ int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMe
                 std::cerr << "ERROR couldn't split best score" << std::endl;
                 break;
             }
+            // if (dataset->compliance != nullptr){
+            //     crnt_node->left_child->compliance_score = scoreL2(crnt_node->left_child->sample_indices, crnt_node->left_child->n_samples, dataset->compliance, 1);
+            //     crnt_node->right_child->compliance_score = scoreL2(crnt_node->right_child->sample_indices, crnt_node->right_child->n_samples, dataset->compliance, 1);
+            // }
             child_tree_nodes[node_idx*2] = crnt_node->left_child;
             child_tree_nodes[node_idx*2+ 1] = crnt_node->right_child;
         }

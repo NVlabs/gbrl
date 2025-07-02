@@ -45,12 +45,12 @@ struct splitDataGPU{
     int *tree_counters;
     float *best_score;
     int *best_idx;
+    float *compliance_mean;
     // cosine score
     float *left_dot;
     float *right_dot;
     float *oblivious_split_scores;
     size_t size;
-    float compliance_mean;
 };
 
 struct TreeNodeGPU {

@@ -31,3 +31,13 @@ void get_grid_dimensions(int n_elements, int& blocks, int& threads_per_block) {
     threads_per_block = 1 << static_cast<int>(ceilf(log2f(static_cast<float>(n_elements) / blocks)));
     threads_per_block = (threads_per_block > deviceProp.maxThreadsPerBlock) ? deviceProp.maxThreadsPerBlock : threads_per_block;
 }
+
+void get_tpb_dimensions(int n_elements, int blocks, int& threads_per_block) {
+    const int max_threads_per_block = THREADS_PER_BLOCK; // You can adjust this based on your GPU
+
+    cudaDeviceProp deviceProp;
+    cudaGetDeviceProperties(&deviceProp, 0);
+
+    threads_per_block = 1 << static_cast<int>(ceilf(log2f(static_cast<float>(n_elements) / blocks)));
+    threads_per_block = (threads_per_block > deviceProp.maxThreadsPerBlock) ? deviceProp.maxThreadsPerBlock : threads_per_block;
+}

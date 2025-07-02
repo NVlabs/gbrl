@@ -100,7 +100,6 @@ class GBTLearner(BaseLearner):
             num_features = get_tensor_info(features)
             cat_features = None
             grads = get_tensor_info(grads)
-            self._save_memory = None
         else:
             num_features, cat_features = preprocess_features(features)
             grads = np.ascontiguousarray(grads.reshape((len(grads), self.params['output_dim'])))
@@ -111,6 +110,7 @@ class GBTLearner(BaseLearner):
                 compliance = compliance.astype(numerical_dtype)
 
         self._cpp_model.step(num_features, cat_features, grads, compliance)
+        self._save_memory = None
         self.iteration = self._cpp_model.get_iteration()
         self.total_iterations += 1
 

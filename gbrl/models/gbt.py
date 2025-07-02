@@ -124,7 +124,7 @@ class GBTModel(BaseGBT):
         # GBRL only works with float32
         self.learner.set_bias(mean_arr)
 
-    def step(self,  X: Optional[NumericalData] = None,
+    def step(self, X: Optional[NumericalData] = None,
              grad: Optional[NumericalData] = None,
              max_grad_norm: Optional[float] = None,
              compliance: Optional[NumericalData] = None) -> None:

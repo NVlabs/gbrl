@@ -264,6 +264,9 @@ splitDataGPU* allocate_split_data(ensembleMetaData *metadata, const int n_candid
         data_alloc_size += sizeof(float) * n_candidates * 2;
     if (metadata->grow_policy == OBLIVIOUS)
         data_alloc_size += sizeof(float) * n_candidates * nodes_per_evaluation;
+    
+    // add data for compliance mean
+    data_alloc_size += sizeof(float);
 
     char *data_alloc;
     cudaError_t err = cudaMalloc((void**)&data_alloc, data_alloc_size);
@@ -280,7 +283,6 @@ splitDataGPU* allocate_split_data(ensembleMetaData *metadata, const int n_candid
         return nullptr;
     }
 
-    split_data->compliance_mean = 0.0f;
     cudaMemset(data_alloc, 0, data_alloc_size);
     size_t trace = 0;
     split_data->split_scores = (float *)(data_alloc + trace);
@@ -301,6 +303,8 @@ splitDataGPU* allocate_split_data(ensembleMetaData *metadata, const int n_candid
     trace += sizeof(float);
     split_data->best_idx = (int *)(data_alloc + trace);
     trace += sizeof(int);
+    split_data->compliance_mean = (float *)(data_alloc + trace);
+    trace += sizeof(float);
 
     split_data->left_dot = nullptr;
     split_data->right_dot = nullptr;

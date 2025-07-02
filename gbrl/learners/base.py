@@ -61,6 +61,8 @@ class BaseLearner(ABC):
                                                     'Quantile'),
                        'use_control_variates': params.get('control_variates',
                                                           False),
+                       'compliance_weight': params.get('compliance_weight',
+                                                         1.0),
                        'verbose': verbose, 'device': device, **tree_struct}
 
         self.iteration = 0

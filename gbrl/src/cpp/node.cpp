@@ -31,6 +31,7 @@ TreeNode::TreeNode(int *sample_indices, const int n_samples, const int n_num_fea
             this->split_conditions[d].categorical_value = nullptr;
         }
     }
+    this->compliance_score = 0.0f;
 }
 
 TreeNode::~TreeNode(){
@@ -179,7 +180,7 @@ float TreeNode::getSplitScore(dataSet *dataset, const float *feature_weights, sc
 }
 
 
-float TreeNode::getComplianceScore(dataSet *dataset, const splitCandidate &split_candidate, const int min_data_in_leaf, const float parent_g_score){
+float TreeNode::getSplitComplianceScore(dataSet *dataset, const splitCandidate &split_candidate, const int min_data_in_leaf){
     // make sure that we do not re-use the same split candidate along a path
     int left_count = 0, right_count = 0;
     int n_features = this->n_num_features + this->n_cat_features;
@@ -218,8 +219,8 @@ float TreeNode::getComplianceScore(dataSet *dataset, const splitCandidate &split
     float left_mean_norm = left_mean * left_mean;
     float right_mean_norm = right_mean * right_mean;
 
-    float g_score = left_count_f*left_mean_norm + right_count_f*right_mean_norm;
-    return g_score - parent_g_score;
+    float split_compliance_score = left_count_f*left_mean_norm + right_count_f*right_mean_norm;
+    return this->compliance_score - split_compliance_score; // act as penalty
 }
 
 float TreeNode::splitScoreCosine(const float *obs, const float *feature_weights, const float *grads, const splitCandidate &split_candidate, const int min_data_in_leaf){
@@ -386,7 +387,9 @@ float TreeNode::splitScoreL2(const float *obs, const float *feature_weights, con
         } else {
 
             #pragma omp simd
-            for (int d = 0; d < n_cols; ++d)
+            for (int d = 0; d < n_cols;
+                
+                ++d)
                 left_mean[d] += grads[grad_row + d];
             ++left_count;
         }

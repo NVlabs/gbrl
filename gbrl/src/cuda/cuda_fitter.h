@@ -36,20 +36,20 @@ __global__ void average_leaf_value_kernel(float* __restrict__ values, const int 
 #endif
 __global__ void split_score_cosine_cuda(const float* __restrict__ obs, const char* __restrict__ categorical_obs, const float* __restrict__ grads, const float* __restrict__ feature_weights, const TreeNodeGPU* __restrict__ node, const int* __restrict__ candidate_indices, const float* __restrict__ candidate_values, const char* __restrict__ candidate_categories, const bool* __restrict__ candidate_numeric, const int min_data_in_leaf, float* __restrict__ split_scores, const int global_n_samples, const int n_num_features);
 __global__ void split_score_l2_cuda(const float* __restrict__ obs, const char* __restrict__ categorical_obs, const float* __restrict__ grads, const float* __restrict__ feature_weights, const TreeNodeGPU* __restrict__ node, const int* __restrict__ candidate_indices, const float* __restrict__ candidate_values,  const char* __restrict__ candidate_categories, const bool* __restrict__ candidate_numeric, const int min_data_in_leaf, float* __restrict__ split_scores, const int global_n_samples, const int n_num_features);
-__global__ void update_best_candidate_cuda(float *split_scores, int n_candidates, int *best_idx, float *best_score, const TreeNodeGPU* __restrict__ node);
-__global__ void reduce_leaf_sum(const float *obs, const char *categorical_obs, const float *grads, float* __restrict__ values, const TreeNodeGPU *node, const int n_samples, const int global_idx, float *count_f);
+__global__ void update_best_candidate_cuda(float* __restrict__ split_scores, int n_candidates, int *best_idx, float *best_score, const TreeNodeGPU* __restrict__ node);
+__global__ void reduce_leaf_sum(const float* __restrict__ obs, const char* __restrict__ categorical_obs, const float* __restrict__ grads, float* __restrict__ values, const TreeNodeGPU* __restrict__ node, const int n_samples, const int global_idx, float* __restrict__ count_f);
 __global__ void partition_samples_kernel(const float* __restrict__ obs, const char* __restrict__ categorical_obs, TreeNodeGPU* __restrict__ parent_node, TreeNodeGPU* __restrict__ left_child, TreeNodeGPU* __restrict__ right_child, const int* __restrict__ candidate_indices, const float* __restrict__ candidate_values, const char* __restrict__ candidate_categories, const bool* __restrict__ candidate_numeric, const int* __restrict__ best_idx, int* __restrict__ tree_counters, const int global_n_samples);
-__global__ void node_l2_kernel(TreeNodeGPU *node, const float *mean);
-__global__ void node_cosine_kernel(TreeNodeGPU* node, const float *grads, float *mean);
-__global__ void compliance_l2_kernel(TreeNodeGPU *node, const float mean);
+__global__ void node_l2_kernel(TreeNodeGPU* __restrict__ node, const float* __restrict__ mean);
+__global__ void node_cosine_kernel(TreeNodeGPU* __restrict__ node, const float* __restrict__ grads, float* __restrict__ mean);
+__global__ void compliance_l2_kernel(TreeNodeGPU* __restrict__ node, const float* __restrict__ mean);
 __global__ void update_child_nodes_kernel(const TreeNodeGPU* __restrict__ parent_node, TreeNodeGPU* __restrict__ left_child, TreeNodeGPU* __restrict__ right_child, int* __restrict__ tree_counters, const int* __restrict__ candidate_indices, const float* __restrict__ candidate_values, const bool* __restrict__ candidate_numeric, const char* __restrict__ candidate_categories, const int* __restrict__ best_idx, const float* __restrict__ best_score);
-__global__ void column_sums_reduce(const float * __restrict__ in, float * __restrict__ out, size_t n_cols, size_t n_rows);
+__global__ void column_sums_reduce(const float* __restrict__ in, float* __restrict__ out, size_t n_cols, size_t n_rows);
 __global__ void node_column_mean_reduce(const float * __restrict__ in, float * __restrict__ out, size_t n_cols, const TreeNodeGPU* __restrict__ node);
 __global__ void copy_node_to_data(const TreeNodeGPU* __restrict__ node, int* __restrict__ depths, int* __restrict__ feature_indices, float* __restrict__ feature_values, float* __restrict__ edge_weights, bool* __restrict__ inequality_directions, bool* __restrict__ is_numerics, char * __restrict__  categorical_values, const int global_idx, const int leaf_idx, const int max_depth);
-__global__ void print_tree_node(const TreeNodeGPU *node);
-__global__ void print_tree_indices_kernel(int *tree_indices, int size);
-__global__ void print_vector_kernel(const float *vec, const int size);
-__device__ int strcmpCuda(const char *str_a, const char *str_b);
+__global__ void print_tree_node(const TreeNodeGPU* __restrict__ node);
+__global__ void print_tree_indices_kernel(const int* __restrict__ tree_indices, int size);
+__global__ void print_vector_kernel(const float* __restrict__ vec, const int size);
+__device__ int strcmpCuda(const char* __restrict__ str_a, const char* __restrict__ str_b);
 __global__ void print_candidate_scores(const int* __restrict__ candidate_indices, const float* __restrict__ candidate_values,  const char* __restrict__ candidate_categories, const bool* __restrict__ candidate_numeric, float* __restrict__ split_scores, const int n_candidates);
 
 __global__ void split_conditional_sum_kernel(const float* __restrict__ obs, const char* __restrict__ categorical_obs, const float* __restrict__ grads, const TreeNodeGPU* __restrict__ node, const int* __restrict__ candidate_indices, const float* __restrict__ candidate_values,  const char* __restrict__ candidate_categories, const bool* __restrict__ candidate_numeric, const int n_candidates, const int global_n_samples, float* __restrict__ left_sum, float* __restrict__ right_sum, float* __restrict__ left_count, float* __restrict__ right_count);
