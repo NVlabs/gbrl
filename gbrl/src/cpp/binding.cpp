@@ -639,4 +639,8 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         py::gil_scoped_release release; 
         self.plot_tree(tree_idx, filename); 
     }, "Plot specified tree index to png file"); 
+    gbrl.def("print_ensemble_metadata", [](GBRL &self) {
+        py::gil_scoped_release release; 
+        self.print_ensemble_metadata(); 
+    }, "Print ensemble metadata"); 
 }

@@ -938,12 +938,13 @@ int GBRL::loadFromFile(const std::string& filename){
 void GBRL::print_ensemble_metadata(){
     std::cout << "######## GBRL model ########" << std::endl;
     std::cout << "input_dim: " << this->metadata->input_dim;
-    std::cout << "output_dim: " << this->metadata->output_dim;
+    std::cout << " output_dim: " << this->metadata->output_dim;
     std::cout << " max_depth: " << this->metadata->max_depth << " min_data_in_leaf: " << this->metadata->min_data_in_leaf << std::endl;
     std::cout << "generator_type: " << generatorTypeToString(this->metadata->generator_type) << " n_bins: " << this->metadata->n_bins;
     std::cout << " cv_beta: " << this->metadata->cv_beta << " split_score_func: " << scoreFuncToString(this->metadata->split_score_func) << std::endl;
     std::cout << "grow_policy: " << growPolicyToString(this->metadata->grow_policy);
     std::cout << " verbose: " << this->metadata->verbose << " device: "<< deviceTypeToString(this->device);
+    std::cout << " compliance weight: " << this->metadata->compliance_weight;
     std::cout << " use_cv: " << this->metadata->use_cv << " batch_size: " << this->metadata->batch_size << std::endl;
     std::cout << "Loaded: " << this->metadata->n_leaves << " leaves from " << this->metadata->n_trees << " trees" <<  std::endl;
     std::cout << "Model has: " << this->opts.size() << " optimizers " <<  std::endl;

@@ -75,7 +75,7 @@ class SharedActorCriticLearner(GBTLearner):
         grads = concatenate_arrays(theta_grad, value_grad)
         obs, grads = ensure_same_type(obs, grads)
         if compliance is not None:
-            obs, grads = ensure_same_type(obs, compliance)
+            obs, compliance = ensure_same_type(obs, compliance)
         if isinstance(obs, th.Tensor):
             obs = obs.float()
             grads = grads.float()
