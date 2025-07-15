@@ -137,12 +137,6 @@ void evaluate_greedy_splits(dataSet *dataset, ensembleData *edata, const TreeNod
         cudaDeviceSynchronize();
         get_grid_dimensions(candidata->n_candidates, n_blocks, tpb);
         split_cosine_score_kernel<<<n_blocks, tpb>>>(node, edata->feature_weights, split_data->split_scores, candidata->candidate_indices, candidata->candidate_values, candidata->candidate_categories, candidata->candidate_numeric, candidata->n_candidates, split_data->left_sum, split_data->right_sum, split_data->left_count, split_data->right_count, split_data->left_dot, split_data->right_dot, metadata->min_data_in_leaf, metadata->n_num_features);
-        if (dataset->compliance != nullptr){
-            cudaDeviceSynchronize();
-            get_tpb_dimensions(candidata->n_candidates * parent_n_samples, candidata->n_candidates, tpb);
-            size_t shared_mem = sizeof(float)*2*(1 + 2)*tpb;
-            split_compliance_score_cosine_cuda<<<candidata->n_candidates, tpb, shared_mem>>>(dataset->obs, dataset->categorical_obs, dataset->compliance, node, candidata->candidate_indices, candidata->candidate_values, candidata->candidate_categories, candidata->candidate_numeric, metadata->min_data_in_leaf, split_data->split_scores, dataset->n_samples, metadata->n_num_features, metadata->compliance_weight);
-        }
      } else if (metadata->split_score_func == L2){
         cudaMemset(split_data->split_scores, 0, split_data->size);
         get_grid_dimensions(parent_n_samples*candidata->n_candidates, n_blocks, tpb);
@@ -150,14 +144,14 @@ void evaluate_greedy_splits(dataSet *dataset, ensembleData *edata, const TreeNod
         cudaDeviceSynchronize();
         get_grid_dimensions(candidata->n_candidates, n_blocks, tpb);
         split_l2_score_kernel<<<n_blocks, tpb>>>(node, edata->feature_weights, split_data->split_scores, candidata->candidate_indices, candidata->candidate_values, candidata->candidate_categories, candidata->candidate_numeric, candidata->n_candidates, split_data->left_sum, split_data->right_sum, split_data->left_count, split_data->right_count, metadata->min_data_in_leaf, metadata->n_num_features);
-        if (dataset->compliance != nullptr){
-            cudaDeviceSynchronize();
-            get_tpb_dimensions(candidata->n_candidates * parent_n_samples, candidata->n_candidates, tpb);
-            size_t shared_mem = sizeof(float)*2*(1 + 1)*tpb;
-            split_compliance_score_l2_cuda<<<candidata->n_candidates, tpb, shared_mem>>>(dataset->obs, dataset->categorical_obs, dataset->compliance, node, candidata->candidate_indices, candidata->candidate_values, candidata->candidate_categories, candidata->candidate_numeric, metadata->min_data_in_leaf, split_data->split_scores, dataset->n_samples, metadata->n_num_features, metadata->compliance_weight);
-        }
-    }
 
+    }
+    if (dataset->compliance != nullptr){
+        cudaDeviceSynchronize();
+        get_tpb_dimensions(candidata->n_candidates * parent_n_samples, candidata->n_candidates, tpb);
+        size_t shared_mem = sizeof(float)*2*(2 + 1)*tpb;
+        split_compliance_score_cuda<<<candidata->n_candidates, tpb, shared_mem>>>(dataset->obs, dataset->categorical_obs, dataset->compliance, node, candidata->candidate_indices, candidata->candidate_values, candidata->candidate_categories, candidata->candidate_numeric, metadata->min_data_in_leaf, split_data->split_scores, dataset->n_samples, metadata->n_num_features, metadata->compliance_weight);
+    }
     cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -178,23 +172,15 @@ void evaluate_oblivious_splits_cuda(dataSet *dataset, ensembleData *edata, TreeN
         if (metadata->split_score_func == Cosine){
             shared_mem = sizeof(float)*2*(metadata->output_dim + 2)*tpb;
             split_score_cosine_cuda<<<candidata->n_candidates, tpb, shared_mem>>>(dataset->obs, dataset->categorical_obs, dataset->build_grads, edata->feature_weights, nodes[i], candidata->candidate_indices, candidata->candidate_values, candidata->candidate_categories, candidata->candidate_numeric, metadata->min_data_in_leaf, split_data->oblivious_split_scores + candidata->n_candidates*i, dataset->n_samples, metadata->n_num_features);
-
-            if (dataset->compliance != nullptr){
-                cudaDeviceSynchronize();
-                shared_mem = sizeof(float)*2*(1 + 2)*tpb;
-                split_compliance_score_cosine_cuda<<<candidata->n_candidates, tpb, shared_mem>>>(dataset->obs, dataset->categorical_obs, dataset->compliance, nodes[i], candidata->candidate_indices, candidata->candidate_values, candidata->candidate_categories, candidata->candidate_numeric, metadata->min_data_in_leaf, split_data->oblivious_split_scores + candidata->n_candidates*i, dataset->n_samples, metadata->n_num_features, metadata->compliance_weight);
-                cudaDeviceSynchronize();
-            }
         } else if (metadata->split_score_func == L2){
             shared_mem = sizeof(float)*2*(metadata->output_dim + 1)*tpb;
             split_score_l2_cuda<<<candidata->n_candidates, tpb, shared_mem>>>(dataset->obs, dataset->categorical_obs, dataset->build_grads, edata->feature_weights, nodes[i], candidata->candidate_indices, candidata->candidate_values, candidata->candidate_categories, candidata->candidate_numeric, metadata->min_data_in_leaf, split_data->oblivious_split_scores + candidata->n_candidates*i, dataset->n_samples, metadata->n_num_features);
-
-            if (dataset->compliance != nullptr){
-                cudaDeviceSynchronize();
-                shared_mem = sizeof(float)*2*(1 + 1)*tpb;
-                split_compliance_score_l2_cuda<<<candidata->n_candidates, tpb, shared_mem>>>(dataset->obs, dataset->categorical_obs, dataset->compliance, nodes[i], candidata->candidate_indices, candidata->candidate_values, candidata->candidate_categories, candidata->candidate_numeric, metadata->min_data_in_leaf, split_data->oblivious_split_scores + candidata->n_candidates*i, dataset->n_samples, metadata->n_num_features, metadata->compliance_weight);
-                cudaDeviceSynchronize();
-            }
+        }
+        if (dataset->compliance != nullptr){
+            cudaDeviceSynchronize();
+            shared_mem = sizeof(float)*2*(2 + 1)*tpb;
+            split_compliance_score_cuda<<<candidata->n_candidates, tpb, shared_mem>>>(dataset->obs, dataset->categorical_obs, dataset->compliance, nodes[i], candidata->candidate_indices, candidata->candidate_values, candidata->candidate_categories, candidata->candidate_numeric, metadata->min_data_in_leaf, split_data->oblivious_split_scores + candidata->n_candidates*i, dataset->n_samples, metadata->n_num_features, metadata->compliance_weight);
+            cudaDeviceSynchronize();
         }
     }
     cudaDeviceSynchronize();
@@ -431,10 +417,10 @@ __global__ void split_score_l2_cuda(const float* __restrict__ obs, const char* _
     }  
 }
 
-__global__ void split_compliance_score_l2_cuda(const float* __restrict__ obs, const char* __restrict__ categorical_obs, const float* __restrict__ compliance, const TreeNodeGPU* __restrict__ node, const int* __restrict__ candidate_indices, const float* __restrict__ candidate_values,  const char* __restrict__ candidate_categories, const bool* __restrict__ candidate_numeric, const int min_data_in_leaf, float* __restrict__ split_scores, const int global_n_samples, const int n_num_features, const float compliance_weight){
+__global__ void split_compliance_score_cuda(const float* __restrict__ obs, const char* __restrict__ categorical_obs, const float* __restrict__ compliance, const TreeNodeGPU* __restrict__ node, const int* __restrict__ candidate_indices, const float* __restrict__ candidate_values,  const char* __restrict__ candidate_categories, const bool* __restrict__ candidate_numeric, const int min_data_in_leaf, float* __restrict__ split_scores, const int global_n_samples, const int n_num_features, const float compliance_weight){
     extern __shared__ float sdata[];
 
-    int n_samples = node->n_samples, n_cols = 1;
+    int n_samples = node->n_samples;
     int cand_idx = blockIdx.x;
 
     if (split_scores[cand_idx] == -CUDART_INF_F)
@@ -443,27 +429,36 @@ __global__ void split_compliance_score_l2_cuda(const float* __restrict__ obs, co
     int threads_per_block = blockDim.x;
     int thread_offset = 0;
     float *left_mean = &sdata[thread_offset];
-    thread_offset += threads_per_block * n_cols;
+    thread_offset += threads_per_block;
     float *l_count = &sdata[thread_offset];
     thread_offset += threads_per_block;
-    float* right_mean = &sdata[thread_offset]; // Assuming each part is n_cols floats long
-    thread_offset += threads_per_block * n_cols;
-    float* r_count = &sdata[thread_offset]; // Assuming each part is n_cols floats long
+    float* right_mean = &sdata[thread_offset];
+    thread_offset += threads_per_block;
+    float* r_count = &sdata[thread_offset];
+    thread_offset += threads_per_block;
+    float* left_sq_sum = &sdata[thread_offset]; 
+    thread_offset += threads_per_block;
+    float* right_sq_sum = &sdata[thread_offset]; 
 
     r_count[threadIdx.x] = 0.0f;
     l_count[threadIdx.x] = 0.0f;
     right_mean[threadIdx.x] = 0.0f;
     left_mean[threadIdx.x] = 0.0f;
+    left_sq_sum[threadIdx.x] = 0.0f;
+    right_sq_sum[threadIdx.x] = 0.0f;
     
     __syncthreads();
     // Accumulate per thread partial sum
     for(int i=threadIdx.x; i < n_samples; i += blockDim.x) {
         int sample_idx = __ldg(&node->sample_indices[i]); // Access the spec
+        float val = __ldg(&compliance[sample_idx]);
         if ((candidate_numeric[cand_idx] && __ldg(&obs[__ldg(&candidate_indices[cand_idx])*global_n_samples + sample_idx]) > __ldg(&candidate_values[cand_idx])) || (!candidate_numeric[cand_idx] && strcmpCuda(&categorical_obs[(sample_idx*node->n_cat_features + __ldg(&candidate_indices[cand_idx]))* MAX_CHAR_SIZE], candidate_categories + cand_idx * MAX_CHAR_SIZE) == 0)){
-            right_mean[threadIdx.x] += __ldg(&compliance[sample_idx]);
+            right_mean[threadIdx.x] += val;
+            right_sq_sum[threadIdx.x] += val * val;
             r_count[threadIdx.x] += 1;
         } else {
-            left_mean[threadIdx.x] += __ldg(&compliance[sample_idx]);
+            left_mean[threadIdx.x] += val;
+            left_sq_sum[threadIdx.x] += val * val;
             l_count[threadIdx.x] += 1;
         }
     }
@@ -474,6 +469,8 @@ __global__ void split_compliance_score_l2_cuda(const float* __restrict__ obs, co
         if(threadIdx.x < offset) {
             left_mean[threadIdx.x]  += left_mean[threadIdx.x + offset];
             right_mean[threadIdx.x] += right_mean[threadIdx.x + offset];
+            left_sq_sum[threadIdx.x]  += left_sq_sum[threadIdx.x + offset];
+            right_sq_sum[threadIdx.x] += right_sq_sum[threadIdx.x + offset];
             l_count[threadIdx.x]   += l_count[threadIdx.x + offset];
             r_count[threadIdx.x]   += r_count[threadIdx.x + offset];
         }
@@ -482,130 +479,30 @@ __global__ void split_compliance_score_l2_cuda(const float* __restrict__ obs, co
 
     // thread 0 writes the final result
     if (threadIdx.x == 0) {
-        float l_mean_norm = 0.0f, r_mean_norm = 0.0f;
         if (l_count[0] < static_cast<float>(min_data_in_leaf) || r_count[0] < static_cast<float>(min_data_in_leaf)){
             return;
         }  
 
         left_mean[0] = (l_count[0] > 0) ? left_mean[0] / l_count[0] : 0.0f;
-        l_mean_norm += left_mean[0] * left_mean[0];
+        left_sq_sum[0] = (l_count[0] > 0) ? left_sq_sum[0] / l_count[0] : 0.0f;
         right_mean[0] = (r_count[0] > 0) ? right_mean[0] / r_count[0] : 0.0f;
-        r_mean_norm += right_mean[0] * right_mean[0];
+        right_sq_sum[0] = (r_count[0] > 0) ? right_sq_sum[0] / r_count[0] : 0.0f;
 
-        float compliance_score =  node->compliance_score - (l_count[0]*l_mean_norm + r_count[0]*r_mean_norm);
+        float l_var = left_sq_sum[0] - left_mean[0] * left_mean[0];
+        float r_var = right_sq_sum[0] - right_mean[0] * right_mean[0];
+        float total = l_count[0] + r_count[0];
+
+        float compliance_score = (total > 0.0f) ? (l_count[0] * l_var + r_count[0] * r_var) / total : 0.0f;
+
 #ifdef DEBUG
-        printf("score: %f, compliance_score: %f, feature: %i, value: %f\n", __ldg(&split_scores[cand_idx]), compliance_score, __ldg(&candidate_indices[cand_idx]), __ldg(&candidate_values[cand_idx]));
+        if (candidate_numeric[cand_idx])
+            printf("score: %f, compliance_score: %f, split_score: %f, feature: %i, value: %f\n", __ldg(&split_scores[cand_idx]), compliance_score, split_scores[cand_idx], __ldg(&candidate_indices[cand_idx]), __ldg(&candidate_values[cand_idx]));
+        else 
+            printf("score: %f, compliance_score: %f, split_score: %f, feature: %i, value: %s, vars: [%f, %f], counts: [%f, %f], means: [%f, %f]\n", __ldg(&split_scores[cand_idx]), compliance_score, split_scores[cand_idx], __ldg(&candidate_indices[cand_idx]), &candidate_categories[cand_idx * MAX_CHAR_SIZE], l_var, r_var, l_count[0], r_count[0], left_mean[0], right_mean[0]);
 #endif
         split_scores[cand_idx] = split_scores[cand_idx] - compliance_weight * compliance_score;
     }  
 }
-
-
-
-__global__ void split_compliance_score_cosine_cuda(const float* __restrict__ obs, const char* __restrict__ categorical_obs, const float* __restrict__ compliance, const TreeNodeGPU* __restrict__ node, const int* __restrict__ candidate_indices, const float* __restrict__ candidate_values,  const char* __restrict__ candidate_categories, const bool* __restrict__ candidate_numeric, const int min_data_in_leaf, float* __restrict__ split_scores, const int global_n_samples, const int n_num_features, const float compliance_weight){
-    extern __shared__ float sdata[];
-    int n_samples = __ldg(&node->n_samples), n_cols = 1;
-    int cand_idx = blockIdx.x;
-    
-    if (split_scores[cand_idx] == -CUDART_INF_F)
-    return;
-
-    int thread_offset = 0;
-    float *left_mean = &sdata[0];
-    thread_offset += blockDim.x * n_cols;
-    float *l_count = &sdata[thread_offset];
-    thread_offset += blockDim.x;
-    float *l_dot_sum = &sdata[thread_offset];
-    thread_offset += blockDim.x;
-    float* right_mean = &sdata[thread_offset]; // Assuming each part is n_cols floats long
-    thread_offset += blockDim.x * n_cols;
-    float* r_count = &sdata[thread_offset]; // Assuming each part is n_cols floats long
-    thread_offset += blockDim.x;
-    float* r_dot_sum = &sdata[thread_offset]; // Assuming each part is n_cols floats long
-
-    r_count[threadIdx.x] = 0.0f;
-    l_count[threadIdx.x] = 0.0f;
-    r_dot_sum[threadIdx.x] = 0.0f;
-    l_dot_sum[threadIdx.x] = 0.0f;
-    right_mean[threadIdx.x] = 0.0f;
-    left_mean[threadIdx.x] = 0.0f;
-    
-    // Accumulate per thread partial sum
-    for(int i=threadIdx.x; i < n_samples; i += blockDim.x) {
-        int sample_idx = __ldg(&node->sample_indices[i]); // Access the spec
-        bool passed = candidate_numeric[cand_idx] && __ldg(&obs[sample_idx +  global_n_samples * __ldg(&candidate_indices[cand_idx])]) > __ldg(&candidate_values[cand_idx]);
-        passed = passed || (!candidate_numeric[cand_idx] && strcmpCuda(&categorical_obs[(sample_idx*node->n_cat_features + __ldg(&candidate_indices[cand_idx]))* MAX_CHAR_SIZE], candidate_categories + cand_idx * MAX_CHAR_SIZE) == 0);
-        if (passed){
-            right_mean[threadIdx.x] += __ldg(&compliance[sample_idx]);
-            r_count[threadIdx.x] += 1;
-        } 
-        else {
-            left_mean[threadIdx.x] += __ldg(&compliance[sample_idx]);
-            l_count[threadIdx.x] += 1;
-        }
-    }
-    __syncthreads();
-     // // tree reduction
-    for(int offset = blockDim.x / 2; offset > 0; offset >>= 1) {
-        if(threadIdx.x < offset) {
-            left_mean[threadIdx.x] += left_mean[threadIdx.x + offset];
-            right_mean[threadIdx.x] += right_mean[threadIdx.x + offset];
-            l_count[threadIdx.x] += l_count[threadIdx.x + offset];
-            r_count[threadIdx.x] += r_count[threadIdx.x + offset];
-            
-        }
-        __syncthreads();
-    }
-
-    if (l_count[0] < static_cast<float>(min_data_in_leaf) || r_count[0] < static_cast<float>(min_data_in_leaf)){
-        return;
-    } 
-
-    // Accumulate per thread partial sum
-    for(int i=threadIdx.x; i < n_samples; i += blockDim.x) {
-        int sample_idx = __ldg(&node->sample_indices[i]); // Access the spec
-        bool passed = candidate_numeric[cand_idx] && __ldg(&obs[sample_idx + global_n_samples * __ldg(&candidate_indices[cand_idx])]) > __ldg(&candidate_values[cand_idx]);
-        passed = passed || (!candidate_numeric[cand_idx] && strcmpCuda(&categorical_obs[(sample_idx*node->n_cat_features + __ldg(&candidate_indices[cand_idx]))* MAX_CHAR_SIZE], candidate_categories + cand_idx * MAX_CHAR_SIZE) == 0);
-        if (passed){
-            r_dot_sum[threadIdx.x] += __ldg(&compliance[sample_idx])*right_mean[0];
-        } else {
-            l_dot_sum[threadIdx.x] += __ldg(&compliance[sample_idx])*left_mean[0];;
-        }
-    }
-    __syncthreads();
-    
-     // tree reduction
-    for(int offset = blockDim.x / 2; offset > 0; offset >>= 1) {
-        if(threadIdx.x < offset) {
-            r_dot_sum[threadIdx.x] += r_dot_sum[threadIdx.x + offset];  
-            l_dot_sum[threadIdx.x] += l_dot_sum[threadIdx.x + offset];  
-        }
-        __syncthreads();
-    }
-
-    // thread 0 writes the final result
-    if (threadIdx.x == 0){
-        float cosine = 0.0f, l_mean_norm = 0.0f, r_mean_norm = 0.0f;
-        l_mean_norm += left_mean[0] * left_mean[0];
-        r_mean_norm += right_mean[0] * right_mean[0];
-        
-        l_mean_norm = (l_count[0] > 0.0f) ? l_mean_norm / (l_count[0]*l_count[0]) : 0.0f;
-        r_mean_norm = (r_count[0] > 0.0f) ? r_mean_norm / (r_count[0]*r_count[0]) : 0.0f;
-        l_dot_sum[0] = (l_count[0] > 0.0f) ? l_dot_sum[0] / l_count[0] : 0.0f;
-        r_dot_sum[0] = (r_count[0] > 0.0f) ? r_dot_sum[0] / r_count[0] : 0.0f;
-        float denominator = l_count[0]* l_mean_norm + r_count[0] * r_mean_norm;
-        if (denominator > 0.0f) {
-            cosine = (l_dot_sum[0] + r_dot_sum[0]) / sqrtf(denominator);
-        }
-
-        float compliance_score =  node->compliance_score - cosine;
-#ifdef DEBUG
-        printf("score: %f, compliance_score: %f, feature: %i, value: %f\n", __ldg(&split_scores[cand_idx]), compliance_score, __ldg(&candidate_indices[cand_idx]), __ldg(&candidate_values[cand_idx]));
-#endif
-        split_scores[cand_idx] = split_scores[cand_idx] - compliance_weight * compliance_score;
-    }  
-}
-
 
 __global__ void split_conditional_sum_kernel(const float* __restrict__ obs, const char* __restrict__ categorical_obs, const float* __restrict__ grads, const TreeNodeGPU* __restrict__ node, const int* __restrict__ candidate_indices, const float* __restrict__ candidate_values,  const char* __restrict__ candidate_categories, const bool* __restrict__ candidate_numeric, const int n_candidates, const int global_n_samples, float* __restrict__ left_sum, float* __restrict__ right_sum, float* __restrict__ left_count, float* __restrict__ right_count){
     // Accumulate per thread partial sum
@@ -835,7 +732,7 @@ __global__ void column_sums_reduce(const float * __restrict__ in, float * __rest
 // }
 
 
-__global__ void reduce_leaf_sum(const float* __restrict__ obs, const char* __restrict__ categorical_obs, const float* __restrict__ grads, float* __restrict__ values, const TreeNodeGPU* __restrict__ node, const int n_samples, const int global_idx, float* __restrict__ count_f){
+__global__ void reduce_leaf_sum(const float* __restrict__ obs, const char* __restrict__ categorical_obs, const float* __restrict__ grads, const float* __restrict__ compliance, float* __restrict__ values, const TreeNodeGPU* __restrict__ node, const int n_samples, const int global_idx, float* __restrict__ count_f, const float compliance_exp){
     extern __shared__ float sdata[];
 
     int thread_offset = 0;
@@ -863,7 +760,10 @@ __global__ void reduce_leaf_sum(const float* __restrict__ obs, const char* __res
                 break;
         }
         if (passed){
-            sums[threadIdx.x] += grads[sample_idx * node->output_dim + blockIdx.x];      
+            if (compliance == nullptr || compliance[sample_idx] == 0)
+                sums[threadIdx.x] += grads[sample_idx * node->output_dim + blockIdx.x];      
+            else
+                 sums[threadIdx.x] += grads[sample_idx * node->output_dim + blockIdx.x]  * powf(node->compliance_percent, compliance_exp);      
             sum_count[threadIdx.x] += 1;       
         }
     }
@@ -879,6 +779,8 @@ __global__ void reduce_leaf_sum(const float* __restrict__ obs, const char* __res
     }
     if (threadIdx.x == 0){
         values[global_idx + blockIdx.x] = sums[threadIdx.x];
+        // values[global_idx + blockIdx.x] = sums[threadIdx.x];
+        // printf("values[%d] = %f -> %f\n", global_idx + blockIdx.x, sums[threadIdx.x], sums[threadIdx.x] * node->compliance_percent);
         if (blockIdx.x == 0) 
             *count_f = sum_count[threadIdx.x]; 
     }
@@ -921,52 +823,6 @@ __global__ void node_l2_kernel(TreeNodeGPU* __restrict__ node, const float* __re
             mean_squared_norm += (mean[i]*mean[i]);
         node->score = (node->node_idx > 0) ? mean_squared_norm*static_cast<float>(node->n_samples) : 0.0f; 
     }
-}
-
-__global__ void compliance_l2_kernel(TreeNodeGPU* __restrict__ node, const float* __restrict__ mean){
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx == 0){
-        float mean_squared_norm = mean[0] * mean[0];
-        // node->compliance_score = (node->node_idx > 0) ? mean_squared_norm*static_cast<float>(node->n_samples) : 0.0f; 
-        node->compliance_score = mean_squared_norm*static_cast<float>(node->n_samples); 
-    }
-}
-
-
-__global__ void compliance_cosine_kernel(TreeNodeGPU* __restrict__ node, const float* __restrict__ compliance, float* __restrict__ mean){
-    extern __shared__ float sdata[];
-    int n_samples = node->n_samples;    
-    int thread_offset = 0;
-    float *dot_sum = &sdata[thread_offset];
-    dot_sum[threadIdx.x] = 0.0f;
-    __syncthreads();
-    // Accumulate per thread partial sum
-    for(int i=threadIdx.x; i < n_samples; i += blockDim.x) {
-        int sample_idx = node->sample_indices[i]; // Access the spec
-        dot_sum[threadIdx.x] += compliance[sample_idx]*mean[0];
-    }
-    __syncthreads();
-
-     // tree reduction
-    for(int offset = blockDim.x / 2; offset > 0; offset >>= 1) {
-        if(threadIdx.x < offset) {
-            dot_sum[threadIdx.x] += dot_sum[threadIdx.x + offset]; 
-        }
-        __syncthreads();
-    }
-
-    // thread 0 writes the final result
-    if (threadIdx.x == 0){
-        float cosine = 0.0f;
-        float mean_norm = 0.0f;
-        mean_norm += mean[0]*mean[0];
-
-        float denominator = static_cast<float>(n_samples) * mean_norm;
-        if (denominator > 0) {
-            cosine = dot_sum[0] / sqrtf(denominator);
-        }
-        node->compliance_score = cosine;
-    }  
 }
 
 __global__ void node_cosine_kernel(TreeNodeGPU* __restrict__ node, const float* __restrict__ grads, float* __restrict__ mean){
@@ -1026,7 +882,7 @@ TreeNodeGPU* allocate_root_tree_node(dataSet *dataset, ensembleMetaData *metadat
     tempNode.output_dim = metadata->output_dim;
     tempNode.node_idx = 0;
     tempNode.score = 0.0f;
-    tempNode.compliance_score = 0.0f;
+    tempNode.compliance_percent = 1.0f;
 
     tempNode.sample_indices = nullptr;
     tempNode.feature_indices = nullptr;
@@ -1064,7 +920,7 @@ void allocate_child_tree_node(TreeNodeGPU* host_parent, TreeNodeGPU** device_chi
     host_child.output_dim = host_parent->output_dim;
     host_child.node_idx = -1;
     host_child.score = 0.0f;
-    host_child.compliance_score = 0.0f;
+    host_child.compliance_percent = 1.0f;
     host_child.n_num_features = host_parent->n_num_features;
     host_child.n_cat_features = host_parent->n_cat_features;
     host_child.sample_indices = nullptr;
@@ -1123,7 +979,7 @@ void allocate_child_tree_node(TreeNodeGPU* host_parent, TreeNodeGPU** device_chi
     cudaMemcpy(*device_child, &host_child, sizeof(TreeNodeGPU), cudaMemcpyHostToDevice);
 }
 
-void allocate_child_tree_nodes(dataSet *dataset, TreeNodeGPU* parent_node, TreeNodeGPU* host_parent, TreeNodeGPU** left_child, TreeNodeGPU** right_child, candidatesData *candidata, splitDataGPU *split_data){
+void allocate_child_tree_nodes(dataSet *dataset, TreeNodeGPU* parent_node, TreeNodeGPU* host_parent, TreeNodeGPU** left_child, TreeNodeGPU** right_child, candidatesData *candidata, splitDataGPU *split_data, ensembleMetaData *metadata){
     int n_samples = host_parent->n_samples;
     int depth = host_parent->depth + 1;
     allocate_child_tree_node(host_parent, left_child);
@@ -1136,6 +992,14 @@ void allocate_child_tree_nodes(dataSet *dataset, TreeNodeGPU* parent_node, TreeN
     int n_threads = WARP_SIZE*((MAX_CHAR_SIZE + WARP_SIZE - 1) / WARP_SIZE);
     update_child_nodes_kernel<<<depth, n_threads>>>(parent_node, *left_child, *right_child, split_data->tree_counters, candidata->candidate_indices, candidata->candidate_values, candidata->candidate_numeric, candidata->candidate_categories, split_data->best_idx, split_data->best_score);
     cudaDeviceSynchronize();
+    if (dataset->compliance){
+        get_tpb_dimensions(n_samples, 1, threads_per_block);
+        size_t shared_mem_size = threads_per_block * sizeof(float);
+        get_node_compliance_percentage_kernel<<<1, threads_per_block, shared_mem_size>>>(*left_child, parent_node, dataset->compliance);
+        get_node_compliance_percentage_kernel<<<1, threads_per_block, shared_mem_size>>>(*right_child, parent_node, dataset->compliance);
+        cudaDeviceSynchronize();
+    }
+    
 }
 
 void add_leaf_node(const TreeNodeGPU *node, const int depth, ensembleMetaData *metadata, ensembleData *edata, dataSet *dataset){
@@ -1157,7 +1021,7 @@ void add_leaf_node(const TreeNodeGPU *node, const int depth, ensembleMetaData *m
         threads_per_block = THREADS_PER_BLOCK;
     }
     size_t shared_mem = sizeof(float)*2*threads_per_block;
-    reduce_leaf_sum<<<metadata->output_dim, threads_per_block, shared_mem>>>(dataset->obs, dataset->categorical_obs, dataset->grads, edata->values, node, dataset->n_samples, leaf_idx*metadata->output_dim, count_f);
+    reduce_leaf_sum<<<metadata->output_dim, threads_per_block, shared_mem>>>(dataset->obs, dataset->categorical_obs, dataset->grads, dataset->compliance, edata->values, node, dataset->n_samples, leaf_idx*metadata->output_dim, count_f, metadata->compliance_exp);
     cudaDeviceSynchronize();
     get_grid_dimensions(metadata->output_dim, n_blocks, threads_per_block);
     
@@ -1349,9 +1213,44 @@ __global__ void update_child_nodes_kernel(const TreeNodeGPU* __restrict__ parent
         right_child->node_idx = tree_counters[2] + 2;
         left_child->score = best_score[0];
         right_child->score = best_score[0];
+        left_child->compliance_percent = 1.0f;
+        right_child->compliance_percent = 1.0f;
         left_child->n_samples = tree_counters[0];
         right_child->n_samples = tree_counters[1];
         tree_counters[2] += 2;
+    }
+}
+
+
+__global__ void get_node_compliance_percentage_kernel(TreeNodeGPU* __restrict__ node, const TreeNodeGPU* __restrict__ parent_node, const float* __restrict__ compliance){
+    extern __shared__ float s_compliance_count[];
+    if (node->n_samples == 0)
+        return;
+
+    s_compliance_count[threadIdx.x] = 0.0f;
+    __syncthreads();
+
+    for (int idx = threadIdx.x; idx < node->n_samples; idx += blockDim.x) {
+        int sample_idx = node->sample_indices[idx];
+        if (compliance[sample_idx] == 0)
+            s_compliance_count[threadIdx.x] += 1;
+    }
+    __syncthreads();
+    // tree reduction
+    for(int offset = blockDim.x / 2; offset > 0; offset >>= 1) {
+        if(threadIdx.x < offset) {
+            s_compliance_count[threadIdx.x] += s_compliance_count[threadIdx.x + offset]; 
+        }
+        __syncthreads();
+    }
+
+    if (threadIdx.x == 0){
+        s_compliance_count[threadIdx.x] /= static_cast<float>(node->n_samples);
+        node->compliance_percent = s_compliance_count[threadIdx.x] * parent_node->compliance_percent;
+        // printf("Node %d compliance percent: %f, n_samples %d, n_compliant_samples %f, compliance exp:%f before compliance_exp: %f\n", node->node_idx, node->compliance_percent, node->n_samples, s_compliance_count[threadIdx.x]* static_cast<float>(node->n_samples), compliance_exp, s_compliance_count[threadIdx.x]);
+#ifdef DEBUG
+        printf("Node %d compliance percent: %f, n_samples %d, n_compliant_samples %f\n", node->node_idx, node->compliance_percent, node->n_samples, s_compliance_count[threadIdx.x]* static_cast<float>(node->n_samples));
+#endif
     }
 }
 
@@ -1385,7 +1284,7 @@ void fit_tree_oblivious_cuda(dataSet *dataset, ensembleData *edata, ensembleMeta
             TreeNodeGPU *left_child = nullptr, *right_child = nullptr;
             crnt_node = tree_nodes[node_idx];
             cudaMemcpy(&host_node, crnt_node, sizeof(TreeNodeGPU), cudaMemcpyDeviceToHost);
-            allocate_child_tree_nodes(dataset, crnt_node, &host_node, &left_child, &right_child, candidata, split_data);
+            allocate_child_tree_nodes(dataset, crnt_node, &host_node, &left_child, &right_child, candidata, split_data, metadata);
             child_tree_nodes[node_idx*2] = left_child;
             child_tree_nodes[node_idx*2+ 1] = right_child;
             free_tree_node(crnt_node);
@@ -1442,7 +1341,7 @@ void fit_tree_greedy_cuda(dataSet *dataset, ensembleData *edata, ensembleMetaDat
         if (host_status == 0){
             size_t shmsize;
             const dim3 n_threads_per_blockdim3(BLOCK_COLS, BLOCK_ROWS);
-            node_column_mean_reduce<<<(metadata->output_dim + BLOCK_COLS-1) /BLOCK_COLS, n_threads_per_blockdim3 >>>(dataset->build_grads, split_data->node_mean, metadata->output_dim, crnt_node);
+            node_column_mean_reduce<<<(metadata->output_dim + BLOCK_COLS - 1) / BLOCK_COLS, n_threads_per_blockdim3 >>>(dataset->build_grads, split_data->node_mean, metadata->output_dim, crnt_node);
             cudaDeviceSynchronize();
             if (metadata->split_score_func == Cosine){
                 shmsize = sizeof(float) * THREADS_PER_BLOCK;
@@ -1452,22 +1351,7 @@ void fit_tree_greedy_cuda(dataSet *dataset, ensembleData *edata, ensembleMetaDat
             } else{
                 std::cerr << "error invalid split score func." << std::endl;
                 continue;
-            }
-            if (dataset->compliance != nullptr){
-
-                node_column_mean_reduce<<<(1 + BLOCK_COLS-1) /BLOCK_COLS, n_threads_per_blockdim3 >>>(dataset->compliance, split_data->compliance_mean, 1, crnt_node);
-                cudaDeviceSynchronize();
-                if (metadata->split_score_func == Cosine){
-                    shmsize = sizeof(float) * THREADS_PER_BLOCK;
-                    compliance_cosine_kernel<<<1, THREADS_PER_BLOCK, shmsize>>>(crnt_node, dataset->compliance, split_data->compliance_mean);
-                } else if (metadata->split_score_func == L2){
-                    compliance_l2_kernel<<<1, WARP_SIZE>>>(crnt_node, split_data->compliance_mean);
-                } else{
-                    std::cerr << "error invalid split score func." << std::endl;
-                    continue;
-                }
-                
-            }
+            }   
 
             cudaDeviceSynchronize();
             evaluate_greedy_splits(dataset, edata, crnt_node, candidata, metadata, split_data, threads_per_block, host_node.n_samples);
@@ -1476,7 +1360,7 @@ void fit_tree_greedy_cuda(dataSet *dataset, ensembleData *edata, ensembleMetaDat
 
         if (host_score >= 0 && host_status == 0){   
             TreeNodeGPU *left_child = nullptr, *right_child = nullptr;
-            allocate_child_tree_nodes(dataset, crnt_node, &host_node, &left_child, &right_child, candidata, split_data);
+            allocate_child_tree_nodes(dataset, crnt_node, &host_node, &left_child, &right_child, candidata, split_data, metadata);
             tree_nodes[crnt_node_ptr_idx] = right_child;
             crnt_node_ptr_idx++;
             tree_nodes[crnt_node_ptr_idx] = left_child;

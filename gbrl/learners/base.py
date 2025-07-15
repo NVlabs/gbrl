@@ -63,6 +63,8 @@ class BaseLearner(ABC):
                                                           False),
                        'compliance_weight': params.get('compliance_weight',
                                                          1.0),
+                       'compliance_exp': params.get('compliance_exp',
+                                                         0.0),
                        'verbose': verbose, 'device': device, **tree_struct}
 
         self.iteration = 0

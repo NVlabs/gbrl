@@ -126,12 +126,14 @@ class MultiGBTLearner(BaseLearner):
         if compliance is not None:
             features, compliance = ensure_same_type(features, compliance)
 
-            if isinstance(features, th.Tensor):
+            if isinstance(features, th.Tensor) and len(np.unique(compliance)) > 1:
                 compliance = compliance.float()
                 compliance = get_tensor_info(compliance)
-            else:
+            elif len(np.unique(compliance)) > 1:
                 compliance = np.ascontiguousarray(compliance.reshape((len(compliance), 1)))
                 compliance = compliance.astype(numerical_dtype)
+            else:
+                compliance = None
         
         if model_idx is not None:
             num_features, cat_features, grads = process_data(features, grads,

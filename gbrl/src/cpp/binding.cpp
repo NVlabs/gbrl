@@ -227,7 +227,7 @@ py::list getOptimizerConfigs(const std::vector<Optimizer*>& opts) {
 
 PYBIND11_MODULE(gbrl_cpp, m) {
     py::class_<GBRL> gbrl(m, "GBRL");
-    gbrl.def(py::init<int, int, int, int, int, int, float, std::string, std::string, bool, int, std::string, float, int, std::string>(),
+    gbrl.def(py::init<int, int, int, int, int, int, float, std::string, std::string, bool, int, std::string, float, float, int, std::string>(),
          py::arg("input_dim")=1, 
          py::arg("output_dim")=1, 
          py::arg("max_depth")=4, 
@@ -241,6 +241,7 @@ PYBIND11_MODULE(gbrl_cpp, m) {
          py::arg("batch_size")=5000, 
          py::arg("grow_policy")="greedy", 
          py::arg("compliance_weight")=1.0,
+         py::arg("compliance_exp")=0.0,
          py::arg("verbose")=0,
          py::arg("device")="cpu",
          "Constructor of the GBRL class");

@@ -27,10 +27,10 @@ class GBRL {
     public:
         GBRL(int input_dim, int output_dim, int max_depth, int min_data_in_leaf, 
              int n_bins, int par_th, float cv_beta, scoreFunc split_score_func, generatorType generator_type, bool use_control_variates, 
-             int batch_size, growPolicy grow_policy, float compliance_weight, int verbose, deviceType _device);
+             int batch_size, growPolicy grow_policy, float compliance_weight, float compliance_exp, int verbose, deviceType _device);
         GBRL(int input_dim, int output_dim, int max_depth, int min_data_in_leaf, 
              int n_bins, int par_th, float cv_beta, std::string split_score_func, std::string generator_type, bool use_control_variates, 
-             int batch_size, std::string grow_policy, float compliance_weight, int verbose, std::string _device);
+             int batch_size, std::string grow_policy, float compliance_weight, float compliance_exp, int verbose, std::string _device);
         GBRL(const std::string& filename);
         GBRL(GBRL& other);
         ~GBRL();

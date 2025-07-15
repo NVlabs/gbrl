@@ -303,8 +303,6 @@ splitDataGPU* allocate_split_data(ensembleMetaData *metadata, const int n_candid
     trace += sizeof(float);
     split_data->best_idx = (int *)(data_alloc + trace);
     trace += sizeof(int);
-    split_data->compliance_mean = (float *)(data_alloc + trace);
-    trace += sizeof(float);
 
     split_data->left_dot = nullptr;
     split_data->right_dot = nullptr;

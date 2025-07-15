@@ -45,7 +45,6 @@ struct splitDataGPU{
     int *tree_counters;
     float *best_score;
     int *best_idx;
-    float *compliance_mean;
     // cosine score
     float *left_dot;
     float *right_dot;
@@ -54,14 +53,14 @@ struct splitDataGPU{
 };
 
 struct TreeNodeGPU {
-    int n_samples; 
+    int n_samples;
     int depth;
     int n_num_features;
     int n_cat_features;
     int output_dim;
     int node_idx;
     float score;
-    float compliance_score;
+    float compliance_percent;
     int *sample_indices;
     int* feature_indices;
     float* feature_values;

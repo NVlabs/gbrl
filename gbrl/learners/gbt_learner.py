@@ -90,12 +90,13 @@ class GBTLearner(BaseLearner):
             features = features.float()
             grads = grads.float()
 
-            if compliance is not None:
+            if compliance is not None and len(compliance.unique()) > 1:
                 compliance = compliance.float()
                 self._save_memory = (features, grads, compliance)
                 compliance = get_tensor_info(compliance)
             else:
                 self._save_memory = (features, grads)
+                compliance = None
 
             num_features = get_tensor_info(features)
             cat_features = None
@@ -105,9 +106,11 @@ class GBTLearner(BaseLearner):
             grads = np.ascontiguousarray(grads.reshape((len(grads), self.params['output_dim'])))
             grads = grads.astype(numerical_dtype)
 
-            if compliance is not None:
+            if compliance is not None and len(np.unique(compliance)) > 1:
                 compliance = np.ascontiguousarray(compliance.reshape((len(compliance), 1)))
                 compliance = compliance.astype(numerical_dtype)
+            else:
+                compliance = None
 
         self._cpp_model.step(num_features, cat_features, grads, compliance)
         self._save_memory = None

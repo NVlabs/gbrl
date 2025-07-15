@@ -18,14 +18,16 @@ class Fitter {
     public:
         static void step_cpu(dataSet *dataset, ensembleData *edata, ensembleMetaData *metadata);
         static float fit_cpu(dataSet *dataset, const float *targets, ensembleData *edata, ensembleMetaData *metadata, const int iterations, lossType loss_type, std::vector<Optimizer*> opts);
-        static int fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaData *metadata, const SplitCandidateGenerator &generator);
-        static int fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMetaData *metadata, const SplitCandidateGenerator &generator);
-        static void fit_leaves(dataSet *dataset, ensembleData *edata, ensembleMetaData *metadata, const int added_leaves);
+        static int fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaData *metadata, const SplitCandidateGenerator &generator, float *leaf_compliance);
+        static int fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMetaData *metadata, const SplitCandidateGenerator &generato, float *leaf_compliance);
+        static void fit_leaves(dataSet *dataset, ensembleData *edata, ensembleMetaData *metadata, const int added_leaves, const float *leaf_compliance);
         static void update_ensemble_per_leaf(ensembleData *edata, ensembleMetaData *metadata, const TreeNode* node);
         static void update_ensemble_per_tree(ensembleData *edata, ensembleMetaData *metadata, std::vector<TreeNode*> nodes, const int n_nodes);
-        static void calc_leaf_value(dataSet *data, ensembleData *edata, ensembleMetaData *metadata, const int leaf_idx, const int tree_idx);
+        static void calc_leaf_value(dataSet *data, ensembleData *edata, ensembleMetaData *metadata, const int leaf_idx, const int tree_idx, const float *leaf_compliance, const int rel_leaf_idx);
         
         static void control_variates(dataSet *dataset, ensembleData *edata, ensembleMetaData *metadata);
+
+        float *leaf_compliance = nullptr;
 };
 
 #endif

@@ -74,6 +74,7 @@ class SharedActorCriticLearner(GBTLearner):
         """
         grads = concatenate_arrays(theta_grad, value_grad)
         obs, grads = ensure_same_type(obs, grads)
+
         if compliance is not None:
             obs, compliance = ensure_same_type(obs, compliance)
         if isinstance(obs, th.Tensor):
@@ -83,12 +84,13 @@ class SharedActorCriticLearner(GBTLearner):
             grads = get_tensor_info(grads)
             # store data so that data isn't garbage collected
             # while GBRL uses it
-            if compliance is not None:
+            if compliance is not None and len(compliance.unique()) > 1:
                 compliance = compliance.float()
                 compliance = get_tensor_info(compliance)
                 self._save_memory = (obs, grads, compliance)
             else:
                 self._save_memory = (obs, grads)
+                compliance = None
 
             self._cpp_model.step(obs, None, grads, compliance)
             self._save_memory = None
@@ -98,9 +100,15 @@ class SharedActorCriticLearner(GBTLearner):
             input_dim = 0 if num_obs is None else num_obs.shape[1]
             input_dim += 0 if cat_obs is None else cat_obs.shape[1]
 
-            if compliance is not None:
+            if compliance is not None and len(np.unique(compliance)) > 1:
                 compliance = np.ascontiguousarray(compliance).astype(numerical_dtype)
+            else:
+                compliance = None
 
+            # if compliance is not None:
+            #     # print(compliance, grads)
+            #     grads[compliance != 0] = 0
+            #     # print(grads)
             self._cpp_model.step(num_obs, cat_obs, grads, compliance)
 
         self.iteration = self._cpp_model.get_iteration()
@@ -282,26 +290,30 @@ class SeparateActorCriticLearner(MultiGBTLearner):
         super().step(obs, [theta_grad, value_grad], model_idx=model_idx, compliance=compliance)
 
     def step_actor(self, obs: NumericalData,
-                   theta_grad: NumericalData) -> None:
+                   theta_grad: NumericalData,
+                   compliance: Optional[NumericalData] = None,) -> None:
         """
         Performs a gradient update step for the policy (actor) model.
 
         Args:
             obs (NumericalData): Input observations.
             theta_grad (NumericalData): Gradient update for the policy (actor).
+            compliance (Optional[NumericalData]): guidelines compliance vector.
         """
-        super().step(obs, theta_grad, model_idx=0)
+        super().step(obs, theta_grad, model_idx=0, compliance=compliance)
 
     def step_critic(self, obs: NumericalData,
-                    value_grad: NumericalData) -> None:
+                    value_grad: NumericalData,
+                    compliance: Optional[NumericalData] = None) -> None:
         """
         Performs a gradient update step for the value function (critic) model.
 
         Args:
             obs (NumericalData): Input observations.
             value_grad (NumericalData): Gradient update for the value function (critic).
+            compliance (Optional[NumericalData]): guidelines compliance vector.
         """
-        super().step(obs, value_grad, model_idx=1)
+        super().step(obs, value_grad, model_idx=1, compliance=compliance)
 
     def distil(self, obs: NumericalData,
                policy_targets: np.ndarray, value_targets: np.ndarray,
