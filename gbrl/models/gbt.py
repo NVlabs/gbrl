@@ -127,7 +127,9 @@ class GBTModel(BaseGBT):
     def step(self, X: Optional[NumericalData] = None,
              grad: Optional[NumericalData] = None,
              max_grad_norm: Optional[float] = None,
-             compliance: Optional[NumericalData] = None) -> None:
+             compliance: Optional[NumericalData] = None,
+             user_actions: Optional[NumericalData] = None,
+             ) -> None:
         """
         Perform a boosting step (fits a single tree on the gradients)
 
@@ -136,6 +138,8 @@ class GBTModel(BaseGBT):
             max_grad_norm (float, optional): perform gradient clipping by norm. Defaults to None.
             grad (Optional[NumericalData], optional): manually calculated gradients. Defaults to None.
             compliance (Optional[NumericalData]): guidelines compliance vector.
+            user_actions (Optional[NumericalData]): guidelines user suggested action vector.
+
         """
         if X is None:
             assert self.input is not None, ("Cannot update trees without input."
@@ -146,7 +150,7 @@ class GBTModel(BaseGBT):
 
         grad = clip_grad_norm(grad, max_grad_norm)
         validate_array(grad)
-        self.learner.step(X, grad, compliance)
+        self.learner.step(X, grad, compliance, user_actions)
         self.grad = grad
         self.input = None
 

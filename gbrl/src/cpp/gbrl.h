@@ -44,7 +44,7 @@ class GBRL {
         int loadFromFile(const std::string& filename);
         void ensemble_check();
 
-        void step(const float *obs, const char *categorical_obs, float *grads, const float *compliance, const int n_samples, const int n_num_features, const int n_cat_features, deviceType _device);
+        void step(const float *obs, const char *categorical_obs, float *grads, const float *compliance, const float *user_actions, const int n_samples, const int n_num_features, const int n_cat_features, deviceType _device);
 #ifdef USE_CUDA
         void _step_gpu(dataSet *dataset);
         float _fit_gpu(dataSet *dataset, float *targets, const int n_iterations);

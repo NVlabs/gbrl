@@ -93,7 +93,9 @@ class MultiGBTLearner(BaseLearner):
         self.iteration = [0] * self.n_learners
 
     def step(self, features: Union[NumericalData, Tuple[NumericalData, ...]],
-             grads: Union[List[NumericalData], NumericalData], compliance: Optional[NumericalData] = None,
+             grads: Union[List[NumericalData], NumericalData],
+             compliance: Optional[NumericalData] = None,
+             user_actions: Optional[NumericalData] = None,
              model_idx: Optional[int] = None,
              ) -> None:
         """
@@ -103,12 +105,13 @@ class MultiGBTLearner(BaseLearner):
             features (Union[np.ndarray, th.Tensor, Tuple]): Input features.
             grads (Union[List[NumericalData], NumericalData]): Gradients.
             compliance (Optional[NumericalData]): guidelines compliance vector.
+            user_actions (Optional[NumericalData]): guidelines user suggested action vector.
             model_idx (int, optional): The index of the model.
         """
         assert model_idx is not None or (isinstance(grads, list) and
                                          len(grads) == self.n_learners)
 
-        def process_data(features, grads, compliance, output_dim):
+        def process_data(features, grads, output_dim):
             """Helper function to ensure consistent feature and gradient processing."""
             features, grads = ensure_same_type(features, grads)
             if isinstance(features, th.Tensor):
@@ -134,19 +137,32 @@ class MultiGBTLearner(BaseLearner):
                 compliance = compliance.astype(numerical_dtype)
             else:
                 compliance = None
+
+        if user_actions is not None:
+            features, user_actions = ensure_same_type(features, user_actions)
+            user_actions = user_actions.reshape((len(features), self.output_dim))
+
+            if isinstance(features, th.Tensor) and len(np.unique(user_actions)) > 1:
+                user_actions = user_actions.float()
+                user_actions = get_tensor_info(user_actions)
+            elif len(np.unique(user_actions)) > 1:
+                user_actions = np.ascontiguousarray(user_actions)
+                user_actions = user_actions.astype(numerical_dtype)
+            else:
+                user_actions = None
         
         if model_idx is not None:
             num_features, cat_features, grads = process_data(features, grads,
-                                                             compliance,
                                                              output_dim if not
                                                              isinstance(output_dim,
                                                                         list) else output_dim[model_idx])
             if isinstance(num_features, th.Tensor):
+                self._save_memory = [num_features, grads]
                 if compliance is not None:
-                    self._save_memory = (num_features, grads, compliance)
-                else:
-                    self._save_memory = (num_features, grads)
-            self._cpp_models[model_idx].step(num_features, cat_features, grads, compliance)
+                    self._save_memory.append(compliance)
+                if user_actions is not None:
+                    self._save_memory.append(user_actions)
+            self._cpp_models[model_idx].step(num_features, cat_features, grads, compliance, user_actions)
 
             if isinstance(num_features, th.Tensor):
                 self._save_memory = None
@@ -155,13 +171,12 @@ class MultiGBTLearner(BaseLearner):
             assert isinstance(grads, list) and len(grads) == self.n_learners
             for i in range(self.n_learners):
                 num_features, cat_features, grads[i] = process_data(features, grads[i],
-                                                                    compliance,
                                                                     output_dim if not
                                                                     isinstance(output_dim,
                                                                                list) else output_dim[i])
                 if isinstance(num_features, th.Tensor):
                     self._save_memory = (num_features, grads, compliance)
-                self._cpp_models[i].step(num_features, cat_features, grads[i], compliance)
+                self._cpp_models[i].step(num_features, cat_features, grads[i], compliance, user_actions)
                 if isinstance(num_features, th.Tensor):
                     self._save_memory = None
                 self.iteration[i] = self._cpp_models[i].get_iteration()

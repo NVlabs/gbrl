@@ -73,7 +73,9 @@ class GBTLearner(BaseLearner):
             print(f"Caught an exception in GBRL: {e}")
 
     def step(self, features: Union[np.ndarray, th.Tensor, Tuple], grads: NumericalData,
-             compliance: Optional[NumericalData] = None) -> None:
+             compliance: Optional[NumericalData] = None,
+             user_actions: Optional[NumericalData] = None,
+             ) -> None:
         """
         Performs a single gradient update step (e.g, adding a single decision tree).
 
@@ -81,22 +83,33 @@ class GBTLearner(BaseLearner):
             features (Union[np.ndarray, th.Tensor, Tuple]): Input features.
             grads (NumericalData): Gradients.
             compliance (Optional[NumericalData]): guidelines compliance vector.
+            user_actions (Optional[NumericalData]): guidelines user suggested actions vector.
         """
         features, grads = ensure_same_type(features, grads)
         if compliance is not None:
             features, compliance = ensure_same_type(features, compliance)
+        if user_actions is not None:
+            features, user_actions = ensure_same_type(features, user_actions)
+            user_actions = user_actions.reshape((len(features), self.output_dim))
 
         if isinstance(features, th.Tensor):
             features = features.float()
             grads = grads.float()
+            self._save_memory = [features, grads]
 
             if compliance is not None and len(compliance.unique()) > 1:
                 compliance = compliance.float()
-                self._save_memory = (features, grads, compliance)
+                self._save_memory.append(compliance)
                 compliance = get_tensor_info(compliance)
             else:
-                self._save_memory = (features, grads)
                 compliance = None
+
+            if user_actions is not None and len(user_actions.unique()) > 1:
+                user_actions = user_actions.float()
+                user_actions = get_tensor_info(user_actions)
+                self._save_memory.append(user_actions)
+            else:
+                user_actions = None
 
             num_features = get_tensor_info(features)
             cat_features = None
@@ -112,7 +125,13 @@ class GBTLearner(BaseLearner):
             else:
                 compliance = None
 
-        self._cpp_model.step(num_features, cat_features, grads, compliance)
+            if user_actions is not None and len(np.unique(user_actions)) > 1:
+                user_actions = np.ascontiguousarray(user_actions.reshape((len(user_actions), 1)))
+                user_actions = user_actions.astype(numerical_dtype)
+            else:
+                user_actions = None
+
+        self._cpp_model.step(num_features, cat_features, grads, compliance, user_actions)
         self._save_memory = None
         self.iteration = self._cpp_model.get_iteration()
         self.total_iterations += 1

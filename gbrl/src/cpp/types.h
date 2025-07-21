@@ -135,6 +135,7 @@ struct dataSet {
     float *grads;
     const float *build_grads;
     const float *compliance;
+    const float *user_actions;
     int n_samples;
     deviceType device;
 };

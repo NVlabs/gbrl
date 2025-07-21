@@ -256,13 +256,14 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         self.to_device(stringTodeviceType(str_device)); 
     },  py::arg("device"),
     "Set GBRL device ['cpu', 'cuda']");
-    gbrl.def("step", [](GBRL &self, py::object &obs, py::object &categorical_obs, py::object &grads, py::object &compliance) {
+    gbrl.def("step", [](GBRL &self, py::object &obs, py::object &categorical_obs, py::object &grads, py::object &compliance, py::object &user_actions) {
         const float* obs_ptr = nullptr;
         const char* cat_obs_ptr= nullptr;
         float* grads_ptr = nullptr;
         const float* compliance_ptr = nullptr;
-        std::vector<size_t> obs_shape, cat_obs_shape, grads_shape, compliance_shape;
-        std::string obs_device, cat_obs_device, grads_device, compliance_device;
+        const float* user_actions_ptr = nullptr;
+        std::vector<size_t> obs_shape, cat_obs_shape, grads_shape, compliance_shape, user_actions_shape;
+        std::string obs_device, cat_obs_device, grads_device, compliance_device, user_actions_device;
         int n_samples, n_num_features = 0, n_cat_features = 0;
         handle_input_info<float>(grads, grads_ptr, grads_shape, grads_device, "grads", false, "step");
         if (grads_shape.size() == 1){
@@ -331,12 +332,30 @@ PYBIND11_MODULE(gbrl_cpp, m) {
             }
         }
 
+        handle_input_info<const float>(user_actions, user_actions_ptr, user_actions_shape, user_actions_device, "user_actions", true, "step");
+        if (user_actions_ptr != nullptr){
+            int n_user_samples = 0;
+            n_user_samples = static_cast<int>(user_actions_shape[0]);
+
+            if (n_user_samples != n_samples){
+                std::stringstream ss;
+                ss << "Number of user actions samples " << n_user_samples << " != number of gradient samples " << n_samples;
+                throw std::runtime_error(ss.str());
+            }
+            if (user_actions_device != grads_device){
+                std::stringstream ss;
+                ss << "user_actions device: " << user_actions_device << " != Gradient device " << grads_device;
+                throw std::runtime_error(ss.str());
+            }
+        }
+
         py::gil_scoped_release release; 
-        self.step(obs_ptr, cat_obs_ptr, grads_ptr, compliance_ptr, n_samples, n_num_features, n_cat_features, stringTodeviceType(grads_device)); 
+        self.step(obs_ptr, cat_obs_ptr, grads_ptr, compliance_ptr, user_actions_ptr, n_samples, n_num_features, n_cat_features, stringTodeviceType(grads_device)); 
     },  py::arg("obs"),
         py::arg("categorical_obs"),
         py::arg("grads"),
-        py::arg("compliance"),
+        py::arg("compliance")=py::none(),
+        py::arg("user_actions")=py::none(),
     "Fit a decision tree with the given observations and gradients");
     gbrl.def("fit", [](GBRL &self, py::object &obs, py::object &categorical_obs, py::array_t<float> &targets, int iterations, bool shuffle, std::string loss_type) -> float {
         if (!targets.attr("flags").attr("c_contiguous").cast<bool>()) {

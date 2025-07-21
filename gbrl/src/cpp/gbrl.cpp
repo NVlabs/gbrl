@@ -281,6 +281,7 @@ float* GBRL::predict(const float *obs, const char *categorical_obs, const int n_
         nullptr,           // grads (not used in predict)
         nullptr,           // build_grads (not used in predict)
         nullptr,           // compliance (not used in predict)
+        nullptr,           // user_actions (not used in predict)
         n_samples,         // number of samples
         _device           // device type
     };
@@ -442,6 +443,7 @@ void GBRL::_step_gpu(dataSet *dataset){
     size_t cand_cat_size =  sizeof(char)*n_bins*this->metadata->input_dim*MAX_CHAR_SIZE;
     size_t cand_numerical_size =  sizeof(bool)*n_bins*this->metadata->input_dim;
     size_t compliance_size = sizeof(float)*n_samples;
+    size_t user_actions_size = sizeof(float)*n_samples * metadata->output_dim;
 
     size_t alloc_size = obs_size + grads_size + cat_obs_size + grads_norm_size + cand_indices_size + cand_float_size + cand_cat_size + cand_numerical_size;
     if (dataset->device == cpu){
@@ -449,6 +451,8 @@ void GBRL::_step_gpu(dataSet *dataset){
         alloc_size += grads_size;
         if (dataset->compliance != nullptr)
             alloc_size += compliance_size;
+        if (dataset->user_actions != nullptr)
+            alloc_size += user_actions_size;
     }
     char *device_memory_block; 
 
@@ -473,6 +477,7 @@ void GBRL::_step_gpu(dataSet *dataset){
     float *gpu_obs;
     float *gpu_grads;
     float *gpu_compliance = nullptr;
+    float *gpu_user_actions = nullptr;
     if (dataset->device == cpu){
         gpu_obs = (float*)(device_memory_block + trace);
         trace += obs_size;
@@ -486,11 +491,17 @@ void GBRL::_step_gpu(dataSet *dataset){
             trace += compliance_size;
             cudaMemcpy(gpu_compliance, dataset->compliance, compliance_size, cudaMemcpyHostToDevice);
         }
+        if (dataset->user_actions != nullptr){
+            gpu_user_actions = (float*)(device_memory_block + trace);
+            trace += user_actions_size;
+            cudaMemcpy(gpu_user_actions, dataset->user_actions, user_actions_size, cudaMemcpyHostToDevice);
+        }
     } else {
         gpu_obs = const_cast<float*>(dataset->obs);
         gpu_grads = dataset->grads;
         cudaMemcpy(gpu_build_grads, gpu_grads, grads_size, cudaMemcpyDeviceToDevice);
         gpu_compliance = const_cast<float*>(dataset->compliance);
+        gpu_user_actions = const_cast<float*>(dataset->user_actions);
     }
     float *trans_obs = (float*)(device_memory_block + trace);
     trace += obs_size;
@@ -516,7 +527,8 @@ void GBRL::_step_gpu(dataSet *dataset){
         gpu_categorical_obs, // categorical observations on GPU
         gpu_grads,          // gradients on GPU
         gpu_build_grads,    // build gradients on GPU
-        gpu_compliance,       // compliance
+        gpu_compliance,      // compliance
+        gpu_user_actions,   // user_actions
         n_samples,         // number of samples
         this->device      // device type (GPU)
     };
@@ -614,6 +626,7 @@ float GBRL::_fit_gpu(dataSet *dataset, float *targets, const int n_iterations){
         gpu_grads,          // gradients on GPU
         gpu_build_grads,    // build gradients on GPU
         nullptr,           // compliance (not used in fit_gpu)
+        nullptr,           // user_actions (not used in fit_gpu)
         n_samples,         // number of samples
         this->device      // device type (GPU)
     };
@@ -668,7 +681,7 @@ float GBRL::_fit_gpu(dataSet *dataset, float *targets, const int n_iterations){
 }
 
 #endif
-void GBRL::step(const float *obs, const char *categorical_obs, float *grads, const float* compliance, const int n_samples, const int n_num_features, const int n_cat_features, deviceType _device){
+void GBRL::step(const float *obs, const char *categorical_obs, float *grads, const float* compliance, const float *user_actions, const int n_samples, const int n_num_features, const int n_cat_features, deviceType _device){
     if (this->metadata->iteration == 0){
         this->metadata->n_num_features = n_num_features;
         this->metadata->n_cat_features = n_cat_features;
@@ -691,6 +704,7 @@ void GBRL::step(const float *obs, const char *categorical_obs, float *grads, con
         grads,             // gradients
         nullptr,           // build_grads (not used in step)
         compliance,          // compliance values
+        user_actions,          // user_actions values
         n_samples,         // number of samples
         _device           // device type
     };
@@ -778,6 +792,7 @@ float GBRL::fit(float *obs, char *categorical_obs, float *targets, int iteration
         nullptr,           // grads (not used initially)
         nullptr,           // build_grads (not used initially)
         nullptr,           // compliance (not used in fit)
+        nullptr,           // user_actions (not used in fit)
         n_samples,         // number of samples
         this->device      // device type
     };
@@ -972,6 +987,7 @@ ensembleData *edata_cpu = nullptr;
         nullptr,           // grads (not used in tree_shap)
         nullptr,           // build_grads (not used in tree_shap)
         nullptr,           // compliance (not used in tree_shap)
+        nullptr,           // user_actions (not used in tree_shap)
         n_samples,         // number of samples
         this->device      // device type
     };
@@ -995,6 +1011,7 @@ float* GBRL::ensemble_shap(const float *obs, const char *categorical_obs, const 
         nullptr,           // grads (not used in ensemble_shap)
         nullptr,           // build_grads (not used in ensemble_shap)
         nullptr,           // compliance (not used in ensemble_shap)
+        nullptr,           // user_actions (not used in ensemble_shap)
         n_samples,         // number of samples
         this->device      // device type
     };
