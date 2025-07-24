@@ -1,7 +1,7 @@
 # Gradient Boosting Reinforcement Learning (GBRL)
 GBRL is a Python-based Gradient Boosting Trees (GBT) library, similar to popular packages such as [XGBoost](https://xgboost.readthedocs.io/en/stable/), [CatBoost](https://catboost.ai/), but specifically designed and optimized for reinforcement learning (RL). GBRL is implemented in C++/CUDA aimed to seamlessly integrate within popular RL libraries. 
 
-[![License](https://img.shields.io/badge/license-NVIDIA-green.svg)](https://github.com/NVlabs/gbrl/blob/master/LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](https://github.com/NVlabs/gbrl/blob/master/LICENSE)
 [![PyPI version](https://badge.fury.io/py/gbrl.svg)](https://badge.fury.io/py/gbrl)
 
 ## Overview
@@ -66,20 +66,22 @@ For a detailed usage example, see `tutorial.ipynb`
 # Documentation 
 For comprehensive documentation, visit the [GBRL documentation](https://nvlabs.github.io/gbrl/).
 
+# Contributing
+To contribute to GBRL, please review and sign the Contributor License Agreement (CLA) available at: [https://github.com/NVlabs/gbrl/blob/master/CLA.md](https://github.com/NVlabs/gbrl/blob/master/CLA.md)
+
 # Citation
 ``` 
-@article{gbrl,
-  title={Gradient Boosting Reinforcement Learning},
-  author={Benjamin Fuhrer, Chen Tessler, Gal Dalal},
-  year={2024},
-  eprint={2407.08250},
-  archivePrefix={arXiv},
-  primaryClass={cs.LG},
-  url={https://arxiv.org/abs/2407.08250}, 
+@inproceedings{
+fuhrer2025gradient,
+title={Gradient Boosting Reinforcement Learning},
+author={Benjamin Fuhrer and Chen Tessler and Gal Dalal},
+booktitle={Forty-second International Conference on Machine Learning},
+year={2025},
+url={https://arxiv.org/abs/2407.08250}
 }
 ```
 # Licenses
-Copyright © 2024, NVIDIA Corporation. All rights reserved.
+Copyright © 2025, NVIDIA Corporation. All rights reserved.
 
-This work is made available under the NVIDIA Source Code License-NC. Click [here](https://github.com/NVlabs/gbrl/blob/master/LICENSE). to view a copy of this license.
+This work is made available under the NVIDIA The MIT License. Click [here](https://github.com/NVlabs/gbrl/blob/master/LICENSE). to view a copy of this license.
 
