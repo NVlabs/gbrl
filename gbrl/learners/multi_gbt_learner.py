@@ -126,30 +126,31 @@ class MultiGBTLearner(BaseLearner):
 
         output_dim = self.output_dim
 
-        if compliance is not None:
+        if compliance is not None and (compliance != 0).any():
             features, compliance = ensure_same_type(features, compliance)
 
-            if isinstance(features, th.Tensor) and len(np.unique(compliance)) > 1:
+            if isinstance(features, th.Tensor):
                 compliance = compliance.float()
                 compliance = get_tensor_info(compliance)
-            elif len(np.unique(compliance)) > 1:
+            else:
                 compliance = np.ascontiguousarray(compliance.reshape((len(compliance), 1)))
                 compliance = compliance.astype(numerical_dtype)
-            else:
-                compliance = None
 
-        if user_actions is not None:
-            features, user_actions = ensure_same_type(features, user_actions)
-            user_actions = user_actions.reshape((len(features), self.output_dim))
+            if user_actions is not None:
+                features, user_actions = ensure_same_type(features, user_actions)
+                user_actions = user_actions.reshape((len(features), self.output_dim))
 
-            if isinstance(features, th.Tensor) and len(np.unique(user_actions)) > 1:
-                user_actions = user_actions.float()
-                user_actions = get_tensor_info(user_actions)
-            elif len(np.unique(user_actions)) > 1:
-                user_actions = np.ascontiguousarray(user_actions)
-                user_actions = user_actions.astype(numerical_dtype)
-            else:
-                user_actions = None
+                if isinstance(features, th.Tensor) and len(np.unique(user_actions)) > 1:
+                    user_actions = user_actions.float()
+                    user_actions = get_tensor_info(user_actions)
+                elif len(np.unique(user_actions)) > 1:
+                    user_actions = np.ascontiguousarray(user_actions)
+                    user_actions = user_actions.astype(numerical_dtype)
+                else:
+                    user_actions = None
+        else:
+            compliance = None
+            user_actions = None
         
         if model_idx is not None:
             num_features, cat_features, grads = process_data(features, grads,

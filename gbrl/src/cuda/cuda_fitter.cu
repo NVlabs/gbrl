@@ -742,7 +742,6 @@ __global__ void reduce_leaf_sum(const float* __restrict__ obs, const char* __res
     sums[threadIdx.x] = 0.0f; // Initialize shared memory
     sum_count[threadIdx.x] = 0.0f; // Initialize shared memory
     values[global_idx + blockIdx.x] = 0.0f;
-    // *count_f = 0.0f;
 
     float *user_actions_sums = nullptr;
     float *user_actions_count = nullptr;
@@ -778,7 +777,7 @@ __global__ void reduce_leaf_sum(const float* __restrict__ obs, const char* __res
                 user_actions_count[threadIdx.x] += 1;
                 // printf("user_actions[%d, %d] = %f\n", sample_idx, blockIdx.x, user_actions[sample_idx * node->output_dim + blockIdx.x]);
             }
-            sums[threadIdx.x] += grads[sample_idx * node->output_dim + blockIdx.x];         
+            sums[threadIdx.x] += grads[sample_idx * node->output_dim + blockIdx.x];
             sum_count[threadIdx.x] += 1;       
         }
     }
@@ -799,13 +798,14 @@ __global__ void reduce_leaf_sum(const float* __restrict__ obs, const char* __res
     }
     if (threadIdx.x == 0){
         float compliance_degree = powf(node->compliance_percent, compliance_exp);
-        if (sum_count[threadIdx.x] > 0)
+        if (sum_count[threadIdx.x] > 0){
             values[global_idx + blockIdx.x] = (sums[threadIdx.x] / sum_count[threadIdx.x]) * compliance_degree;
         // float tmp = values[global_idx + blockIdx.x];
             // printf("result before: %f\n", values[global_idx + blockIdx.x]);
-        if (user_actions != nullptr && user_actions_count[threadIdx.x] > 0){
-            values[global_idx + blockIdx.x] -= (user_actions_sums[threadIdx.x] / user_actions_count[threadIdx.x]) * (1.0f - compliance_degree);
-        }
+            if (user_actions != nullptr && user_actions_count[threadIdx.x] > 0){
+                values[global_idx + blockIdx.x] -= (user_actions_sums[threadIdx.x] / user_actions_count[threadIdx.x]) * (1.0f - compliance_degree);
+            }
+    }
         // printf("value[%d]: compliance degree %f, sums: %f, sum_count %f, score %f, user_action sum: %f, user action count %f, 1.0 - compliance: %f, before: %f, partial_score: %f, final value: %f\n", blockIdx.x, compliance_degree, sums[threadIdx.x], sum_count[threadIdx.x], (sums[threadIdx.x] / sum_count[threadIdx.x]) * node->compliance_percent, user_actions_sums[threadIdx.x], user_actions_count[threadIdx.x], 1.0f - node->compliance_percent, tmp, (user_actions_sums[threadIdx.x] / user_actions_count[threadIdx.x]) * (1.0f - compliance_degree), values[global_idx + blockIdx.x]);
     }
 }
@@ -1016,7 +1016,7 @@ void allocate_child_tree_nodes(dataSet *dataset, TreeNodeGPU* parent_node, TreeN
     int n_threads = WARP_SIZE*((MAX_CHAR_SIZE + WARP_SIZE - 1) / WARP_SIZE);
     update_child_nodes_kernel<<<depth, n_threads>>>(parent_node, *left_child, *right_child, split_data->tree_counters, candidata->candidate_indices, candidata->candidate_values, candidata->candidate_numeric, candidata->candidate_categories, split_data->best_idx, split_data->best_score);
     cudaDeviceSynchronize();
-    if (dataset->compliance){
+    if (dataset->compliance != nullptr){
         get_tpb_dimensions(n_samples, 1, threads_per_block);
         size_t shared_mem_size = threads_per_block * sizeof(float);
         get_node_compliance_percentage_kernel<<<1, threads_per_block, shared_mem_size>>>(*left_child, parent_node, dataset->compliance);
@@ -1028,19 +1028,14 @@ void allocate_child_tree_nodes(dataSet *dataset, TreeNodeGPU* parent_node, TreeN
 
 void add_leaf_node(const TreeNodeGPU *node, const int depth, ensembleMetaData *metadata, ensembleData *edata, dataSet *dataset){
     int leaf_idx = metadata->n_leaves, tree_idx = metadata->n_trees; 
-    // float *count_f;
-    // cudaMalloc((void**)&count_f, sizeof(float));
-    // cudaMemset(count_f, 0, sizeof(float));
-    int threads_per_block;
-    // get_grid_dimensions(dataset->n_samples, n_blocks, threads_per_block);
-    int n_threads = WARP_SIZE*((MAX_CHAR_SIZE + WARP_SIZE - 1) / WARP_SIZE);
     if (depth > 0){
+        int n_threads = WARP_SIZE*((MAX_CHAR_SIZE + WARP_SIZE - 1) / WARP_SIZE);
         int global_idx = (metadata->grow_policy == GREEDY) ? leaf_idx : tree_idx;
         copy_node_to_data<<<depth, n_threads>>>(node, edata->depths, edata->feature_indices, edata->feature_values, edata->edge_weights, edata->inequality_directions, edata->is_numerics, edata->categorical_values, global_idx, leaf_idx, metadata->max_depth);
         cudaDeviceSynchronize();
     }
 
-    threads_per_block = WARP_SIZE*((dataset->n_samples  + WARP_SIZE - 1 )/ WARP_SIZE);
+    int threads_per_block = WARP_SIZE*((dataset->n_samples  + WARP_SIZE - 1 )/ WARP_SIZE);
     if (threads_per_block > THREADS_PER_BLOCK) {
         threads_per_block = THREADS_PER_BLOCK;
     }

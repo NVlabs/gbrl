@@ -411,9 +411,7 @@ float TreeNode::splitScoreL2(const float *obs, const float *feature_weights, con
         } else {
 
             #pragma omp simd
-            for (int d = 0; d < n_cols;
-                
-                ++d)
+            for (int d = 0; d < n_cols; ++d)
                 left_mean[d] += grads[grad_row + d];
             ++left_count;
         }

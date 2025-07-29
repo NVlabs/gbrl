@@ -77,10 +77,12 @@ class SharedActorCriticLearner(GBTLearner):
         obs, grads = ensure_same_type(obs, grads)
 
         n_samples = len(obs)
-        if compliance is not None:
+        if compliance is not None and (compliance != 0).any():
             obs, compliance = ensure_same_type(obs, compliance)
+        else:
+            compliance = None
 
-        is_non_compliant = compliance is not None and (compliance != 0).any()
+        is_non_compliant = compliance is not None
 
         if user_actions is not None:
             obs, user_actions = ensure_same_type(obs, user_actions)
@@ -108,6 +110,7 @@ class SharedActorCriticLearner(GBTLearner):
                 self._save_memory.append(user_actions)
             else:
                 user_actions = None
+
             self._cpp_model.step(obs, None, grads, compliance, user_actions)
             self._save_memory = None
         else:

@@ -86,11 +86,15 @@ class GBTLearner(BaseLearner):
             user_actions (Optional[NumericalData]): guidelines user suggested actions vector.
         """
         features, grads = ensure_same_type(features, grads)
-        if compliance is not None:
+        if compliance is not None and (compliance != 0).any():
             features, compliance = ensure_same_type(features, compliance)
-        if user_actions is not None:
+        else:
+            compliance = None
+        if user_actions is not None and compliance is not None:
             features, user_actions = ensure_same_type(features, user_actions)
             user_actions = user_actions.reshape((len(features), self.output_dim))
+        else:
+            user_actions = None
 
         if isinstance(features, th.Tensor):
             features = features.float()
@@ -119,17 +123,13 @@ class GBTLearner(BaseLearner):
             grads = np.ascontiguousarray(grads.reshape((len(grads), self.params['output_dim'])))
             grads = grads.astype(numerical_dtype)
 
-            if compliance is not None and len(np.unique(compliance)) > 1:
+            if compliance is not None:
                 compliance = np.ascontiguousarray(compliance.reshape((len(compliance), 1)))
                 compliance = compliance.astype(numerical_dtype)
-            else:
-                compliance = None
 
-            if user_actions is not None and len(np.unique(user_actions)) > 1:
+            if user_actions is not None:
                 user_actions = np.ascontiguousarray(user_actions.reshape((len(user_actions), 1)))
                 user_actions = user_actions.astype(numerical_dtype)
-            else:
-                user_actions = None
 
         self._cpp_model.step(num_features, cat_features, grads, compliance, user_actions)
         self._save_memory = None
