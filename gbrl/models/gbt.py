@@ -83,9 +83,13 @@ class GBTModel(BaseGBT):
                 optimizers = [optimizers]
             optimizers = [setup_optimizer(opt) for opt in optimizers]
 
-        self.learner = GBTLearner(input_dim, output_dim,
-                                  tree_struct, optimizers,
-                                  params, verbose, device)
+        self.learner = GBTLearner(input_dim=input_dim,
+                                  output_dim=output_dim,
+                                  tree_struct=tree_struct,
+                                  optimizers=optimizers,
+                                  params=params,
+                                  verbose=verbose,
+                                  device=device)
         self.learner.reset()
         self.grad = None
         self.input = None

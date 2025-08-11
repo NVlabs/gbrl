@@ -25,12 +25,14 @@
 
 class GBRL {
     public:
-        GBRL(int input_dim, int output_dim, int max_depth, int min_data_in_leaf, 
+        GBRL(int input_dim, int output_dim, int policy_dim, int max_depth, int min_data_in_leaf, 
              int n_bins, int par_th, float cv_beta, scoreFunc split_score_func, generatorType generator_type, bool use_control_variates, 
-             int batch_size, growPolicy grow_policy, float compliance_weight, float compliance_exp, int verbose, deviceType _device);
-        GBRL(int input_dim, int output_dim, int max_depth, int min_data_in_leaf, 
+             int batch_size, growPolicy grow_policy, float compliance_weight, float compliance_exp, 
+             float compliance_scale, int verbose, deviceType _device);
+        GBRL(int input_dim, int output_dim, int policy_dim, int max_depth, int min_data_in_leaf, 
              int n_bins, int par_th, float cv_beta, std::string split_score_func, std::string generator_type, bool use_control_variates, 
-             int batch_size, std::string grow_policy, float compliance_weight, float compliance_exp, int verbose, std::string _device);
+             int batch_size, std::string grow_policy, float compliance_weight, float compliance_exp, float compliance_scale,
+             int verbose, std::string _device);
         GBRL(const std::string& filename);
         GBRL(GBRL& other);
         ~GBRL();
@@ -40,7 +42,7 @@ class GBRL {
         void to_device(deviceType _device);
         std::string get_device();
         int saveToFile(const std::string& filename);
-        int exportModel(const std::string& filename, const std::string& modelname);
+        int exportModel(const std::string& filename, const std::string& modelname, const std::string& export_format, const std::string &export_type, const std::string& prefix);
         int loadFromFile(const std::string& filename);
         void ensemble_check();
 
@@ -66,6 +68,8 @@ class GBRL {
         void print_tree(int tree_idx);
         void print_ensemble_metadata();
         void plot_tree(int tree_idx, const std::string &filename);
+
+        ensembleData* get_ensemble_data();
 
         ensembleData *edata;
         ensembleMetaData *metadata;

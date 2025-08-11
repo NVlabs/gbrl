@@ -56,9 +56,13 @@ class SharedActorCriticLearner(GBTLearner):
                   f'policy_optimizer: {policy_optimizer}'
                   f'value_optimizer: {value_optimizer}')
             print('****************************************')
-        super().__init__(input_dim, output_dim, tree_struct,
-                         [policy_optimizer, value_optimizer],
-                         params, verbose, device)
+        super().__init__(input_dim, output_dim,
+                         tree_struct=tree_struct,
+                         optimizers=[policy_optimizer, value_optimizer],
+                         params=params,
+                         policy_dim=output_dim - 1,
+                         verbose=verbose,
+                         device=device)
 
     def step(self, obs: NumericalData, theta_grad: NumericalData, value_grad: NumericalData,
              compliance: Optional[NumericalData] = None, user_actions: Optional[NumericalData] = None
@@ -94,6 +98,7 @@ class SharedActorCriticLearner(GBTLearner):
             obs = get_tensor_info(obs)
             grads = get_tensor_info(grads)
             self._save_memory = [obs, grads]
+            
             # store data so that data isn't garbage collected
             # while GBRL uses it
             if is_non_compliant:
@@ -110,7 +115,7 @@ class SharedActorCriticLearner(GBTLearner):
                 self._save_memory.append(user_actions)
             else:
                 user_actions = None
-
+            
             self._cpp_model.step(obs, None, grads, compliance, user_actions)
             self._save_memory = None
         else:
@@ -129,6 +134,7 @@ class SharedActorCriticLearner(GBTLearner):
                 user_actions = np.ascontiguousarray(user_actions).astype(numerical_dtype)
             else:
                 user_actions = None
+            
             self._cpp_model.step(num_obs, cat_obs, grads, compliance, user_actions)
 
         self.iteration = self._cpp_model.get_iteration()
@@ -236,12 +242,14 @@ class SharedActorCriticLearner(GBTLearner):
         Returns:
             SharedActorCriticLearner: A copy of the current instance.
         """
-        copy_ = SharedActorCriticLearner(self.input_dim, self.output_dim,
-                                         self.tree_struct.copy(),
-                                         self.optimizers[0].copy(),
-                                         self.optimizers[1].copy(),
-                                         self.params, self.verbose,
-                                         self.device)
+        copy_ = SharedActorCriticLearner(input_dim=self.input_dim, output_dim=self.output_dim,
+                                         tree_struct=self.tree_struct.copy(),
+                                         policy_optimizer=self.optimizers[0].copy(),
+                                         value_optimizer=self.optimizers[1].copy(),
+                                         params=self.params, 
+                                         policy_dim=self.policy_dim,
+                                         verbose=self.verbose,
+                                         device=self.device)
         copy_.iteration = self.iteration
         copy_.total_iterations = self.total_iterations
         if self._cpp_model is not None:
@@ -287,9 +295,14 @@ class SeparateActorCriticLearner(MultiGBTLearner):
                   f'policy_optimizer: {policy_optimizer}'
                   f'value_optimizer: {value_optimizer}')
             print('****************************************')
-        super().__init__(input_dim, [output_dim - 1, 1], tree_struct,
-                         [policy_optimizer, value_optimizer],
-                         params, 2, verbose, device)
+        super().__init__(input_dim,
+                         output_dim=[output_dim - 1, 1],
+                         tree_struct=tree_struct,
+                         optimizers=[policy_optimizer, value_optimizer],
+                         params=params,
+                         n_learners=2,
+                         policy_dim=[output_dim - 1, 0],
+                         verbose=verbose, device=device)
 
     def step(self, obs: NumericalData,
              theta_grad: NumericalData, value_grad: NumericalData,
@@ -428,12 +441,14 @@ class SeparateActorCriticLearner(MultiGBTLearner):
         opts = [opt.copy() if opt is not None else opt
                 for opt in self.optimizers
                 ]
-        copy_ = SeparateActorCriticLearner(self.input_dim, self.output_dim,
-                                           self.tree_struct.copy(),
-                                           opts, self.params,
-                                           self.n_learners,
-                                           self.verbose,
-                                           self.device)
+        copy_ = SeparateActorCriticLearner(input_dim=self.input_dim,
+                                           output_dim=self.output_dim,
+                                           tree_struct=self.tree_struct.copy(),
+                                           optimizers=opts, params=self.params,
+                                           n_learners=self.n_learners,
+                                           policy_dim=self.policy_dim,
+                                           verbose=self.verbose,
+                                           device=self.device)
         copy_.iteration = self.iteration
         copy_.total_iterations = self.total_iterations
         if self._cpp_models is not None:

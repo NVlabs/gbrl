@@ -76,19 +76,21 @@ class ActorCritic(BaseGBT):
                                                       dtype=numerical_dtype)
         # init model
         if self.shared_tree_struct:
-            self.learner = SharedActorCriticLearner(input_dim, output_dim,
-                                                    tree_struct,
-                                                    policy_optimizer,
-                                                    value_optimizer,
-                                                    params, verbose, device)
+            self.learner = SharedActorCriticLearner(input_dim=input_dim,
+                                                    output_dim=output_dim,
+                                                    tree_struct=tree_struct,
+                                                    policy_optimizer=policy_optimizer,
+                                                    value_optimizer=value_optimizer,
+                                                    params=params, verbose=verbose, device=device)
             self.learner.reset()
             self.learner.set_bias(bias)
         else:
-            self.learner = SeparateActorCriticLearner(input_dim, output_dim,
-                                                      tree_struct,
-                                                      policy_optimizer,
-                                                      value_optimizer,
-                                                      params, verbose, device)
+            self.learner = SeparateActorCriticLearner(input_dim=input_dim,
+                                                      output_dim=output_dim,
+                                                      tree_struct=tree_struct,
+                                                      policy_optimizer=policy_optimizer,
+                                                      value_optimizer=value_optimizer,
+                                                      params=params, verbose=verbose, device=device)
             self.learner.reset()
             self.learner.set_bias(bias, model_idx=0)
         self.policy_grad = None

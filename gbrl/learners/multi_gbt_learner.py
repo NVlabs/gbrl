@@ -31,6 +31,7 @@ class MultiGBTLearner(BaseLearner):
     def __init__(self, input_dim: Union[int, List[int]], output_dim: Union[int, List[int]],
                  tree_struct: Dict, optimizers: Union[Dict, List[Dict]],
                  params: Dict, n_learners: int,
+                 policy_dim: Optional[Union[int, List[int]]] = None, 
                  verbose: int = 0, device: str = 'cpu'):
         """
         Initializes the MultiGBTLearner.
@@ -43,6 +44,7 @@ class MultiGBTLearner(BaseLearner):
             dictionaries containing optimizer parameters.
             params (Dict): A dictionary containing model parameters.
             n_learners (int): Number of GBT learners.
+            policy_dim (Optional[Union[int, List[int]]]): The dimension of the policy space.
             verbose (int, optional): Verbosity level. Defaults to 0.
             device (str, optional): The device to run the model on. Defaults to 'cpu'.
         """
@@ -57,7 +59,16 @@ class MultiGBTLearner(BaseLearner):
             if isinstance(input_dim, int):
                 input_dim = [input_dim] * n_learners
 
-        super().__init__(input_dim, output_dim, tree_struct, params, verbose, device)
+        if policy_dim is None:
+            policy_dim = output_dim
+
+        super().__init__(input_dim=input_dim,
+                         output_dim=output_dim, 
+                         tree_struct=tree_struct, 
+                         params=params,
+                         policy_dim=policy_dim,
+                         verbose=verbose,
+                         device=device)
         if isinstance(optimizers, dict):
             optimizers = [optimizers for _ in range(n_learners)]
         self.optimizers = optimizers
@@ -78,6 +89,7 @@ class MultiGBTLearner(BaseLearner):
             if isinstance(self.input_dim, list):
                 params['input_dim'] = self.input_dim[i]
                 params['output_dim'] = self.output_dim[i]
+                params['policy_dim'] = self.policy_dim[i]
             cpp_model = GBRL_CPP(**params)
             cpp_model.set_feature_weights(self.feature_weights)
             if self.student_models is not None:
@@ -311,6 +323,11 @@ class MultiGBTLearner(BaseLearner):
             instance.n_learners = n_learners
             instance._cpp_models = []
             instance.optimizers = []
+
+            instance.input_dim = []
+            instance.output_dim = []
+            instance.policy_dim = []
+            
             for i in range(n_learners):
                 if custom_names is None:
                     loadname = filename + f'_{i}'
@@ -320,6 +337,11 @@ class MultiGBTLearner(BaseLearner):
                 cpp_model = GBRL_CPP.load(loadname)
                 instance.optimizers.extend(cpp_model.get_optimizers())
                 instance._cpp_models.append(cpp_model)
+                model_metadata = cpp_model.get_metadata()
+                print(model_metadata)
+                instance.output_dim.append(model_metadata['output_dim'])
+                instance.input_dim.append(model_metadata['input_dim'])
+                instance.policy_dim.append(model_metadata['policy_dim'])
 
             instance.set_device(device)
             metadata = instance._cpp_models[0].get_metadata()
@@ -330,8 +352,12 @@ class MultiGBTLearner(BaseLearner):
                                     'par_th': metadata['par_th'],
                                     'batch_size': metadata['batch_size'],
                                     'grow_policy': metadata['grow_policy']}
-            instance.params = {'input_dim': metadata['input_dim'],
-                               'output_dim': metadata['output_dim'],
+            instance.params = {'input_dim': instance.input_dim,
+                               'output_dim': instance.output_dim,
+                               'policy_dim': instance.policy_dim,
+                               'compliance_weight': metadata['compliance_weight'],
+                               'compliance_scale': metadata['compliance_scale'],
+                               'compliance_exp': metadata['compliance_exp'],
                                'split_score_func':
                                metadata['split_score_func'],
                                'generator_type': metadata['generator_type'],
@@ -343,6 +369,7 @@ class MultiGBTLearner(BaseLearner):
                                }
             instance.output_dim = metadata['output_dim']
             instance.input_dim = metadata['input_dim']
+            instance.policy_dim = metadata['policy_dim']
             instance.verbose = metadata['verbose']
             instance.params = {'split_score_func':
                                metadata['split_score_func'],
@@ -795,12 +822,15 @@ class MultiGBTLearner(BaseLearner):
         opts = [opt.copy() if opt is not None else opt
                 for opt in self.optimizers
                 ]
-        copy_ = MultiGBTLearner(self.input_dim, self.output_dim,
-                                self.tree_struct.copy(),
-                                opts, self.params,
-                                self.n_learners,
-                                self.verbose,
-                                self.device)
+        copy_ = MultiGBTLearner(input_dim=self.input_dim,
+                                output_dim=self.output_dim,
+                                tree_struct=self.tree_struct.copy(),
+                                optimizers=opts,
+                                params=self.params,
+                                n_learners=self.n_learners,
+                                policy_dim=self.policy_dim,
+                                verbose=self.verbose,
+                                device=self.device)
         copy_.iteration = self.iteration
         copy_.total_iterations = self.total_iterations
         if self._cpp_models is not None:

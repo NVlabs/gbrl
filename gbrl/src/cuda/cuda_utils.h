@@ -9,6 +9,12 @@
 #ifndef CUDA_UTILS_H
 #define CUDA_UTILS_H
 
+#include <string>
+
+#include <cuda_runtime.h>
+
+cudaError_t allocateCudaMemory(void** device_ptr, size_t size, const std::string& error_message);
+
 #ifdef __cplusplus
 extern "C" {
 #endif

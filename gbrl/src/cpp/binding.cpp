@@ -181,6 +181,7 @@ py::dict metadataToDict(const ensembleMetaData* metadata){
     if (metadata != nullptr){
         d["input_dim"] = metadata->input_dim;
         d["output_dim"] = metadata->output_dim;
+        d["policy_dim"] = metadata->policy_dim;
         d["split_score_func"] = scoreFuncToString(metadata->split_score_func);
         d["generator_type"] = generatorTypeToString(metadata->generator_type);
         d["use_control_variates"] = metadata->use_cv;
@@ -192,10 +193,63 @@ py::dict metadataToDict(const ensembleMetaData* metadata){
         d["batch_size"] = metadata->batch_size;
         d["grow_policy"] = growPolicyToString(metadata->grow_policy);
         d["compliance_weight"] = metadata->compliance_weight;
+        d["compliance_exp"] = metadata->compliance_exp;
+        d["compliance_scale"] = metadata->compliance_scale;
         d["iteration"] = metadata->iteration;
     }
     return d;
 }
+
+py::dict ensembleDataToDict(const ensembleData* data, const ensembleMetaData* metadata) {
+    py::dict d;
+    if (data != nullptr) {
+        // Convert float pointers to NumPy arrays with ownership transfer
+        auto bias_capsule = py::capsule(data->bias, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
+        d["bias"] = py::array_t<float>({metadata->output_dim}, data->bias, bias_capsule);
+
+        auto feature_weights_capsule = py::capsule(data->feature_weights, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
+        d["feature_weights"] = py::array_t<float>({metadata->input_dim}, data->feature_weights, feature_weights_capsule);
+
+        auto tree_indices_capsule = py::capsule(data->tree_indices, [](void* ptr) { delete[] reinterpret_cast<int*>(ptr); });
+        d["tree_indices"] = py::array_t<int>({metadata->n_trees}, data->tree_indices, tree_indices_capsule);
+
+        int split_sizes = (metadata->grow_policy == OBLIVIOUS) ? metadata->n_trees : metadata->n_leaves;
+
+        auto depths_capsule = py::capsule(data->depths, [](void* ptr) { delete[] reinterpret_cast<int*>(ptr); });
+        d["depths"] = py::array_t<int>({split_sizes}, data->depths, depths_capsule);
+
+        auto values_capsule = py::capsule(data->values, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
+        d["values"] = py::array_t<float>({metadata->n_leaves, metadata->output_dim}, data->values, values_capsule);
+
+        auto feature_indices_capsule = py::capsule(data->feature_indices, [](void* ptr) { delete[] reinterpret_cast<int*>(ptr); });
+        d["feature_indices"] = py::array_t<int>({split_sizes, metadata->max_depth}, data->feature_indices, feature_indices_capsule);
+
+        auto feature_values_capsule = py::capsule(data->feature_values, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
+        d["feature_values"] = py::array_t<float>({split_sizes, metadata->max_depth}, data->feature_values, feature_values_capsule);
+
+        auto edge_weights_capsule = py::capsule(data->edge_weights, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
+        d["edge_weights"] = py::array_t<float>({metadata->n_leaves, metadata->max_depth}, data->edge_weights, edge_weights_capsule);
+
+        auto is_numerics_capsule = py::capsule(data->is_numerics, [](void* ptr) { delete[] reinterpret_cast<bool*>(ptr); });
+        d["is_numerics"] = py::array_t<bool>({split_sizes, metadata->max_depth}, data->is_numerics, is_numerics_capsule);
+
+        auto inequality_directions_capsule = py::capsule(data->inequality_directions, [](void* ptr) { delete[] reinterpret_cast<bool*>(ptr); });
+        d["inequality_directions"] = py::array_t<bool>({metadata->n_leaves, metadata->max_depth}, data->inequality_directions, inequality_directions_capsule);
+      
+        // Convert char* categorical_values to NumPy string array (S128)
+        auto categorical_capsule = py::capsule(data->categorical_values, [](void* ptr) { delete[] reinterpret_cast<char*>(ptr); });
+        d["categorical_values"] = py::array(py::dtype("S128"), {split_sizes, metadata->max_depth}, data->categorical_values, categorical_capsule);
+        
+        d["alloc_data_size"] = data->alloc_data_size;
+
+#ifdef DEBUG
+        auto n_samples_capsule = py::capsule(data->n_samples, [](void* ptr) { delete[] reinterpret_cast<int*>(ptr); });
+        d["n_samples"] = py::array_t<int>({metadata->n_leaves}, data->n_samples, n_samples_capsule);
+#endif
+    }
+    return d;
+}
+
 
 py::dict optimizerToDict(const optimizerConfig* conf){
     py::dict d;
@@ -227,9 +281,10 @@ py::list getOptimizerConfigs(const std::vector<Optimizer*>& opts) {
 
 PYBIND11_MODULE(gbrl_cpp, m) {
     py::class_<GBRL> gbrl(m, "GBRL");
-    gbrl.def(py::init<int, int, int, int, int, int, float, std::string, std::string, bool, int, std::string, float, float, int, std::string>(),
+    gbrl.def(py::init<int, int, int, int, int, int, int, float, std::string, std::string, bool, int, std::string, float, float, float, int, std::string>(),
          py::arg("input_dim")=1, 
          py::arg("output_dim")=1, 
+         py::arg("policy_dim")=1, 
          py::arg("max_depth")=4, 
          py::arg("min_data_in_leaf")=0, 
          py::arg("n_bins")=256, 
@@ -242,6 +297,7 @@ PYBIND11_MODULE(gbrl_cpp, m) {
          py::arg("grow_policy")="greedy", 
          py::arg("compliance_weight")=1.0,
          py::arg("compliance_exp")=0.0,
+         py::arg("compliance_scale")=1.0,
          py::arg("verbose")=0,
          py::arg("device")="cpu",
          "Constructor of the GBRL class");
@@ -504,10 +560,10 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         py::gil_scoped_release release; 
         return self.saveToFile(filename); 
     }, "Save the model to a file");
-    gbrl.def("export", [](GBRL &self, const std::string& filename, const std::string& modelname) -> int {
+    gbrl.def("export", [](GBRL &self, const std::string& filename, const std::string& modelname, const std::string& export_format, const std::string &export_type, const std::string& prefix) -> int {
         py::gil_scoped_release release; 
-        return self.exportModel(filename, modelname); 
-    }, py::arg("filename"), py::arg("modelname") = "", "Export model as a C-header file");
+        return self.exportModel(filename, modelname, export_format, export_type, prefix); 
+    }, py::arg("filename"), py::arg("modelname") = "", py::arg("export_format") = "float", py::arg("export_type") = "full", py::arg("prefix") = "", "Export model as a C-header file");
     gbrl.def("get_scheduler_lrs", [](GBRL &self) ->  py::array_t<float> {
         py::gil_scoped_release release; 
         float* lrs = self.get_scheduler_lrs(); 
@@ -524,6 +580,12 @@ PYBIND11_MODULE(gbrl_cpp, m) {
     gbrl.def("get_metadata", [](GBRL &self) ->  py::dict {
         return metadataToDict(self.metadata); 
     }, "Return ensemble metadata");  
+    gbrl.def("get_ensemble_data", [](GBRL &self) -> py::dict{
+        py::gil_scoped_release release; 
+        ensembleData *edata = self.get_ensemble_data(); 
+        py::gil_scoped_acquire acquire;
+        return ensembleDataToDict(edata, self.metadata);
+    }, "Return ensemble data");
     gbrl.def("get_device", [](GBRL &self) ->  std::string {
         py::gil_scoped_release release; 
         return self.get_device(); 
@@ -535,7 +597,7 @@ PYBIND11_MODULE(gbrl_cpp, m) {
     gbrl.def("print_tree", [](GBRL &self, int tree_idx) {
         py::gil_scoped_release release; 
         self.print_tree(tree_idx); 
-    }, "Print specified tree index");
+    }, py::arg("tree_idx") = -1, "Print specified tree index");
     gbrl.def("tree_shap", [](GBRL &self, const int tree_idx, py::object &obs, py::object &categorical_obs, 
                             py::object &norm_values, py::object &base_poly, py::object &offset) -> py::array_t<float> {
         const float* obs_ptr = nullptr;
@@ -658,7 +720,9 @@ PYBIND11_MODULE(gbrl_cpp, m) {
     gbrl.def("plot_tree", [](GBRL &self, int tree_idx, const std::string &filename) {
         py::gil_scoped_release release; 
         self.plot_tree(tree_idx, filename); 
-    }, "Plot specified tree index to png file"); 
+    }, py::arg("tree_idx") = -1,
+       py::arg("filename"),
+     "Plot specified tree index to png file"); 
     gbrl.def("print_ensemble_metadata", [](GBRL &self) {
         py::gil_scoped_release release; 
         self.print_ensemble_metadata(); 

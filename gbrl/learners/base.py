@@ -7,7 +7,7 @@
 #
 ##############################################################################
 from abc import ABC, abstractmethod
-from typing import Dict, List, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch as th
@@ -33,8 +33,8 @@ class BaseLearner(ABC):
         total_iterations (int): Total number of training iterations.
         feature_weights (np.ndarray): Feature importance weights.
     """
-    def __init__(self, input_dim: int, output_dim: int, tree_struct: Dict,
-                 params: Dict, verbose: int = 0, device: str = 'cpu'):
+    def __init__(self, input_dim: Union[int, List[int]], output_dim: Union[int, List[int]], tree_struct: Dict,
+                 params: Dict, policy_dim: Optional[Union[int, List[int]]] = None, verbose: int = 0, device: str = 'cpu'):
         """
         Initializes the BaseLearner.
 
@@ -52,9 +52,11 @@ class BaseLearner(ABC):
         self.tree_struct = tree_struct
         self.input_dim = input_dim
         self.output_dim = output_dim
+        self.policy_dim = policy_dim if policy_dim is not None else output_dim
         self.device = device
         self.params = {'input_dim': input_dim,
                        'output_dim': output_dim,
+                       'policy_dim': self.policy_dim,
                        'split_score_func': params.get('split_score_func',
                                                       'Cosine'),
                        'generator_type': params.get('generator_type',
@@ -62,9 +64,11 @@ class BaseLearner(ABC):
                        'use_control_variates': params.get('control_variates',
                                                           False),
                        'compliance_weight': params.get('compliance_weight',
-                                                         1.0),
+                                                         0.0),
                        'compliance_exp': params.get('compliance_exp',
                                                          0.0),
+                       'compliance_scale': params.get('compliance_scale',
+                                                       1.0),
                        'verbose': verbose, 'device': device, **tree_struct}
 
         self.iteration = 0

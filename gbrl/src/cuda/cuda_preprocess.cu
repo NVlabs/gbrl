@@ -234,17 +234,8 @@ __global__ void bitonic_sort_kernel(const float* __restrict__ input, int* __rest
 
 int* sort_indices_cuda(const float* __restrict__ obs, const int n_samples, const int n_features){
     int *indices;
-    cudaError_t err = cudaMalloc((void**)&indices, sizeof(int)*n_samples*n_features);
+    cudaError_t err = allocateCudaMemory((void**)&indices, sizeof(int)*n_samples*n_features, "when trying to allocate memory for sort_indices");
     if (err != cudaSuccess) {
-        size_t free_mem, total_mem;
-        cudaMemGetInfo(&free_mem, &total_mem);
-        std::cerr << "CUDA error: " << cudaGetErrorString(err)
-                << " when trying to allocate " << ((sizeof(int)*n_samples*n_features) / (1024.0 * 1024.0)) << " MB."
-                << std::endl;
-        std::cerr << "Free memory: " << (free_mem / (1024.0 * 1024.0)) << " MB."
-                << std::endl;
-        std::cerr << "Total memory: " << (total_mem / (1024.0 * 1024.0)) << " MB."
-                << std::endl;
         return nullptr;
     }
 

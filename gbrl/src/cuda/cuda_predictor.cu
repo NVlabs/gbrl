@@ -21,7 +21,7 @@ SGDOptimizerGPU** deepCopySGDOptimizerVectorToGPU(const std::vector<Optimizer*>&
     cudaError_t error;
     SGDOptimizerGPU** device_opts;
     int n_opts = host_opts.size();
-    error = cudaMalloc((void**)&device_opts, sizeof(SGDOptimizerGPU*) * n_opts);
+    error = allocateCudaMemory((void**)&device_opts, sizeof(SGDOptimizerGPU*) * n_opts, "when trying to allocate device_opts");
     if (error != cudaSuccess) {
     // Handle the error (e.g., print an error message and exit)
         std::cout << "Cuda error: " << error << " when trying to allocate device_opts." <<std::endl;
@@ -30,7 +30,7 @@ SGDOptimizerGPU** deepCopySGDOptimizerVectorToGPU(const std::vector<Optimizer*>&
     // For each leaf, deep copy it to GPU and store its pointer in the array
     for (int i = 0; i < n_opts; ++i) {
         SGDOptimizerGPU* device_opt;
-        error = cudaMalloc((void**)&device_opt, sizeof(SGDOptimizerGPU));
+        error = allocateCudaMemory((void**)&device_opt, sizeof(SGDOptimizerGPU), "when trying to allocate device_opt");
         if (error != cudaSuccess) {
         // Handle the error (e.g., print an error message and exit)
             std::cout << "Cuda error: " << error << " when trying to allocate device_opt " << i << "." <<std::endl;
@@ -99,17 +99,8 @@ void predict_cuda(dataSet *dataset, float *&preds, ensembleMetaData *metadata, e
     size_t cat_obs_matrix_size = dataset->n_samples * metadata->n_cat_features * sizeof(char) * MAX_CHAR_SIZE;
     size_t alloc_size = obs_matrix_size + cat_obs_matrix_size + preds_matrix_size;
     if (dataset->device == deviceType::cpu){
-        cudaError_t alloc_error = cudaMalloc((void**)&device_data, alloc_size);
+        cudaError_t alloc_error = allocateCudaMemory((void**)&device_data, alloc_size, "when trying to allocate in predict_cuda");
         if (alloc_error != cudaSuccess) {
-            size_t free_mem, total_mem;
-            cudaMemGetInfo(&free_mem, &total_mem);
-            std::cerr << "CUDA predict_cuda error: " << cudaGetErrorString(alloc_error)
-                    << " when trying to allocate " << ((alloc_size) / (1024.0 * 1024.0)) << " MB."
-                    << std::endl;
-            std::cerr << "Free memory: " << (free_mem / (1024.0 * 1024.0)) << " MB."
-                    << std::endl;
-            std::cerr << "Total memory: " << (total_mem / (1024.0 * 1024.0)) << " MB."
-                    << std::endl;
             return;
         }
         preds = new float[dataset->n_samples * metadata->output_dim];
@@ -131,17 +122,8 @@ void predict_cuda(dataSet *dataset, float *&preds, ensembleMetaData *metadata, e
         trace += preds_matrix_size;
         device_batch_cat_obs = (char *)(device_data + trace);
     } else {
-        cudaError_t alloc_error_preds = cudaMalloc((void**)&device_preds, preds_matrix_size);
-            if (alloc_error_preds != cudaSuccess) {
-            size_t free_mem, total_mem;
-            cudaMemGetInfo(&free_mem, &total_mem);
-            std::cerr << "CUDA predict_cuda error: " << cudaGetErrorString(alloc_error_preds)
-                    << " when trying to allocate " << ((preds_matrix_size) / (1024.0 * 1024.0)) << " MB."
-                    << std::endl;
-            std::cerr << "Free memory: " << (free_mem / (1024.0 * 1024.0)) << " MB."
-                    << std::endl;
-            std::cerr << "Total memory: " << (total_mem / (1024.0 * 1024.0)) << " MB."
-                    << std::endl;
+        cudaError_t alloc_error_preds = allocateCudaMemory((void**)&device_preds, preds_matrix_size, "when trying to allocate device_preds in predict_cuda");
+        if (alloc_error_preds != cudaSuccess) {
             return;
         }
         cudaMemset(device_preds, 0, preds_matrix_size);

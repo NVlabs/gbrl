@@ -29,7 +29,7 @@ class GBTLearner(BaseLearner):
     """
     def __init__(self, input_dim: int, output_dim: int, tree_struct: Dict,
                  optimizers: Union[Dict, List], params: Dict,
-                 verbose: int = 0, device: str = 'cpu'):
+                 policy_dim: Optional[int] = None, verbose: int = 0, device: str = 'cpu'):
         """
         Initializes the GBTLearner.
 
@@ -39,10 +39,11 @@ class GBTLearner(BaseLearner):
             tree_struct (Dict): A dictionary containing tree structure parameters.
             optimizers (Union[Dict, List]): A dictionary or list of dictionaries containing optimizer parameters.
             params (Dict): A dictionary containing model parameters.
+            policy_dim (Optional[int]): The dimension of the policy output. Defaults to None -> if None assumes to equal output dim.
             verbose (int, optional): Verbosity level. Defaults to 0.
             device (str, optional): The device to run the model on. Defaults to 'cpu'.
         """
-        super().__init__(input_dim, output_dim, tree_struct, params, verbose, device)
+        super().__init__(input_dim, output_dim, tree_struct, params, policy_dim, verbose, device)
         if not isinstance(optimizers, list):
             optimizers = [optimizers]
         self.optimizers = optimizers
@@ -226,17 +227,22 @@ class GBTLearner(BaseLearner):
                                     'grow_policy': metadata['grow_policy']}
             instance.params = {'input_dim': metadata['input_dim'],
                                'output_dim': metadata['output_dim'],
+                               'policy_dim': metadata['policy_dim'],
                                'split_score_func':
                                metadata['split_score_func'],
                                'generator_type': metadata['generator_type'],
                                'use_control_variates':
                                metadata['use_control_variates'],
                                'verbose': metadata['verbose'],
+                               'compliance_weight': metadata['compliance_weight'],
+                               'compliance_exp': metadata['compliance_exp'],
+                               'compliance_scale': metadata['compliance_scale'],
                                'device': instance._cpp_model.get_device(),
                                **instance.tree_struct
                                }
             instance.output_dim = metadata['output_dim']
             instance.input_dim = metadata['input_dim']
+            instance.policy_dim = metadata['policy_dim']
             instance.verbose = metadata['verbose']
             instance.optimizers = instance._cpp_model.get_optimizers()
             instance.iteration = metadata['iteration']
@@ -538,6 +544,9 @@ class GBTLearner(BaseLearner):
 
     def print_ensemble_metadata(self):
         """Prints the metadata of the ensemble."""
+        if self._cpp_model is None:
+            print("No model loaded!")
+            return
         self._cpp_model.print_ensemble_metadata()
 
     def __copy__(self):
@@ -545,10 +554,14 @@ class GBTLearner(BaseLearner):
         opts = [opt.copy() if opt is not None else opt
                 for opt in self.optimizers
                 ]
-        copy_ = GBTLearner(self.input_dim, self.output_dim,
-                           self.tree_struct.copy(),
-                           opts, self.params, self.verbose,
-                           self.device)
+        copy_ = GBTLearner(input_dim=self.input_dim,
+                           output_dim=self.output_dim,
+                           tree_struct=self.tree_struct.copy(),
+                           optimizers=opts,
+                           params=self.params,
+                           policy_dim=self.policy_dim,
+                           verbose=self.verbose,
+                           device=self.device)
         copy_.iteration = self.iteration
         copy_.total_iterations = self.total_iterations
         if self._cpp_model is not None:

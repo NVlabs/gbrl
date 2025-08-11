@@ -80,6 +80,17 @@ enum NULL_CHECK : uint8_t {
     VALID
 };
 
+enum exportFormat : uint8_t {
+    EXP_FLOAT,
+    EXP_FXP8,
+    EXP_FXP16,
+};
+
+enum exportType : uint8_t {
+    FULL, 
+    COMPACT
+};
+
 enum growPolicy : uint8_t {
     GREEDY,
     OBLIVIOUS
@@ -111,6 +122,7 @@ struct ensembleMetaData {
     int max_leaves_batch; // maximum number of leaves to add in a batch
     int input_dim;
     int output_dim;
+    int policy_dim; // dimension of the policy output
     int max_depth;
     int min_data_in_leaf;
     int n_bins;
@@ -127,6 +139,7 @@ struct ensembleMetaData {
     int iteration;
     float compliance_weight;
     float compliance_exp;
+    float compliance_scale;
 };
 
 struct dataSet {
@@ -176,6 +189,8 @@ struct nodeInfo {
 };
 
 scoreFunc stringToScoreFunc(std::string str);
+exportFormat stringToexportFormat(std::string str);
+exportType stringToexportType(std::string str);
 generatorType stringTogeneratorType(std::string str);
 growPolicy stringTogrowPolicy(std::string str);
 lossType stringTolossType(std::string str);
@@ -191,13 +206,13 @@ std::string deviceTypeToString(deviceType type);
 std::string algoTypeToString(optimizerAlgo algo);
 std::string schedulerTypeToString(schedulerFunc func);
 
-ensembleMetaData* ensemble_metadata_alloc(int max_trees, int max_leaves, int max_trees_batch, int max_leaves_batch, int input_dim, int output_dim, int max_depth, int min_data_in_leaf, int n_bins, int par_th, float cv_beta, int verbose, int batch_size, bool use_cv, scoreFunc split_score_func, generatorType generator_type, growPolicy grow_policy, float compliance_weight, float compliance_exp);
+ensembleMetaData* ensemble_metadata_alloc(int max_trees, int max_leaves, int max_trees_batch, int max_leaves_batch, int input_dim, int output_dim, int policy_dim, int max_depth, int min_data_in_leaf, int n_bins, int par_th, float cv_beta, int verbose, int batch_size, bool use_cv, scoreFunc split_score_func, generatorType generator_type, growPolicy grow_policy, float compliance_weight, float compliance_exp, float compliance_scale);
 ensembleData* ensemble_data_alloc(ensembleMetaData *metadata);
 ensembleData* ensemble_copy_data_alloc(ensembleMetaData *metadata);
 ensembleData* copy_ensemble_data(ensembleData *other_edata, ensembleMetaData *metadata);
 void ensemble_data_dealloc(ensembleData *edata);
 void save_ensemble_data(std::ofstream& file, ensembleData *edata, ensembleMetaData *metadata, deviceType device);
-void export_ensemble_data(std::ofstream& header_file, const std::string& model_name, ensembleData *edata, ensembleMetaData *metadata, deviceType device, std::vector<Optimizer*> opts);
+void export_ensemble_data(std::ofstream& header_file, const std::string& model_name, ensembleData *edata, ensembleMetaData *metadata, deviceType device, std::vector<Optimizer*> opts, exportFormat export_format, exportType export_type, const std::string &prefix);
 ensembleData* load_ensemble_data(std::ifstream& file, ensembleMetaData *metadata);
 void allocate_ensemble_memory(ensembleMetaData *metadata, ensembleData *edata);
 #endif 

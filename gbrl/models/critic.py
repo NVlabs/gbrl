@@ -80,9 +80,9 @@ class ContinuousCritic(BaseGBT):
         bias = bias if bias is not None else np.zeros(output_dim, dtype=numerical_dtype)
         self.target_update_interval = target_update_interval
         # init model
-        self.learner = GBTLearner(input_dim, output_dim, tree_struct,
-                                  [self.weights_optimizer, self.bias_optimizer],
-                                  params, verbose, device)
+        self.learner = GBTLearner(input_dim=input_dim, output_dim=output_dim, tree_struct=tree_struct,
+                                  optimizers=[self.weights_optimizer, self.bias_optimizer],
+                                  params=params, verbose=verbose, device=device)
         self.learner.reset()
         self.learner.set_bias(bias)
 

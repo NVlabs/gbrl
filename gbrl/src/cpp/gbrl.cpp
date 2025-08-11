@@ -55,12 +55,12 @@ extern "C" {
 
 
 
-GBRL::GBRL(int input_dim, int output_dim, int max_depth, int min_data_in_leaf, 
+GBRL::GBRL(int input_dim, int output_dim, int policy_dim, int max_depth, int min_data_in_leaf, 
            int n_bins, int par_th, float cv_beta, scoreFunc split_score_func,
            generatorType generator_type, bool use_cv, int batch_size, growPolicy grow_policy, 
-           float compliance_weight, float compliance_exp, int verbose, 
+           float compliance_weight, float compliance_exp, float compliance_scale, int verbose, 
            deviceType _device){
-    this->metadata = ensemble_metadata_alloc(INITAL_MAX_TREES, INITAL_MAX_TREES * (1 << max_depth), TREES_BATCH, TREES_BATCH * (1 << max_depth), input_dim, output_dim, max_depth, min_data_in_leaf, n_bins, par_th, cv_beta, verbose, batch_size, use_cv, split_score_func, generator_type, grow_policy, compliance_weight, compliance_exp);
+    this->metadata = ensemble_metadata_alloc(INITAL_MAX_TREES, INITAL_MAX_TREES * (1 << max_depth), TREES_BATCH, TREES_BATCH * (1 << max_depth), input_dim, output_dim, policy_dim, max_depth, min_data_in_leaf, n_bins, par_th, cv_beta, verbose, batch_size, use_cv, split_score_func, generator_type, grow_policy, compliance_weight, compliance_exp, compliance_scale);
     this->sheader = create_header();
 #ifdef USE_CUDA
     if (_device == gpu){
@@ -74,11 +74,12 @@ GBRL::GBRL(int input_dim, int output_dim, int max_depth, int min_data_in_leaf,
         
 }
 
-GBRL::GBRL(int input_dim, int output_dim, int max_depth, int min_data_in_leaf, 
+GBRL::GBRL(int input_dim, int output_dim, int policy_dim, int max_depth, int min_data_in_leaf, 
            int n_bins, int par_th, float cv_beta, std::string split_score_func,
            std::string generator_type, bool use_cv, int batch_size, 
-           std::string grow_policy, float compliance_weight, float compliance_exp, int verbose, std::string _device){
-    this->metadata = ensemble_metadata_alloc(INITAL_MAX_TREES, INITAL_MAX_TREES * (1 << max_depth), TREES_BATCH, TREES_BATCH * (1 << max_depth), input_dim, output_dim, max_depth, min_data_in_leaf, n_bins, par_th, cv_beta, verbose, batch_size, use_cv, stringToScoreFunc(split_score_func), stringTogeneratorType(generator_type), stringTogrowPolicy(grow_policy), compliance_weight, compliance_exp);
+           std::string grow_policy, float compliance_weight, float compliance_exp, 
+           float compliance_scale, int verbose, std::string _device){
+    this->metadata = ensemble_metadata_alloc(INITAL_MAX_TREES, INITAL_MAX_TREES * (1 << max_depth), TREES_BATCH, TREES_BATCH * (1 << max_depth), input_dim, output_dim, policy_dim, max_depth, min_data_in_leaf, n_bins, par_th, cv_beta, verbose, batch_size, use_cv, stringToScoreFunc(split_score_func), stringTogeneratorType(generator_type), stringTogrowPolicy(grow_policy), compliance_weight, compliance_exp, compliance_scale);
     this->sheader = create_header();
 #ifdef USE_CUDA
     if (stringTodeviceType(_device) == gpu){
@@ -815,7 +816,7 @@ float GBRL::fit(float *obs, char *categorical_obs, float *targets, int iteration
     return full_loss;   
 }
 
-int GBRL::exportModel(const std::string& filename, const std::string& modelname){
+int GBRL::exportModel(const std::string& filename, const std::string& modelname, const std::string& export_format, const std::string &export_type, const std::string& prefix){
     std::ofstream header_file(filename, std::ios::binary);
     if (!header_file.is_open() || header_file.fail()) {
         std::cerr << "Error opening file: " << filename << std::endl;
@@ -828,7 +829,7 @@ int GBRL::exportModel(const std::string& filename, const std::string& modelname)
         throw std::runtime_error("Export is supported only for Oblivious trees.");
         return -1;
     }
-    export_ensemble_data(header_file, modelname, this->edata, this->metadata, this->device, this->opts);
+    export_ensemble_data(header_file, modelname, this->edata, this->metadata, this->device, this->opts, stringToexportFormat(export_format), stringToexportType(export_type), prefix);
     if (!header_file.good()) {
         std::cerr << "Error occurred at writing time." << std::endl;
         throw std::runtime_error("Writing to file error");
@@ -939,11 +940,13 @@ int GBRL::loadFromFile(const std::string& filename){
     std::cout << "######## Loaded GBRL model ########" << std::endl;
     std::cout << "input_dim: " << this->metadata->input_dim;
     std::cout << " output_dim: " << this->metadata->output_dim;
+    std::cout << " policy_dim: " << this->metadata->policy_dim;
     std::cout << " max_depth: " << this->metadata->max_depth << " min_data_in_leaf: " << this->metadata->min_data_in_leaf << std::endl;
     std::cout << "generator_type: " << generatorTypeToString(this->metadata->generator_type) << " n_bins: " << this->metadata->n_bins;
     std::cout << " cv_beta: " << this->metadata->cv_beta << " split_score_func: " << scoreFuncToString(this->metadata->split_score_func) << std::endl;
     std::cout << "grow_policy: " << growPolicyToString(this->metadata->grow_policy);
     std::cout << " verbose: " << this->metadata->verbose << " device: "<< deviceTypeToString(this->device);
+    std::cout << " compliance weight: " << this->metadata->compliance_weight << " compliance exp: " << this->metadata->compliance_exp << " compliance scale: " << this->metadata->compliance_scale << std::endl;
     std::cout << " use_cv: " << this->metadata->use_cv << " batch_size: " << this->metadata->batch_size << std::endl;
     std::cout << "Loaded: " << this->metadata->n_leaves << " leaves from " << this->metadata->n_trees << " trees" <<  std::endl;
     std::cout << "Model has: " << num_opts << " optimizers " <<  std::endl;
@@ -953,16 +956,17 @@ int GBRL::loadFromFile(const std::string& filename){
 
 void GBRL::print_ensemble_metadata(){
     std::cout << "######## GBRL model ########" << std::endl;
-    std::cout << "input_dim: " << this->metadata->input_dim;
-    std::cout << " output_dim: " << this->metadata->output_dim;
-    std::cout << " max_depth: " << this->metadata->max_depth << " min_data_in_leaf: " << this->metadata->min_data_in_leaf << std::endl;
-    std::cout << "generator_type: " << generatorTypeToString(this->metadata->generator_type) << " n_bins: " << this->metadata->n_bins;
-    std::cout << " cv_beta: " << this->metadata->cv_beta << " split_score_func: " << scoreFuncToString(this->metadata->split_score_func) << std::endl;
-    std::cout << "grow_policy: " << growPolicyToString(this->metadata->grow_policy);
+    std::cout << "input dim: " << this->metadata->input_dim;
+    std::cout << " output dim: " << this->metadata->output_dim;
+    std::cout << " policy dim: " << this->metadata->policy_dim;
+    std::cout << " max depth: " << this->metadata->max_depth << " min data in leaf: " << this->metadata->min_data_in_leaf << std::endl;
+    std::cout << "generator type: " << generatorTypeToString(this->metadata->generator_type) << " n bins: " << this->metadata->n_bins;
+    std::cout << " cv beta: " << this->metadata->cv_beta << " split score func: " << scoreFuncToString(this->metadata->split_score_func) << std::endl;
+    std::cout << "grow policy: " << growPolicyToString(this->metadata->grow_policy);
     std::cout << " verbose: " << this->metadata->verbose << " device: "<< deviceTypeToString(this->device);
-    std::cout << " compliance weight: " << this->metadata->compliance_weight << " compliance exp: " << this->metadata->compliance_exp;
-    std::cout << " use_cv: " << this->metadata->use_cv << " batch_size: " << this->metadata->batch_size << std::endl;
-    std::cout << "Loaded: " << this->metadata->n_leaves << " leaves from " << this->metadata->n_trees << " trees" <<  std::endl;
+    std::cout << " compliance weight: " << this->metadata->compliance_weight << " compliance exp: " << this->metadata->compliance_exp << " compliance scale: " << this->metadata->compliance_scale << std::endl;
+    std::cout << "use cv: " << this->metadata->use_cv << " batch size: " << this->metadata->batch_size << std::endl;
+    std::cout << "Ensemble with: " << this->metadata->n_leaves << " leaves from " << this->metadata->n_trees << " trees" <<  std::endl;
     std::cout << "Model has: " << this->opts.size() << " optimizers " <<  std::endl;
 }
 
@@ -1041,7 +1045,24 @@ float* GBRL::ensemble_shap(const float *obs, const char *categorical_obs, const 
     return shap_values;
 }
 
-void GBRL::print_tree(int tree_idx){
+ensembleData* GBRL::get_ensemble_data(){
+    ensembleData *edata_copy = nullptr;
+#ifdef USE_CUDA
+    if (this->device == gpu){
+        edata_copy = ensemble_data_copy_gpu_cpu(this->metadata, this->edata, nullptr);
+    }
+#endif 
+    if (this->device == cpu)
+        edata_copy = copy_ensemble_data(this->edata, this->metadata);
+
+    return edata_copy;
+}
+
+void GBRL::print_tree(int tree_idx = -1){
+    if (tree_idx == -1) {
+        tree_idx = this->metadata->n_trees - 1;
+        std::cout << "No tree index provided. Printing last tree in the ensemble containing " <<  this->metadata->n_trees << " trees" << std::endl;
+    }
     valid_tree_idx(tree_idx, this->metadata);
     ensembleData *edata_cpu = nullptr;
 #ifdef USE_CUDA
@@ -1059,6 +1080,7 @@ void GBRL::print_tree(int tree_idx){
     std::cout << growPolicyToString(this->metadata->grow_policy) <<" DecisionTree idx: " << tree_idx;
     std::cout <<  " output_dim: " << this->metadata->output_dim << " n_bins: " << this->metadata->n_bins;
     std::cout <<  " min_data_in_leaf: " << this->metadata->min_data_in_leaf << " par_th: " << this->metadata->par_th << " max_depth: " << this->metadata->max_depth << std::endl;
+    std::cout << " input_dim: " << this->metadata->input_dim << " with " << this->metadata->n_num_features << " numerical features and " << this->metadata->n_cat_features << " categorical features" << std::endl;
     std::cout << "Leaf Nodes: " << n_leaves << std::endl;
     int ctr = 0;
     for (int leaf_idx = edata_cpu->tree_indices[tree_idx]; leaf_idx < stop_leaf_idx; ++leaf_idx){
@@ -1090,6 +1112,11 @@ bool valid_device(){
 
 void GBRL::plot_tree(int tree_idx, const std::string &filename){
 #ifdef USE_GRAPHVIZ
+
+    if (tree_idx == -1) {
+        tree_idx = this->metadata->n_trees - 1;
+        std::cout << "No tree index provided. Plotting last tree in the ensemble containing " <<  this->metadata->n_trees << " trees" << std::endl;
+    }
     ensembleData *edata_cpu = this->edata; 
 #ifdef USE_CUDA
     if (this->device == gpu){
