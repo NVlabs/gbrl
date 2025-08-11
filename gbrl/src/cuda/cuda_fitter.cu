@@ -132,8 +132,8 @@ void evaluate_greedy_splits(dataSet *dataset, ensembleData *edata, const TreeNod
     if (dataset->compliance != nullptr){
         cudaDeviceSynchronize();
         get_tpb_dimensions(candidata->n_candidates * parent_n_samples, candidata->n_candidates, tpb);
-        size_t shared_mem = sizeof(float)*2*(2 + 1)*tpb;
-        split_compliance_score_cuda<<<candidata->n_candidates, tpb, shared_mem>>>(dataset->obs, dataset->categorical_obs, dataset->compliance, node, candidata->candidate_indices, candidata->candidate_values, candidata->candidate_categories, candidata->candidate_numeric, metadata->min_data_in_leaf, split_data->split_scores, dataset->n_samples, metadata->n_num_features, metadata->compliance_weight);
+        size_t shared_mem = sizeof(float)*11*tpb;
+        lexicographic_compliance_impurity<<<candidata->n_candidates, tpb, shared_mem>>>(dataset->obs, dataset->categorical_obs, dataset->compliance, node, candidata->candidate_indices, candidata->candidate_values, candidata->candidate_categories, candidata->candidate_numeric, metadata->min_data_in_leaf, split_data->split_scores, dataset->n_samples, metadata->n_num_features, metadata->compliance_weight);
     }
     cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
@@ -161,8 +161,8 @@ void evaluate_oblivious_splits_cuda(dataSet *dataset, ensembleData *edata, TreeN
         }
         if (dataset->compliance != nullptr){
             cudaDeviceSynchronize();
-            shared_mem = sizeof(float)*2*(2 + 1)*tpb;
-            split_compliance_score_cuda<<<candidata->n_candidates, tpb, shared_mem>>>(dataset->obs, dataset->categorical_obs, dataset->compliance, nodes[i], candidata->candidate_indices, candidata->candidate_values, candidata->candidate_categories, candidata->candidate_numeric, metadata->min_data_in_leaf, split_data->oblivious_split_scores + candidata->n_candidates*i, dataset->n_samples, metadata->n_num_features, metadata->compliance_weight);
+            shared_mem = sizeof(float)*11*tpb;
+            lexicographic_compliance_impurity<<<candidata->n_candidates, tpb, shared_mem>>>(dataset->obs, dataset->categorical_obs, dataset->compliance, nodes[i], candidata->candidate_indices, candidata->candidate_values, candidata->candidate_categories, candidata->candidate_numeric, metadata->min_data_in_leaf, split_data->oblivious_split_scores + candidata->n_candidates*i, dataset->n_samples, metadata->n_num_features, metadata->compliance_weight);
         }
     }
 
@@ -402,7 +402,23 @@ __global__ void split_score_l2_cuda(const float* __restrict__ obs, const char* _
     }  
 }
 
-__global__ void split_compliance_score_cuda(const float* __restrict__ obs, const char* __restrict__ categorical_obs, const float* __restrict__ compliance, const TreeNodeGPU* __restrict__ node, const int* __restrict__ candidate_indices, const float* __restrict__ candidate_values,  const char* __restrict__ candidate_categories, const bool* __restrict__ candidate_numeric, const int min_data_in_leaf, float* __restrict__ split_scores, const int global_n_samples, const int n_num_features, const float compliance_weight){
+__global__ void lexicographic_compliance_impurity(const float* __restrict__ obs, const char* __restrict__ categorical_obs, const float* __restrict__ compliance, const TreeNodeGPU* __restrict__ node, const int* __restrict__ candidate_indices, const float* __restrict__ candidate_values,  const char* __restrict__ candidate_categories, const bool* __restrict__ candidate_numeric, const int min_data_in_leaf, float* __restrict__ split_scores, const int global_n_samples, const int n_num_features, const float compliance_weight){
+    // lexicographic_compliance_impurity
+    // Purpose: score a node/dataset D by a compliance-first variance.
+    // Inputs:
+    //   compliance   -> pointer to compliance values (compliance[i] >= 0; 0 = compliant)
+    //   node         -> tree node containing sample indices and metadata
+    //   compliance_weight -> weight for compliance penalty in split scoring
+    // Definition:
+    //   I_i = 1[compliance[i] > 0]               // non-compliance indicator
+    //   Var[I] = p(1-p),  p = (# of I_i=1)/n
+    //   Var_c+ = variance of {compliance[i] | compliance[i] > 0}     // 0 if fewer than 2 items
+    //   I_lex(D) = Var[I] + Var_c+
+    // Split reduction (for a candidate split D -> L,R):
+    //   ΔG_comp = I_lex(D) - (|L|/|D|) I_lex(L) - (|R|/|D|) I_lex(R)
+    // Notes:
+    //   - Treat NaN/inf as invalid; negative compliance[i] are invalid.
+    //   - For vector compliance, replace Var_c+ with tr(Cov of compliance over {compliance>0}).
     extern __shared__ float sdata[];
 
     int n_samples = node->n_samples;
@@ -413,49 +429,76 @@ __global__ void split_compliance_score_cuda(const float* __restrict__ obs, const
 
     int threads_per_block = blockDim.x;
     int thread_offset = 0;
-    float *left_mean = &sdata[thread_offset];
+    float *left_bernoulli = &sdata[thread_offset];
+    thread_offset += threads_per_block;
+    float *left_mean_non_comp = &sdata[thread_offset];
     thread_offset += threads_per_block;
     float *l_count = &sdata[thread_offset];
     thread_offset += threads_per_block;
-    float* right_mean = &sdata[thread_offset];
+    float* right_bernoulli = &sdata[thread_offset];
+    thread_offset += threads_per_block;
+    float* right_mean_non_comp = &sdata[thread_offset];
     thread_offset += threads_per_block;
     float* r_count = &sdata[thread_offset];
     thread_offset += threads_per_block;
-    float* left_sq_sum = &sdata[thread_offset]; 
+    float* left_sq_sum_non_comp = &sdata[thread_offset]; 
     thread_offset += threads_per_block;
-    float* right_sq_sum = &sdata[thread_offset]; 
+    float* right_sq_sum_non_comp = &sdata[thread_offset]; 
+    thread_offset += threads_per_block;
+    float* sq_sum_non_comp = &sdata[thread_offset]; 
+    thread_offset += threads_per_block;
+    float* bernoulli = &sdata[thread_offset]; 
+    thread_offset += threads_per_block;
+    float* mean_non_comp = &sdata[thread_offset]; 
 
     r_count[threadIdx.x] = 0.0f;
     l_count[threadIdx.x] = 0.0f;
-    right_mean[threadIdx.x] = 0.0f;
-    left_mean[threadIdx.x] = 0.0f;
-    left_sq_sum[threadIdx.x] = 0.0f;
-    right_sq_sum[threadIdx.x] = 0.0f;
+    right_bernoulli[threadIdx.x] = 0.0f;
+    right_mean_non_comp[threadIdx.x] = 0.0f;
+    left_bernoulli[threadIdx.x] = 0.0f;
+    left_mean_non_comp[threadIdx.x] = 0.0f;
+    bernoulli[threadIdx.x] = 0.0f;
+    mean_non_comp[threadIdx.x] = 0.0f;
+    left_sq_sum_non_comp[threadIdx.x] = 0.0f;
+    right_sq_sum_non_comp[threadIdx.x] = 0.0f;
+    sq_sum_non_comp[threadIdx.x] = 0.0f;
     
     __syncthreads();
     // Accumulate per thread partial sum
     for(int i=threadIdx.x; i < n_samples; i += blockDim.x) {
         int sample_idx = __ldg(&node->sample_indices[i]); // Access the spec
         float val = __ldg(&compliance[sample_idx]);
+        float non_compliant = (val > 0.0f) ? 1.0f : 0.0f;
+
         if ((candidate_numeric[cand_idx] && __ldg(&obs[__ldg(&candidate_indices[cand_idx])*global_n_samples + sample_idx]) > __ldg(&candidate_values[cand_idx])) || (!candidate_numeric[cand_idx] && strcmpCuda(&categorical_obs[(sample_idx*node->n_cat_features + __ldg(&candidate_indices[cand_idx]))* MAX_CHAR_SIZE], candidate_categories + cand_idx * MAX_CHAR_SIZE) == 0)){
-            right_mean[threadIdx.x] += val;
-            right_sq_sum[threadIdx.x] += val * val;
+            right_bernoulli[threadIdx.x] += non_compliant;
+            right_mean_non_comp[threadIdx.x] += val;
+            right_sq_sum_non_comp[threadIdx.x] += val * val;
             r_count[threadIdx.x] += 1;
         } else {
-            left_mean[threadIdx.x] += val;
-            left_sq_sum[threadIdx.x] += val * val;
+            left_bernoulli[threadIdx.x] += non_compliant;
+            left_mean_non_comp[threadIdx.x] += val;
+            left_sq_sum_non_comp[threadIdx.x] += val * val;
             l_count[threadIdx.x] += 1;
         }
+        bernoulli[threadIdx.x] += non_compliant;
+        mean_non_comp[threadIdx.x] += val;
+        sq_sum_non_comp[threadIdx.x] += val * val;
     }
     __syncthreads();
 
      // // tree reduction
     for(int offset = blockDim.x / 2; offset > 0; offset >>= 1) {
         if(threadIdx.x < offset) {
-            left_mean[threadIdx.x]  += left_mean[threadIdx.x + offset];
-            right_mean[threadIdx.x] += right_mean[threadIdx.x + offset];
-            left_sq_sum[threadIdx.x]  += left_sq_sum[threadIdx.x + offset];
-            right_sq_sum[threadIdx.x] += right_sq_sum[threadIdx.x + offset];
+            left_bernoulli[threadIdx.x]  += left_bernoulli[threadIdx.x + offset];
+            left_mean_non_comp[threadIdx.x]  += left_mean_non_comp[threadIdx.x + offset];
+            right_bernoulli[threadIdx.x] += right_bernoulli[threadIdx.x + offset];
+            right_mean_non_comp[threadIdx.x] += right_mean_non_comp[threadIdx.x + offset];
+            bernoulli[threadIdx.x] += bernoulli[threadIdx.x + offset];
+            mean_non_comp[threadIdx.x] += mean_non_comp[threadIdx.x + offset];
+            left_sq_sum_non_comp[threadIdx.x]  += left_sq_sum_non_comp[threadIdx.x + offset];
+            right_sq_sum_non_comp[threadIdx.x] += right_sq_sum_non_comp[threadIdx.x + offset];
+            sq_sum_non_comp[threadIdx.x] += sq_sum_non_comp[threadIdx.x + offset];
             l_count[threadIdx.x]   += l_count[threadIdx.x + offset];
             r_count[threadIdx.x]   += r_count[threadIdx.x + offset];
         }
@@ -468,24 +511,31 @@ __global__ void split_compliance_score_cuda(const float* __restrict__ obs, const
             return;
         }  
 
-        left_mean[0] = (l_count[0] > 0) ? left_mean[0] / l_count[0] : 0.0f;
-        left_sq_sum[0] = (l_count[0] > 0) ? left_sq_sum[0] / l_count[0] : 0.0f;
-        right_mean[0] = (r_count[0] > 0) ? right_mean[0] / r_count[0] : 0.0f;
-        right_sq_sum[0] = (r_count[0] > 0) ? right_sq_sum[0] / r_count[0] : 0.0f;
+        left_bernoulli[0] = (l_count[0] > 0) ? left_bernoulli[0] / l_count[0] : 0.0f;
+        left_mean_non_comp[0] = (l_count[0] > 0) ? left_mean_non_comp[0] / l_count[0] : 0.0f;
+        left_sq_sum_non_comp[0] = (l_count[0] > 0) ? left_sq_sum_non_comp[0] / l_count[0] : 0.0f;
+        right_bernoulli[0] = (r_count[0] > 0) ? right_bernoulli[0] / r_count[0] : 0.0f;
+        right_mean_non_comp[0] = (r_count[0] > 0) ? right_mean_non_comp[0] / r_count[0] : 0.0f;
+        right_sq_sum_non_comp[0] = (r_count[0] > 0) ? right_sq_sum_non_comp[0] / r_count[0] : 0.0f;
 
-        float l_var = left_sq_sum[0] - left_mean[0] * left_mean[0];
-        float r_var = right_sq_sum[0] - right_mean[0] * right_mean[0];
+        float l_var = left_bernoulli[0] * (1.0f - left_bernoulli[0]) + left_sq_sum_non_comp[0] - left_mean_non_comp[0] * left_mean_non_comp[0];
+        float r_var = right_bernoulli[0] * (1.0f - right_bernoulli[0]) + right_sq_sum_non_comp[0] - right_mean_non_comp[0] * right_mean_non_comp[0];
         float total = l_count[0] + r_count[0];
 
-        float compliance_score = (total > 0.0f) ? (l_count[0] * l_var + r_count[0] * r_var) / total : 0.0f;
+        bernoulli[0] = (total > 0.0f) ? bernoulli[0] / total : 0.0f;
+        mean_non_comp[0] = (total > 0.0f) ? mean_non_comp[0] / total : 0.0f;
+        sq_sum_non_comp[0] = (total > 0.0f) ? sq_sum_non_comp[0] / total : 0.0f;
+        float var = bernoulli[0] * (1.0f - bernoulli[0]) + sq_sum_non_comp[0] - mean_non_comp[0] * mean_non_comp[0];
+
+        float lexi_comp_impurity = (total > 0.0f) ? (l_count[0] * l_var + r_count[0] * r_var) / total - var : 0.0f;
 
 #ifdef DEBUG
         if (candidate_numeric[cand_idx])
-            printf("score: %f, compliance_score: %f, split_score: %f, feature: %i, value: %f\n", __ldg(&split_scores[cand_idx]), compliance_score, split_scores[cand_idx], __ldg(&candidate_indices[cand_idx]), __ldg(&candidate_values[cand_idx]));
+            printf("score: %f, lexi_comp_impurity: %f, split_score: %f, feature: %i, value: %f\n", __ldg(&split_scores[cand_idx]), lexi_comp_impurity, split_scores[cand_idx], __ldg(&candidate_indices[cand_idx]), __ldg(&candidate_values[cand_idx]));
         else 
-            printf("score: %f, compliance_score: %f, split_score: %f, feature: %i, value: %s, vars: [%f, %f], counts: [%f, %f], means: [%f, %f]\n", __ldg(&split_scores[cand_idx]), compliance_score, split_scores[cand_idx], __ldg(&candidate_indices[cand_idx]), &candidate_categories[cand_idx * MAX_CHAR_SIZE], l_var, r_var, l_count[0], r_count[0], left_mean[0], right_mean[0]);
+            printf("score: %f, lexi_comp_impurity: %f, split_score: %f, feature: %i, value: %s, vars: [%f, %f], counts: [%f, %f], means: [%f, %f]\n", __ldg(&split_scores[cand_idx]), lexi_comp_impurity, split_scores[cand_idx], __ldg(&candidate_indices[cand_idx]), &candidate_categories[cand_idx * MAX_CHAR_SIZE], l_var, r_var, l_count[0], r_count[0], left_mean_non_comp[0], right_mean_non_comp[0]);
 #endif
-        split_scores[cand_idx] = split_scores[cand_idx] - compliance_weight * compliance_score;
+        split_scores[cand_idx] = split_scores[cand_idx] - compliance_weight * lexi_comp_impurity;
     }  
 }
 
