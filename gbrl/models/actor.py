@@ -6,16 +6,17 @@
 # https://nvlabs.github.io/gbrl/license.html
 #
 ##############################################################################
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple, cast
 
 import numpy as np
-from gbrl.common.utils import NumericalData
+from torch import Tensor
 
-from gbrl.learners.gbt_learner import GBTLearner
-from gbrl.models.base import BaseGBT
-from gbrl.common.utils import (clip_grad_norm, concatenate_arrays, constant_like,
+from gbrl.common.utils import (NumericalData, clip_grad_norm,
+                               concatenate_arrays, constant_like,
                                ensure_leaf_tensor_or_array, numerical_dtype,
                                setup_optimizer, validate_array)
+from gbrl.learners.gbt_learner import GBTLearner
+from gbrl.models.base import BaseGBT
 
 
 class ParametricActor(BaseGBT):
@@ -31,7 +32,7 @@ class ParametricActor(BaseGBT):
                  output_dim: int,
                  policy_optimizer: Dict,
                  params: Dict = dict(),
-                 bias: np.ndarray = None,
+                 bias: Optional[np.ndarray] = None,
                  verbose: int = 0,
                  device: str = 'cpu'):
         """
@@ -66,13 +67,10 @@ class ParametricActor(BaseGBT):
                                   params, verbose, device)
         self.learner.reset()
         self.learner.set_bias(bias)
-        self.params = None
-        self.input = None
-        self.grad = None
 
     def step(self, observations: Optional[NumericalData] = None,
              policy_grad: Optional[NumericalData] = None,
-             policy_grad_clip: Optional[float] = None,) -> None:
+             policy_grad_clip: Optional[float] = None) -> None:
         """
         Performs a single boosting iteration.
 
@@ -82,14 +80,16 @@ class ParametricActor(BaseGBT):
             policy_grad (Optional[NumericalData], optional): manually
             calculated gradients. Defaults to None.
         """
+        assert self.learner is not None, "Learner model not yet initialized"
+        assert policy_grad is not None or (self.params is not None and isinstance(self.params, Tensor)), \
+            "Cannot update trees without gradients."
         if observations is None:
             assert self.input is not None, "Cannot update trees without input."
             "Make sure model is called with requires_grad=True"
             observations = self.input
         n_samples = len(observations)
 
-        policy_grad = policy_grad if policy_grad is not None else \
-            self.params.grad.detach() * n_samples
+        policy_grad = policy_grad if policy_grad is not None else self.params.grad.detach() * n_samples  # type: ignore
         policy_grad = clip_grad_norm(policy_grad, policy_grad_clip)
         validate_array(policy_grad)
 
@@ -99,7 +99,7 @@ class ParametricActor(BaseGBT):
 
     def __call__(self, observations: NumericalData,
                  requires_grad: bool = True, start_idx: int = 0,
-                 stop_idx: int = None, tensor: bool = True) -> NumericalData:
+                 stop_idx: Optional[int] = None, tensor: bool = True) -> NumericalData:
         """
         Returns actor output as Tensor. If `requires_grad=True`, stores
         differentiable parameters in `self.params`.
@@ -119,6 +119,7 @@ class ParametricActor(BaseGBT):
             NumericalData: GBRL outputs - a single parameter per action
             dimension.
         """
+        assert self.learner is not None, "Learner model not yet initialized"
         params = self.learner.predict(observations, requires_grad, start_idx,
                                       stop_idx, tensor)
         if requires_grad:
@@ -134,7 +135,8 @@ class ParametricActor(BaseGBT):
         Returns:
             ParametricActor: A copy of the current model.
         """
-        learner = self.learner.copy()
+        assert self.learner is not None, "Learner model not yet initialized"
+        learner = cast(GBTLearner, self.learner.copy())
         copy_ = ParametricActor(learner.tree_struct, learner.input_dim,
                                 learner.output_dim, learner.optimizers[0],
                                 learner.params, learner.get_bias(),
@@ -154,10 +156,10 @@ class GaussianActor(BaseGBT):
                  input_dim: int,
                  output_dim: int,
                  mu_optimizer: Dict,
-                 std_optimizer: Dict = None,
+                 std_optimizer: Optional[Dict] = None,
                  log_std_init: float = -2,
                  params: Dict = dict(),
-                 bias: np.ndarray = None,
+                 bias: Optional[np.ndarray] = None,
                  verbose: int = 0,
                  device: str = 'cpu'):
         """
@@ -233,19 +235,20 @@ class GaussianActor(BaseGBT):
             log_std_grad_clip (Optional[float], optional): Gradient clipping
             for log standard deviation. Defaults to None.
         """
+        assert self.learner is not None, "Learner model not yet initialized"
         if observations is None:
             assert self.input is not None, "Cannot update trees without input."
             "Make sure model is called with requires_grad=True"
             observations = self.input
         n_samples = len(observations)
         mu_grad = mu_grad if mu_grad is not None else \
-            self.params[0].grad.detach() * n_samples
-        mu_grad = clip_grad_norm(mu_grad, mu_grad_clip)
+            self.params[0].grad.detach() * n_samples  # type: ignore
+        mu_grad = clip_grad_norm(mu_grad, mu_grad_clip)  # type: ignore
 
         if not self.fixed_std:
             log_std_grad = log_std_grad if log_std_grad is not None else \
-                self.params[1].grad.detach() * n_samples
-            log_std_grad = clip_grad_norm(log_std_grad, log_std_grad_clip)
+                self.params[1].grad.detach() * n_samples  # type: ignore
+            log_std_grad = clip_grad_norm(log_std_grad, log_std_grad_clip)  # type: ignore
             theta_grad = concatenate_arrays(mu_grad, log_std_grad)
         else:
             theta_grad = mu_grad
@@ -255,13 +258,14 @@ class GaussianActor(BaseGBT):
         self.learner.step(observations, theta_grad)
         self.grad = mu_grad
         if not self.fixed_std:
-            self.grad = (mu_grad, log_std_grad)
+            self.grad = (mu_grad, log_std_grad)  # type: ignore
         self.input = None
 
     def __call__(self, observations: NumericalData,
                  requires_grad: bool = True,
-                 start_idx: int = 0, stop_idx: int = None,
-                 tensor: bool = True) -> NumericalData:
+                 start_idx: int = 0, stop_idx: Optional[int] = None,
+                 tensor: bool = True) -> Tuple[NumericalData,
+                                               NumericalData]:
         """
         Returns actor's outputs as tensor. If `requires_grad=True` then stores
            differentiable parameters in self.params. Return type/device is
@@ -280,11 +284,13 @@ class GaussianActor(BaseGBT):
         Returns:
             NumericalData: Gaussian parameters
         """
+        assert self.learner is not None, "Learner model not yet initialized"
         theta = self.learner.predict(observations, requires_grad, start_idx,
                                      stop_idx, tensor)
         mean_actions = theta if self.fixed_std else theta[:, :self.policy_dim]
         if not self.fixed_std:
-            mean_actions = ensure_leaf_tensor_or_array(mean_actions, tensor=True, requires_grad=requires_grad, device=self.learner.device)
+            mean_actions = ensure_leaf_tensor_or_array(mean_actions, tensor=True, requires_grad=requires_grad,
+                                                       device=self.learner.device)
         log_std = constant_like(theta, self.log_std_init) if self.fixed_std else theta[:, self.policy_dim:]
         log_std = ensure_leaf_tensor_or_array(log_std, tensor=True, requires_grad=False if
                                               self.fixed_std else
@@ -292,9 +298,9 @@ class GaussianActor(BaseGBT):
                                               device=self.learner.device)
         if requires_grad:
             self.grad = None
-            self.params = mean_actions, log_std
+            self.params = mean_actions, log_std  # type: ignore
             self.input = observations
-        return mean_actions, log_std
+        return mean_actions, log_std  # type: ignore
 
     def __copy__(self) -> "GaussianActor":
         """
@@ -303,11 +309,13 @@ class GaussianActor(BaseGBT):
         Returns:
             GaussianActor: A copy of the current model.
         """
-        learner = self.learner.copy()
+        assert self.learner is not None, "Learner model not yet initialized"
+        learner = cast(GBTLearner, self.learner.copy())
         copy_ = GaussianActor(learner.tree_struct, learner.input_dim,
                               learner.output_dim, learner.optimizers[0],
-                              learner.optimizers[1], learner.params,
-                              learner.get_bias(), learner.verbose,
-                              learner.device)
+                              learner.optimizers[1],  self.log_std_init,
+                              learner.params,  # type: ignore
+                              learner.get_bias(), learner.verbose,  # type: ignore
+                              learner.device)  # type: ignore
         copy_.learner = learner
         return copy_

@@ -38,10 +38,10 @@ class ContinuousCritic(BaseGBT):
                  input_dim: int,
                  output_dim: int,
                  weights_optimizer: Dict,
-                 bias_optimizer: Dict = None,
+                 bias_optimizer: Dict,
                  params: Dict = dict(),
                  target_update_interval: int = 100,
-                 bias: np.ndarray = None,
+                 bias: Optional[np.ndarray] = None,
                  verbose: int = 0,
                  device: str = 'cpu'):
         """
@@ -104,18 +104,18 @@ class ContinuousCritic(BaseGBT):
                                             "Make sure model is called with requires_grad=True")
             observations = self.input
         n_samples = len(observations)
-        weight_grad = weight_grad if weight_grad is not None else self.params[0].grad.detach() * n_samples
-        bias_grad = bias_grad if bias_grad is not None else self.params[1].grad.detach() * n_samples
+        weight_grad = weight_grad if weight_grad is not None else self.params[0].grad.detach() * n_samples  # type: ignore
+        bias_grad = bias_grad if bias_grad is not None else self.params[1].grad.detach() * n_samples  # type: ignore
 
-        weight_grad = clip_grad_norm(weight_grad, q_grad_clip)
-        bias_grad = clip_grad_norm(bias_grad, q_grad_clip)
+        weight_grad = clip_grad_norm(weight_grad, q_grad_clip)  # type: ignore
+        bias_grad = clip_grad_norm(bias_grad, q_grad_clip)  # type: ignore
 
         validate_array(weight_grad)
         validate_array(bias_grad)
         theta_grad = concatenate_arrays(weight_grad, bias_grad)
 
-        self.learner.step(observations, theta_grad)
-        self.grad = (weight_grad, bias_grad)
+        self.learner.step(observations, theta_grad)  # type: ignore
+        self.grad = (weight_grad, bias_grad)  # type: ignore
         self.input = None
 
     def predict_target(self, observations: NumericalData,
@@ -134,6 +134,8 @@ class ContinuousCritic(BaseGBT):
             Tuple[th.Tensor, th.Tensor]: weights and bias parameters to thetype of Q-functions
 
         """
+        assert self.learner is not None, "Target learner is not set"
+
         n_trees = self.learner.get_num_trees()
         theta = self.learner.predict(observations, requires_grad=False,
                                      stop_idx=max(n_trees - self.target_update_interval, 1), tensor=tensor)
@@ -144,7 +146,7 @@ class ContinuousCritic(BaseGBT):
 
     def __call__(self, observations: NumericalData,
                  requires_grad: bool = True, target: bool = False,
-                 start_idx: int = 0, stop_idx: int = None,
+                 start_idx: int = 0, stop_idx: Optional[int] = None,
                  tensor: bool = True) -> Tuple[NumericalData,
                                                NumericalData]:
         """
@@ -165,6 +167,7 @@ class ContinuousCritic(BaseGBT):
         """
         if target:
             return self.predict_target(observations, tensor)
+        assert self.learner is not None, "Learner model not yet initialized"
 
         theta = self.learner.predict(observations, requires_grad, start_idx,
                                      stop_idx, tensor)
@@ -175,7 +178,7 @@ class ContinuousCritic(BaseGBT):
         bias = ensure_leaf_tensor_or_array(bias, tensor=True, requires_grad=requires_grad, device=self.learner.device)
         if requires_grad:
             self.grad = None
-            self.params = weights, bias
+            self.params = weights, bias  # type: ignore
             self.input = observations
         return weights, bias
 
@@ -183,13 +186,16 @@ class ContinuousCritic(BaseGBT):
         """
         Creates a copy of the ContinuousCritic model.
         """
+        assert self.learner is not None, "Learner model not yet initialized"
         learner = self.learner.copy()
         copy_ = ContinuousCritic(learner.tree_struct, learner.input_dim,
-                                 learner.output_dim, learner.optimizers[0],
-                                 learner.optimizers[1], learner.params,
-                                 learner.get.bias(), learner.verbose,
+                                 learner.output_dim, learner.optimizers[0],  # type: ignore
+                                 learner.optimizers[1], learner.params,  # type: ignore
+                                 learner.target_update_interval,  # type: ignore
+                                 learner.get.bias(),  # type: ignore
+                                 learner.verbose,
                                  learner.device)
-        copy_.learner = learner
+        copy_.learner = learner  # type: ignore
         return copy_
 
 
@@ -206,7 +212,7 @@ class DiscreteCritic(BaseGBT):
                  critic_optimizer: Dict,
                  params: Dict = dict(),
                  target_update_interval: int = 100,
-                 bias: np.ndarray = None,
+                 bias: Optional[np.ndarray] = None,
                  verbose: int = 0,
                  device: str = 'cpu'):
         """
@@ -261,10 +267,10 @@ class DiscreteCritic(BaseGBT):
             observations = self.input
         if q_grad is None:
             n_samples = len(observations)
-            q_grad = self.params.grad.detach().cpu().numpy() * n_samples
-        q_grad = clip_grad_norm(q_grad, max_q_grad_norm)
+            q_grad = self.params.grad.detach().cpu().numpy() * n_samples  # type: ignore
+        q_grad = clip_grad_norm(q_grad, max_q_grad_norm)  # type: ignore
 
-        self.learner.step(observations, q_grad)
+        self.learner.step(observations, q_grad)  # type: ignore
         self.grad = q_grad
         self.input = None
 
@@ -288,6 +294,8 @@ class DiscreteCritic(BaseGBT):
         Returns:
             NumericalData: Critic's outputs.
         """
+        assert self.learner is not None, "Learner model not yet initialized"
+
         q_values = self.learner.predict(observations, requires_grad, start_idx, stop_idx, tensor)
         if requires_grad:
             self.grad = None
@@ -308,19 +316,25 @@ class DiscreteCritic(BaseGBT):
         Returns:
             th.Tensor: Target Critic's outputs.
         """
+        assert self.learner is not None, "Learner model not yet initialized"
+
         n_trees = self.learner.get_num_trees()
-        return self.learner.predict(observations, requires_grad=False,
-                                    stop_idx=max(n_trees - self.target_update_interval, 1), tensor=tensor)
+        return self.learner.predict(observations, requires_grad=False,  # type: ignore
+                                    stop_idx=max(n_trees - self.target_update_interval, 1),
+                                    tensor=tensor)
 
     def __copy__(self) -> "DiscreteCritic":
         """
         Creates a copy of the DiscreteCritic model.
         """
+        assert self.learner is not None, "Learner model not yet initialized"
+
         learner = self.learner.copy()
         copy_ = DiscreteCritic(learner.tree_struct, learner.input_dim,
-                               learner.output_dim, learner.optimizers[0],
+                               learner.output_dim, learner.optimizers[0],  # type: ignore
                                learner.params, self.target_update_interval,
-                               learner.get_bias(), learner.verbose,
+                               learner.get_bias(),  # type: ignore
+                               learner.verbose,
                                learner.device)
-        copy_.learner = learner
+        copy_.learner = learner  # type: ignore
         return copy_

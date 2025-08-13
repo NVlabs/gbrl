@@ -7,7 +7,7 @@
 #
 ##############################################################################
 from abc import ABC, abstractmethod
-from typing import Dict, List, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch as th
@@ -76,6 +76,7 @@ class BaseLearner(ABC):
             weights = np.ones(input_dim, dtype=np.single)
             feature_weights = np.ascontiguousarray(weights)
         self.feature_weights = feature_weights
+        self.cpp_model = None  # Placeholder for the C++ model instance
 
     @abstractmethod
     def reset(self) -> None:
@@ -107,7 +108,7 @@ class BaseLearner(ABC):
         """
         pass
 
-    def export(self, filename: str, modelname: str = None) -> None:
+    def export(self, filename: str, modelname: Optional[str] = None) -> None:
         # exports model to C
         filename = filename.rstrip('.')
         filename += '.h'

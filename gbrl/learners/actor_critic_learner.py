@@ -60,7 +60,7 @@ class SharedActorCriticLearner(GBTLearner):
                          [policy_optimizer, value_optimizer],
                          params, verbose, device)
 
-    def step(self, obs: NumericalData,
+    def step(self, obs: NumericalData,  # type: ignore
              theta_grad: np.ndarray, value_grad: np.ndarray) -> None:
         """
         Performs a gradient update step for both policy and value function.
@@ -70,11 +70,13 @@ class SharedActorCriticLearner(GBTLearner):
             theta_grad (np.ndarray): Gradient of the policy parameters.
             value_grad (np.ndarray): Gradient of the value function parameters.
         """
+        assert self._cpp_model is not None, "Learner model not initialized"
+
         grads = concatenate_arrays(theta_grad, value_grad)
         obs, grads = ensure_same_type(obs, grads)
         if isinstance(obs, th.Tensor):
             obs = obs.float()
-            grads = grads.float()
+            grads = grads.float()  # type: ignore[attr-defined]
             # store data so that data isn't garbage collected
             # while GBRL uses it
             self._save_memory = (obs, grads)
@@ -88,10 +90,10 @@ class SharedActorCriticLearner(GBTLearner):
             input_dim += 0 if cat_obs is None else cat_obs.shape[1]
             self._cpp_model.step(num_obs, cat_obs, grads)
 
-        self.iteration = self._cpp_model.get_iteration()
+        self.iteration = self._cpp_model.get_iteration()  # type: ignore
         self.total_iterations += 1
 
-    def distil(self, obs: NumericalData,
+    def distil(self, obs: NumericalData,  # type: ignore
                policy_targets: np.ndarray, value_targets: np.ndarray,
                params: Dict, verbose: int) -> Tuple[float, Dict]:
         """
@@ -113,9 +115,9 @@ class SharedActorCriticLearner(GBTLearner):
                                   value_targets[:, np.newaxis]], axis=1)
         return super().distil(obs, targets, params, verbose)
 
-    def predict(self, obs: NumericalData,
+    def predict(self, obs: NumericalData,  # type: ignore
                 requires_grad: bool = True, start_idx: int = 0,
-                stop_idx: int = None, tensor: bool = True) -> \
+                stop_idx: Optional[int] = None, tensor: bool = True) -> \
             Tuple[np.ndarray, np.ndarray]:
         """
         Predicts both policy and value function outputs.
@@ -140,11 +142,11 @@ class SharedActorCriticLearner(GBTLearner):
         preds = preds[:, :-1]
         preds = ensure_leaf_tensor_or_array(preds, tensor, requires_grad, self.device)
         pred_values = ensure_leaf_tensor_or_array(pred_values, tensor, requires_grad, self.device)
-        return preds, pred_values
+        return preds, pred_values  # type: ignore
 
     def predict_policy(self, obs: NumericalData,
                        requires_grad: bool = True, start_idx: int = 0,
-                       stop_idx: int = None, tensor: bool = True):
+                       stop_idx: Optional[int] = None, tensor: bool = True):
         """
         Predicts the policy (actor) output for the given observations.
 
@@ -168,7 +170,7 @@ class SharedActorCriticLearner(GBTLearner):
 
     def predict_critic(self, obs: NumericalData,
                        requires_grad: bool = True, start_idx: int = 0,
-                       stop_idx: int = None, tensor: bool = True):
+                       stop_idx: Optional[int] = None, tensor: bool = True):
         """
         Predicts the value function (critic) output for the given observations.
 
@@ -248,7 +250,7 @@ class SeparateActorCriticLearner(MultiGBTLearner):
                          [policy_optimizer, value_optimizer],
                          params, 2, verbose, device)
 
-    def step(self, obs: NumericalData,
+    def step(self, obs: NumericalData,  # type: ignore
              theta_grad: NumericalData, value_grad: NumericalData,
              model_idx: Optional[int] = None) -> None:
         """
@@ -286,7 +288,7 @@ class SeparateActorCriticLearner(MultiGBTLearner):
         """
         super().step(obs, value_grad, model_idx=1)
 
-    def distil(self, obs: NumericalData,
+    def distil(self, obs: NumericalData,  # type: ignore
                policy_targets: np.ndarray, value_targets: np.ndarray,
                params: Dict, verbose: int) -> Tuple[List[float], List[Dict]]:
         """
@@ -302,13 +304,12 @@ class SeparateActorCriticLearner(MultiGBTLearner):
         Returns:
             Tuple[List[float], List[Dict]]: The final loss values and updated parameters for distillation.
         """
-        return super().distil(obs, [policy_targets, value_targets], params,
-                              verbose)
+        return super().distil(obs, [policy_targets, value_targets], params, verbose)  # type: ignore
 
-    def predict(self, obs: NumericalData,
+    def predict(self, obs: NumericalData,  # type: ignore
                 requires_grad: bool = True, start_idx: int = 0,
-                stop_idx: int = None, tensor: bool = True) -> \
-            Tuple[np.ndarray, np.ndarray]:
+                stop_idx: Optional[int] = None, tensor: bool = True) -> \
+            List[NumericalData]:
         """
         Predicts both the policy and value outputs for the given observations.
 
@@ -320,13 +321,15 @@ class SeparateActorCriticLearner(MultiGBTLearner):
             tensor (bool, optional): Whether to return a tensor. Defaults to True.
 
         Returns:
-            Tuple[np.ndarray, np.ndarray]: Predicted policy outputs and value function outputs.
+            List[NumericalData]: Predicted policy outputs and value function outputs.
         """
-        return super().predict(obs, requires_grad, start_idx, stop_idx, tensor)
+        preds = super().predict(obs, requires_grad, start_idx, stop_idx, tensor)
+        assert isinstance(preds, list), "SeparateActorCriticLearner.predict should always return a list"
+        return preds
 
     def predict_policy(self, obs: NumericalData,
                        requires_grad: bool = True, start_idx: int = 0,
-                       stop_idx: int = None, tensor: bool = True) -> NumericalData:
+                       stop_idx: Optional[int] = None, tensor: bool = True) -> NumericalData:
         """
         Predicts the policy (actor) output for the given observations.
 
@@ -340,12 +343,13 @@ class SeparateActorCriticLearner(MultiGBTLearner):
         Returns:
             NumericalData: Predicted policy outputs.
         """
-        return super().predict(obs, requires_grad, start_idx, stop_idx, tensor,
-                               model_idx=0)
+        preds = super().predict(obs, requires_grad, start_idx, stop_idx, tensor, model_idx=0)
+        assert not isinstance(preds, list), "SeparateActorCriticLearner.predict_policy should never return a list"
+        return preds
 
     def predict_critic(self, obs: NumericalData,
                        requires_grad: bool = True, start_idx: int = 0,
-                       stop_idx: int = None, tensor: bool = True) -> NumericalData:
+                       stop_idx: Optional[int] = None, tensor: bool = True) -> NumericalData:
         """
         Predicts the value function (critic) output for the given observations.
 
@@ -359,8 +363,9 @@ class SeparateActorCriticLearner(MultiGBTLearner):
         Returns:
             NumericalData: Predicted value function outputs.
         """
-        return super().predict(obs, requires_grad, start_idx, stop_idx, tensor,
-                               model_idx=1)
+        preds = super().predict(obs, requires_grad, start_idx, stop_idx, tensor, model_idx=1)
+        assert not isinstance(preds, list), "SeparateActorCriticLearner.predict_critic should never return a list"
+        return preds
 
     def __copy__(self) -> "SeparateActorCriticLearner":
         """
@@ -374,15 +379,17 @@ class SeparateActorCriticLearner(MultiGBTLearner):
                 ]
         copy_ = SeparateActorCriticLearner(self.input_dim, self.output_dim,
                                            self.tree_struct.copy(),
-                                           opts, self.params,
-                                           self.n_learners,
+                                           opts[0], opts[1],
+                                           self.params,
                                            self.verbose,
                                            self.device)
+        assert copy_._cpp_models is not None, "Copy models not initialized"
+        assert copy_.student_models is not None, "Copy student models not initialized"
         copy_.iteration = self.iteration
         copy_.total_iterations = self.total_iterations
         if self._cpp_models is not None:
             for i in range(self.n_learners):
                 copy_._cpp_models[i] = GBRL_CPP(self._cpp_models[i])
-        if self.student_models is not None:
-            copy_.student_models[i] = GBRL_CPP(self.student_models[i])
+                if self.student_models is not None:
+                    copy_.student_models[i] = GBRL_CPP(self.student_models[i])
         return copy_

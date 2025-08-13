@@ -6,7 +6,7 @@
 # https://nvlabs.github.io/gbrl/license.html
 #
 ##############################################################################
-__version__ = "1.1.0"
+__version__ = "1.1.1"
 
 import importlib.util
 import os
@@ -47,8 +47,8 @@ def load_cpp_module():
                     file_path = os.path.join(dir_path, file_name)
                     spec = importlib.util.spec_from_file_location(module_name,
                                                                   file_path)
-                    module = importlib.util.module_from_spec(spec)
-                    spec.loader.exec_module(module)
+                    module = importlib.util.module_from_spec(spec)  # type: ignore
+                    spec.loader.exec_module(module)  # type: ignore
                     _loaded_cpp_module = module = module
                     return module
 
@@ -67,8 +67,8 @@ def load_cpp_module():
                         file_path = os.path.join(dir_path, file_name)
                         spec = importlib.util.spec_from_file_location(
                             module_name, file_path)
-                        module = importlib.util.module_from_spec(spec)
-                        spec.loader.exec_module(module)
+                        module = importlib.util.module_from_spec(spec)  # type: ignore
+                        spec.loader.exec_module(module)  # type: ignore
                         _loaded_cpp_module = module = module
                         return module
     raise ImportError(f"Could not find {module_name}{ext} in any of the"

@@ -97,12 +97,13 @@ class GBTModel(BaseGBT):
         Args:
             bias (NumericalData)
         """
+        assert self.learner is not None, "Learner model not yet initialized"
         if isinstance(bias, th.Tensor):
             bias = bias.clone().detach().cpu().numpy()
         # GBRL works with 2D numpy arrays.
         if len(bias.shape) == 1:
             bias = bias[:, np.newaxis]
-        self.learner.set_bias(bias.astype(np.single))
+        self.learner.set_bias(bias.astype(np.single))   # type: ignore
 
     def set_bias_from_targets(self, targets: Union[np.ndarray,
                                                    th.Tensor]) -> None:
@@ -111,6 +112,7 @@ class GBTModel(BaseGBT):
         Args:
             targets (NumericalData): Targets
         """
+        assert self.learner is not None, "Learner model not yet initialized"
         if isinstance(targets, th.Tensor):
             arr = targets.clone().detach().cpu().numpy()
         else:
@@ -120,9 +122,9 @@ class GBTModel(BaseGBT):
             arr = arr[:, np.newaxis]
         mean_arr = np.mean(arr, axis=0)
         if isinstance(mean_arr, float):
-            mean_arr = np.ndarray([mean_arr])
+            mean_arr = np.ndarray([mean_arr])  # type: ignore
         # GBRL only works with float32
-        self.learner.set_bias(mean_arr)
+        self.learner.set_bias(mean_arr)   # type: ignore
 
     def step(self,  X: Optional[NumericalData] = None,
              grad: Optional[NumericalData] = None,
@@ -135,12 +137,13 @@ class GBTModel(BaseGBT):
             max_grad_norm (float, optional): perform gradient clipping by norm. Defaults to None.
             grad (Optional[NumericalData], optional): manually calculated gradients. Defaults to None.
         """
+        assert self.learner is not None, "Learner model not yet initialized"
         if X is None:
             assert self.input is not None, ("Cannot update trees without input."
                                             "Make sure model is called with requires_grad=True")
             X = self.input
         n_samples = len(X)
-        grad = grad if grad is not None else self.params.grad.detach() * n_samples
+        grad = grad if grad is not None else self.params.grad.detach() * n_samples  # type: ignore
 
         grad = clip_grad_norm(grad, max_grad_norm)
         validate_array(grad)
@@ -165,6 +168,7 @@ class GBTModel(BaseGBT):
         Returns:
             float: final loss over all examples.
         """
+        assert self.learner is not None, "Learner model not yet initialized"
         return self.learner.fit(X, targets, iterations, shuffle, loss_type)
 
     @classmethod
@@ -184,7 +188,7 @@ class GBTModel(BaseGBT):
 
     def __call__(self, X: Union[th.Tensor, np.ndarray],
                  requires_grad: bool = True, start_idx: int = 0,
-                 stop_idx: int = None, tensor: bool = True) -> Union[th.Tensor, np.ndarray]:
+                 stop_idx: Optional[int] = None, tensor: bool = True) -> Union[th.Tensor, np.ndarray]:
         """
         Returns GBRL's output as either a Tensor or a numpy array. if
         `requires_grad=True` then stores differentiable parameters
@@ -201,6 +205,7 @@ class GBTModel(BaseGBT):
         Returns:
             Union[th.Tensor, np.ndarray]: Returns model predictions
         """
+        assert self.learner is not None, "Learner model not yet initialized"
         y_pred = self.learner.predict(X, requires_grad, start_idx, stop_idx, tensor)
         if requires_grad:
             self.grad = None
@@ -214,6 +219,7 @@ class GBTModel(BaseGBT):
         Args:
             tree_idx (int): tree index to print
         """
+        assert self.learner is not None, "Learner model not yet initialized"
         self.learner.print_tree(tree_idx)
 
     def plot_tree(self, tree_idx: int, filename: str) -> None:
@@ -223,6 +229,7 @@ class GBTModel(BaseGBT):
             tree_idx (int): tree index to plot
             filename (str): .png filename to save
         """
+        assert self.learner is not None, "Learner model not yet initialized"
         self.learner.plot_tree(tree_idx, filename)
 
     def copy(self) -> "GBTModel":
@@ -235,9 +242,11 @@ class GBTModel(BaseGBT):
         return self.__copy__()
 
     def __copy__(self) -> "GBTModel":
+        assert self.learner is not None, "Learner model not yet initialized"
+
         learner = self.learner.copy()
         copy_ = GBTModel(learner.tree_struct, learner.input_dim,
-                         learner.output_dim, learner.optimizers,
+                         learner.output_dim, learner.optimizers,  # type: ignore
                          learner.params, learner.verbose, learner.device)
-        copy_.learner = learner
+        copy_.learner = learner  # type: ignore
         return copy_
