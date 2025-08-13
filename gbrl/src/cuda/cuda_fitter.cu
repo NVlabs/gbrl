@@ -132,7 +132,7 @@ void evaluate_greedy_splits(dataSet *dataset, ensembleData *edata, const TreeNod
     if (dataset->compliance != nullptr){
         cudaDeviceSynchronize();
         get_tpb_dimensions(candidata->n_candidates * parent_n_samples, candidata->n_candidates, tpb);
-        size_t shared_mem = sizeof(float)*11*tpb;
+        size_t shared_mem = sizeof(float)*10*tpb;
         lexicographic_compliance_impurity<<<candidata->n_candidates, tpb, shared_mem>>>(dataset->obs, dataset->categorical_obs, dataset->compliance, node, candidata->candidate_indices, candidata->candidate_values, candidata->candidate_categories, candidata->candidate_numeric, metadata->min_data_in_leaf, split_data->split_scores, dataset->n_samples, metadata->n_num_features, metadata->compliance_weight);
     }
     cudaDeviceSynchronize();
@@ -161,7 +161,7 @@ void evaluate_oblivious_splits_cuda(dataSet *dataset, ensembleData *edata, TreeN
         }
         if (dataset->compliance != nullptr){
             cudaDeviceSynchronize();
-            shared_mem = sizeof(float)*11*tpb;
+            shared_mem = sizeof(float)*10*tpb;
             lexicographic_compliance_impurity<<<candidata->n_candidates, tpb, shared_mem>>>(dataset->obs, dataset->categorical_obs, dataset->compliance, nodes[i], candidata->candidate_indices, candidata->candidate_values, candidata->candidate_categories, candidata->candidate_numeric, metadata->min_data_in_leaf, split_data->oblivious_split_scores + candidata->n_candidates*i, dataset->n_samples, metadata->n_num_features, metadata->compliance_weight);
         }
     }
@@ -445,23 +445,20 @@ __global__ void lexicographic_compliance_impurity(const float* __restrict__ obs,
     thread_offset += threads_per_block;
     float* right_sq_sum_non_comp = &sdata[thread_offset]; 
     thread_offset += threads_per_block;
-    float* sq_sum_non_comp = &sdata[thread_offset]; 
+    float* r_count_non_comp = &sdata[thread_offset]; 
     thread_offset += threads_per_block;
-    float* bernoulli = &sdata[thread_offset]; 
-    thread_offset += threads_per_block;
-    float* mean_non_comp = &sdata[thread_offset]; 
+    float* l_count_non_comp = &sdata[thread_offset]; 
 
     r_count[threadIdx.x] = 0.0f;
     l_count[threadIdx.x] = 0.0f;
+    r_count_non_comp[threadIdx.x] = 0.0f;
+    l_count_non_comp[threadIdx.x] = 0.0f;
     right_bernoulli[threadIdx.x] = 0.0f;
     right_mean_non_comp[threadIdx.x] = 0.0f;
     left_bernoulli[threadIdx.x] = 0.0f;
     left_mean_non_comp[threadIdx.x] = 0.0f;
-    bernoulli[threadIdx.x] = 0.0f;
-    mean_non_comp[threadIdx.x] = 0.0f;
     left_sq_sum_non_comp[threadIdx.x] = 0.0f;
     right_sq_sum_non_comp[threadIdx.x] = 0.0f;
-    sq_sum_non_comp[threadIdx.x] = 0.0f;
     
     __syncthreads();
     // Accumulate per thread partial sum
@@ -475,15 +472,18 @@ __global__ void lexicographic_compliance_impurity(const float* __restrict__ obs,
             right_mean_non_comp[threadIdx.x] += val;
             right_sq_sum_non_comp[threadIdx.x] += val * val;
             r_count[threadIdx.x] += 1;
+            if (non_compliant) {
+                r_count_non_comp[threadIdx.x] += 1;
+            }
         } else {
             left_bernoulli[threadIdx.x] += non_compliant;
             left_mean_non_comp[threadIdx.x] += val;
             left_sq_sum_non_comp[threadIdx.x] += val * val;
             l_count[threadIdx.x] += 1;
+            if (non_compliant) {
+                l_count_non_comp[threadIdx.x] += 1;
+            }
         }
-        bernoulli[threadIdx.x] += non_compliant;
-        mean_non_comp[threadIdx.x] += val;
-        sq_sum_non_comp[threadIdx.x] += val * val;
     }
     __syncthreads();
 
@@ -494,13 +494,12 @@ __global__ void lexicographic_compliance_impurity(const float* __restrict__ obs,
             left_mean_non_comp[threadIdx.x]  += left_mean_non_comp[threadIdx.x + offset];
             right_bernoulli[threadIdx.x] += right_bernoulli[threadIdx.x + offset];
             right_mean_non_comp[threadIdx.x] += right_mean_non_comp[threadIdx.x + offset];
-            bernoulli[threadIdx.x] += bernoulli[threadIdx.x + offset];
-            mean_non_comp[threadIdx.x] += mean_non_comp[threadIdx.x + offset];
             left_sq_sum_non_comp[threadIdx.x]  += left_sq_sum_non_comp[threadIdx.x + offset];
             right_sq_sum_non_comp[threadIdx.x] += right_sq_sum_non_comp[threadIdx.x + offset];
-            sq_sum_non_comp[threadIdx.x] += sq_sum_non_comp[threadIdx.x + offset];
-            l_count[threadIdx.x]   += l_count[threadIdx.x + offset];
-            r_count[threadIdx.x]   += r_count[threadIdx.x + offset];
+            l_count[threadIdx.x] += l_count[threadIdx.x + offset];
+            r_count[threadIdx.x] += r_count[threadIdx.x + offset];
+            l_count_non_comp[threadIdx.x] += l_count_non_comp[threadIdx.x + offset];
+            r_count_non_comp[threadIdx.x] += r_count_non_comp[threadIdx.x + offset];
         }
         __syncthreads();
     }
@@ -512,22 +511,17 @@ __global__ void lexicographic_compliance_impurity(const float* __restrict__ obs,
         }  
 
         left_bernoulli[0] = (l_count[0] > 0) ? left_bernoulli[0] / l_count[0] : 0.0f;
-        left_mean_non_comp[0] = (l_count[0] > 0) ? left_mean_non_comp[0] / l_count[0] : 0.0f;
-        left_sq_sum_non_comp[0] = (l_count[0] > 0) ? left_sq_sum_non_comp[0] / l_count[0] : 0.0f;
+        left_mean_non_comp[0] = (l_count_non_comp[0] > 0) ? left_mean_non_comp[0] / l_count_non_comp[0] : 0.0f;
+        left_sq_sum_non_comp[0] = (l_count_non_comp[0] > 0) ? left_sq_sum_non_comp[0] / l_count_non_comp[0] : 0.0f;
         right_bernoulli[0] = (r_count[0] > 0) ? right_bernoulli[0] / r_count[0] : 0.0f;
-        right_mean_non_comp[0] = (r_count[0] > 0) ? right_mean_non_comp[0] / r_count[0] : 0.0f;
-        right_sq_sum_non_comp[0] = (r_count[0] > 0) ? right_sq_sum_non_comp[0] / r_count[0] : 0.0f;
+        right_mean_non_comp[0] = (r_count_non_comp[0] > 0) ? right_mean_non_comp[0] / r_count_non_comp[0] : 0.0f;
+        right_sq_sum_non_comp[0] = (r_count_non_comp[0] > 0) ? right_sq_sum_non_comp[0] / r_count_non_comp[0] : 0.0f;
 
         float l_var = left_bernoulli[0] * (1.0f - left_bernoulli[0]) + left_sq_sum_non_comp[0] - left_mean_non_comp[0] * left_mean_non_comp[0];
         float r_var = right_bernoulli[0] * (1.0f - right_bernoulli[0]) + right_sq_sum_non_comp[0] - right_mean_non_comp[0] * right_mean_non_comp[0];
         float total = l_count[0] + r_count[0];
 
-        bernoulli[0] = (total > 0.0f) ? bernoulli[0] / total : 0.0f;
-        mean_non_comp[0] = (total > 0.0f) ? mean_non_comp[0] / total : 0.0f;
-        sq_sum_non_comp[0] = (total > 0.0f) ? sq_sum_non_comp[0] / total : 0.0f;
-        float var = bernoulli[0] * (1.0f - bernoulli[0]) + sq_sum_non_comp[0] - mean_non_comp[0] * mean_non_comp[0];
-
-        float lexi_comp_impurity = (total > 0.0f) ? (l_count[0] * l_var + r_count[0] * r_var) / total - var : 0.0f;
+        float lexi_comp_impurity = (total > 0.0f) ? (l_count[0] * l_var + r_count[0] * r_var) / total: 0.0f;
 
 #ifdef DEBUG
         if (candidate_numeric[cand_idx])
