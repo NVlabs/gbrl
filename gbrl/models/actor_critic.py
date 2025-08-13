@@ -7,7 +7,7 @@
 #
 ##############################################################################
 import os
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, Union
 
 import numpy as np
 from gbrl.common.utils import NumericalData
@@ -30,10 +30,10 @@ class ActorCritic(BaseGBT):
                  input_dim: int,
                  output_dim: int,
                  policy_optimizer: Dict,
-                 value_optimizer: Dict = None,
+                 value_optimizer: Dict,
                  shared_tree_struct: bool = True,
                  params: Dict = dict(),
-                 bias: np.ndarray = None,
+                 bias: Optional[np.ndarray] = None,
                  verbose: int = 0,
                  device: str = 'cpu'):
         """
@@ -63,10 +63,12 @@ class ActorCritic(BaseGBT):
         verbose (int, optional): verbosity level. Defaults to 0.
         device (str, optional): GBRL device 'cpu' or 'cuda/gpu'. Defaults to 'cpu'.
         """
+        assert output_dim > 1, \
+            "ActorCritic module requires at least 1 output dimension each for the actor and the critic."
         super().__init__()
+
         policy_optimizer = setup_optimizer(policy_optimizer, prefix='policy_')
-        if value_optimizer is not None:
-            value_optimizer = setup_optimizer(value_optimizer, prefix='value_')
+        value_optimizer = setup_optimizer(value_optimizer, prefix='value_')
 
         self.shared_tree_struct = True if value_optimizer is None else \
             shared_tree_struct
@@ -84,15 +86,37 @@ class ActorCritic(BaseGBT):
             self.learner.reset()
             self.learner.set_bias(bias)
         else:
-            self.learner = SeparateActorCriticLearner(input_dim, output_dim,
+            self.learner = SeparateActorCriticLearner(input_dim, output_dim,  # type: ignore
                                                       tree_struct,
                                                       policy_optimizer,
                                                       value_optimizer,
                                                       params, verbose, device)
-            self.learner.reset()
-            self.learner.set_bias(bias, model_idx=0)
+            self.learner.reset()  # type: ignore
+            self.learner.set_bias(bias, model_idx=0)  # type: ignore
         self.policy_grad = None
         self.value_grad = None
+
+    def set_bias(self, bias: Union[np.ndarray, float], model_idx: Optional[int] = None) -> None:
+        """Sets the bias for the actor or critic model.
+
+        Args:
+            bias (Union[np.ndarray, float]): The bias value(s) to set.
+            model_idx (int): The index of the model (0 for actor, 1 for critic).
+        """
+        assert self.learner is not None, "Learner is not initialized"
+        assert model_idx is None or isinstance(self.learner, SeparateActorCriticLearner), \
+            "Cannot specify model index for a SharedActorCriticLearner."
+
+        if model_idx is None:
+            assert isinstance(bias, np.ndarray), \
+                "Model idx not specified, bias is expected to be a numpy array with same dimension as the output dim."
+            if isinstance(self.learner, SharedActorCriticLearner):
+                self.learner.set_bias(bias)
+            else:
+                self.learner.set_bias(bias[:-1], model_idx=0)  # type: ignore
+                self.learner.set_bias(bias[-1], model_idx=1)  # type: ignore
+
+        self.learner.set_bias(bias, model_idx=model_idx)  # type: ignore
 
     @classmethod
     def load_learner(cls, load_name: str, device: str) -> "ActorCritic":
@@ -109,12 +133,10 @@ class ActorCritic(BaseGBT):
 
         instance = cls.__new__(cls)
         if os.path.isfile(policy_file) and os.path.isfile(value_file):
-            instance.learner = SeparateActorCriticLearner.load(load_name,
-                                                               device)
+            instance.learner = SeparateActorCriticLearner.load(load_name, device)  # type: ignore
             instance.shared_tree_struct = False
         else:
-            instance.learner = SharedActorCriticLearner.load(load_name,
-                                                             device)
+            instance.learner = SharedActorCriticLearner.load(load_name, device)  # type: ignore
             instance.shared_tree_struct = True
 
         instance.policy_grad = None
@@ -125,7 +147,7 @@ class ActorCritic(BaseGBT):
 
     def predict_values(self, observations: NumericalData,
                        requires_grad: bool = True, start_idx: int = 0,
-                       stop_idx: int = None, tensor: bool = True) -> \
+                       stop_idx: Optional[int] = None, tensor: bool = True) -> \
             NumericalData:
         """
         Predict only values. If `requires_grad=True` then stores differentiable parameters in self.params
@@ -142,7 +164,9 @@ class ActorCritic(BaseGBT):
         Returns:
             NumericalData: values
         """
-        values = self.learner.predict_critic(observations, requires_grad,
+        assert self.learner is not None, "Learner is not initialized"
+
+        values = self.learner.predict_critic(observations, requires_grad,  # type: ignore
                                              start_idx, stop_idx, tensor)
         if requires_grad:
             self.value_grad = None
@@ -151,7 +175,7 @@ class ActorCritic(BaseGBT):
 
     def __call__(self, observations: NumericalData,
                  requires_grad: bool = True, start_idx: int = 0,
-                 stop_idx: int = None, tensor: bool = True) -> \
+                 stop_idx: Optional[int] = None, tensor: bool = True) -> \
             Tuple[NumericalData, NumericalData]:
         """
         Predicts  and returns actor and critic outputs as tensors.
@@ -168,6 +192,8 @@ class ActorCritic(BaseGBT):
         Returns:
             Tuple[NumericalData, NumericalData]: actor and critic output
         """
+        assert self.learner is not None, "Learner is not initialized"
+
         params = self.learner.predict(observations, requires_grad, start_idx,
                                       stop_idx, tensor)
         if requires_grad:
@@ -175,7 +201,7 @@ class ActorCritic(BaseGBT):
             self.value_grad = None
             self.params = params
             self.input = observations
-        return params
+        return params  # type: ignore
 
     def step(self, observations: Optional[NumericalData] = None,
              policy_grad: Optional[NumericalData] = None,
@@ -194,22 +220,23 @@ class ActorCritic(BaseGBT):
             policy_grad_clip (Optional[float], optional):Gradient clipping value for policy updates.
             value_grad_clip (Optional[float], optional): Gradient clipping value for value updates.
         """
+        assert self.learner is not None, "Learner is not initialized"
         if observations is None:
             assert self.input is not None, ("Cannot update trees without input."
                                             "Make sure model is called with requires_grad=True")
             observations = self.input
         n_samples = len(observations)
 
-        policy_grad = policy_grad if policy_grad is not None else self.params[0].grad.detach() * n_samples
-        value_grad = value_grad if value_grad is not None else self.params[1].grad.detach() * n_samples
+        policy_grad = policy_grad if policy_grad is not None else self.params[0].grad.detach() * n_samples  # type: ignore
+        value_grad = value_grad if value_grad is not None else self.params[1].grad.detach() * n_samples  # type: ignore
 
-        policy_grad = clip_grad_norm(policy_grad, policy_grad_clip)
-        value_grad = clip_grad_norm(value_grad, value_grad_clip)
+        policy_grad = clip_grad_norm(policy_grad, policy_grad_clip)  # type: ignore
+        value_grad = clip_grad_norm(value_grad, value_grad_clip)  # type: ignore
 
         validate_array(policy_grad)
         validate_array(value_grad)
 
-        self.learner.step(observations, policy_grad, value_grad)
+        self.learner.step(observations, policy_grad, value_grad)  # type: ignore
         self.policy_grad = policy_grad
         self.value_grad = value_grad
         self.input = None
@@ -229,6 +256,7 @@ class ActorCritic(BaseGBT):
         Returns:
             np.ndarray: policy gradient
         """
+        assert self.learner is not None, "Learner is not initialized"
         assert not self.shared_tree_struct, "Cannot separate boosting steps"
         "for actor and critic when using separate tree architectures!"
         if observations is None:
@@ -236,11 +264,11 @@ class ActorCritic(BaseGBT):
                                             "Make sure model is called with requires_grad=True")
             observations = self.input
         n_samples = len(observations)
-        policy_grad = policy_grad if policy_grad is not None else self.params[0].grad.detach() * n_samples
-        policy_grad = clip_grad_norm(policy_grad, policy_grad_clip)
+        policy_grad = policy_grad if policy_grad is not None else self.params[0].grad.detach() * n_samples  # type: ignore
+        policy_grad = clip_grad_norm(policy_grad, policy_grad_clip)  # type: ignore
         validate_array(policy_grad)
 
-        self.learner.step_actor(observations, policy_grad)
+        self.learner.step_actor(observations, policy_grad)  # type: ignore
         self.policy_grad = policy_grad
 
     def critic_step(self, observations: Optional[NumericalData] = None,
@@ -258,6 +286,7 @@ class ActorCritic(BaseGBT):
         Returns:
             np.ndarray: value gradient
         """
+        assert self.learner is not None, "Learner is not initialized"
         assert not self.shared_tree_struct, ("Cannot separate boosting steps"
                                              "for actor and critic when using separate tree architectures!")
         if observations is None:
@@ -266,19 +295,19 @@ class ActorCritic(BaseGBT):
             observations = self.input
         n_samples = len(observations)
 
-        value_grad = value_grad if value_grad is not None else self.params[1].grad.detach() * n_samples
-        value_grad = clip_grad_norm(value_grad, value_grad_clip)
+        value_grad = value_grad if value_grad is not None else self.params[1].grad.detach() * n_samples  # type: ignore
+        value_grad = clip_grad_norm(value_grad, value_grad_clip)  # type: ignore
 
         validate_array(value_grad)
-        self.learner.step_critic(observations, value_grad)
+        self.learner.step_critic(observations, value_grad)  # type: ignore
         self.value_grad = value_grad
 
-    def get_params(self) -> Tuple[np.ndarray, np.ndarray]:
+    def get_params(self) -> Tuple[NumericalData, NumericalData]:
         """
         Returns the predicted actor and critic parameters along with their gradients.
 
         Returns:
-            Tuple[np.ndarray, np.ndarray]:
+            Tuple[NumericalData, NumericalData]:
                 - Predicted actor and critic outputs.
                 - Corresponding policy and value gradients.
         """
@@ -287,7 +316,7 @@ class ActorCritic(BaseGBT):
             params = (self.params[0].detach().cpu().numpy(), self.params[1].detach().cpu().numpy())
         else:
             params = self.params
-        return params, (self.policy_grad, self.value_grad)
+        return params, (self.policy_grad, self.value_grad)  # type: ignore
 
     def save_learner(self, save_path: str) -> None:
         """
@@ -296,10 +325,12 @@ class ActorCritic(BaseGBT):
         Args:
             filename (str): Absolute path and name of save filename.
         """
+        assert self.learner is not None, "Learner is not initialized"
+
         if self.shared_tree_struct:
             self.learner.save(save_path)
         else:
-            self.learner.save(save_path, custom_names=['policy', 'value'])
+            self.learner.save(save_path, custom_names=['policy', 'value'])  # type: ignore
 
     def copy(self) -> "ActorCritic":
         """
@@ -311,11 +342,13 @@ class ActorCritic(BaseGBT):
         return self.__copy__()
 
     def __copy__(self) -> "ActorCritic":
+        assert self.learner is not None, "Learner is not initialized"
+
         learner = self.learner.copy()
         copy_ = ActorCritic(learner.tree_struct, learner.input_dim,
-                            learner.output_dim, learner.optimizers[0],
-                            learner.optimizers[1], self.shared_tree_struct,
-                            learner.params, learner.get_bias(),
+                            learner.output_dim, learner.policy_optimizer,  # type: ignore
+                            learner.value_optimizer, self.shared_tree_struct,   # type: ignore
+                            learner.params, learner.get_bias(),  # type: ignore
                             learner.verbose, learner.device)
-        copy_.learner = learner
+        copy_.learner = learner  # type: ignore
         return copy_

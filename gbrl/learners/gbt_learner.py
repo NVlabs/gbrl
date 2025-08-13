@@ -7,16 +7,17 @@
 #
 ##############################################################################
 import os
-from typing import Dict, List, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch as th
 
 from gbrl import GBRL_CPP
-from gbrl.learners.base import BaseLearner
 from gbrl.common.utils import (NumericalData, ensure_leaf_tensor_or_array,
-                               ensure_same_type, get_poly_vectors, get_tensor_info,
-                               numerical_dtype, preprocess_features, to_numpy)
+                               ensure_same_type, get_poly_vectors,
+                               get_tensor_info, numerical_dtype,
+                               preprocess_features, to_numpy)
+from gbrl.learners.base import BaseLearner
 
 
 class GBTLearner(BaseLearner):
@@ -79,14 +80,16 @@ class GBTLearner(BaseLearner):
             features (Union[np.ndarray, th.Tensor, Tuple]): Input features.
             grads (NumericalData): Gradients.
         """
-        features, grads = ensure_same_type(features, grads)
+        assert self._cpp_model is not None, "Model not initialized"
+        features, grads = ensure_same_type(features, grads)  # type: ignore
+
         if isinstance(features, th.Tensor):
             features = features.float()
-            grads = grads.float()
+            grads = grads.float()  # type: ignore
             self._save_memory = (features, grads)
             num_features = get_tensor_info(features)
             cat_features = None
-            grads = get_tensor_info(grads)
+            grads = get_tensor_info(grads)  # type: ignore
             self._save_memory = None
         else:
             num_features, cat_features = preprocess_features(features)
@@ -114,8 +117,11 @@ class GBTLearner(BaseLearner):
         Returns:
             float: The final loss value.
         """
+        assert self._cpp_model is not None, "Model not initialized"
+
         if isinstance(features, th.Tensor):
             features = features.detach().cpu().numpy()
+
         num_features, cat_features = preprocess_features(features)
         targets = to_numpy(targets)
         targets = targets.reshape((len(targets), self.params['output_dim']))
@@ -138,7 +144,7 @@ class GBTLearner(BaseLearner):
         status = self._cpp_model.save(filename)
         assert status == 0, "Failed to save model"
 
-    def export(self, filename: str, modelname: str = None) -> None:
+    def export(self, filename: str, modelname: Optional[str] = None) -> None:
         """
         Exports the model to a C header file.
 
@@ -208,7 +214,7 @@ class GBTLearner(BaseLearner):
             return instance
         except RuntimeError as e:
             print(f"Caught an exception in GBRL: {e}")
-            return None
+            return None  # type: ignore
 
     def get_schedule_learning_rates(self) -> Union[int, Tuple[int, int]]:
         """
@@ -217,6 +223,7 @@ class GBTLearner(BaseLearner):
         Returns:
             Union[int, Tuple[int, int]]: The learning rates.
         """
+        assert self._cpp_model is not None, "Model not initialized"
         return self._cpp_model.get_scheduler_lrs()
 
     def get_iteration(self) -> int:
@@ -226,6 +233,7 @@ class GBTLearner(BaseLearner):
         Returns:
             int: The current iteration number.
         """
+        assert self._cpp_model is not None, "Model not initialized"
         return self._cpp_model.get_iteration()
 
     def get_num_trees(self) -> int:
@@ -235,6 +243,8 @@ class GBTLearner(BaseLearner):
         Returns:
             int: The total number of trees.
         """
+        assert self._cpp_model is not None, "Model not initialized"
+
         num_trees = self._cpp_model.get_num_trees()
         if self.student_model is not None:
             num_trees += self.student_model.get_num_trees()
@@ -247,16 +257,18 @@ class GBTLearner(BaseLearner):
         Args:
             bias (Union[np.ndarray, float]): The bias value.
         """
+        assert self._cpp_model is not None, "Model not initialized"
+
         if not isinstance(bias, np.ndarray) and not isinstance(bias, float):
             raise TypeError("Input should be a numpy array or float")
 
         if isinstance(bias, float):
-            bias = np.ndarray([float])
+            bias = np.array([bias])
 
         if bias.ndim > 1:
             bias = bias.ravel()
         elif bias.ndim == 0:
-            bias = np.ndarray([bias.item()])  # Converts 0D arrays to 1D
+            bias = np.array([bias.item()])  # Converts 0D arrays to 1D
         try:
             bias = bias.astype(np.single)
             self._cpp_model.set_bias(bias)
@@ -270,6 +282,8 @@ class GBTLearner(BaseLearner):
         Args:
             feature_weights (Union[np.ndarray, float]): The feature weights.
         """
+        assert self._cpp_model is not None, "Model not initialized"
+
         if not isinstance(feature_weights, np.ndarray) and not isinstance(feature_weights, float):
             raise TypeError("Input should be a numpy array or float")
 
@@ -296,6 +310,7 @@ class GBTLearner(BaseLearner):
         Returns:
             np.ndarray: The bias.
         """
+        assert self._cpp_model is not None, "Model not initialized"
         return self._cpp_model.get_bias()
 
     def get_feature_weights(self) -> np.ndarray:
@@ -305,6 +320,7 @@ class GBTLearner(BaseLearner):
         Returns:
             np.ndarray: The feature weights.
         """
+        assert self._cpp_model is not None, "Model not initialized"
         return self._cpp_model.get_feature_weights()
 
     def get_device(self) -> str:
@@ -314,6 +330,7 @@ class GBTLearner(BaseLearner):
         Returns:
             str: The device.
         """
+        assert self._cpp_model is not None, "Model not initialized"
         return self._cpp_model.get_device()
 
     def print_tree(self, tree_idx: int) -> None:
@@ -323,6 +340,7 @@ class GBTLearner(BaseLearner):
         Args:
             tree_idx (int): The index of the tree to print.
         """
+        assert self._cpp_model is not None, "Model not initialized"
         self._cpp_model.print_tree(tree_idx)
 
     def plot_tree(self, tree_idx: int, filename: str) -> None:
@@ -333,6 +351,7 @@ class GBTLearner(BaseLearner):
             tree_idx (int): The index of the tree to plot.
             filename (str): The filename to save the plot to.
         """
+        assert self._cpp_model is not None, "Model not initialized"
         filename = filename.rstrip('.')
         try:
             self._cpp_model.plot_tree(tree_idx, filename)
@@ -353,6 +372,8 @@ class GBTLearner(BaseLearner):
         Returns:
             np.ndarray: shap values
         """
+        assert self._cpp_model is not None, "Model not initialized"
+
         if isinstance(features, th.Tensor):
             features = features.detach().cpu().numpy()
         num_features, cat_features = preprocess_features(features)
@@ -378,6 +399,7 @@ class GBTLearner(BaseLearner):
         Returns:
             np.ndarray: shap values
         """
+        assert self._cpp_model is not None, "Model not initialized"
         if isinstance(features, th.Tensor):
             features = features.detach().cpu().numpy()
         num_features, cat_features = preprocess_features(features)
@@ -387,8 +409,7 @@ class GBTLearner(BaseLearner):
         base_poly = np.ascontiguousarray(base_poly)
         norm_values = np.ascontiguousarray(norm_values)
         offset = np.ascontiguousarray(offset)
-        return self._cpp_model.ensemble_shap(num_features, cat_features,
-                                             norm_values, base_poly, offset)
+        return self._cpp_model.ensemble_shap(num_features, cat_features, norm_values, base_poly, offset)
 
     def set_device(self, device: Union[str, th.device]) -> None:
         """
@@ -397,6 +418,7 @@ class GBTLearner(BaseLearner):
         Args:
             device (Union[str, th.device]): The device to set.
         """
+        assert self._cpp_model is not None, "Model not initialized"
         if isinstance(device, th.device):
             device = device.type
         try:
@@ -405,8 +427,8 @@ class GBTLearner(BaseLearner):
         except RuntimeError as e:
             print(f"Caught an exception in GBRL: {e}")
 
-    def predict(self, features: NumericalData, requires_grad: bool = True,
-                start_idx: int = 0, stop_idx: int = None, tensor: bool = True) -> np.ndarray:
+    def predict(self, features: NumericalData, requires_grad: bool = True,  # type: ignore
+                start_idx: int = 0, stop_idx: Optional[int] = None, tensor: bool = True) -> NumericalData:
         """
         Predicts the output for the given features.
 
@@ -418,8 +440,9 @@ class GBTLearner(BaseLearner):
             tensor (bool, optional): Whether to return a tensor. Defaults to True.
 
         Returns:
-            np.ndarray: The predicted output.
+            NumericalData: The predicted output.
         """
+        assert self._cpp_model is not None, "Model not initialized"
         if stop_idx is None:
             stop_idx = 0
 
@@ -434,7 +457,7 @@ class GBTLearner(BaseLearner):
             num_features, cat_features = preprocess_features(features)
 
         preds = self._cpp_model.predict(num_features, cat_features, start_idx, stop_idx)
-        preds = th.from_dlpack(preds) if not isinstance(preds, np.ndarray) else preds
+        preds = th.from_dlpack(preds) if not isinstance(preds, np.ndarray) else preds  # type: ignore
 
         # Add student model predictions if available
         if self.student_model is not None:
@@ -442,8 +465,8 @@ class GBTLearner(BaseLearner):
                                                        cat_features,
                                                        start_idx,
                                                        stop_idx)
-            student_preds = th.from_dlpack(student_preds) if not \
-                isinstance(student_preds, np.ndarray) else student_preds
+            student_preds = student_preds if isinstance(student_preds, np.ndarray) else \
+                th.from_dlpack(student_preds)   # type: ignore
             preds += student_preds
 
         preds = ensure_leaf_tensor_or_array(preds, tensor, requires_grad, self.device)
@@ -463,7 +486,7 @@ class GBTLearner(BaseLearner):
         Returns:
             Tuple[int, Dict]: The final loss and updated parameters.
         """
-        num_obs, cat_obs = preprocess_features(obs)
+        num_obs, cat_obs = preprocess_features(obs)  # type: ignore
         distil_params = {'output_dim': self.params['output_dim'],
                          'split_score_func': 'L2',
                          'generator_type': 'Quantile',
@@ -481,7 +504,7 @@ class GBTLearner(BaseLearner):
 
         bias = np.mean(targets, axis=0)
         if isinstance(bias, float):
-            bias = np.ndarray([bias])
+            bias = np.ndarray([bias])  # type:ignore
         self.student_model.set_bias(bias.astype(numerical_dtype))
         tr_loss = self.student_model.fit(num_obs, cat_obs,
                                          targets, params['min_steps'])
@@ -499,6 +522,7 @@ class GBTLearner(BaseLearner):
 
     def print_ensemble_metadata(self):
         """Prints the metadata of the ensemble."""
+        assert self._cpp_model is not None, "Model not initialized"
         self._cpp_model.print_ensemble_metadata()
 
     def __copy__(self):

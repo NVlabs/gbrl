@@ -57,7 +57,7 @@ class MultiGBTLearner(BaseLearner):
             if isinstance(input_dim, int):
                 input_dim = [input_dim] * n_learners
 
-        super().__init__(input_dim, output_dim, tree_struct, params, verbose, device)
+        super().__init__(input_dim, output_dim, tree_struct, params, verbose, device)  # type:ignore
         if isinstance(optimizers, dict):
             optimizers = [optimizers for _ in range(n_learners)]
         self.optimizers = optimizers
@@ -77,7 +77,7 @@ class MultiGBTLearner(BaseLearner):
         for i in range(self.n_learners):
             if isinstance(self.input_dim, list):
                 params['input_dim'] = self.input_dim[i]
-                params['output_dim'] = self.output_dim[i]
+                params['output_dim'] = self.output_dim[i]  # type:ignore
             cpp_model = GBRL_CPP(**params)
             cpp_model.set_feature_weights(self.feature_weights)
             if self.student_models is not None:
@@ -102,6 +102,7 @@ class MultiGBTLearner(BaseLearner):
             grads (Union[List[NumericalData], NumericalData]): Gradients.
             model_idx (int, optional): The index of the model.
         """
+        assert self._cpp_models is not None, "Models must be initialized before stepping"
         assert model_idx is not None or (isinstance(grads, list) and
                                          len(grads) == self.n_learners)
 
@@ -109,7 +110,7 @@ class MultiGBTLearner(BaseLearner):
             """Helper function to ensure consistent feature and gradient processing."""
             features, grads = ensure_same_type(features, grads)
             if isinstance(features, th.Tensor):
-                features, grads = features.float(), grads.float()
+                features, grads = features.float(), grads.float()  # type:ignore
                 num_features, cat_features = get_tensor_info(features), None
                 grads = get_tensor_info(grads)
             else:
@@ -120,7 +121,7 @@ class MultiGBTLearner(BaseLearner):
 
         output_dim = self.output_dim
         if model_idx is not None:
-            num_features, cat_features, grads = process_data(features, grads,
+            num_features, cat_features, grads = process_data(features, grads,  # type:ignore
                                                              output_dim if not
                                                              isinstance(output_dim,
                                                                         list) else output_dim[model_idx])
@@ -133,7 +134,7 @@ class MultiGBTLearner(BaseLearner):
         else:
             assert isinstance(grads, list) and len(grads) == self.n_learners
             for i in range(self.n_learners):
-                num_features, cat_features, grads[i] = process_data(features, grads[i],
+                num_features, cat_features, grads[i] = process_data(features, grads[i],  # type:ignore
                                                                     output_dim if not
                                                                     isinstance(output_dim,
                                                                                list) else output_dim[i])
@@ -164,7 +165,7 @@ class MultiGBTLearner(BaseLearner):
         Returns:
             Union[float, List[float]]: The final loss value.
         """
-
+        assert self._cpp_models is not None, "Models must be initialized before fitting"
         assert model_idx is not None or (isinstance(targets, list) and
                                          len(targets) == self.n_learners)
         if isinstance(features, th.Tensor):
@@ -174,7 +175,7 @@ class MultiGBTLearner(BaseLearner):
         self.total_interations += iterations
 
         if model_idx is not None:
-            targets = to_numpy(targets)
+            targets = to_numpy(targets)  # type:ignore
             targets = targets.reshape((len(targets),
                                        self.params['output_dim']))
             loss = self._cpp_models[model_idx].fit(num_features, cat_features,
@@ -187,11 +188,11 @@ class MultiGBTLearner(BaseLearner):
 
         losses = []
         for i in range(self.n_learners):
-            targets[i] = to_numpy(targets[i])
-            targets[i] = targets[i].reshape((len(targets[i]),
+            targets[i] = to_numpy(targets[i])  # type:ignore
+            targets[i] = targets[i].reshape((len(targets[i]),  # type:ignore
                                             self.params['output_dim']))
             loss = self._cpp_models[i].fit(num_features, cat_features,
-                                           targets[i].astype(numerical_dtype),
+                                           targets[i].astype(numerical_dtype),  # type: ignore
                                            iterations, shuffle, loss_type)
             self.iteration[i] = self._cpp_models[i].get_iteration()
             losses.append(loss)
@@ -204,6 +205,8 @@ class MultiGBTLearner(BaseLearner):
         Args:
             filename (str): The filename to save the model to.
         """
+        assert self._cpp_models is not None, "Models must be initialized before saving"
+
         filename = filename.rstrip('.')
         assert custom_names is None or len(custom_names) == self.n_learners, "Custom names must be per learner"
         for i in range(self.n_learners):
@@ -225,7 +228,7 @@ class MultiGBTLearner(BaseLearner):
 
         print(f"Saved {self.n_learners} models with metadata to {meta_filename}")
 
-    def export(self, filename: str, modelname: str = None) -> None:
+    def export(self, filename: str, modelname: Optional[str] = None) -> None:
         """
         Exports the model to a C header file.
 
@@ -234,6 +237,8 @@ class MultiGBTLearner(BaseLearner):
             modelname (str, optional): The name of the model in the C code.
             Defaults to None.
         """
+        assert self._cpp_models is not None, "Models must be initialized before exporting"
+
         filename = filename.rstrip('.')
         for i in range(self.n_learners):
             exportname = filename + f'_{i}.h'
@@ -321,7 +326,7 @@ class MultiGBTLearner(BaseLearner):
             return instance
         except RuntimeError as e:
             print(f"Caught an exception in GBRL: {e}")
-            return None
+            return None  # type: ignore
 
     def get_schedule_learning_rates(self, model_idx: Optional[int] = None) -> Union[int, Tuple[int, int]]:
         """
@@ -333,10 +338,11 @@ class MultiGBTLearner(BaseLearner):
         Returns:
             Union[int, Tuple[int, int]]: The learning rates.
         """
-        if model_idx is not None:
-            return self._cpp_models[model_idx].get_scheduler_lrs()
-        return (cpp_model.get_scheduler_lrs()
-                for cpp_model in self._cpp_models)
+        assert self._cpp_models is not None, "Model not initialized"
+
+        if model_idx is None:
+            return tuple((cpp_model.get_scheduler_lrs() for cpp_model in self._cpp_models))
+        return self._cpp_models[model_idx].get_scheduler_lrs()
 
     def get_iteration(self, model_idx: Optional[int] = None) -> Union[int, Tuple[int, int]]:
         """
@@ -348,10 +354,11 @@ class MultiGBTLearner(BaseLearner):
         Returns:
             Union[int, Tuple[int, int]]: The current iteration number.
         """
-        if model_idx is not None:
-            return self._cpp_models[model_idx].get_iteration()
-        return (cpp_model.get_iteration()
-                for cpp_model in self._cpp_models)
+        assert self._cpp_models is not None, "Model not initialized"
+
+        if model_idx is None:
+            return tuple((cpp_model.get_iteration() for cpp_model in self._cpp_models))
+        return self._cpp_models[model_idx].get_iteration()
 
     def get_num_trees(self, model_idx: Optional[int] = None) -> Union[int, Tuple[int, int]]:
         """
@@ -363,6 +370,8 @@ class MultiGBTLearner(BaseLearner):
         Returns:
             Union[int, Tuple[int, int]]: The total number of trees.
         """
+        assert self._cpp_models is not None, "Models must be initialized"
+
         if model_idx is not None:
             _num_trees = self._cpp_models[model_idx].get_num_trees()
             if self.student_models is not None:
@@ -386,11 +395,12 @@ class MultiGBTLearner(BaseLearner):
             bias (Union[np.ndarray, float]): The bias value.
             model_idx (int, optional): model index to set bias to.
         """
+        assert self._cpp_models is not None, "Models must be initialized"
         if not isinstance(bias, np.ndarray) and not isinstance(bias, float):
             raise TypeError("Input should be a numpy array or float")
 
         if isinstance(bias, float):
-            bias = np.ndarray([float])
+            bias = np.array([bias])  # type: ignore
 
         if bias.ndim > 1:
             bias = bias.ravel()
@@ -415,6 +425,8 @@ class MultiGBTLearner(BaseLearner):
             feature_weights (Union[np.ndarray, float]): The feature weights.
             model_idx (int, optional): The index of the model.
         """
+        assert self._cpp_models is not None, "Models must be initialized"
+
         if not isinstance(feature_weights, np.ndarray) and not isinstance(feature_weights, float):
             raise TypeError("Input should be a numpy array or float")
 
@@ -449,9 +461,10 @@ class MultiGBTLearner(BaseLearner):
         Returns:
             Union[np.ndarray, Tuple[np.ndarray, ...]]: The bias.
         """
+        assert self._cpp_models is not None, "Model not initialized"
+
         if model_idx is None:
-            return (cpp_model.get_bias()
-                    for cpp_model in self._cpp_models)
+            return tuple((cpp_model.get_bias() for cpp_model in self._cpp_models))
         return self._cpp_models[model_idx].get_bias()
 
     def get_feature_weights(self, model_idx: Optional[int] = None) -> Union[np.ndarray, Tuple[np.ndarray, ...]]:
@@ -464,9 +477,10 @@ class MultiGBTLearner(BaseLearner):
         Returns:
             Union[np.ndarray, Tuple[np.ndarray, ...]]: The feature weights.
         """
+        assert self._cpp_models is not None, "Model not initialized"
+
         if model_idx is None:
-            return (cpp_model.get_feature_weights()
-                    for cpp_model in self._cpp_models)
+            return tuple((cpp_model.get_feature_weights() for cpp_model in self._cpp_models))
         return self._cpp_models[model_idx].get_feature_weights()
 
     def get_device(self, model_idx: Optional[int] = None) -> Union[str, Tuple[str, ...]]:
@@ -479,9 +493,10 @@ class MultiGBTLearner(BaseLearner):
         Returns:
             Union[str, Tuple[str, ...]]: The device.
         """
+        assert self._cpp_models is not None, "Model not initialized"
+
         if model_idx is None:
-            return (cpp_model.get_device()
-                    for cpp_model in self._cpp_models)
+            return tuple((cpp_model.get_device() for cpp_model in self._cpp_models))
         return self._cpp_models[model_idx].get_device()
 
     def print_tree(self, tree_idx: int,
@@ -493,6 +508,8 @@ class MultiGBTLearner(BaseLearner):
             tree_idx (int): The index of the tree to print.
             model_idx (int, optional): The index of the model to print.
         """
+        assert self._cpp_models is not None, "Models must be initialized"
+
         if model_idx is None:
             for i in range(self.n_learners):
                 self._cpp_models[i].print_tree(tree_idx)
@@ -508,6 +525,8 @@ class MultiGBTLearner(BaseLearner):
             filename (str): The filename to save the plot to.
             model_idx (int, optional): The index of the model to print.
         """
+        assert self._cpp_models is not None, "Models must be initialized"
+
         filename = filename.rstrip('.')
         try:
             if model_idx is not None:
@@ -534,8 +553,11 @@ class MultiGBTLearner(BaseLearner):
         Returns:
             Union[np.ndarray, Tuple[np.ndarray, ...]: shap values
         """
+        assert self._cpp_models is not None, "Models must be initialized"
+
         if isinstance(features, th.Tensor):
             features = features.detach().cpu().numpy()
+
         num_features, cat_features = preprocess_features(features)
         poly_vectors = get_poly_vectors(self.params['max_depth'], numerical_dtype)
         base_poly, norm_values, offset = poly_vectors
@@ -557,7 +579,7 @@ class MultiGBTLearner(BaseLearner):
                                                              norm_values,
                                                              base_poly,
                                                              offset))
-        return shap_values
+        return shap_values  # type: ignore
 
     def shap(self, features: NumericalData,
              model_idx: Optional[int] = None) -> Union[np.ndarray, Tuple[np.ndarray, ...]]:
@@ -574,8 +596,11 @@ class MultiGBTLearner(BaseLearner):
         Returns:
             Union[np.ndarray, Tuple[np.ndarray, ...]: shap values
         """
+        assert self._cpp_models is not None, "Models must be initialized"
+
         if isinstance(features, th.Tensor):
             features = features.detach().cpu().numpy()
+
         num_features, cat_features = preprocess_features(features)
         poly_vectors = get_poly_vectors(self.params['max_depth'], numerical_dtype)
         base_poly, norm_values, offset = poly_vectors
@@ -595,7 +620,7 @@ class MultiGBTLearner(BaseLearner):
                                                                  norm_values,
                                                                  base_poly,
                                                                  offset))
-        return shap_values
+        return shap_values  # type: ignore
 
     def set_device(self, device: Union[str, th.device],
                    model_idx: Optional[int] = None) -> None:
@@ -606,6 +631,7 @@ class MultiGBTLearner(BaseLearner):
             device (Union[str, th.device]): The device to set.
             model_idx (int, optional): The index of the model to print.
         """
+        assert self._cpp_models is not None, "Models must be initialized"
         if isinstance(device, th.device):
             device = device.type
         try:
@@ -618,9 +644,9 @@ class MultiGBTLearner(BaseLearner):
         except RuntimeError as e:
             print(f"Caught an exception in GBRL: {e}")
 
-    def predict(self, features: NumericalData,
+    def predict(self, features: NumericalData,  # type: ignore
                 requires_grad: bool = True, start_idx: int = 0,
-                stop_idx: int = None, tensor: bool = True,
+                stop_idx: Optional[int] = None, tensor: bool = True,
                 model_idx: Optional[int] = None) -> Union[NumericalData, List[NumericalData]]:
         """
         Predicts the output for the given features.
@@ -637,6 +663,7 @@ class MultiGBTLearner(BaseLearner):
             Union[NumericalData, List[NumericalData]]: The predicted output.
         """
         assert self.n_learners > 0
+        assert self._cpp_models is not None, "Models must be initialized"
         if stop_idx is None:
             stop_idx = 0
 
@@ -652,7 +679,7 @@ class MultiGBTLearner(BaseLearner):
 
         def predict_single_model(model, student_model, device):
             preds = model.predict(num_features, cat_features, start_idx, stop_idx)
-            preds = th.from_dlpack(preds) if not isinstance(preds, np.ndarray) else preds
+            preds = th.from_dlpack(preds) if not isinstance(preds, np.ndarray) else preds  # type: ignore
 
             # Add student model predictions if available
             if student_model is not None:
@@ -660,8 +687,8 @@ class MultiGBTLearner(BaseLearner):
                                                       cat_features,
                                                       start_idx,
                                                       stop_idx)
-                student_preds = th.from_dlpack(student_preds) if not \
-                    isinstance(student_preds, np.ndarray) else student_preds
+                student_preds = student_preds if isinstance(student_preds, np.ndarray) \
+                    else th.from_dlpack(student_preds)  # type: ignore
                 preds += student_preds
             return ensure_leaf_tensor_or_array(preds, tensor, requires_grad, device)
 
@@ -685,7 +712,7 @@ class MultiGBTLearner(BaseLearner):
 
         return total_preds
 
-    def distil(self, obs: NumericalData, targets: List[np.ndarray],
+    def distil(self, obs: NumericalData, targets: List[np.ndarray],  # type: ignore
                params: Dict, verbose: int = 0) -> Tuple[List[int], List[Dict]]:
         """
         Distills the model into a student model.
@@ -699,7 +726,7 @@ class MultiGBTLearner(BaseLearner):
         Returns:
             Tuple[List[int], List[Dict]]: The final loss and updated parameters.
         """
-        num_obs, cat_obs = preprocess_features(obs)
+        num_obs, cat_obs = preprocess_features(obs)  # type: ignore
         distil_params = {'output_dim': self.params['output_dim'],
                          'split_score_func': 'L2',
                          'generator_type': 'Quantile',
@@ -713,7 +740,7 @@ class MultiGBTLearner(BaseLearner):
         tr_losses = []
         distil_params = []
         for i in range(self.n_learners):
-            student_model = GBRL_CPP(**distil_params)
+            student_model = GBRL_CPP(**distil_params)  # type: ignore
             try:
                 student_model.set_optimizer(**distil_optimizer)
             except RuntimeError as e:
@@ -721,15 +748,16 @@ class MultiGBTLearner(BaseLearner):
 
             bias = np.mean(targets[i], axis=0)
             if isinstance(bias, float):
-                bias = np.ndarray([bias])
+                bias = np.ndarray([bias])  # type: ignore
+
             student_model.set_bias(bias.astype(numerical_dtype))
             tr_loss = student_model.fit(num_obs, cat_obs, targets[i], params['min_steps'])
             while tr_loss > params.get('min_distillation_loss', 0.1):
                 if params['min_steps'] < params['limit_steps']:
                     steps_to_add = min(500, params['limit_steps'] - params['min_steps'])
-                    tr_loss = self.student_model.fit(num_obs, cat_obs,
-                                                     targets[i], steps_to_add,
-                                                     shuffle=False)
+                    tr_loss = student_model.fit(num_obs, cat_obs,
+                                                targets[i], steps_to_add,
+                                                shuffle=False)
                     params['min_steps'] += steps_to_add
                 else:
                     break
@@ -746,6 +774,8 @@ class MultiGBTLearner(BaseLearner):
         Args:
             model_idx (int, optional): The index of the model.
         """
+        assert self._cpp_models is not None, "Models must be initialized"
+
         if model_idx is not None:
             self._cpp_models[model_idx].print_ensemble_metadata()
         else:
@@ -754,6 +784,8 @@ class MultiGBTLearner(BaseLearner):
 
     def __copy__(self):
         """Creates a copy of the MultiGBTLearner instance."""
+        assert self._cpp_models is not None, "Models must be initialized"
+
         opts = [opt.copy() if opt is not None else opt
                 for opt in self.optimizers
                 ]
@@ -767,7 +799,7 @@ class MultiGBTLearner(BaseLearner):
         copy_.total_iterations = self.total_iterations
         if self._cpp_models is not None:
             for i in range(self.n_learners):
-                copy_._cpp_models[i] = GBRL_CPP(self._cpp_models[i])
-        if self.student_models is not None:
-            copy_.student_models[i] = GBRL_CPP(self.student_models[i])
+                copy_._cpp_models[i] = GBRL_CPP(self._cpp_models[i])  # type: ignore
+                if self.student_models is not None:
+                    copy_.student_models[i] = GBRL_CPP(self.student_models[i])  # type: ignore
         return copy_

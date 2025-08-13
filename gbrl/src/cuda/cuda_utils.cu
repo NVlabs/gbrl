@@ -12,7 +12,21 @@
 #include "cuda_utils.h"
 #include "cuda_types.h"
 
+cudaError_t allocateCudaMemory(void** device_ptr, size_t size, const std::string& error_message) {
+    cudaError_t error = cudaMalloc(device_ptr, size);
+    if (error != cudaSuccess) {
+        size_t free_mem, total_mem;
+        cudaMemGetInfo(&free_mem, &total_mem);
 
+        std::cerr << "CUDA Allocation Error: " << error_message << " - " 
+                  << cudaGetErrorString(error) << " when trying to allocate "
+                  << (size / (1024.0 * 1024.0)) << " MB." << std::endl;
+
+        std::cerr << "Free memory: " << (free_mem / (1024.0 * 1024.0)) << " MB, "
+                  << "Total memory: " << (total_mem / (1024.0 * 1024.0)) << " MB." << std::endl;
+    }
+    return error;
+}
 
 void get_grid_dimensions(int n_elements, int& blocks, int& threads_per_block) {
     const int max_threads_per_block = THREADS_PER_BLOCK; // You can adjust this based on your GPU
