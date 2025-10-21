@@ -91,14 +91,14 @@ class SharedActorCriticLearner(GBTLearner):
         if user_actions is not None:
             obs, user_actions = ensure_same_type(obs, user_actions)
             user_actions = user_actions.reshape((len(obs), self.output_dim - 1))
-        
+
         if isinstance(obs, th.Tensor):
             obs = obs.float()
             grads = grads.float()
             obs = get_tensor_info(obs)
             grads = get_tensor_info(grads)
             self._save_memory = [obs, grads]
-            
+
             # store data so that data isn't garbage collected
             # while GBRL uses it
             if is_non_compliant:
@@ -107,7 +107,7 @@ class SharedActorCriticLearner(GBTLearner):
                 self._save_memory.append(compliance)
             else:
                 compliance = None
-                
+
             if user_actions is not None and is_non_compliant:
                 user_actions = th.cat([user_actions, th.zeros((n_samples, 1), device=user_actions.device)], dim=1)
                 user_actions = user_actions.float()
@@ -115,7 +115,7 @@ class SharedActorCriticLearner(GBTLearner):
                 self._save_memory.append(user_actions)
             else:
                 user_actions = None
-            
+
             self._cpp_model.step(obs, None, grads, compliance, user_actions)
             self._save_memory = None
         else:
@@ -164,7 +164,7 @@ class SharedActorCriticLearner(GBTLearner):
 
     def predict(self, obs: NumericalData,
                 requires_grad: bool = True, start_idx: int = 0,
-                stop_idx: int = None, tensor: bool = True) -> \
+                stop_idx: Optional[int] = None, tensor: bool = True) -> \
             Tuple[np.ndarray, np.ndarray]:
         """
         Predicts both policy and value function outputs.
@@ -193,7 +193,7 @@ class SharedActorCriticLearner(GBTLearner):
 
     def predict_policy(self, obs: NumericalData,
                        requires_grad: bool = True, start_idx: int = 0,
-                       stop_idx: int = None, tensor: bool = True):
+                       stop_idx: Optional[int] = None, tensor: bool = True):
         """
         Predicts the policy (actor) output for the given observations.
 
@@ -217,7 +217,7 @@ class SharedActorCriticLearner(GBTLearner):
 
     def predict_critic(self, obs: NumericalData,
                        requires_grad: bool = True, start_idx: int = 0,
-                       stop_idx: int = None, tensor: bool = True):
+                       stop_idx: Optional[int] = None, tensor: bool = True):
         """
         Predicts the value function (critic) output for the given observations.
 
@@ -376,7 +376,7 @@ class SeparateActorCriticLearner(MultiGBTLearner):
 
     def predict(self, obs: NumericalData,
                 requires_grad: bool = True, start_idx: int = 0,
-                stop_idx: int = None, tensor: bool = True) -> \
+                stop_idx: Optional[int] = None, tensor: bool = True) -> \
             Tuple[np.ndarray, np.ndarray]:
         """
         Predicts both the policy and value outputs for the given observations.
@@ -395,7 +395,7 @@ class SeparateActorCriticLearner(MultiGBTLearner):
 
     def predict_policy(self, obs: NumericalData,
                        requires_grad: bool = True, start_idx: int = 0,
-                       stop_idx: int = None, tensor: bool = True) -> NumericalData:
+                       stop_idx: Optional[int] = None, tensor: bool = True) -> NumericalData:
         """
         Predicts the policy (actor) output for the given observations.
 
@@ -414,7 +414,7 @@ class SeparateActorCriticLearner(MultiGBTLearner):
 
     def predict_critic(self, obs: NumericalData,
                        requires_grad: bool = True, start_idx: int = 0,
-                       stop_idx: int = None, tensor: bool = True) -> NumericalData:
+                       stop_idx: Optional[int] = None, tensor: bool = True) -> NumericalData:
         """
         Predicts the value function (critic) output for the given observations.
 

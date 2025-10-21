@@ -824,7 +824,7 @@ __global__ void reduce_leaf_sum(const float* __restrict__ obs, const char* __res
                 values[global_idx + blockIdx.x] *= compliance_degree;
 
                 if (user_actions != nullptr && user_actions_count[threadIdx.x] > 0){
-                    values[global_idx + blockIdx.x] -= compliance_scale * (user_actions_sums[threadIdx.x] / user_actions_count[threadIdx.x]) * (1.0f - compliance_degree);
+                    values[global_idx + blockIdx.x] += compliance_scale * (user_actions_sums[threadIdx.x] / user_actions_count[threadIdx.x]) * (1.0f - compliance_degree);
                 }
             }
         }

@@ -125,9 +125,35 @@ class ActorCritic(BaseGBT):
         instance.input = None
         return instance
 
+    def predict_policy(self, observations: NumericalData,
+                       requires_grad: bool = True, start_idx: int = 0,
+                       stop_idx: Optional[int] = None, tensor: bool = True) -> \
+            NumericalData:
+        """
+        Predict only policy. If `requires_grad=True` then stores differentiable parameters in self.params
+           Return type/device is identical to the input type/device.
+
+        Args:
+            observations (NumericalData)
+            requires_grad (bool, optional). Defaults to True. Ignored if input is a numpy array.
+            start_idx (int, optional): start tree index for prediction. Defaults to 0.
+            stop_idx (_type_, optional): stop tree index for prediction (uses
+            all trees in the ensemble if set to 0). Defaults to None.
+            tensor (bool, optional): Return PyTorch Tensor, False returns a numpy array. Defaults to True.
+
+        Returns:
+            NumericalData: policy
+        """
+        policy = self.learner.predict_policy(observations, requires_grad,
+                                             start_idx, stop_idx, tensor)
+        if requires_grad:
+            self.policy_grad = None
+            self.params = policy
+        return policy
+
     def predict_values(self, observations: NumericalData,
                        requires_grad: bool = True, start_idx: int = 0,
-                       stop_idx: int = None, tensor: bool = True) -> \
+                       stop_idx: Optional[int] = None, tensor: bool = True) -> \
             NumericalData:
         """
         Predict only values. If `requires_grad=True` then stores differentiable parameters in self.params
@@ -153,7 +179,7 @@ class ActorCritic(BaseGBT):
 
     def __call__(self, observations: NumericalData,
                  requires_grad: bool = True, start_idx: int = 0,
-                 stop_idx: int = None, tensor: bool = True) -> \
+                 stop_idx: Optional[int] = None, tensor: bool = True) -> \
             Tuple[NumericalData, NumericalData]:
         """
         Predicts  and returns actor and critic outputs as tensors.

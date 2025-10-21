@@ -248,7 +248,7 @@ class GaussianActor(BaseGBT):
                 for log standard deviation. Defaults to None.
             compliance (Optional[NumericalData]): guidelines compliance vector.
             user_actions (Optional[NumericalData]): guidelines user suggested action vector.
-        
+
         """
         if observations is None:
             assert self.input is not None, "Cannot update trees without input."
