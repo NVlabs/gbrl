@@ -27,11 +27,11 @@ class GBRL {
     public:
         GBRL(int input_dim, int output_dim, int policy_dim, int max_depth, int min_data_in_leaf, 
              int n_bins, int par_th, float cv_beta, scoreFunc split_score_func, generatorType generator_type, bool use_control_variates, 
-             int batch_size, growPolicy grow_policy, float compliance_weight, float compliance_exp, 
-             float compliance_scale, int verbose, deviceType _device);
+             int batch_size, growPolicy grow_policy, float guidance_weight,
+             float guidance_scale, int verbose, deviceType _device);
         GBRL(int input_dim, int output_dim, int policy_dim, int max_depth, int min_data_in_leaf, 
              int n_bins, int par_th, float cv_beta, std::string split_score_func, std::string generator_type, bool use_control_variates, 
-             int batch_size, std::string grow_policy, float compliance_weight, float compliance_exp, float compliance_scale,
+             int batch_size, std::string grow_policy, float guidance_weight, float guidance_scale,
              int verbose, std::string _device);
         GBRL(const std::string& filename);
         GBRL(GBRL& other);
@@ -46,7 +46,7 @@ class GBRL {
         int loadFromFile(const std::string& filename);
         void ensemble_check();
 
-        void step(const float *obs, const char *categorical_obs, float *grads, const float *compliance, const float *user_actions, const int n_samples, const int n_num_features, const int n_cat_features, deviceType _device);
+        void step(const float *obs, const char *categorical_obs, float *grads, const float *guidance_label, const float *guidance_grads, const int n_samples, const int n_num_features, const int n_cat_features, deviceType _device);
 #ifdef USE_CUDA
         void _step_gpu(dataSet *dataset);
         float _fit_gpu(dataSet *dataset, float *targets, const int n_iterations);

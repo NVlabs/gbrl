@@ -75,19 +75,19 @@ void Fitter::step_cpu(dataSet *dataset, ensembleData *edata, ensembleMetaData *m
 
     dataset->build_grads = build_grads; 
 
-    float *leaf_compliance = nullptr;
+    float *guidance_percent = nullptr;
 
-    if (dataset->compliance != nullptr){
+    if (dataset->guidance_labels != nullptr){
         int max_n_leaves = 1 << metadata->max_depth;
-        leaf_compliance = new float[max_n_leaves];
+        guidance_percent = new float[max_n_leaves];
     }
     
     int added_leaves = 0;
     if (metadata->grow_policy == GREEDY)
-        added_leaves = Fitter::fit_greedy_tree(dataset, edata, metadata, generator, leaf_compliance);
+        added_leaves = Fitter::fit_greedy_tree(dataset, edata, metadata, generator, guidance_percent);
     else 
-        added_leaves = Fitter::fit_oblivious_tree(dataset, edata, metadata, generator, leaf_compliance);
-    Fitter::fit_leaves(dataset, edata, metadata, added_leaves, leaf_compliance);
+        added_leaves = Fitter::fit_oblivious_tree(dataset, edata, metadata, generator, guidance_percent);
+    Fitter::fit_leaves(dataset, edata, metadata, added_leaves, guidance_percent);
 
     if (indices != nullptr){
         for (int i = 0; i < metadata->n_num_features; ++i)
@@ -99,8 +99,8 @@ void Fitter::step_cpu(dataSet *dataset, ensembleData *edata, ensembleMetaData *m
     if (norm_grads != nullptr)
         delete[] norm_grads;
 
-    if (leaf_compliance != nullptr)
-        delete[] leaf_compliance;
+    if (guidance_percent != nullptr)
+        delete[] guidance_percent;
     metadata->iteration++;
 }
 
@@ -153,8 +153,8 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
         delete[] full_grad_norms;
     }
     dataSet batch_dataset;
-    batch_dataset.compliance = nullptr; // compliance is not used in fit
-    batch_dataset.user_actions = nullptr; // compliance is not used in fit
+    batch_dataset.guidance_labels = nullptr; // guidance_labels is not used in fit
+    batch_dataset.guidance_grads = nullptr; // guidance_grads is not used in fit
 
     for (int i = 0; i < iterations; ++i){
         batch_dataset.obs = dataset->obs + batch_start_idx*metadata->n_num_features; 
@@ -243,7 +243,7 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
     return full_loss;
 }
 
-int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaData *metadata, const SplitCandidateGenerator &generator, float *leaf_compliance){
+int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaData *metadata, const SplitCandidateGenerator &generator, float *guidance_percent){
     allocate_ensemble_memory(metadata, edata);
     edata->tree_indices[metadata->n_trees] = metadata->n_leaves;
     int depth = 0, node_idx_cntr = 0, chosen_idx = 0;
@@ -314,12 +314,12 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
                     int feat_idx = (split_candidates[j].categorical_value == nullptr) ? split_candidates[j].feature_idx : split_candidates[j].feature_idx + metadata->n_num_features; 
                     score = score * edata->feature_weights[feat_idx] - parent_score;
                     
-                    if (dataset->compliance != nullptr){
-                        float compliance_score = crnt_node->getSplitComplianceScore(dataset, split_candidates[j], metadata->min_data_in_leaf);
+                    if (dataset->guidance_labels != nullptr){
+                        float guidance_score = crnt_node->getSplitGuidanceScore(dataset, split_candidates[j], metadata->min_data_in_leaf);
 #ifdef DEBUG
-                    std::cout << " cand: " <<  j << " score: " <<  score << " parent score: " <<  parent_score << " compliance score * weight: " << metadata->compliance_weight * compliance_score << " info: " << split_candidates[j] << std::endl;
-#endif 
-                        score -= metadata->compliance_weight * compliance_score;
+                    std::cout << " cand: " <<  j << " score: " <<  score << " parent score: " <<  parent_score << " guidance score * weight: " << metadata->guidance_weight * guidance_score << " info: " << split_candidates[j] << std::endl;
+#endif
+                        score -= metadata->guidance_weight * guidance_score;
                     }
 // #ifdef DEBUG
 //                     std::cout << " cand: " <<  j << " score: " <<  score << " parent score: " <<  parent_score << " info: " << split_candidates[j] << std::endl;
@@ -344,7 +344,7 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
         }
 
         if (best_score >= 0 && to_split){           
-            int status = crnt_node->splitNode(dataset->obs, dataset->categorical_obs, dataset->compliance, node_idx_cntr, split_candidates[chosen_idx], metadata);
+            int status = crnt_node->splitNode(dataset->obs, dataset->categorical_obs, dataset->guidance_labels, node_idx_cntr, split_candidates[chosen_idx], metadata);
             if (status == -1){
                 std::cerr << "ERROR couldn't split best score" << std::endl;
                 break;
@@ -355,8 +355,8 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
             node_idx_cntr += 2;
         } else {
             Fitter::update_ensemble_per_leaf(edata, metadata, crnt_node);
-            if (leaf_compliance != nullptr)
-                leaf_compliance[added_leaves] = crnt_node->compliance_percent;
+            if (guidance_percent != nullptr)
+                guidance_percent[added_leaves] = crnt_node->guidance_percent;
             added_leaves += 1;
         }
     }
@@ -365,7 +365,7 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
     return added_leaves;
 }
 
-int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMetaData *metadata, const SplitCandidateGenerator &generator, float *leaf_compliance){
+int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMetaData *metadata, const SplitCandidateGenerator &generator, float *guidance_percent){
     allocate_ensemble_memory(metadata, edata);
     edata->tree_indices[metadata->n_trees] = metadata->n_leaves;
     
@@ -415,20 +415,20 @@ int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMe
             // Process the batch of candidates
             for (int j = start_idx; j < end_idx; ++j) {
                 float score = 0.0f;
-                float compliance_score = 0.0f;
+                float guidance_score = 0.0f;
                 for (int node_idx = 0; node_idx < (1 << depth); ++node_idx){
                     TreeNode *crnt_node = tree_nodes[node_idx];
                     score += crnt_node->getSplitScore(dataset, edata->feature_weights, metadata->split_score_func, split_candidates[j], metadata->min_data_in_leaf);
-                    if (dataset->compliance != nullptr){
-                        compliance_score += crnt_node->getSplitComplianceScore(dataset, split_candidates[j], metadata->min_data_in_leaf);
+                    if (dataset->guidance_labels != nullptr){
+                        guidance_score += crnt_node->getSplitGuidanceScore(dataset, split_candidates[j], metadata->min_data_in_leaf);
                     }
                 }
                 int feat_idx = (split_candidates[j].categorical_value == nullptr) ? split_candidates[j].feature_idx : split_candidates[j].feature_idx + metadata->n_num_features; 
                 score = score*edata->feature_weights[feat_idx];
 #ifdef DEBUG
-                std::cout << " cand: " <<  j << " score: " <<  score << " compliance: " << metadata->compliance_weight * compliance_score <<  " info: " << split_candidates[j] << std::endl;
-#endif            
-                score -= metadata->compliance_weight * compliance_score;
+                std::cout << " cand: " <<  j << " score: " <<  score << " guidance: " << metadata->guidance_weight * guidance_score <<  " info: " << split_candidates[j] << std::endl;
+#endif
+                score -= metadata->guidance_weight * guidance_score;
 
                 if (score > local_best_score) {
                     local_best_score = score;
@@ -452,7 +452,7 @@ int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMe
 
         for (int node_idx = 0; node_idx < (1 << depth); ++node_idx){
             TreeNode *crnt_node = tree_nodes[node_idx];
-            int status = crnt_node->splitNode(dataset->obs, dataset->categorical_obs, dataset->compliance, node_idx_cntr, split_candidates[chosen_idx], metadata);
+            int status = crnt_node->splitNode(dataset->obs, dataset->categorical_obs, dataset->guidance_labels, node_idx_cntr, split_candidates[chosen_idx], metadata);
             if (status == -1){
                 std::cerr << "ERROR couldn't split best score" << std::endl;
                 break;
@@ -464,8 +464,8 @@ int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMe
         depth += 1;
         for (int node_idx = 0; node_idx < (1 << depth); ++node_idx){
             tree_nodes[node_idx] = child_tree_nodes[node_idx];
-            if (leaf_compliance != nullptr)
-                leaf_compliance[node_idx] = child_tree_nodes[node_idx]->compliance_percent;
+            if (guidance_percent != nullptr)
+                guidance_percent[node_idx] = child_tree_nodes[node_idx]->guidance_percent;
             child_tree_nodes[node_idx] = nullptr;
         }
     }
@@ -478,9 +478,9 @@ int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMe
 }
 
 
-void Fitter::fit_leaves(dataSet *dataset, ensembleData *edata, ensembleMetaData *metadata, const int added_leaves, const float* leaf_compliance){
+void Fitter::fit_leaves(dataSet *dataset, ensembleData *edata, ensembleMetaData *metadata, const int added_leaves, const float* guidance_percent){
     for (int leaf_idx = 0; leaf_idx < added_leaves; ++leaf_idx){
-        Fitter::calc_leaf_value(dataset, edata, metadata, edata->tree_indices[metadata->n_trees - 1] + leaf_idx, metadata->n_trees - 1, leaf_compliance, leaf_idx);
+        Fitter::calc_leaf_value(dataset, edata, metadata, edata->tree_indices[metadata->n_trees - 1] + leaf_idx, metadata->n_trees - 1, guidance_percent, leaf_idx);
     }
 }
 
@@ -536,7 +536,7 @@ void Fitter::update_ensemble_per_tree(ensembleData *edata, ensembleMetaData *met
 }
 
 
-void Fitter::calc_leaf_value(dataSet *dataset, ensembleData *edata, ensembleMetaData *metadata, const int leaf_idx, const int tree_idx, const float* leaf_compliance, const int rel_leaf_idx){
+void Fitter::calc_leaf_value(dataSet *dataset, ensembleData *edata, ensembleMetaData *metadata, const int leaf_idx, const int tree_idx, const float* guidance_percent, const int rel_leaf_idx){
     int output_dim = metadata->output_dim;
     const float *obs = dataset->obs, *grads = dataset->grads;
     const char *categorical_obs = dataset->categorical_obs;
@@ -568,8 +568,8 @@ void Fitter::calc_leaf_value(dataSet *dataset, ensembleData *edata, ensembleMeta
     if (count > 0){
         for (int d = 0; d < output_dim; ++d){
             edata->values[leaf_idx*output_dim + d] /= count;
-            if (leaf_compliance != nullptr)
-                edata->values[leaf_idx*output_dim + d] *= leaf_compliance[rel_leaf_idx];
+            if (guidance_percent != nullptr)
+                edata->values[leaf_idx*output_dim + d] *= guidance_percent[rel_leaf_idx];
         }
     }
 #ifdef DEBUG

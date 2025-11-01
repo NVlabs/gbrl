@@ -63,11 +63,9 @@ class BaseLearner(ABC):
                                                     'Quantile'),
                        'use_control_variates': params.get('control_variates',
                                                           False),
-                       'compliance_weight': params.get('compliance_weight',
+                       'guidance_weight': params.get('guidance_weight',
                                                          0.0),
-                       'compliance_exp': params.get('compliance_exp',
-                                                         0.0),
-                       'compliance_scale': params.get('compliance_scale',
+                       'guidance_scale': params.get('guidance_scale',
                                                        1.0),
                        'verbose': verbose, 'device': device, **tree_struct}
 

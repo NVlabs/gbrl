@@ -65,7 +65,7 @@ class SharedActorCriticLearner(GBTLearner):
                          device=device)
 
     def step(self, obs: NumericalData, theta_grad: NumericalData, value_grad: NumericalData,
-             compliance: Optional[NumericalData] = None, user_actions: Optional[NumericalData] = None
+             guidance_label: Optional[NumericalData] = None, guidance_grad: Optional[NumericalData] = None
              ) -> None:
         """
         Performs a gradient update step for both policy and value function.
@@ -74,23 +74,21 @@ class SharedActorCriticLearner(GBTLearner):
             obs (NumericalData): Input observations.
             theta_grad (NumericalData): Gradient of the policy parameters.
             value_grad (NumericalData): Gradient of the value function parameters.
-            compliance (Optional[NumericalData]): guidelines compliance vector.
-            user_actions (Optional[NumericalData]): guidelines user suggested action vector.
+            guidance_label (Optional[NumericalData]): guidance label vector.
+            guidance_grad (Optional[NumericalData]): guidance gradient vector.
         """
         grads = concatenate_arrays(theta_grad, value_grad)
         obs, grads = ensure_same_type(obs, grads)
 
         n_samples = len(obs)
-        if compliance is not None and (compliance != 0).any():
-            obs, compliance = ensure_same_type(obs, compliance)
+        if guidance_label is not None and (guidance_label != 0).any():
+            obs, guidance_label = ensure_same_type(obs, guidance_label)
         else:
-            compliance = None
+            guidance_label = None
 
-        is_non_compliant = compliance is not None
-
-        if user_actions is not None:
-            obs, user_actions = ensure_same_type(obs, user_actions)
-            user_actions = user_actions.reshape((len(obs), self.output_dim - 1))
+        if guidance_grad is not None:
+            obs, guidance_grad = ensure_same_type(obs, guidance_grad)
+            guidance_grad = guidance_grad.reshape((len(obs), self.output_dim - 1))
 
         if isinstance(obs, th.Tensor):
             obs = obs.float()
@@ -101,22 +99,22 @@ class SharedActorCriticLearner(GBTLearner):
 
             # store data so that data isn't garbage collected
             # while GBRL uses it
-            if is_non_compliant:
-                compliance = compliance.float()
-                compliance = get_tensor_info(compliance)
-                self._save_memory.append(compliance)
+            if guidance_label is not None:
+                guidance_label = guidance_label.float()
+                guidance_label = get_tensor_info(guidance_label)
+                self._save_memory.append(guidance_label)
             else:
-                compliance = None
+                guidance_label = None
 
-            if user_actions is not None and is_non_compliant:
-                user_actions = th.cat([user_actions, th.zeros((n_samples, 1), device=user_actions.device)], dim=1)
-                user_actions = user_actions.float()
-                user_actions = get_tensor_info(user_actions)
-                self._save_memory.append(user_actions)
+            if guidance_grad is not None and guidance_label is not None:
+                guidance_grad = th.cat([guidance_grad, th.zeros((n_samples, 1), device=guidance_grad.device)], dim=1)
+                guidance_grad = guidance_grad.float()
+                guidance_grad = get_tensor_info(guidance_grad)
+                self._save_memory.append(guidance_grad)
             else:
-                user_actions = None
+                guidance_grad = None
 
-            self._cpp_model.step(obs, None, grads, compliance, user_actions)
+            self._cpp_model.step(obs, None, grads, guidance_label, guidance_grad)
             self._save_memory = None
         else:
             num_obs, cat_obs = preprocess_features(obs)
@@ -124,18 +122,16 @@ class SharedActorCriticLearner(GBTLearner):
             input_dim = 0 if num_obs is None else num_obs.shape[1]
             input_dim += 0 if cat_obs is None else cat_obs.shape[1]
 
-            if is_non_compliant:
-                compliance = np.ascontiguousarray(compliance).astype(numerical_dtype)
-            else:
-                compliance = None
+            if guidance_label is not None:
+                guidance_label = np.ascontiguousarray(guidance_label).astype(numerical_dtype)
 
-            if user_actions is not None and is_non_compliant:
-                user_actions = np.concatenate([user_actions, np.zeros((n_samples, 1))], axis=1)
-                user_actions = np.ascontiguousarray(user_actions).astype(numerical_dtype)
+            if guidance_grad is not None and guidance_label is not None:
+                guidance_grad = np.concatenate([guidance_grad, np.zeros((n_samples, 1))], axis=1)
+                guidance_grad = np.ascontiguousarray(guidance_grad).astype(numerical_dtype)
             else:
-                user_actions = None
-            
-            self._cpp_model.step(num_obs, cat_obs, grads, compliance, user_actions)
+                guidance_grad = None
+
+            self._cpp_model.step(num_obs, cat_obs, grads, guidance_label, guidance_grad)
 
         self.iteration = self._cpp_model.get_iteration()
         self.total_iterations += 1
@@ -306,8 +302,8 @@ class SeparateActorCriticLearner(MultiGBTLearner):
 
     def step(self, obs: NumericalData,
              theta_grad: NumericalData, value_grad: NumericalData,
-             compliance: Optional[NumericalData] = None,
-             user_actions: Optional[NumericalData] = None,
+             guidance_label: Optional[NumericalData] = None,
+             guidance_grad: Optional[NumericalData] = None,
              model_idx: Optional[int] = None) -> None:
         """
         Performs a single gradient update step on both the policy and value
@@ -317,17 +313,17 @@ class SeparateActorCriticLearner(MultiGBTLearner):
             obs (NumericalData): Input observations.
             theta_grad (NumericalData): Gradient update for the policy (actor).
             value_grad (NumericalData): Gradient update for the value function (critic).
-            compliance (Optional[NumericalData]): guidelines compliance vector.
-            user_actions (Optional[NumericalData]): guidelines user suggested actions vector.
+            guidance_label (Optional[NumericalData]): guidance label vector.
+            guidance_grad (Optional[NumericalData]): guidelines user suggested actions vector.
             model_idx (Optional[int], optional): Index of the model to update.
             If None, updates both models.
         """
-        super().step(obs, [theta_grad, value_grad], model_idx=model_idx, compliance=compliance, user_actions=user_actions)
+        super().step(obs, [theta_grad, value_grad], model_idx=model_idx, guidance_label=guidance_label, guidance_grad=guidance_grad)
 
     def step_actor(self, obs: NumericalData,
                    theta_grad: NumericalData,
-                   compliance: Optional[NumericalData] = None,
-                   user_actions: Optional[NumericalData] = None,
+                   guidance_label: Optional[NumericalData] = None,
+                   guidance_grad: Optional[NumericalData] = None,
                    ) -> None:
         """
         Performs a gradient update step for the policy (actor) model.
@@ -335,25 +331,21 @@ class SeparateActorCriticLearner(MultiGBTLearner):
         Args:
             obs (NumericalData): Input observations.
             theta_grad (NumericalData): Gradient update for the policy (actor).
-            compliance (Optional[NumericalData]): guidelines compliance vector.
-            user_actions (Optional[NumericalData]): guidelines user suggested actions vector.
+            guidance_label (Optional[NumericalData]): guidance label vector.
+            guidance_grad (Optional[NumericalData]): guidelines user suggested actions vector.
         """
-        super().step(obs, theta_grad, model_idx=0, compliance=compliance, user_actions=user_actions)
+        super().step(obs, theta_grad, model_idx=0, guidance_label=guidance_label, guidance_grad=guidance_grad)
 
     def step_critic(self, obs: NumericalData,
-                    value_grad: NumericalData,
-                    compliance: Optional[NumericalData] = None,
-                    user_actions: Optional[NumericalData] = None) -> None:
+                    value_grad: NumericalData) -> None:
         """
         Performs a gradient update step for the value function (critic) model.
 
         Args:
             obs (NumericalData): Input observations.
             value_grad (NumericalData): Gradient update for the value function (critic).
-            compliance (Optional[NumericalData]): guidelines compliance vector.
-            user_actions (Optional[NumericalData]): guidelines user suggested actions vector.
         """
-        super().step(obs, value_grad, model_idx=1, compliance=compliance, user_actions=user_actions)
+        super().step(obs, value_grad, model_idx=1)
 
     def distil(self, obs: NumericalData,
                policy_targets: np.ndarray, value_targets: np.ndarray,

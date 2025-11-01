@@ -74,8 +74,8 @@ class GBTLearner(BaseLearner):
             print(f"Caught an exception in GBRL: {e}")
 
     def step(self, features: Union[np.ndarray, th.Tensor, Tuple], grads: NumericalData,
-             compliance: Optional[NumericalData] = None,
-             user_actions: Optional[NumericalData] = None,
+             guidance_label: Optional[NumericalData] = None,
+             guidance_grads: Optional[NumericalData] = None,
              ) -> None:
         """
         Performs a single gradient update step (e.g, adding a single decision tree).
@@ -83,38 +83,38 @@ class GBTLearner(BaseLearner):
         Args:
             features (Union[np.ndarray, th.Tensor, Tuple]): Input features.
             grads (NumericalData): Gradients.
-            compliance (Optional[NumericalData]): guidelines compliance vector.
-            user_actions (Optional[NumericalData]): guidelines user suggested actions vector.
+            guidance_label (Optional[NumericalData]): guidance label vector.
+            guidance_grads (Optional[NumericalData]): guidance gradient vector.
         """
         features, grads = ensure_same_type(features, grads)
-        if compliance is not None and (compliance != 0).any():
-            features, compliance = ensure_same_type(features, compliance)
+        if guidance_label is not None and (guidance_label != 0).any():
+            features, guidance_label = ensure_same_type(features, guidance_label)
         else:
-            compliance = None
-        if user_actions is not None and compliance is not None:
-            features, user_actions = ensure_same_type(features, user_actions)
-            user_actions = user_actions.reshape((len(features), self.output_dim))
+            guidance_label = None
+        if guidance_grads is not None and guidance_label is not None:
+            features, guidance_grads = ensure_same_type(features, guidance_grads)
+            guidance_grads = guidance_grads.reshape((len(features), self.output_dim))
         else:
-            user_actions = None
+            guidance_grads = None
 
         if isinstance(features, th.Tensor):
             features = features.float()
             grads = grads.float()
             self._save_memory = [features, grads]
 
-            if compliance is not None and len(compliance.unique()) > 1:
-                compliance = compliance.float()
-                self._save_memory.append(compliance)
-                compliance = get_tensor_info(compliance)
+            if guidance_label is not None and len(guidance_label.unique()) > 1:
+                guidance_label = guidance_label.float()
+                self._save_memory.append(guidance_label)
+                guidance_label = get_tensor_info(guidance_label)
             else:
-                compliance = None
+                guidance_label = None
 
-            if user_actions is not None and len(user_actions.unique()) > 1:
-                user_actions = user_actions.float()
-                user_actions = get_tensor_info(user_actions)
-                self._save_memory.append(user_actions)
+            if guidance_grads is not None and len(guidance_grads.unique()) > 1:
+                guidance_grads = guidance_grads.float()
+                guidance_grads = get_tensor_info(guidance_grads)
+                self._save_memory.append(guidance_grads)
             else:
-                user_actions = None
+                guidance_grads = None
 
             num_features = get_tensor_info(features)
             cat_features = None
@@ -124,15 +124,15 @@ class GBTLearner(BaseLearner):
             grads = np.ascontiguousarray(grads.reshape((len(grads), self.params['output_dim'])))
             grads = grads.astype(numerical_dtype)
 
-            if compliance is not None:
-                compliance = np.ascontiguousarray(compliance.reshape((len(compliance), 1)))
-                compliance = compliance.astype(numerical_dtype)
+            if guidance_label is not None:
+                guidance_label = np.ascontiguousarray(guidance_label.reshape((len(guidance_label), 1)))
+                guidance_label = guidance_label.astype(numerical_dtype)
 
-            if user_actions is not None:
-                user_actions = np.ascontiguousarray(user_actions.reshape((len(user_actions), 1)))
-                user_actions = user_actions.astype(numerical_dtype)
+            if guidance_grads is not None:
+                guidance_grads = np.ascontiguousarray(guidance_grads.reshape((len(guidance_grads), 1)))
+                guidance_grads = guidance_grads.astype(numerical_dtype)
 
-        self._cpp_model.step(num_features, cat_features, grads, compliance, user_actions)
+        self._cpp_model.step(num_features, cat_features, grads, guidance_label, guidance_grads)
         self._save_memory = None
         self.iteration = self._cpp_model.get_iteration()
         self.total_iterations += 1
@@ -234,9 +234,8 @@ class GBTLearner(BaseLearner):
                                'use_control_variates':
                                metadata['use_control_variates'],
                                'verbose': metadata['verbose'],
-                               'compliance_weight': metadata['compliance_weight'],
-                               'compliance_exp': metadata['compliance_exp'],
-                               'compliance_scale': metadata['compliance_scale'],
+                               'guidance_weight': metadata['guidance_weight'],
+                               'guidance_scale': metadata['guidance_scale'],
                                'device': instance._cpp_model.get_device(),
                                **instance.tree_struct
                                }

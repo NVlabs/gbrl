@@ -106,8 +106,8 @@ class MultiGBTLearner(BaseLearner):
 
     def step(self, features: Union[NumericalData, Tuple[NumericalData, ...]],
              grads: Union[List[NumericalData], NumericalData],
-             compliance: Optional[NumericalData] = None,
-             user_actions: Optional[NumericalData] = None,
+             guidance_label: Optional[NumericalData] = None,
+             guidance_grads: Optional[NumericalData] = None,
              model_idx: Optional[int] = None,
              ) -> None:
         """
@@ -116,8 +116,8 @@ class MultiGBTLearner(BaseLearner):
         Args:
             features (Union[np.ndarray, th.Tensor, Tuple]): Input features.
             grads (Union[List[NumericalData], NumericalData]): Gradients.
-            compliance (Optional[NumericalData]): guidelines compliance vector.
-            user_actions (Optional[NumericalData]): guidelines user suggested action vector.
+            guidance_label (Optional[NumericalData]): guidance_label vector.
+            guidance_grads (Optional[NumericalData]): guidance gradient vector.
             model_idx (int, optional): The index of the model.
         """
         assert model_idx is not None or (isinstance(grads, list) and
@@ -138,31 +138,31 @@ class MultiGBTLearner(BaseLearner):
 
         output_dim = self.output_dim
 
-        if compliance is not None and (compliance != 0).any():
-            features, compliance = ensure_same_type(features, compliance)
+        if guidance_label is not None and (guidance_label != 0).any():
+            features, guidance_label = ensure_same_type(features, guidance_label)
 
             if isinstance(features, th.Tensor):
-                compliance = compliance.float()
-                compliance = get_tensor_info(compliance)
+                guidance_label = guidance_label.float()
+                guidance_label = get_tensor_info(guidance_label)
             else:
-                compliance = np.ascontiguousarray(compliance.reshape((len(compliance), 1)))
-                compliance = compliance.astype(numerical_dtype)
+                guidance_label = np.ascontiguousarray(guidance_label.reshape((len(guidance_label), 1)))
+                guidance_label = guidance_label.astype(numerical_dtype)
 
-            if user_actions is not None:
-                features, user_actions = ensure_same_type(features, user_actions)
-                user_actions = user_actions.reshape((len(features), self.output_dim))
+            if guidance_grads is not None:
+                features, guidance_grads = ensure_same_type(features, guidance_grads)
+                guidance_grads = guidance_grads.reshape((len(features), self.output_dim))
 
-                if isinstance(features, th.Tensor) and len(np.unique(user_actions)) > 1:
-                    user_actions = user_actions.float()
-                    user_actions = get_tensor_info(user_actions)
-                elif len(np.unique(user_actions)) > 1:
-                    user_actions = np.ascontiguousarray(user_actions)
-                    user_actions = user_actions.astype(numerical_dtype)
+                if isinstance(features, th.Tensor) and len(np.unique(guidance_grads)) > 1:
+                    guidance_grads = guidance_grads.float()
+                    guidance_grads = get_tensor_info(guidance_grads)
+                elif len(np.unique(guidance_grads)) > 1:
+                    guidance_grads = np.ascontiguousarray(guidance_grads)
+                    guidance_grads = guidance_grads.astype(numerical_dtype)
                 else:
-                    user_actions = None
+                    guidance_grads = None
         else:
-            compliance = None
-            user_actions = None
+            guidance_label = None
+            guidance_grads = None
         
         if model_idx is not None:
             num_features, cat_features, grads = process_data(features, grads,
@@ -171,11 +171,11 @@ class MultiGBTLearner(BaseLearner):
                                                                         list) else output_dim[model_idx])
             if isinstance(num_features, th.Tensor):
                 self._save_memory = [num_features, grads]
-                if compliance is not None:
-                    self._save_memory.append(compliance)
-                if user_actions is not None:
-                    self._save_memory.append(user_actions)
-            self._cpp_models[model_idx].step(num_features, cat_features, grads, compliance, user_actions)
+                if guidance_label is not None:
+                    self._save_memory.append(guidance_label)
+                if guidance_grads is not None:
+                    self._save_memory.append(guidance_grads)
+            self._cpp_models[model_idx].step(num_features, cat_features, grads, guidance_label, guidance_grads)
 
             if isinstance(num_features, th.Tensor):
                 self._save_memory = None
@@ -188,8 +188,8 @@ class MultiGBTLearner(BaseLearner):
                                                                     isinstance(output_dim,
                                                                                list) else output_dim[i])
                 if isinstance(num_features, th.Tensor):
-                    self._save_memory = (num_features, grads, compliance)
-                self._cpp_models[i].step(num_features, cat_features, grads[i], compliance, user_actions)
+                    self._save_memory = (num_features, grads, guidance_label)
+                self._cpp_models[i].step(num_features, cat_features, grads[i], guidance_label, guidance_grads)
                 if isinstance(num_features, th.Tensor):
                     self._save_memory = None
                 self.iteration[i] = self._cpp_models[i].get_iteration()
@@ -355,9 +355,8 @@ class MultiGBTLearner(BaseLearner):
             instance.params = {'input_dim': instance.input_dim,
                                'output_dim': instance.output_dim,
                                'policy_dim': instance.policy_dim,
-                               'compliance_weight': metadata['compliance_weight'],
-                               'compliance_scale': metadata['compliance_scale'],
-                               'compliance_exp': metadata['compliance_exp'],
+                               'guidance_weight': metadata['guidance_weight'],
+                               'guidance_scale': metadata['guidance_scale'],
                                'split_score_func':
                                metadata['split_score_func'],
                                'generator_type': metadata['generator_type'],

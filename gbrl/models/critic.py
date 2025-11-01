@@ -90,8 +90,6 @@ class ContinuousCritic(BaseGBT):
              weight_grad: Optional[NumericalData] = None,
              bias_grad: Optional[NumericalData] = None,
              q_grad_clip: Optional[float] = None,
-             compliance: Optional[NumericalData] = None,
-             user_actions: Optional[NumericalData] = None,
              ) -> None:
         """
         Performs a single boosting step
@@ -101,8 +99,6 @@ class ContinuousCritic(BaseGBT):
             q_grad_clip (float, optional):. Defaults to None.
             weight_grad (Optional[NumericalData], optional): manually calculated gradients. Defaults to None.
             bias_grad (Optional[NumericalData], optional): manually calculated gradients. Defaults to None.
-            compliance (Optional[NumericalData]): guidelines compliance vector.
-            user_actions (Optional[NumericalData]): guidelines user suggested action vector.
         """
         if observations is None:
             assert self.input is not None, ("Cannot update trees without input."
@@ -119,7 +115,7 @@ class ContinuousCritic(BaseGBT):
         validate_array(bias_grad)
         theta_grad = concatenate_arrays(weight_grad, bias_grad)
 
-        self.learner.step(observations, theta_grad, compliance, user_actions)
+        self.learner.step(observations, theta_grad)
         self.grad = (weight_grad, bias_grad)
         self.input = None
 
@@ -251,8 +247,6 @@ class DiscreteCritic(BaseGBT):
     def step(self, observations: Optional[NumericalData] = None,
              q_grad: Optional[NumericalData] = None,
              max_q_grad_norm: Optional[float] = None,
-             compliance: Optional[NumericalData] = None,
-             user_actions: Optional[NumericalData] = None,
              ) -> None:
         """
         Performs a single boosting iterations.
@@ -262,8 +256,6 @@ class DiscreteCritic(BaseGBT):
             max_q_grad_norm (float, optional). Defaults to None.
             q_grad (Optional[NumericalData], optional): manually calculated
                 gradients. Defaults to None.
-            compliance (Optional[NumericalData]): guidelines compliance vector.
-            user_actions (Optional[NumericalData]): guidelines user suggested action vector.
         """
         if observations is None:
             assert self.input is not None, ("Cannot update trees without input."
@@ -274,7 +266,7 @@ class DiscreteCritic(BaseGBT):
             q_grad = self.params.grad.detach().cpu().numpy() * n_samples
         q_grad = clip_grad_norm(q_grad, max_q_grad_norm)
 
-        self.learner.step(observations, q_grad, compliance, user_actions)
+        self.learner.step(observations, q_grad)
         self.grad = q_grad
         self.input = None
 

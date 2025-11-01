@@ -248,7 +248,7 @@ splitDataGPU* allocate_split_data(ensembleMetaData *metadata, const int n_candid
     if (metadata->grow_policy == OBLIVIOUS)
         data_alloc_size += sizeof(float) * n_candidates * nodes_per_evaluation;
     
-    // add data for compliance mean
+    // add data for guidance mean
     data_alloc_size += sizeof(float);
 
     char *data_alloc;

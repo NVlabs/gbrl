@@ -129,11 +129,11 @@ void evaluate_greedy_splits(dataSet *dataset, ensembleData *edata, const TreeNod
         split_l2_score_kernel<<<n_blocks, tpb>>>(node, edata->feature_weights, split_data->split_scores, candidata->candidate_indices, candidata->candidate_values, candidata->candidate_categories, candidata->candidate_numeric, candidata->n_candidates, split_data->left_sum, split_data->right_sum, split_data->left_count, split_data->right_count, metadata->min_data_in_leaf, metadata->n_num_features);
 
     }
-    if (dataset->compliance != nullptr){
+    if (dataset->guidance_labels != nullptr){
         cudaDeviceSynchronize();
         get_tpb_dimensions(candidata->n_candidates * parent_n_samples, candidata->n_candidates, tpb);
         size_t shared_mem = sizeof(float)*10*tpb;
-        lexicographic_compliance_impurity<<<candidata->n_candidates, tpb, shared_mem>>>(dataset->obs, dataset->categorical_obs, dataset->compliance, node, candidata->candidate_indices, candidata->candidate_values, candidata->candidate_categories, candidata->candidate_numeric, metadata->min_data_in_leaf, split_data->split_scores, dataset->n_samples, metadata->n_num_features, metadata->compliance_weight);
+        lexicographic_guidance_impurity<<<candidata->n_candidates, tpb, shared_mem>>>(dataset->obs, dataset->categorical_obs, dataset->guidance_labels, node, candidata->candidate_indices, candidata->candidate_values, candidata->candidate_categories, candidata->candidate_numeric, metadata->min_data_in_leaf, split_data->split_scores, dataset->n_samples, metadata->n_num_features, metadata->guidance_weight);
     }
     cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
@@ -159,10 +159,10 @@ void evaluate_oblivious_splits_cuda(dataSet *dataset, ensembleData *edata, TreeN
             shared_mem = sizeof(float)*2*(metadata->output_dim + 1)*tpb;
             split_score_l2_cuda<<<candidata->n_candidates, tpb, shared_mem>>>(dataset->obs, dataset->categorical_obs, dataset->build_grads, edata->feature_weights, nodes[i], candidata->candidate_indices, candidata->candidate_values, candidata->candidate_categories, candidata->candidate_numeric, metadata->min_data_in_leaf, split_data->oblivious_split_scores + candidata->n_candidates*i, dataset->n_samples, metadata->n_num_features);
         }
-        if (dataset->compliance != nullptr){
+        if (dataset->guidance_labels != nullptr){
             cudaDeviceSynchronize();
             shared_mem = sizeof(float)*10*tpb;
-            lexicographic_compliance_impurity<<<candidata->n_candidates, tpb, shared_mem>>>(dataset->obs, dataset->categorical_obs, dataset->compliance, nodes[i], candidata->candidate_indices, candidata->candidate_values, candidata->candidate_categories, candidata->candidate_numeric, metadata->min_data_in_leaf, split_data->oblivious_split_scores + candidata->n_candidates*i, dataset->n_samples, metadata->n_num_features, metadata->compliance_weight);
+            lexicographic_guidance_impurity<<<candidata->n_candidates, tpb, shared_mem>>>(dataset->obs, dataset->categorical_obs, dataset->guidance_labels, nodes[i], candidata->candidate_indices, candidata->candidate_values, candidata->candidate_categories, candidata->candidate_numeric, metadata->min_data_in_leaf, split_data->oblivious_split_scores + candidata->n_candidates*i, dataset->n_samples, metadata->n_num_features, metadata->guidance_weight);
         }
     }
 
@@ -402,23 +402,23 @@ __global__ void split_score_l2_cuda(const float* __restrict__ obs, const char* _
     }  
 }
 
-__global__ void lexicographic_compliance_impurity(const float* __restrict__ obs, const char* __restrict__ categorical_obs, const float* __restrict__ compliance, const TreeNodeGPU* __restrict__ node, const int* __restrict__ candidate_indices, const float* __restrict__ candidate_values,  const char* __restrict__ candidate_categories, const bool* __restrict__ candidate_numeric, const int min_data_in_leaf, float* __restrict__ split_scores, const int global_n_samples, const int n_num_features, const float compliance_weight){
-    // lexicographic_compliance_impurity
-    // Purpose: score a node/dataset D by a compliance-first variance.
+__global__ void lexicographic_guidance_impurity(const float* __restrict__ obs, const char* __restrict__ categorical_obs, const float* __restrict__ guidance_labels, const TreeNodeGPU* __restrict__ node, const int* __restrict__ candidate_indices, const float* __restrict__ candidate_values,  const char* __restrict__ candidate_categories, const bool* __restrict__ candidate_numeric, const int min_data_in_leaf, float* __restrict__ split_scores, const int global_n_samples, const int n_num_features, const float guidance_weight){
+    // lexicographic_guidance_impurity
+    // Purpose: score a node/dataset D by a guidance_labels-first variance.
     // Inputs:
-    //   compliance   -> pointer to compliance values (compliance[i] >= 0; 0 = compliant)
+    //   guidance_labels   -> pointer to guidance_labels values (guidance_labels[i] >= 0; 0 = compliant)
     //   node         -> tree node containing sample indices and metadata
-    //   compliance_weight -> weight for compliance penalty in split scoring
+    //   guidance_weight -> weight for guidance_labels penalty in split scoring
     // Definition:
-    //   I_i = 1[compliance[i] > 0]               // non-compliance indicator
+    //   I_i = 1[guidance_labels[i] > 0]               // requires guidance indicator
     //   Var[I] = p(1-p),  p = (# of I_i=1)/n
-    //   Var_c+ = variance of {compliance[i] | compliance[i] > 0}     // 0 if fewer than 2 items
+    //   Var_c+ = variance of {guidance_labels[i] | guidance_labels[i] > 0}     // 0 if fewer than 2 items
     //   I_lex(D) = Var[I] + Var_c+
     // Split reduction (for a candidate split D -> L,R):
-    //   ΔG_comp = I_lex(D) - (|L|/|D|) I_lex(L) - (|R|/|D|) I_lex(R)
+    //   ΔG_guidance = I_lex(D) - (|L|/|D|) I_lex(L) - (|R|/|D|) I_lex(R)
     // Notes:
-    //   - Treat NaN/inf as invalid; negative compliance[i] are invalid.
-    //   - For vector compliance, replace Var_c+ with tr(Cov of compliance over {compliance>0}).
+    //   - Treat NaN/inf as invalid; negative guidance_labels[i] are invalid.
+    //   - For vector guidance_labels, replace Var_c+ with tr(Cov of guidance_labels over {guidance_labels>0}).
     extern __shared__ float sdata[];
 
     int n_samples = node->n_samples;
@@ -464,7 +464,7 @@ __global__ void lexicographic_compliance_impurity(const float* __restrict__ obs,
     // Accumulate per thread partial sum
     for(int i=threadIdx.x; i < n_samples; i += blockDim.x) {
         int sample_idx = __ldg(&node->sample_indices[i]); // Access the spec
-        float val = __ldg(&compliance[sample_idx]);
+        float val = __ldg(&guidance_labels[sample_idx]);
         float non_compliant = (val > 0.0f) ? 1.0f : 0.0f;
 
         if ((candidate_numeric[cand_idx] && __ldg(&obs[__ldg(&candidate_indices[cand_idx])*global_n_samples + sample_idx]) > __ldg(&candidate_values[cand_idx])) || (!candidate_numeric[cand_idx] && strcmpCuda(&categorical_obs[(sample_idx*node->n_cat_features + __ldg(&candidate_indices[cand_idx]))* MAX_CHAR_SIZE], candidate_categories + cand_idx * MAX_CHAR_SIZE) == 0)){
@@ -529,7 +529,7 @@ __global__ void lexicographic_compliance_impurity(const float* __restrict__ obs,
         else 
             printf("score: %f, lexi_comp_impurity: %f, split_score: %f, feature: %i, value: %s, vars: [%f, %f], counts: [%f, %f], means: [%f, %f]\n", __ldg(&split_scores[cand_idx]), lexi_comp_impurity, split_scores[cand_idx], __ldg(&candidate_indices[cand_idx]), &candidate_categories[cand_idx * MAX_CHAR_SIZE], l_var, r_var, l_count[0], r_count[0], left_mean_non_comp[0], right_mean_non_comp[0]);
 #endif
-        split_scores[cand_idx] = split_scores[cand_idx] - compliance_weight * lexi_comp_impurity;
+        split_scores[cand_idx] = split_scores[cand_idx] - guidance_weight * lexi_comp_impurity;
     }  
 }
 
@@ -752,7 +752,7 @@ __global__ void column_sums_reduce(const float * __restrict__ in, float * __rest
 }
 
 
-__global__ void reduce_leaf_sum(const float* __restrict__ obs, const char* __restrict__ categorical_obs, const float* __restrict__ grads, const float* __restrict__ compliance, const float* __restrict__ user_actions, float* __restrict__ values, const TreeNodeGPU* __restrict__ node, const int n_samples, const int global_idx, const float compliance_exp, const float compliance_scale, const int policy_dim){
+__global__ void reduce_leaf_sum(const float* __restrict__ obs, const char* __restrict__ categorical_obs, const float* __restrict__ grads, const float* __restrict__ guidance_labels, const float* __restrict__ guidance_grads, float* __restrict__ values, const TreeNodeGPU* __restrict__ node, const int n_samples, const int global_idx, const float guidance_scale, const int policy_dim){
     extern __shared__ float sdata[];
 
     int thread_offset = 0;
@@ -763,16 +763,16 @@ __global__ void reduce_leaf_sum(const float* __restrict__ obs, const char* __res
     sum_count[threadIdx.x] = 0.0f; // Initialize shared memory
     values[global_idx + blockIdx.x] = 0.0f;
 
-    float *user_actions_sums = nullptr;
-    float *user_actions_count = nullptr;
-    if (user_actions != nullptr){
+    float *guidance_grads_sums = nullptr;
+    float *guidance_grads_count = nullptr;
+    if (guidance_grads != nullptr){
         thread_offset += blockDim.x;
-        user_actions_sums = &sdata[thread_offset];
+        guidance_grads_sums = &sdata[thread_offset];
         thread_offset += blockDim.x;
-        user_actions_count = &sdata[thread_offset];
+        guidance_grads_count = &sdata[thread_offset];
 
-        user_actions_sums[threadIdx.x] = 0.0f; // Initialize shared memory
-        user_actions_count[threadIdx.x] = 0.0f; // Initialize shared memory
+        guidance_grads_sums[threadIdx.x] = 0.0f; // Initialize shared memory
+        guidance_grads_count[threadIdx.x] = 0.0f; // Initialize shared memory
     }
 
     __syncthreads();
@@ -792,10 +792,10 @@ __global__ void reduce_leaf_sum(const float* __restrict__ obs, const char* __res
                 break;
         }
         if (passed){
-            if (compliance != nullptr && compliance[sample_idx] != 0 && user_actions != nullptr){
-                user_actions_sums[threadIdx.x] += user_actions[sample_idx * node->output_dim + blockIdx.x];
-                user_actions_count[threadIdx.x] += 1;
-                // printf("user_actions[%d, %d] = %f\n", sample_idx, blockIdx.x, user_actions[sample_idx * node->output_dim + blockIdx.x]);
+            if (guidance_labels != nullptr && guidance_labels[sample_idx] != 0 && guidance_grads != nullptr){
+                guidance_grads_sums[threadIdx.x] += guidance_grads[sample_idx * node->output_dim + blockIdx.x];
+                guidance_grads_count[threadIdx.x] += 1;
+                // printf("guidance_grads[%d, %d] = %f\n", sample_idx, blockIdx.x, guidance_grads[sample_idx * node->output_dim + blockIdx.x]);
             }
             sums[threadIdx.x] += grads[sample_idx * node->output_dim + blockIdx.x];
             sum_count[threadIdx.x] += 1;       
@@ -809,26 +809,25 @@ __global__ void reduce_leaf_sum(const float* __restrict__ obs, const char* __res
             sums[threadIdx.x]  += sums[threadIdx.x + offset];
             sum_count[threadIdx.x] += sum_count[threadIdx.x + offset];  
 
-            if (user_actions != nullptr){
-                user_actions_sums[threadIdx.x]  += user_actions_sums[threadIdx.x + offset];
-                user_actions_count[threadIdx.x] += user_actions_count[threadIdx.x + offset];   
+            if (guidance_grads != nullptr){
+                guidance_grads_sums[threadIdx.x]  += guidance_grads_sums[threadIdx.x + offset];
+                guidance_grads_count[threadIdx.x] += guidance_grads_count[threadIdx.x + offset];   
             }
         }
         __syncthreads();
     }
     if (threadIdx.x == 0){
-        float compliance_degree = powf(node->compliance_percent, compliance_exp);
         if (sum_count[threadIdx.x] > 0){
             values[global_idx + blockIdx.x] = (sums[threadIdx.x] / sum_count[threadIdx.x]);
             if (blockIdx.x < policy_dim) {
-                values[global_idx + blockIdx.x] *= compliance_degree;
+                values[global_idx + blockIdx.x] *= node->guidance_percent;
 
-                if (user_actions != nullptr && user_actions_count[threadIdx.x] > 0){
-                    values[global_idx + blockIdx.x] += compliance_scale * (user_actions_sums[threadIdx.x] / user_actions_count[threadIdx.x]) * (1.0f - compliance_degree);
+                if (guidance_grads != nullptr && guidance_grads_count[threadIdx.x] > 0){
+                    values[global_idx + blockIdx.x] += guidance_scale * (guidance_grads_sums[threadIdx.x] / guidance_grads_count[threadIdx.x]) * (1.0f - node->guidance_percent);
                 }
             }
         }
-        // printf("value[%d]: compliance degree %f, sums: %f, sum_count %f, score %f, user_action sum: %f, user action count %f, 1.0 - compliance: %f, before: %f, partial_score: %f, final value: %f\n", blockIdx.x, compliance_degree, sums[threadIdx.x], sum_count[threadIdx.x], (sums[threadIdx.x] / sum_count[threadIdx.x]) * node->compliance_percent, user_actions_sums[threadIdx.x], user_actions_count[threadIdx.x], 1.0f - node->compliance_percent, tmp, (user_actions_sums[threadIdx.x] / user_actions_count[threadIdx.x]) * (1.0f - compliance_degree), values[global_idx + blockIdx.x]);
+        // printf("value[%d]: guidance percent %f, sums: %f, sum_count %f, score %f, user_action sum: %f, user action count %f, 1.0 - guidance_percent: %f, before: %f, partial_score: %f, final value: %f\n", blockIdx.x, guidance_percent, sums[threadIdx.x], sum_count[threadIdx.x], (sums[threadIdx.x] / sum_count[threadIdx.x]) * node->guidance_percent, guidance_grads_sums[threadIdx.x], guidance_grads_count[threadIdx.x], 1.0f - node->guidance_percent, tmp, (guidance_grads_sums[threadIdx.x] / guidance_grads_count[threadIdx.x]) * (1.0f - guidance_percent), values[global_idx + blockIdx.x]);
     }
 }
 
@@ -926,7 +925,7 @@ TreeNodeGPU* allocate_root_tree_node(dataSet *dataset, ensembleMetaData *metadat
     tempNode.output_dim = metadata->output_dim;
     tempNode.node_idx = 0;
     tempNode.score = 0.0f;
-    tempNode.compliance_percent = 1.0f;
+    tempNode.guidance_percent = 1.0f;
 
     tempNode.sample_indices = nullptr;
     tempNode.feature_indices = nullptr;
@@ -962,7 +961,7 @@ void allocate_child_tree_node(TreeNodeGPU* host_parent, TreeNodeGPU** device_chi
     host_child.output_dim = host_parent->output_dim;
     host_child.node_idx = -1;
     host_child.score = 0.0f;
-    host_child.compliance_percent = 1.0f;
+    host_child.guidance_percent = 1.0f;
     host_child.n_num_features = host_parent->n_num_features;
     host_child.n_cat_features = host_parent->n_cat_features;
     host_child.sample_indices = nullptr;
@@ -1024,11 +1023,11 @@ void allocate_child_tree_nodes(dataSet *dataset, TreeNodeGPU* parent_node, TreeN
     int n_threads = WARP_SIZE*((MAX_CHAR_SIZE + WARP_SIZE - 1) / WARP_SIZE);
     update_child_nodes_kernel<<<depth, n_threads>>>(parent_node, *left_child, *right_child, split_data->tree_counters, candidata->candidate_indices, candidata->candidate_values, candidata->candidate_numeric, candidata->candidate_categories, split_data->best_idx, split_data->best_score);
     cudaDeviceSynchronize();
-    if (dataset->compliance != nullptr){
+    if (dataset->guidance_labels != nullptr){
         get_tpb_dimensions(n_samples, 1, threads_per_block);
         size_t shared_mem_size = threads_per_block * sizeof(float);
-        get_node_compliance_percentage_kernel<<<1, threads_per_block, shared_mem_size>>>(*left_child, parent_node, dataset->compliance);
-        get_node_compliance_percentage_kernel<<<1, threads_per_block, shared_mem_size>>>(*right_child, parent_node, dataset->compliance);
+        get_node_guidance_percentage_kernel<<<1, threads_per_block, shared_mem_size>>>(*left_child, parent_node, dataset->guidance_labels);
+        get_node_guidance_percentage_kernel<<<1, threads_per_block, shared_mem_size>>>(*right_child, parent_node, dataset->guidance_labels);
         cudaDeviceSynchronize();
     }
     
@@ -1048,9 +1047,9 @@ void add_leaf_node(const TreeNodeGPU *node, const int depth, ensembleMetaData *m
         threads_per_block = THREADS_PER_BLOCK;
     }
     size_t shared_mem = sizeof(float)*2*threads_per_block;
-    if (dataset->user_actions != nullptr)
+    if (dataset->guidance_grads != nullptr)
         shared_mem += sizeof(float)*2*threads_per_block;
-    reduce_leaf_sum<<<metadata->output_dim, threads_per_block, shared_mem>>>(dataset->obs, dataset->categorical_obs, dataset->grads, dataset->compliance, dataset->user_actions, edata->values, node, dataset->n_samples, leaf_idx*metadata->output_dim, metadata->compliance_exp, metadata->compliance_scale, metadata->policy_dim);
+    reduce_leaf_sum<<<metadata->output_dim, threads_per_block, shared_mem>>>(dataset->obs, dataset->categorical_obs, dataset->grads, dataset->guidance_labels, dataset->guidance_grads, edata->values, node, dataset->n_samples, leaf_idx*metadata->output_dim, metadata->guidance_scale, metadata->policy_dim);
     cudaDeviceSynchronize();
        
     metadata->n_leaves += 1;
@@ -1234,8 +1233,8 @@ __global__ void update_child_nodes_kernel(const TreeNodeGPU* __restrict__ parent
         right_child->node_idx = tree_counters[2] + 2;
         left_child->score = best_score[0];
         right_child->score = best_score[0];
-        left_child->compliance_percent = 1.0f;
-        right_child->compliance_percent = 1.0f;
+        left_child->guidance_percent = 1.0f;
+        right_child->guidance_percent = 1.0f;
         left_child->n_samples = tree_counters[0];
         right_child->n_samples = tree_counters[1];
         tree_counters[2] += 2;
@@ -1243,35 +1242,34 @@ __global__ void update_child_nodes_kernel(const TreeNodeGPU* __restrict__ parent
 }
 
 
-__global__ void get_node_compliance_percentage_kernel(TreeNodeGPU* __restrict__ node, const TreeNodeGPU* __restrict__ parent_node, const float* __restrict__ compliance){
-    extern __shared__ float s_compliance_count[];
+__global__ void get_node_guidance_percentage_kernel(TreeNodeGPU* __restrict__ node, const TreeNodeGPU* __restrict__ parent_node, const float* __restrict__ guidance_labels){
+    extern __shared__ float s_guidance_label_count[];
     if (node->n_samples == 0)
         return;
 
-    s_compliance_count[threadIdx.x] = 0.0f;
+    s_guidance_label_count[threadIdx.x] = 0.0f;
     __syncthreads();
 
     for (int idx = threadIdx.x; idx < node->n_samples; idx += blockDim.x) {
         int sample_idx = node->sample_indices[idx];
-        if (compliance[sample_idx] == 0)
-            s_compliance_count[threadIdx.x] += 1;
+        if (guidance_labels[sample_idx] == 0)
+            s_guidance_label_count[threadIdx.x] += 1;
     }
     __syncthreads();
     // tree reduction
     for(int offset = blockDim.x / 2; offset > 0; offset >>= 1) {
         if(threadIdx.x < offset) {
-            s_compliance_count[threadIdx.x] += s_compliance_count[threadIdx.x + offset]; 
+            s_guidance_label_count[threadIdx.x] += s_guidance_label_count[threadIdx.x + offset]; 
         }
         __syncthreads();
     }
 
     if (threadIdx.x == 0){
-        s_compliance_count[threadIdx.x] /= static_cast<float>(node->n_samples);
-        node->compliance_percent = s_compliance_count[threadIdx.x] * parent_node->compliance_percent;
-        // node->compliance_percent = s_compliance_count[threadIdx.x];
-        // printf("Node %d compliance percent: %f, n_samples %d, n_compliant_samples %f, compliance exp:%f before compliance_exp: %f\n", node->node_idx, node->compliance_percent, node->n_samples, s_compliance_count[threadIdx.x]* static_cast<float>(node->n_samples), compliance_exp, s_compliance_count[threadIdx.x]);
+        s_guidance_label_count[threadIdx.x] /= static_cast<float>(node->n_samples);
+        node->guidance_percent = s_guidance_label_count[threadIdx.x] * parent_node->guidance_percent;
+        // node->guidance_percent = s_guidance_label_count[threadIdx.x];
 #ifdef DEBUG
-        printf("Node %d compliance percent: %f, n_samples %d, n_compliant_samples %f\n", node->node_idx, node->compliance_percent, node->n_samples, s_compliance_count[threadIdx.x]* static_cast<float>(node->n_samples));
+        printf("Node %d guidance percent: %f, n_samples %d, n_guidance_labels %f\n", node->node_idx, node->guidance_percent, node->n_samples, s_guidance_label_count[threadIdx.x]* static_cast<float>(node->n_samples));
 #endif
     }
 }
@@ -1399,7 +1397,7 @@ void fit_tree_greedy_cuda(dataSet *dataset, ensembleData *edata, ensembleMetaDat
     free(tree_nodes);
 }
 
-__device__ int strcmpCuda(const char *str_a, const char *str_b){
+__device__ int strcmpCuda(const char* __restrict__ str_a, const char* __restrict__ str_b){
     int match = 0;
     unsigned i = 0;
     unsigned done = 0;

@@ -24,7 +24,7 @@
 TreeNode::TreeNode(int *sample_indices, const int n_samples, const int n_num_features, const int n_cat_features, const int output_dim, const int depth, const int node_idx): 
             sample_indices(sample_indices), n_samples(n_samples), n_num_features(n_num_features), n_cat_features(n_cat_features),
             output_dim(output_dim), depth(depth), node_idx(node_idx), feature_value(0.0),
-            feature_idx(0), compliance_percent(1.0f){
+            feature_idx(0), guidance_percent(1.0f){
     if (depth > 0){
         this->split_conditions = new splitCondition[depth];
         for (int d = 0; d < depth; d++){
@@ -56,7 +56,7 @@ TreeNode::~TreeNode(){
 }
 
 
-int TreeNode::splitNode(const float *obs, const char *categorical_obs, const float *compliance, const int _node_idx, const splitCandidate &split_candidate, ensembleMetaData *metadata){
+int TreeNode::splitNode(const float *obs, const char *categorical_obs, const float *guidance_labels, const int _node_idx, const splitCandidate &split_candidate, ensembleMetaData *metadata){
     std::vector<int> pre_left_indices(this->n_samples), pre_right_indices(this->n_samples);
     int left_count = 0, right_count = 0;
     bool is_categorical = split_candidate.categorical_value != nullptr;
@@ -139,24 +139,23 @@ int TreeNode::splitNode(const float *obs, const char *categorical_obs, const flo
         std::copy(split_candidate.categorical_value, split_candidate.categorical_value + MAX_CHAR_SIZE, this->right_child->split_conditions[this->depth].categorical_value);
     }
     this->right_child->split_conditions[this->depth].inequality_direction = true;
-    
-    if (compliance != nullptr){
-        this->right_child->getCompliancePercent(compliance, metadata->compliance_exp);
-        this->left_child->getCompliancePercent(compliance, metadata->compliance_exp);
+
+    if (guidance_labels != nullptr){
+        this->right_child->getGuidancePercent(guidance_labels);
+        this->left_child->getGuidancePercent(guidance_labels);
     }
     return 0;
 }
 
-void TreeNode::getCompliancePercent(const float* compliance, const float compliance_exp){
-    float compliance_percent = 0.0f;
+void TreeNode::getGuidancePercent(const float *guidance_labels){
+    float guidance_percent = 0.0f;
     for (int i = 0; i < this->n_samples; ++i){
         int sample_idx = this->sample_indices[i];
-        if (compliance[sample_idx] == 0)
-            compliance_percent += 1.0f;
+        if (guidance_labels[sample_idx] == 0)
+            guidance_percent += 1.0f;
     }
-    compliance_percent /= static_cast<float>(this->n_samples);
-    compliance_percent = powf(compliance_percent, compliance_exp);
-    this->compliance_percent = compliance_percent;
+    guidance_percent /= static_cast<float>(this->n_samples);
+    this->guidance_percent = guidance_percent;
 }
 
 float TreeNode::getSplitScore(dataSet *dataset, const float *feature_weights, scoreFunc split_score_func, const splitCandidate &split_candidate, const int min_data_in_leaf){
@@ -196,7 +195,7 @@ float TreeNode::getSplitScore(dataSet *dataset, const float *feature_weights, sc
 }
 
 
-float TreeNode::getSplitComplianceScore(dataSet *dataset, const splitCandidate &split_candidate, const int min_data_in_leaf){
+float TreeNode::getSplitGuidanceScore(dataSet *dataset, const splitCandidate &split_candidate, const int min_data_in_leaf){
     // make sure that we do not re-use the same split candidate along a path
     int left_count = 0, right_count = 0;
     int n_features = this->n_num_features + this->n_cat_features;
@@ -212,7 +211,7 @@ float TreeNode::getSplitComplianceScore(dataSet *dataset, const splitCandidate &
 
     for (int n = 0; n < this->n_samples; ++n){
         sample_idx = _sample_indices[n];
-        float val = dataset->compliance[sample_idx];
+        float val = dataset->guidance_labels[sample_idx];
         bool split_right = is_numeric && dataset->obs[sample_idx*n_features + split_candidate.feature_idx] > split_candidate.feature_value;
         split_right |= (!is_numeric && strcmp(&dataset->categorical_obs[(sample_idx*n_features + split_candidate.feature_idx) * MAX_CHAR_SIZE], split_candidate.categorical_value) == 0); 
         if (split_right){
@@ -242,8 +241,8 @@ float TreeNode::getSplitComplianceScore(dataSet *dataset, const splitCandidate &
     float l_var = left_sq_mean - left_mean * left_mean;
     float r_var = right_sq_mean - right_sq_mean * right_mean;
 
-    float split_compliance_score = (left_count_f * l_var + right_count_f * r_var) / (left_count_f + right_count_f);
-    return split_compliance_score; // act as penalty
+    float split_guidance_score = (left_count_f * l_var + right_count_f * r_var) / (left_count_f + right_count_f);
+    return split_guidance_score; // act as penalty
 }
 
 

@@ -20,14 +20,14 @@ class TreeNode {
     public:
         TreeNode(int *sample_indices, const int n_samples, const int n_num_features, const int n_cat_features, const int output_dim, const int depth, const int node_idx);
         ~TreeNode();
-        int splitNode(const float *obs, const char *categorical_obs, const float *compliance, const int _node_idx, const splitCandidate &split_candidate, ensembleMetaData *metadata);
+        int splitNode(const float *obs, const char *categorical_obs, const float *guidance_labels, const int _node_idx, const splitCandidate &split_candidate, ensembleMetaData *metadata);
         float getSplitScore(dataSet *dataset, const float *feature_weights, scoreFunc split_score_func, const splitCandidate &split_candidate, const int min_data_in_leaf);
         float splitScoreCosine(const float *obs, const float *feature_weights, const float *grads, const splitCandidate &split_candidate, const int min_data_in_leaf);
         float splitScoreCosineCategorical(const char *obs, const float *feature_weights, const float *grads, const splitCandidate &split_candidate, const int min_data_in_leaf);
         float splitScoreL2(const float *obs, const float *feature_weights, const float *grads, const splitCandidate &split_candidate, const int min_data_in_leaf);
         float splitScoreL2Categorical(const char *obs, const float *feature_weights, const float *grads, const splitCandidate &split_candidate, const int min_data_in_leaf);
-        float getSplitComplianceScore(dataSet *dataset, const splitCandidate &split_candidate, const int min_data_in_leaf);
-        void getCompliancePercent(const float* compliance, const float compliance_exp);
+        float getSplitGuidanceScore(dataSet *dataset, const splitCandidate &split_candidate, const int min_data_in_leaf);
+        void getGuidancePercent(const float *guidance_labels);
         bool isLeaf() const;
         static void printTree(TreeNode *node);
         friend std::ostream& operator<<(std::ostream& os, const TreeNode& obj);
@@ -43,7 +43,7 @@ class TreeNode {
         float feature_value;
         int feature_idx;
 
-        float compliance_percent;   
+        float guidance_percent;   
         splitCondition *split_conditions = nullptr;
         
         TreeNode *left_child = nullptr;

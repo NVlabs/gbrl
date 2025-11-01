@@ -60,7 +60,7 @@ struct TreeNodeGPU {
     int output_dim;
     int node_idx;
     float score;
-    float compliance_percent;
+    float guidance_percent;
     int *sample_indices;
     int* feature_indices;
     float* feature_values;

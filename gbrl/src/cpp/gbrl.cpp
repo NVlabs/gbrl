@@ -58,9 +58,9 @@ extern "C" {
 GBRL::GBRL(int input_dim, int output_dim, int policy_dim, int max_depth, int min_data_in_leaf, 
            int n_bins, int par_th, float cv_beta, scoreFunc split_score_func,
            generatorType generator_type, bool use_cv, int batch_size, growPolicy grow_policy, 
-           float compliance_weight, float compliance_exp, float compliance_scale, int verbose, 
+           float guidance_weight, float guidance_scale, int verbose, 
            deviceType _device){
-    this->metadata = ensemble_metadata_alloc(INITAL_MAX_TREES, INITAL_MAX_TREES * (1 << max_depth), TREES_BATCH, TREES_BATCH * (1 << max_depth), input_dim, output_dim, policy_dim, max_depth, min_data_in_leaf, n_bins, par_th, cv_beta, verbose, batch_size, use_cv, split_score_func, generator_type, grow_policy, compliance_weight, compliance_exp, compliance_scale);
+    this->metadata = ensemble_metadata_alloc(INITAL_MAX_TREES, INITAL_MAX_TREES * (1 << max_depth), TREES_BATCH, TREES_BATCH * (1 << max_depth), input_dim, output_dim, policy_dim, max_depth, min_data_in_leaf, n_bins, par_th, cv_beta, verbose, batch_size, use_cv, split_score_func, generator_type, grow_policy, guidance_weight, guidance_scale);
     this->sheader = create_header();
 #ifdef USE_CUDA
     if (_device == gpu){
@@ -77,9 +77,9 @@ GBRL::GBRL(int input_dim, int output_dim, int policy_dim, int max_depth, int min
 GBRL::GBRL(int input_dim, int output_dim, int policy_dim, int max_depth, int min_data_in_leaf, 
            int n_bins, int par_th, float cv_beta, std::string split_score_func,
            std::string generator_type, bool use_cv, int batch_size, 
-           std::string grow_policy, float compliance_weight, float compliance_exp, 
-           float compliance_scale, int verbose, std::string _device){
-    this->metadata = ensemble_metadata_alloc(INITAL_MAX_TREES, INITAL_MAX_TREES * (1 << max_depth), TREES_BATCH, TREES_BATCH * (1 << max_depth), input_dim, output_dim, policy_dim, max_depth, min_data_in_leaf, n_bins, par_th, cv_beta, verbose, batch_size, use_cv, stringToScoreFunc(split_score_func), stringTogeneratorType(generator_type), stringTogrowPolicy(grow_policy), compliance_weight, compliance_exp, compliance_scale);
+           std::string grow_policy, float guidance_weight,
+           float guidance_scale, int verbose, std::string _device){
+    this->metadata = ensemble_metadata_alloc(INITAL_MAX_TREES, INITAL_MAX_TREES * (1 << max_depth), TREES_BATCH, TREES_BATCH * (1 << max_depth), input_dim, output_dim, policy_dim, max_depth, min_data_in_leaf, n_bins, par_th, cv_beta, verbose, batch_size, use_cv, stringToScoreFunc(split_score_func), stringTogeneratorType(generator_type), stringTogrowPolicy(grow_policy), guidance_weight, guidance_scale);
     this->sheader = create_header();
 #ifdef USE_CUDA
     if (stringTodeviceType(_device) == gpu){
@@ -281,8 +281,8 @@ float* GBRL::predict(const float *obs, const char *categorical_obs, const int n_
         categorical_obs,    // categorical observations  
         nullptr,           // grads (not used in predict)
         nullptr,           // build_grads (not used in predict)
-        nullptr,           // compliance (not used in predict)
-        nullptr,           // user_actions (not used in predict)
+        nullptr,           // guidance_label (not used in predict)
+        nullptr,           // guidance_grads (not used in predict)
         n_samples,         // number of samples
         _device           // device type
     };
@@ -443,17 +443,17 @@ void GBRL::_step_gpu(dataSet *dataset){
     size_t cand_float_size =  sizeof(float)*n_bins*this->metadata->input_dim;
     size_t cand_cat_size =  sizeof(char)*n_bins*this->metadata->input_dim*MAX_CHAR_SIZE;
     size_t cand_numerical_size =  sizeof(bool)*n_bins*this->metadata->input_dim;
-    size_t compliance_size = sizeof(float)*n_samples;
-    size_t user_actions_size = sizeof(float)*n_samples * metadata->output_dim;
+    size_t guidance_label_size = sizeof(float)*n_samples;
+    size_t guidance_grads_size = sizeof(float)*n_samples * metadata->output_dim;
 
     size_t alloc_size = obs_size + grads_size + cat_obs_size + grads_norm_size + cand_indices_size + cand_float_size + cand_cat_size + cand_numerical_size;
     if (dataset->device == cpu){
         alloc_size += obs_size;
         alloc_size += grads_size;
-        if (dataset->compliance != nullptr)
-            alloc_size += compliance_size;
-        if (dataset->user_actions != nullptr)
-            alloc_size += user_actions_size;
+        if (dataset->guidance_labels != nullptr)
+            alloc_size += guidance_label_size;
+        if (dataset->guidance_grads != nullptr)
+            alloc_size += guidance_grads_size;
     }
     char *device_memory_block; 
 
@@ -477,8 +477,8 @@ void GBRL::_step_gpu(dataSet *dataset){
 
     float *gpu_obs;
     float *gpu_grads;
-    float *gpu_compliance = nullptr;
-    float *gpu_user_actions = nullptr;
+    float *gpu_guidance_labels = nullptr;
+    float *gpu_guidance_grads = nullptr;
     if (dataset->device == cpu){
         gpu_obs = (float*)(device_memory_block + trace);
         trace += obs_size;
@@ -487,22 +487,22 @@ void GBRL::_step_gpu(dataSet *dataset){
         cudaMemcpy(gpu_obs, dataset->obs, obs_size, cudaMemcpyHostToDevice);
         cudaMemcpy(gpu_build_grads, dataset->grads, grads_size, cudaMemcpyHostToDevice);
         cudaMemcpy(gpu_grads, dataset->grads, grads_size, cudaMemcpyHostToDevice);
-        if (dataset->compliance != nullptr){
-            gpu_compliance = (float*)(device_memory_block + trace);
-            trace += compliance_size;
-            cudaMemcpy(gpu_compliance, dataset->compliance, compliance_size, cudaMemcpyHostToDevice);
+        if (dataset->guidance_labels != nullptr){
+            gpu_guidance_labels = (float*)(device_memory_block + trace);
+            trace += guidance_label_size;
+            cudaMemcpy(gpu_guidance_labels, dataset->guidance_labels, guidance_label_size, cudaMemcpyHostToDevice);
         }
-        if (dataset->user_actions != nullptr){
-            gpu_user_actions = (float*)(device_memory_block + trace);
-            trace += user_actions_size;
-            cudaMemcpy(gpu_user_actions, dataset->user_actions, user_actions_size, cudaMemcpyHostToDevice);
+        if (dataset->guidance_grads != nullptr){
+            gpu_guidance_grads = (float*)(device_memory_block + trace);
+            trace += guidance_grads_size;
+            cudaMemcpy(gpu_guidance_grads, dataset->guidance_grads, guidance_grads_size, cudaMemcpyHostToDevice);
         }
     } else {
         gpu_obs = const_cast<float*>(dataset->obs);
         gpu_grads = dataset->grads;
         cudaMemcpy(gpu_build_grads, gpu_grads, grads_size, cudaMemcpyDeviceToDevice);
-        gpu_compliance = const_cast<float*>(dataset->compliance);
-        gpu_user_actions = const_cast<float*>(dataset->user_actions);
+        gpu_guidance_labels = const_cast<float*>(dataset->guidance_labels);
+        gpu_guidance_grads = const_cast<float*>(dataset->guidance_grads);
     }
     float *trans_obs = (float*)(device_memory_block + trace);
     trace += obs_size;
@@ -524,14 +524,14 @@ void GBRL::_step_gpu(dataSet *dataset){
 
     int n_candidates = process_candidates_cuda(gpu_obs, dataset->categorical_obs, gpu_grads_norm, candidate_indices, candidate_values, candidate_categories, candidate_numerical, n_samples, n_num_features, n_cat_features, n_bins, this->metadata->generator_type);
     dataSet cuda_dataset{
-        trans_obs,          // observations (transposed)
+        trans_obs,           // observations (transposed)
         gpu_categorical_obs, // categorical observations on GPU
-        gpu_grads,          // gradients on GPU
-        gpu_build_grads,    // build gradients on GPU
-        gpu_compliance,      // compliance
-        gpu_user_actions,   // user_actions
-        n_samples,         // number of samples
-        this->device      // device type (GPU)
+        gpu_grads,           // gradients on GPU
+        gpu_build_grads,     // build gradients on GPU
+        gpu_guidance_labels,  // guidance labels
+        gpu_guidance_grads,  // guidance gradients
+        n_samples,           // number of samples
+        this->device         // device type (GPU)
     };
     candidatesData candidata{n_candidates, candidate_indices, candidate_values, candidate_numerical, candidate_categories};
     splitDataGPU *split_data = allocate_split_data(this->metadata, candidata.n_candidates);  
@@ -626,8 +626,8 @@ float GBRL::_fit_gpu(dataSet *dataset, float *targets, const int n_iterations){
         gpu_categorical_obs, // categorical observations on GPU
         gpu_grads,          // gradients on GPU
         gpu_build_grads,    // build gradients on GPU
-        nullptr,           // compliance (not used in fit_gpu)
-        nullptr,           // user_actions (not used in fit_gpu)
+        nullptr,           // guidance labels (not used in fit_gpu)
+        nullptr,           // guidance grads (not used in fit_gpu)
         n_samples,         // number of samples
         this->device      // device type (GPU)
     };
@@ -682,7 +682,7 @@ float GBRL::_fit_gpu(dataSet *dataset, float *targets, const int n_iterations){
 }
 
 #endif
-void GBRL::step(const float *obs, const char *categorical_obs, float *grads, const float* compliance, const float *user_actions, const int n_samples, const int n_num_features, const int n_cat_features, deviceType _device){
+void GBRL::step(const float *obs, const char *categorical_obs, float *grads, const float *guidance_labels, const float *guidance_grads, const int n_samples, const int n_num_features, const int n_cat_features, deviceType _device){
     if (this->metadata->iteration == 0){
         this->metadata->n_num_features = n_num_features;
         this->metadata->n_cat_features = n_cat_features;
@@ -704,8 +704,8 @@ void GBRL::step(const float *obs, const char *categorical_obs, float *grads, con
         categorical_obs,    // categorical observations  
         grads,             // gradients
         nullptr,           // build_grads (not used in step)
-        compliance,          // compliance values
-        user_actions,          // user_actions values
+        guidance_labels,          // guidance labels
+        guidance_grads,          // guidance gradients
         n_samples,         // number of samples
         _device           // device type
     };
@@ -792,8 +792,8 @@ float GBRL::fit(float *obs, char *categorical_obs, float *targets, int iteration
         training_cat_obs,   // categorical observations
         nullptr,           // grads (not used initially)
         nullptr,           // build_grads (not used initially)
-        nullptr,           // compliance (not used in fit)
-        nullptr,           // user_actions (not used in fit)
+        nullptr,           // guidance_labels (not used in fit)
+        nullptr,           // guidance_grads (not used in fit)
         n_samples,         // number of samples
         this->device      // device type
     };
@@ -946,7 +946,7 @@ int GBRL::loadFromFile(const std::string& filename){
     std::cout << " cv_beta: " << this->metadata->cv_beta << " split_score_func: " << scoreFuncToString(this->metadata->split_score_func) << std::endl;
     std::cout << "grow_policy: " << growPolicyToString(this->metadata->grow_policy);
     std::cout << " verbose: " << this->metadata->verbose << " device: "<< deviceTypeToString(this->device);
-    std::cout << " compliance weight: " << this->metadata->compliance_weight << " compliance exp: " << this->metadata->compliance_exp << " compliance scale: " << this->metadata->compliance_scale << std::endl;
+    std::cout << " guidance weight: " << this->metadata->guidance_weight << " guidance scale: " << this->metadata->guidance_scale << std::endl;
     std::cout << " use_cv: " << this->metadata->use_cv << " batch_size: " << this->metadata->batch_size << std::endl;
     std::cout << "Loaded: " << this->metadata->n_leaves << " leaves from " << this->metadata->n_trees << " trees" <<  std::endl;
     std::cout << "Model has: " << num_opts << " optimizers " <<  std::endl;
@@ -964,7 +964,7 @@ void GBRL::print_ensemble_metadata(){
     std::cout << " cv beta: " << this->metadata->cv_beta << " split score func: " << scoreFuncToString(this->metadata->split_score_func) << std::endl;
     std::cout << "grow policy: " << growPolicyToString(this->metadata->grow_policy);
     std::cout << " verbose: " << this->metadata->verbose << " device: "<< deviceTypeToString(this->device);
-    std::cout << " compliance weight: " << this->metadata->compliance_weight << " compliance exp: " << this->metadata->compliance_exp << " compliance scale: " << this->metadata->compliance_scale << std::endl;
+    std::cout << " guidance weight: " << this->metadata->guidance_weight << " guidance scale: " << this->metadata->guidance_scale << std::endl;
     std::cout << "use cv: " << this->metadata->use_cv << " batch size: " << this->metadata->batch_size << std::endl;
     std::cout << "Ensemble with: " << this->metadata->n_leaves << " leaves from " << this->metadata->n_trees << " trees" <<  std::endl;
     std::cout << "Model has: " << this->opts.size() << " optimizers " <<  std::endl;
@@ -990,8 +990,8 @@ ensembleData *edata_cpu = nullptr;
         categorical_obs,    // categorical observations  
         nullptr,           // grads (not used in tree_shap)
         nullptr,           // build_grads (not used in tree_shap)
-        nullptr,           // compliance (not used in tree_shap)
-        nullptr,           // user_actions (not used in tree_shap)
+        nullptr,           // guidance_labels (not used in tree_shap)
+        nullptr,           // guidance_grads (not used in tree_shap)
         n_samples,         // number of samples
         this->device      // device type
     };
@@ -1014,8 +1014,8 @@ float* GBRL::ensemble_shap(const float *obs, const char *categorical_obs, const 
         categorical_obs,    // categorical observations  
         nullptr,           // grads (not used in ensemble_shap)
         nullptr,           // build_grads (not used in ensemble_shap)
-        nullptr,           // compliance (not used in ensemble_shap)
-        nullptr,           // user_actions (not used in ensemble_shap)
+        nullptr,           // guidance_labels (not used in ensemble_shap)
+        nullptr,           // guidance_grads (not used in ensemble_shap)
         n_samples,         // number of samples
         this->device      // device type
     };

@@ -78,7 +78,7 @@ class ParametricActor(BaseGBT):
     def step(self, observations: Optional[NumericalData] = None,
              policy_grad: Optional[NumericalData] = None,
              policy_grad_clip: Optional[float] = None,
-             compliance: Optional[NumericalData] = None,
+             guidance_label: Optional[NumericalData] = None,
              user_actions: Optional[NumericalData] = None,
              ) -> None:
         """
@@ -89,7 +89,7 @@ class ParametricActor(BaseGBT):
             policy_grad_clip (float, optional): . Defaults to None.
             policy_grad (Optional[NumericalData], optional): manually
                 calculated gradients. Defaults to None.
-            compliance (Optional[NumericalData]): guidelines compliance vector.
+            guidance_label (Optional[NumericalData]): guidance label vector.
             user_actions (Optional[NumericalData]): guidelines user suggested action vector.
 
         """
@@ -104,7 +104,7 @@ class ParametricActor(BaseGBT):
         policy_grad = clip_grad_norm(policy_grad, policy_grad_clip)
         validate_array(policy_grad)
 
-        self.learner.step(observations, policy_grad, compliance, user_actions)
+        self.learner.step(observations, policy_grad, guidance_label, user_actions)
         self.grad = policy_grad
         self.input = None
 
@@ -230,7 +230,7 @@ class GaussianActor(BaseGBT):
              log_std_grad: Optional[NumericalData] = None,
              mu_grad_clip: Optional[float] = None,
              log_std_grad_clip: Optional[float] = None,
-             compliance: Optional[NumericalData] = None,
+             guidance_label: Optional[NumericalData] = None,
              user_actions: Optional[NumericalData] = None,
              ) -> None:
         """
@@ -246,7 +246,7 @@ class GaussianActor(BaseGBT):
                 mean. Defaults to None.
             log_std_grad_clip (Optional[float], optional): Gradient clipping
                 for log standard deviation. Defaults to None.
-            compliance (Optional[NumericalData]): guidelines compliance vector.
+            guidance_label (Optional[NumericalData]): guidance label vector.
             user_actions (Optional[NumericalData]): guidelines user suggested action vector.
 
         """
@@ -269,7 +269,7 @@ class GaussianActor(BaseGBT):
 
         validate_array(theta_grad)
 
-        self.learner.step(observations, theta_grad, compliance, user_actions)
+        self.learner.step(observations, theta_grad, guidance_label, user_actions)
         self.grad = mu_grad
         if not self.fixed_std:
             self.grad = (mu_grad, log_std_grad)
