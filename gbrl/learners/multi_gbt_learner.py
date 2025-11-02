@@ -8,7 +8,7 @@
 ##############################################################################
 import json
 import os
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union, Sequence
 
 import numpy as np
 import torch as th
@@ -63,8 +63,8 @@ class MultiGBTLearner(BaseLearner):
             policy_dim = output_dim
 
         super().__init__(input_dim=input_dim,
-                         output_dim=output_dim, 
-                         tree_struct=tree_struct, 
+                         output_dim=output_dim,
+                         tree_struct=tree_struct,
                          params=params,
                          policy_dim=policy_dim,
                          verbose=verbose,
@@ -88,8 +88,8 @@ class MultiGBTLearner(BaseLearner):
         for i in range(self.n_learners):
             if isinstance(self.input_dim, list):
                 params['input_dim'] = self.input_dim[i]
-                params['output_dim'] = self.output_dim[i]
-                params['policy_dim'] = self.policy_dim[i]
+                params['output_dim'] = self.output_dim[i]  #  type: ignore
+                params['policy_dim'] = self.policy_dim[i]  #  type: ignore
             cpp_model = GBRL_CPP(**params)
             cpp_model.set_feature_weights(self.feature_weights)
             if self.student_models is not None:
@@ -104,9 +104,10 @@ class MultiGBTLearner(BaseLearner):
             self.total_iterations = 0
         self.iteration = [0] * self.n_learners
 
-    def step(self, features: Union[NumericalData, Tuple[NumericalData, ...]],
-             grads: Union[List[NumericalData], NumericalData],
-             guidance_label: Optional[NumericalData] = None,
+    def step(self,
+             inputs: NumericalData,
+             grads: Union[Sequence[NumericalData], NumericalData],
+             guidance_labels: Optional[NumericalData] = None,
              guidance_grads: Optional[NumericalData] = None,
              model_idx: Optional[int] = None,
              ) -> None:
@@ -114,24 +115,33 @@ class MultiGBTLearner(BaseLearner):
         Performs a single gradient update step (e.g, adding a single decision tree).
 
         Args:
-            features (Union[np.ndarray, th.Tensor, Tuple]): Input features.
+            inputs (Union[np.ndarray, th.Tensor, Tuple]): Input features.
             grads (Union[List[NumericalData], NumericalData]): Gradients.
-            guidance_label (Optional[NumericalData]): guidance_label vector.
+            guidance_labels (Optional[NumericalData]): guidance_label vector.
             guidance_grads (Optional[NumericalData]): guidance gradient vector.
             model_idx (int, optional): The index of the model.
         """
         assert model_idx is not None or (isinstance(grads, list) and
                                          len(grads) == self.n_learners)
+        if guidance_labels is None or (guidance_labels != 0).any():
+            guidance_labels = None
+            guidance_grads = None
 
-        def process_data(features, grads, output_dim):
+        if guidance_grads is not None:
+            guidance_grads = guidance_grads.reshape((len(inputs), self.output_dim))  # type: ignore
+
+        num_features, cat_features = preprocess_features(inputs)
+
+
+        def process_data(inputs, grads, output_dim):
             """Helper function to ensure consistent feature and gradient processing."""
-            features, grads = ensure_same_type(features, grads)
-            if isinstance(features, th.Tensor):
-                features, grads = features.float(), grads.float()
-                num_features, cat_features = get_tensor_info(features), None
-                grads = get_tensor_info(grads)
+            inputs, grads = ensure_same_type(inputs, grads)
+            if isinstance(inputs, th.Tensor):
+                num_features = get_tensor_info(inputs.float())
+                cat_features = None
+                grads = get_tensor_info(grads.float())
             else:
-                num_features, cat_features = preprocess_features(features)
+                num_features, cat_features = preprocess_features(inputs)
                 grads = grads.reshape((len(grads), output_dim))
                 grads = np.ascontiguousarray(grads, dtype=numerical_dtype)
             return num_features, cat_features, grads
@@ -139,20 +149,19 @@ class MultiGBTLearner(BaseLearner):
         output_dim = self.output_dim
 
         if guidance_label is not None and (guidance_label != 0).any():
-            features, guidance_label = ensure_same_type(features, guidance_label)
+            inputs, guidance_label = ensure_same_type(inputs, guidance_label)
 
-            if isinstance(features, th.Tensor):
-                guidance_label = guidance_label.float()
-                guidance_label = get_tensor_info(guidance_label)
+            if isinstance(inputs, th.Tensor):
+                guidance_label = get_tensor_info(guidance_label.float())
             else:
                 guidance_label = np.ascontiguousarray(guidance_label.reshape((len(guidance_label), 1)))
                 guidance_label = guidance_label.astype(numerical_dtype)
 
             if guidance_grads is not None:
-                features, guidance_grads = ensure_same_type(features, guidance_grads)
-                guidance_grads = guidance_grads.reshape((len(features), self.output_dim))
+                inputs, guidance_grads = ensure_same_type(inputs, guidance_grads)
+                guidance_grads = guidance_grads.reshape((len(inputs), self.output_dim))
 
-                if isinstance(features, th.Tensor) and len(np.unique(guidance_grads)) > 1:
+                if isinstance(inputs, th.Tensor) and len(np.unique(guidance_grads)) > 1:
                     guidance_grads = guidance_grads.float()
                     guidance_grads = get_tensor_info(guidance_grads)
                 elif len(np.unique(guidance_grads)) > 1:
@@ -163,9 +172,9 @@ class MultiGBTLearner(BaseLearner):
         else:
             guidance_label = None
             guidance_grads = None
-        
+
         if model_idx is not None:
-            num_features, cat_features, grads = process_data(features, grads,
+            num_features, cat_features, grads = process_data(inputs, grads,
                                                              output_dim if not
                                                              isinstance(output_dim,
                                                                         list) else output_dim[model_idx])
@@ -183,7 +192,7 @@ class MultiGBTLearner(BaseLearner):
         else:
             assert isinstance(grads, list) and len(grads) == self.n_learners
             for i in range(self.n_learners):
-                num_features, cat_features, grads[i] = process_data(features, grads[i],
+                num_features, cat_features, grads[i] = process_data(inputs, grads[i],
                                                                     output_dim if not
                                                                     isinstance(output_dim,
                                                                                list) else output_dim[i])

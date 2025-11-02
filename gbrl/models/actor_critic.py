@@ -30,10 +30,10 @@ class ActorCritic(BaseGBT):
                  input_dim: int,
                  output_dim: int,
                  policy_optimizer: Dict,
-                 value_optimizer: Dict = None,
+                 value_optimizer: Optional[Dict] = None,
                  shared_tree_struct: bool = True,
                  params: Dict = dict(),
-                 bias: np.ndarray = None,
+                 bias: Optional[np.ndarray] = None,
                  verbose: int = 0,
                  device: str = 'cpu'):
         """
@@ -210,8 +210,8 @@ class ActorCritic(BaseGBT):
              value_grad: Optional[NumericalData] = None,
              policy_grad_clip: Optional[float] = None,
              value_grad_clip: Optional[float] = None,
-             guidance_label: Optional[NumericalData] = None,
-             user_actions: Optional[NumericalData] = None,
+             guidance_labels: Optional[NumericalData] = None,
+             guidance_grads: Optional[NumericalData] = None,
              ) -> None:
         """
         Performs a boosting step for both the actor and critic.
@@ -224,8 +224,8 @@ class ActorCritic(BaseGBT):
             value_grad (Optional[NumericalData], optional): Manually computed gradients for the value function.
             policy_grad_clip (Optional[float], optional):Gradient clipping value for policy updates.
             value_grad_clip (Optional[float], optional): Gradient clipping value for value updates.
-            guidance_label (Optional[NumericalData]): guidance label vector.
-            user_actions (Optional[NumericalData]): guidelines user suggested action vector.
+            guidance_labels (Optional[NumericalData]): guidance label vector.
+            guidance_grads (Optional[NumericalData]): guidelines user suggested action vector.
         """
         if observations is None:
             assert self.input is not None, ("Cannot update trees without input."
@@ -233,25 +233,28 @@ class ActorCritic(BaseGBT):
             observations = self.input
         n_samples = len(observations)
 
-        policy_grad = policy_grad if policy_grad is not None else self.params[0].grad.detach() * n_samples
-        value_grad = value_grad if value_grad is not None else self.params[1].grad.detach() * n_samples
+        policy_grad = policy_grad if policy_grad is not None else self.params[0].grad.detach() * n_samples  # type: ignore
+        value_grad = value_grad if value_grad is not None else self.params[1].grad.detach() * n_samples  # type: ignore
 
-        policy_grad = clip_grad_norm(policy_grad, policy_grad_clip)
-        value_grad = clip_grad_norm(value_grad, value_grad_clip)
+        policy_grad = clip_grad_norm(policy_grad, policy_grad_clip)  # type: ignore
+        value_grad = clip_grad_norm(value_grad, value_grad_clip)  # type: ignore
 
         validate_array(policy_grad)
         validate_array(value_grad)
 
-        self.learner.step(observations, policy_grad, value_grad, guidance_label, user_actions)
+        self.learner.step(inputs=observations,
+                          grads=(policy_grad, value_grad),
+                          guidance_labels=guidance_labels,
+                          guidance_grads=guidance_grads)
         self.policy_grad = policy_grad
         self.value_grad = value_grad
         self.input = None
 
-    def actor_step(self, observations: Optional[NumericalData]= None,
-                   policy_grad: Optional[NumericalData]= None,
+    def actor_step(self, observations: Optional[NumericalData] = None,
+                   policy_grad: Optional[NumericalData] = None,
                    policy_grad_clip: Optional[float] = None,
                    guidance_label: Optional[NumericalData] = None,
-                   user_actions: Optional[NumericalData] = None,
+                   guidance_grads: Optional[NumericalData] = None,
                    ) -> None:
         """
         Performs a single boosting step for the actor (should only be used
@@ -262,7 +265,7 @@ class ActorCritic(BaseGBT):
             policy_grad_clip (float, optional): Defaults to None.
             policy_grad (Optional[NumericalData], optional): manually calculated gradients. Defaults to None.
             guidance_label (Optional[NumericalData]): guidance label vector.
-            user_actions (Optional[NumericalData]): guidelines user suggested action vector.
+            guidance_grads (Optional[NumericalData]): guidelines user suggested action vector.
 
         Returns:
             np.ndarray: policy gradient
@@ -278,14 +281,14 @@ class ActorCritic(BaseGBT):
         policy_grad = clip_grad_norm(policy_grad, policy_grad_clip)
         validate_array(policy_grad)
 
-        self.learner.step_actor(observations, policy_grad, guidance_label, user_actions)
+        self.learner.step_actor(observations, policy_grad, guidance_label, guidance_grads)
         self.policy_grad = policy_grad
 
     def critic_step(self, observations: Optional[NumericalData] = None,
                     value_grad: Optional[NumericalData] = None,
                     value_grad_clip: Optional[float] = None,
                     guidance_label: Optional[NumericalData] = None,
-                    user_actions: Optional[NumericalData] = None,
+                    guidance_grads: Optional[NumericalData] = None,
                     ) -> None:
         """
         Performs a single boosting step for the critic (should only be used
@@ -296,7 +299,7 @@ class ActorCritic(BaseGBT):
             value_grad_clip (float, optional): Defaults to None.
             value_grad (Optional[NumericalData], optional): manually calculated gradients. Defaults to None.
             guidance_label (Optional[NumericalData]): guidance label vector.
-            user_actions (Optional[NumericalData]): guidelines user suggested action vector.
+            guidance_grads (Optional[NumericalData]): guidelines user suggested action vector.
 
         Returns:
             np.ndarray: value gradient
@@ -313,7 +316,7 @@ class ActorCritic(BaseGBT):
         value_grad = clip_grad_norm(value_grad, value_grad_clip)
 
         validate_array(value_grad)
-        self.learner.step_critic(observations, value_grad, guidance_label, user_actions)
+        self.learner.step_critic(observations, value_grad, guidance_label, guidance_grads)
         self.value_grad = value_grad
 
     def get_params(self) -> Tuple[np.ndarray, np.ndarray]:

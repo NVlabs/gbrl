@@ -12,7 +12,8 @@ from typing import Dict, List, Optional, Tuple, Union
 import numpy as np
 import torch as th
 
-from gbrl.common.utils import NumericalData, to_numpy
+from gbrl.common.utils import (NumericalData, TensorInfo, get_tensor_info,
+                               numerical_dtype, to_numpy)
 
 
 class BaseLearner(ABC):
@@ -33,8 +34,13 @@ class BaseLearner(ABC):
         total_iterations (int): Total number of training iterations.
         feature_weights (np.ndarray): Feature importance weights.
     """
-    def __init__(self, input_dim: Union[int, List[int]], output_dim: Union[int, List[int]], tree_struct: Dict,
-                 params: Dict, policy_dim: Optional[Union[int, List[int]]] = None, verbose: int = 0, device: str = 'cpu'):
+    def __init__(self, input_dim: Union[int, List[int]],
+                 output_dim: Union[int, List[int]],
+                 tree_struct: Dict,
+                 params: Dict,
+                 policy_dim: Optional[Union[int, List[int]]] = None,
+                 verbose: int = 0,
+                 device: str = 'cpu'):
         """
         Initializes the BaseLearner.
 
@@ -64,9 +70,9 @@ class BaseLearner(ABC):
                        'use_control_variates': params.get('control_variates',
                                                           False),
                        'guidance_weight': params.get('guidance_weight',
-                                                         0.0),
+                                                     0.0),
                        'guidance_scale': params.get('guidance_scale',
-                                                       1.0),
+                                                    1.0),
                        'verbose': verbose, 'device': device, **tree_struct}
 
         self.iteration = 0
@@ -82,6 +88,9 @@ class BaseLearner(ABC):
             weights = np.ones(input_dim, dtype=np.single)
             feature_weights = np.ascontiguousarray(weights)
         self.feature_weights = feature_weights
+        self._cpp_model = None
+
+        self._memory = []
 
     @abstractmethod
     def reset(self) -> None:
@@ -113,15 +122,15 @@ class BaseLearner(ABC):
         """
         pass
 
-    def export(self, filename: str, modelname: str = None) -> None:
+    def export(self, filename: str, modelname: Optional[str] = None) -> None:
         # exports model to C
         filename = filename.rstrip('.')
         filename += '.h'
-        assert self.cpp_model is not None, "Can't export non-existent model!"
+        assert self._cpp_model is not None, "Can't export non-existent model!"
         if modelname is None:
             modelname = ""
         try:
-            status = self.cpp_model.export(filename, modelname)
+            status = self._cpp_model.export(filename, modelname)
             assert status == 0, "Failed to export model"
         except RuntimeError as e:
             print(f"Caught an exception in GBRL: {e}")
@@ -296,12 +305,12 @@ class BaseLearner(ABC):
         pass
 
     @abstractmethod
-    def predict(self, *args, **kwargs) -> Union[np.ndarray, Tuple[np.ndarray, ...]]:
+    def predict(self, *args, **kwargs) -> Union[NumericalData, Tuple[NumericalData, ...]]:
         """
         Generates predictions using the trained model.
 
         Returns:
-            np.ndarray: Model predictions.
+            NumericalData: Model predictions.
         """
         pass
 
@@ -333,3 +342,23 @@ class BaseLearner(ABC):
     def __copy__(self) -> "BaseLearner":
         """Creates and returns a copy of the learner instance."""
         pass
+
+    def transform_data(self, data: Optional[NumericalData]) -> Optional[Union[np.ndarray, TensorInfo]]:
+        """
+        Transforms input data to match the model's expected format.
+
+        Args:
+            data (NumericalData): Input data to be transformed.
+        """
+        if data is None:
+            return data
+
+        if self.device == 'cpu' and isinstance(data, th.Tensor):
+            data = data.to(self.device)
+
+        if isinstance(data, th.Tensor):
+            tensor_data = get_tensor_info(data.float())
+            self._memory.append(tensor_data)
+            return tensor_data
+
+        return np.ascontiguousarray(data).astype(numerical_dtype)

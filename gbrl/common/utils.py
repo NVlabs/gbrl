@@ -6,7 +6,7 @@
 # https://nvlabs.github.io/gbrl/license.html
 #
 ##############################################################################
-from typing import Dict, Tuple, Union
+from typing import Dict, Sequence, Optional, Tuple, Union
 
 import numpy as np
 import torch as th
@@ -14,14 +14,13 @@ from scipy.special import binom
 
 from gbrl.common.config import APPROVED_OPTIMIZERS, VALID_OPTIMIZER_ARGS
 
-
 numerical_dtype = np.dtype('float32')
 categorical_dtype = np.dtype('S128')
 NumericalData = Union[np.ndarray, th.Tensor]
+TensorInfo = Tuple[int, Tuple[int, ...], str, str]
 
 
-def get_tensor_info(tensor: th.Tensor) -> \
-        Tuple[int, Tuple[int, ...], str, str]:
+def get_tensor_info(tensor: th.Tensor) -> TensorInfo:
     """Extracts pytorch tensor information for usage in C++
 
     Args:
@@ -41,7 +40,8 @@ def get_tensor_info(tensor: th.Tensor) -> \
     return (data_ptr, shape, dtype, device)
 
 
-def process_array(arr: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+def process_array(arr: np.ndarray) -> Tuple[Optional[np.ndarray],
+                                            Optional[np.ndarray]]:
     """ Formats numpy array for C++ GBRL.
     """
     if np.issubdtype(arr.dtype, np.floating) or np.issubdtype(arr.dtype,
@@ -219,17 +219,16 @@ def get_poly_vectors(max_depth: int, dtype: np.dtype) -> \
     return base_poly, norm_values, offset
 
 
-def ensure_same_type(arr_a: Union[th.Tensor, np.ndarray],
-                     arr_b: Union[th.Tensor, np.ndarray]) -> \
-                        Tuple[Union[th.Tensor, np.ndarray], Union[th.Tensor,
-                                                                  np.ndarray]]:
+def ensure_same_type(arr_a: NumericalData,
+                     arr_b: NumericalData) -> \
+                        Tuple[NumericalData, NumericalData]:
     """Ensures both arrays are of the same type (either Tensor or ndarray).
        If not, transforms array B to the type and device of array A.
     Args:
-        arr_a (Union[th.Tensor, np.ndarray]): array A
-        arr_b (Union[th.Tensor, np.ndarray]): array B
+        arr_a (NumericalData): array A
+        arr_b (NumericalData): array B
     Returns:
-        Tuple[Union[th.Tensor, np.ndarray], Union[th.Tensor, np.ndarray]]
+        Tuple[NumericalData, NumericalData]
     """
     if isinstance(arr_a, th.Tensor) and not isinstance(arr_b, th.Tensor):
         arr_b = th.tensor(arr_b, device=arr_a.device).float()
@@ -239,23 +238,28 @@ def ensure_same_type(arr_a: Union[th.Tensor, np.ndarray],
     return arr_a, arr_b
 
 
-def concatenate_arrays(arr_a: Union[th.Tensor, np.ndarray],
-                       arr_b: Union[th.Tensor, np.ndarray], axis: int = 1) -> \
-                        Union[th.Tensor, np.ndarray]:
+def concatenate_arrays(arrays: Sequence[NumericalData],
+                       axis: int = 1) -> \
+                        NumericalData:
     """
-    Concatenates to arrays together. If both arrays are not of the same
-    type then transforms array B to the type and device of array A.
+    Concatenates multiple arrays along a specified axis. All arrays must be of the same type
+    (either all NumPy arrays or all PyTorch tensors). If an array has fewer dimensions than
+    required for concatenation, an axis is added to match the dimensionality.
 
     Args:
-        arr_a (Union[th.Tensor, np.ndarray]): array A
-        arr_b (Union[th.Tensor, np.ndarray]): Array B
-        axis (int, optional): concatenation axis. Defaults to 1.
+        arrays (Sequence[NumericalData]): Sequence of arrays (NumPy or PyTorch) to concatenate.
+        axis (int, optional): Axis along which to concatenate. Defaults to 1.
 
     Returns:
-        Union[th.Tensor, np.ndarray]: concatenated array of device and type of
-        array A
+        NumericalData: Concatenated array with the type and device of the first array.
+
+    Raises:
+        AssertionError: If fewer than two arrays are provided or if array types do not match.
     """
-    arr_a, arr_b = ensure_same_type(arr_a, arr_b)
+    assert len(arrays) > 1, "Need at least two arrays to concatenate"
+    sequence_type = type(arrays[0])
+    for arr in arrays[1:]:
+        assert isinstance(arr, sequence_type), "All arrays must be of the same type"
 
     # Check if we need to add an axis to match dimensionality
     def add_axis_if_needed(array, target_ndim, axis):
@@ -266,21 +270,21 @@ def concatenate_arrays(arr_a: Union[th.Tensor, np.ndarray],
                 array = np.expand_dims(array, axis=axis)
         return array
 
-    # Ensure both arrays have at least the right number of dimensions for
+    # Ensure all arrays have at least the right number of dimensions for
     # concatenation
-    max_ndim = max(arr_a.ndim, arr_b.ndim)
-    arr_a = add_axis_if_needed(arr_a, max_ndim, axis)
-    arr_b = add_axis_if_needed(arr_b, max_ndim, axis)
+    max_ndim = max([arr.ndim for arr in arrays])
+    arrays = [add_axis_if_needed(arr, max_ndim, axis) for arr in arrays]
 
-    return th.cat([arr_a, arr_b], dim=axis) if isinstance(arr_a, th.Tensor) \
-        else np.concatenate([arr_a, arr_b], axis=axis)
+    if isinstance(arrays[0], th.Tensor):
+        return th.cat(arrays, dim=axis)  # type: ignore
+    return np.concatenate(arrays, axis=axis)
 
 
-def validate_array(arr: Union[th.Tensor, np.ndarray]) -> None:
+def validate_array(arr: NumericalData) -> None:
     """Checks for NaN and Inf values in an array/tensor.
 
     Args:
-        arr (Union[th.Tensor, np.ndarray]): array/tensor
+        arr (NumericalData): array/tensor
     """
     if isinstance(arr, np.ndarray):
         assert not np.isnan(arr).any(), "nan in array"
@@ -290,12 +294,12 @@ def validate_array(arr: Union[th.Tensor, np.ndarray]) -> None:
         assert not th.isinf(arr).any(), "infinity in tensor"
 
 
-def constant_like(arr: Union[th.Tensor, np.ndarray],
-                  constant: float = 1) -> None:
+def constant_like(arr: NumericalData,
+                  constant: float = 1) -> NumericalData:
     """Returns a ones array with the same shape as arr multiplid by a constant
 
     Args:
-        arr (Union[th.Tensor, np.ndarray]): array
+        arr (NumericalData): array
     """
     if isinstance(arr, th.Tensor):
         return th.ones_like(arr, device=arr.device) * constant
@@ -303,8 +307,8 @@ def constant_like(arr: Union[th.Tensor, np.ndarray],
         return np.ones_like(arr) * constant
 
 
-def separate_numerical_categorical(arr: np.ndarray) -> Tuple[np.ndarray,
-                                                             np.ndarray]:
+def separate_numerical_categorical(arr: np.ndarray) -> Tuple[Optional[np.ndarray],
+                                                             Optional[np.ndarray]]:
     """Separate a numpy array to a categorical and numerical numpy arrays.
     Args:
         arr (np.ndarray): array
@@ -326,7 +330,8 @@ def separate_numerical_categorical(arr: np.ndarray) -> Tuple[np.ndarray,
         return process_array(arr)
 
 
-def preprocess_features(arr: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+def preprocess_features(arr: NumericalData) -> Tuple[Optional[NumericalData],
+                                                     Optional[np.ndarray]]:
     """
     Preprocess array such that the dimensions and the data type match.
     Returns numerical and categorical features.
@@ -336,6 +341,9 @@ def preprocess_features(arr: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     Returns:
         Tuple[np.ndarray, np.ndarray]
     """
+    if isinstance(arr, th.Tensor):
+        return arr, None
+
     input_dim = get_input_dim(arr)
     num_arr, cat_arr = separate_numerical_categorical(arr)
     if num_arr is not None and len(num_arr.shape) == 1:
