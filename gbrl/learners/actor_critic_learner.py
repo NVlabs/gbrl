@@ -6,16 +6,12 @@
 # https://nvlabs.github.io/gbrl/license.html
 #
 ##############################################################################
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
-import torch as th
 
 from gbrl import GBRL_CPP
-from gbrl.common.utils import (NumericalData, concatenate_arrays,
-                               ensure_leaf_tensor_or_array, ensure_same_type,
-                               get_tensor_info, numerical_dtype,
-                               preprocess_features)
+from gbrl.common.utils import NumericalData, ensure_leaf_tensor_or_array
 from gbrl.learners.gbt_learner import GBTLearner
 from gbrl.learners.multi_gbt_learner import MultiGBTLearner
 
@@ -28,7 +24,8 @@ class SharedActorCriticLearner(GBTLearner):
     trees (GBTs)
     to estimate both policy and value function parameters efficiently.
     """
-    def __init__(self, input_dim: int,
+    def __init__(self,
+                 input_dim: int,
                  output_dim: int,
                  tree_struct: Dict,
                  policy_optimizer: Dict,
@@ -69,7 +66,7 @@ class SharedActorCriticLearner(GBTLearner):
                          verbose=verbose,
                          device=device)
 
-    def distil(self, obs: np.ndarray,
+    def distil(self, obs: np.ndarray,  # type: ignore
                policy_targets: np.ndarray,
                value_targets: np.ndarray,
                params: Dict, verbose: int) -> Tuple[float, Dict]:
@@ -92,8 +89,8 @@ class SharedActorCriticLearner(GBTLearner):
                                   value_targets[:, np.newaxis]], axis=1)
         return super().distil(obs, targets, params, verbose)
 
-    def predict(self,
-                obs: NumericalData,
+    def predict(self,  # type: ignore
+                inputs: NumericalData,
                 requires_grad: bool = True, start_idx: int = 0,
                 stop_idx: Optional[int] = None, tensor: bool = True) -> \
             Tuple[NumericalData, NumericalData]:
@@ -101,7 +98,7 @@ class SharedActorCriticLearner(GBTLearner):
         Predicts both policy and value function outputs.
 
         Args:
-            obs (NumericalData): Input observations.
+            inputs (NumericalData): Input observations.
             requires_grad (bool, optional): Whether to compute gradients.
             Defaults to True.
             start_idx (int, optional): Start index for prediction. Defaults to
@@ -112,9 +109,9 @@ class SharedActorCriticLearner(GBTLearner):
             True.
 
         Returns:
-            Tuple[np.ndarray, np.ndarray]: Predicted policy and value outputs.
+            Tuple[NumericalData, NumericalData]: Predicted policy and value outputs.
         """
-        preds = super().predict(obs, requires_grad, start_idx, stop_idx,
+        preds = super().predict(inputs, requires_grad, start_idx, stop_idx,
                                 tensor)
         pred_values = preds[:, -1]
         preds = preds[:, :-1]
@@ -124,7 +121,7 @@ class SharedActorCriticLearner(GBTLearner):
 
     def predict_policy(self, obs: NumericalData,
                        requires_grad: bool = True, start_idx: int = 0,
-                       stop_idx: Optional[int] = None, tensor: bool = True):
+                       stop_idx: Optional[int] = None, tensor: bool = True) -> NumericalData:
         """
         Predicts the policy (actor) output for the given observations.
 
@@ -140,7 +137,7 @@ class SharedActorCriticLearner(GBTLearner):
             True.
 
         Returns:
-            np.ndarray: Predicted policy outputs.
+            NumericalData: Predicted policy outputs.
         """
         preds, _ = self.predict(obs, requires_grad, start_idx, stop_idx,
                                 tensor)
@@ -148,7 +145,7 @@ class SharedActorCriticLearner(GBTLearner):
 
     def predict_critic(self, obs: NumericalData,
                        requires_grad: bool = True, start_idx: int = 0,
-                       stop_idx: Optional[int] = None, tensor: bool = True):
+                       stop_idx: Optional[int] = None, tensor: bool = True) -> NumericalData:
         """
         Predicts the value function (critic) output for the given observations.
 
@@ -160,7 +157,7 @@ class SharedActorCriticLearner(GBTLearner):
             tensor (bool, optional): Whether to return a tensor. Defaults to True.
 
         Returns:
-            np.ndarray: Predicted value function outputs.
+            NumericalData: Predicted value function outputs.
         """
         _, pred_values = self.predict(obs, requires_grad, start_idx, stop_idx,
                                       tensor)
@@ -173,12 +170,14 @@ class SharedActorCriticLearner(GBTLearner):
         Returns:
             SharedActorCriticLearner: A copy of the current instance.
         """
-        copy_ = SharedActorCriticLearner(input_dim=self.input_dim, output_dim=self.output_dim,
+        assert isinstance(self.input_dim, int), "input_dim should be an integer"
+        assert isinstance(self.output_dim, int), "output_dim should be an integer"
+        copy_ = SharedActorCriticLearner(input_dim=self.input_dim,
+                                         output_dim=self.output_dim,
                                          tree_struct=self.tree_struct.copy(),
                                          policy_optimizer=self.optimizers[0].copy(),
                                          value_optimizer=self.optimizers[1].copy(),
                                          params=self.params,
-                                         policy_dim=self.policy_dim,
                                          verbose=self.verbose,
                                          device=self.device)
         copy_.iteration = self.iteration
@@ -235,31 +234,6 @@ class SeparateActorCriticLearner(MultiGBTLearner):
                          policy_dim=[output_dim - 1, 0],
                          verbose=verbose, device=device)
 
-    def step(self,
-             inputs: NumericalData,
-             grads: Union[NumericalData, Tuple[NumericalData, ...]],
-             guidance_labels: Optional[NumericalData] = None,
-             guidance_grads: Optional[NumericalData] = None,
-             model_idx: Optional[int] = None) -> None:
-        """
-        Performs a single gradient update step on both the policy and value
-        models.
-
-        Args:
-            obs (NumericalData): Input observations.
-            theta_grad (NumericalData): Gradient update for the policy (actor).
-            value_grad (NumericalData): Gradient update for the value function (critic).
-            guidance_labels (Optional[NumericalData]): guidance label vector.
-            guidance_grads (Optional[NumericalData]): guidelines user suggested actions vector.
-            model_idx (Optional[int], optional): Index of the model to update.
-            If None, updates both models.
-        """
-        super().step(inputs=inputs,
-                     grads=grads,
-                     model_idx=model_idx,
-                     guidance_labels=guidance_labels,
-                     guidance_grads=guidance_grads)
-
     def step_actor(self,
                    inputs: NumericalData,
                    grads: NumericalData,
@@ -290,7 +264,7 @@ class SeparateActorCriticLearner(MultiGBTLearner):
         """
         super().step(inputs=inputs, grads=grads, model_idx=1)
 
-    def distil(self, obs: NumericalData,
+    def distil(self, obs: NumericalData,  # type: ignore
                policy_targets: np.ndarray, value_targets: np.ndarray,
                params: Dict, verbose: int) -> Tuple[List[float], List[Dict]]:
         """
@@ -306,29 +280,7 @@ class SeparateActorCriticLearner(MultiGBTLearner):
         Returns:
             Tuple[List[float], List[Dict]]: The final loss values and updated parameters for distillation.
         """
-        return super().distil(obs,
-                              [policy_targets, value_targets],
-                              params,
-                              verbose)
-
-    def predict(self, obs: NumericalData,
-                requires_grad: bool = True, start_idx: int = 0,
-                stop_idx: Optional[int] = None, tensor: bool = True) -> \
-            Tuple[np.ndarray, np.ndarray]:
-        """
-        Predicts both the policy and value outputs for the given observations.
-
-        Args:
-            obs (NumericalData): Input observations.
-            requires_grad (bool, optional): Whether to compute gradients. Defaults to True.
-            start_idx (int, optional): Start index for prediction. Defaults to 0.
-            stop_idx (int, optional): Stop index for prediction. Defaults to None.
-            tensor (bool, optional): Whether to return a tensor. Defaults to True.
-
-        Returns:
-            Tuple[np.ndarray, np.ndarray]: Predicted policy outputs and value function outputs.
-        """
-        return super().predict(obs, requires_grad, start_idx, stop_idx, tensor)
+        return super().distil(obs, [policy_targets, value_targets], params, verbose)
 
     def predict_policy(self, obs: NumericalData,
                        requires_grad: bool = True, start_idx: int = 0,
@@ -346,8 +298,7 @@ class SeparateActorCriticLearner(MultiGBTLearner):
         Returns:
             NumericalData: Predicted policy outputs.
         """
-        return super().predict(obs, requires_grad, start_idx, stop_idx, tensor,
-                               model_idx=0)
+        return super().predict(obs, requires_grad, start_idx, stop_idx, tensor, model_idx=0)  # type: ignore
 
     def predict_critic(self, obs: NumericalData,
                        requires_grad: bool = True, start_idx: int = 0,
@@ -365,8 +316,7 @@ class SeparateActorCriticLearner(MultiGBTLearner):
         Returns:
             NumericalData: Predicted value function outputs.
         """
-        return super().predict(obs, requires_grad, start_idx, stop_idx, tensor,
-                               model_idx=1)
+        return super().predict(obs, requires_grad, start_idx, stop_idx, tensor, model_idx=1)  # type: ignore
 
     def __copy__(self) -> "SeparateActorCriticLearner":
         """
@@ -378,19 +328,27 @@ class SeparateActorCriticLearner(MultiGBTLearner):
         opts = [opt.copy() if opt is not None else opt
                 for opt in self.optimizers
                 ]
+        assert isinstance(self.input_dim, int), "input_dim should be an integer"
+        assert isinstance(self.output_dim, int), "output_dim should be an integer"
+
         copy_ = SeparateActorCriticLearner(input_dim=self.input_dim,
                                            output_dim=self.output_dim,
                                            tree_struct=self.tree_struct.copy(),
-                                           optimizers=opts, params=self.params,
-                                           n_learners=self.n_learners,
-                                           policy_dim=self.policy_dim,
+                                           policy_optimizer=opts[0],
+                                           value_optimizer=opts[1],
+                                           params=self.params,
                                            verbose=self.verbose,
                                            device=self.device)
         copy_.iteration = self.iteration
         copy_.total_iterations = self.total_iterations
+
+        if self.student_models is not None:
+            copy_.student_models = [None] * self.n_learners
+        if self._cpp_models is not None:
+            copy_._cpp_models = [None] * self.n_learners
         if self._cpp_models is not None:
             for i in range(self.n_learners):
-                copy_._cpp_models[i] = GBRL_CPP(self._cpp_models[i])
-        if self.student_models is not None:
-            copy_.student_models[i] = GBRL_CPP(self.student_models[i])
+                copy_._cpp_models[i] = GBRL_CPP(self._cpp_models[i])  # type: ignore
+                if self.student_models is not None:
+                    copy_.student_models[i] = GBRL_CPP(self.student_models[i])  # type: ignore
         return copy_

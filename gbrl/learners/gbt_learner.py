@@ -97,7 +97,7 @@ class GBTLearner(BaseLearner):
             None
         """
         assert isinstance(grads, NumericalData), "grads should be a numpy array or torch tensor"
-        if guidance_labels is not None and (guidance_labels != 0).any() and not () :
+        if guidance_labels is not None and (guidance_labels != 0).any():
             guidance_labels = None
             guidance_grads = None
 
@@ -239,7 +239,8 @@ class GBTLearner(BaseLearner):
             print(f"Caught an exception in GBRL: {e}")
             raise e
 
-    def get_schedule_learning_rates(self) -> Union[int, Tuple[int, int]]:
+    def get_schedule_learning_rates(self) -> Union[np.ndarray,
+                                                   Tuple[np.ndarray, ...]]:
         """
         Returns the learning rates of the schedulers.
 
@@ -484,7 +485,7 @@ class GBTLearner(BaseLearner):
                obs: np.ndarray,
                targets: np.ndarray,
                params: Dict,
-               verbose: int = 0) -> Tuple[int, Dict]:
+               verbose: int = 0) -> Tuple[float, Dict]:
         """
         Distills the model into a student model.
 
@@ -495,7 +496,7 @@ class GBTLearner(BaseLearner):
             verbose (int, optional): Verbosity level. Defaults to 0.
 
         Returns:
-            Tuple[int, Dict]: The final loss and updated parameters.
+            Tuple[float, Dict]: The final loss and updated parameters.
         """
         num_obs, cat_obs = preprocess_features(obs)
         distil_params = {'output_dim': self.params['output_dim'],
@@ -544,8 +545,8 @@ class GBTLearner(BaseLearner):
                 for opt in self.optimizers
                 ]
 
-        copy_ = GBTLearner(input_dim=self.input_dim, # type: ignore
-                           output_dim=self.output_dim, # type: ignore
+        copy_ = GBTLearner(input_dim=self.input_dim,  # type: ignore
+                           output_dim=self.output_dim,  # type: ignore
                            tree_struct=self.tree_struct.copy(),
                            optimizers=opts,
                            params=self.params,

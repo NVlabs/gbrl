@@ -151,7 +151,8 @@ class BaseLearner(ABC):
         pass
 
     @abstractmethod
-    def get_schedule_learning_rates(self, *args, **kwargs) -> Union[int, Tuple[int, ...]]:
+    def get_schedule_learning_rates(self, *args, **kwargs) -> Union[np.ndarray,
+                                                                    Tuple[np.ndarray, ...]]:
         """
         Retrieves the scheduled learning rates.
 
@@ -315,12 +316,12 @@ class BaseLearner(ABC):
         pass
 
     @abstractmethod
-    def distil(self, *args, **kwargs) -> Tuple[int, Dict]:
+    def distil(self, *args, **kwargs) -> Tuple[float, Dict]:
         """
         Distills the model into a smaller, simplified version.
 
         Returns:
-            Tuple[int, Dict]: Final loss and updated parameters.
+            Tuple[float, Dict]: Final loss and updated parameters.
         """
         pass
 
