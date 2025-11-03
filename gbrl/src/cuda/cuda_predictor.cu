@@ -104,7 +104,7 @@ void predict_cuda(dataSet *dataset, float *&preds, ensembleMetaData *metadata, e
 
     if (dataset->obs->data != nullptr && dataset->obs->device == cpu)
         extra_alloc_size += obs_matrix_size;
-    if (dataset->categorical_obs->data != nullptr)
+    if (dataset->categorical_obs->data != nullptr && dataset->categorical_obs->device == cpu)
         extra_alloc_size += cat_obs_matrix_size;
 
     cudaError_t alloc_error = allocateCudaMemory((void**)&device_data, alloc_size, "when trying to allocate in predict_cuda");
@@ -126,17 +126,24 @@ void predict_cuda(dataSet *dataset, float *&preds, ensembleMetaData *metadata, e
     device_preds = (float *)(device_data + trace);
     trace += preds_matrix_size;
 
-    if (dataset->obs->data != nullptr && dataset->obs->device == cpu){
-        device_batch_obs = (float*)(extra_data + extra_trace);
-        extra_trace += obs_matrix_size;
-        cudaMemcpy(device_batch_obs, dataset->obs->data, obs_matrix_size, cudaMemcpyHostToDevice);
-    } else {
-        device_batch_obs = const_cast<float*>(dataset->obs->data);
+    if (dataset->obs->data != nullptr){
+        if (dataset->obs->device == cpu){
+            device_batch_obs = (float*)(extra_data + extra_trace);
+            extra_trace += obs_matrix_size;
+            cudaMemcpy(device_batch_obs, dataset->obs->data, obs_matrix_size, cudaMemcpyHostToDevice);
+        } else {
+            device_batch_obs = const_cast<float*>(dataset->obs->data);
+        }
     }
+
     if (dataset->categorical_obs->data != nullptr){
-        device_batch_cat_obs = (char *)(extra_data + extra_trace);
-        extra_trace += cat_obs_matrix_size;
-        cudaMemcpy(device_batch_cat_obs, dataset->categorical_obs->data, cat_obs_matrix_size, cudaMemcpyHostToDevice);
+        if (dataset->categorical_obs->device == cpu){
+            device_batch_cat_obs = (char *)(extra_data + extra_trace);
+            extra_trace += cat_obs_matrix_size;
+            cudaMemcpy(device_batch_cat_obs, dataset->categorical_obs->data, cat_obs_matrix_size, cudaMemcpyHostToDevice);
+        } else {
+            device_batch_cat_obs = const_cast<char*>(dataset->categorical_obs->data);
+        }
     }
 
     int n_blocks, threads_per_block;
@@ -149,6 +156,8 @@ void predict_cuda(dataSet *dataset, float *&preds, ensembleMetaData *metadata, e
         std::cerr << "Given stop_tree_idx idx: " << stop_tree_idx << " greater than number of trees in model: " << metadata->n_trees << std::endl;
 
         preds = device_preds;
+        if (extra_alloc_size > 0) 
+            cudaFree(extra_data);
         
         return;
     } 
@@ -198,6 +207,9 @@ void predict_cuda(dataSet *dataset, float *&preds, ensembleMetaData *metadata, e
     cudaDeviceSynchronize();
 
     preds = device_preds;
+
+    if (extra_alloc_size > 0) 
+        cudaFree(extra_data);
 }
 
 

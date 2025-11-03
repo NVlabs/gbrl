@@ -464,15 +464,17 @@ void GBRL::_step_gpu(dataSet *dataset){
     size_t guidance_grads_size = sizeof(float)*n_samples * metadata->output_dim;
 
     size_t alloc_size = grads_size +
-                        cat_obs_size +
                         grads_norm_size +
                         cand_indices_size +
                         cand_float_size +
                         cand_cat_size +
                         cand_numerical_size;
 
-    if (dataset->obs->data != nullptr && dataset->obs->device == cpu)
-        alloc_size += 2 * obs_size;
+    if (dataset->obs->data != nullptr){
+        alloc_size += obs_size;
+        if (dataset->obs->device == cpu)
+            alloc_size += obs_size;
+    }
 
     if (dataset->categorical_obs->data != nullptr && dataset->categorical_obs->device == cpu)
         alloc_size += cat_obs_size;
@@ -522,29 +524,33 @@ void GBRL::_step_gpu(dataSet *dataset){
     cudaMemcpy(gpu_build_grads, gpu_grads, grads_size, cudaMemcpyDeviceToDevice);
 
     float *gpu_guidance_labels = nullptr;
-    if (dataset->guidance_labels->data != nullptr && dataset->guidance_labels->device == cpu){
-        gpu_guidance_labels = (float*)(device_memory_block + trace);
-        trace += guidance_label_size;
-        cudaMemcpy(gpu_guidance_labels, dataset->guidance_labels->data, guidance_label_size, cudaMemcpyHostToDevice);
-    } else {
-        gpu_guidance_labels = const_cast<float*>(dataset->guidance_labels->data);
-    }
+    if (dataset->guidance_labels->data != nullptr){
+        if(dataset->guidance_labels->device == cpu){
+            gpu_guidance_labels = (float*)(device_memory_block + trace);
+            trace += guidance_label_size;
+            cudaMemcpy(gpu_guidance_labels, dataset->guidance_labels->data, guidance_label_size, cudaMemcpyHostToDevice);
+        } else {
+            gpu_guidance_labels = const_cast<float*>(dataset->guidance_labels->data);
+        }
+    } 
 
     float *gpu_guidance_grads = nullptr;
-    if (dataset->guidance_grads->data != nullptr && dataset->guidance_grads->device == cpu){
-        gpu_guidance_grads = (float*)(device_memory_block + trace);
-        trace += guidance_grads_size;
-        cudaMemcpy(gpu_guidance_grads, dataset->guidance_grads->data, guidance_grads_size, cudaMemcpyHostToDevice);
-    } else {
-        gpu_guidance_grads = const_cast<float*>(dataset->guidance_grads->data);
+    if (dataset->guidance_grads->data != nullptr){
+        if (dataset->guidance_grads->device == cpu){
+            gpu_guidance_grads = (float*)(device_memory_block + trace);
+            trace += guidance_grads_size;
+            cudaMemcpy(gpu_guidance_grads, dataset->guidance_grads->data, guidance_grads_size, cudaMemcpyHostToDevice);
+        } else {
+            gpu_guidance_grads = const_cast<float*>(dataset->guidance_grads->data);
+        }
     }
 
     float *gpu_grads_norm = (float*)(device_memory_block + trace);
     trace += grads_norm_size;
-    int *candidate_indices = (int*)(device_memory_block + trace);
-    trace += cand_indices_size;
     float *candidate_values = (float*)(device_memory_block + trace);
     trace += cand_float_size;
+    int *candidate_indices = (int*)(device_memory_block + trace);
+    trace += cand_indices_size;
     bool *candidate_numerical = (bool*)(device_memory_block + trace);
     trace += cand_numerical_size;
     char *candidate_categories = (char*)(device_memory_block + trace);
@@ -552,11 +558,15 @@ void GBRL::_step_gpu(dataSet *dataset){
     
     char *gpu_categorical_obs = nullptr;
     if (dataset->categorical_obs->data != nullptr){
-        gpu_categorical_obs = (char*)(device_memory_block + trace);
-        trace += cat_obs_size;
-        cudaMemcpy(gpu_categorical_obs, dataset->categorical_obs->data, sizeof(char)*n_cat_features*n_samples*MAX_CHAR_SIZE, cudaMemcpyHostToDevice);
+        if (dataset->categorical_obs->device == cpu){
+            gpu_categorical_obs = (char*)(device_memory_block + trace);
+            trace += cat_obs_size;
+            cudaMemcpy(gpu_categorical_obs, dataset->categorical_obs->data, sizeof(char)*n_cat_features*n_samples*MAX_CHAR_SIZE, cudaMemcpyHostToDevice);
+        } else {
+            gpu_categorical_obs = const_cast<char*>(dataset->categorical_obs->data);
+        }
     }
-    if (dataset->obs->data != nullptr)
+    if (gpu_obs != nullptr)
         transpose_matrix(gpu_obs, trans_obs, n_num_features, n_samples);
 
     preprocess_matrices(gpu_build_grads, gpu_grads_norm, n_samples, output_dim, this->metadata->split_score_func);
@@ -622,7 +632,7 @@ float GBRL::_fit_gpu(dataHolder<float> *obs,
     size_t cand_numerical_size =  sizeof(bool)*n_bins*this->metadata->input_dim;
     size_t result_tmp_size = sizeof(float)*n_blocks;
 
-    size_t alloc_size = grads_size*4 +
+    size_t alloc_size = grads_size*3 +
                         grads_norm_size +
                         cand_indices_size +
                         cand_float_size +
@@ -633,23 +643,27 @@ float GBRL::_fit_gpu(dataHolder<float> *obs,
     if (shuffle)
         alloc_size += indices_size;
 
-    if (obs->data != nullptr && obs->device == cpu){
-        alloc_size += 2*obs_size;
+    if (obs->data != nullptr){
+        alloc_size += obs_size;
+        if (obs->device == cpu)
+            alloc_size += obs_size;
         if (shuffle)
             alloc_size += obs_size;
     }
-    if (categorical_obs->data != nullptr && categorical_obs->device == cpu){
-        alloc_size += cat_obs_size;
+    if (categorical_obs->data != nullptr){
+        if (categorical_obs->device == cpu)
+            alloc_size += cat_obs_size;
         if (shuffle)
             alloc_size += cat_obs_size;
     }
 
-    if (targets->data != nullptr && targets->device == cpu){
-        alloc_size += grads_size;
+    if (targets->data != nullptr){
+        if (targets->device == cpu)
+            alloc_size += grads_size;
         if (shuffle)
             alloc_size += grads_size;
     }
-    
+
     char *device_memory_block; 
 
     if (this->cuda_opt == nullptr){
@@ -657,20 +671,10 @@ float GBRL::_fit_gpu(dataHolder<float> *obs,
         this->n_cuda_opts = static_cast<int>(this->opts.size());
     }
 
-    err = cudaMalloc((void**)&device_memory_block, alloc_size);
-    if (err != cudaSuccess) {
-        size_t free_mem, total_mem;
-        cudaMemGetInfo(&free_mem, &total_mem);
-        std::cerr << "CUDA allocate fit_gpu_sl data error: " << cudaGetErrorString(err)
-                << " when trying to allocate " << ((alloc_size) / (1024.0 * 1024.0)) << " MB."
-                << std::endl;
-        std::cerr << "Free memory: " << (free_mem / (1024.0 * 1024.0)) << " MB."
-                << std::endl;
-        std::cerr << "Total memory: " << (total_mem / (1024.0 * 1024.0)) << " MB."
-                << std::endl;
-        throw std::runtime_error("GPU allocation error");
+    err = allocateCudaMemory((void**)&device_memory_block, alloc_size, "when trying to allocate fit_gpu_sl data");
+    if (err != cudaSuccess)
         return -INFINITY;
-    }
+    
 
     float *gpu_obs = nullptr;
     float *shuffled_obs = nullptr;
@@ -683,29 +687,49 @@ float GBRL::_fit_gpu(dataHolder<float> *obs,
     cudaMemset(device_memory_block, 0, alloc_size);
 
     size_t trace = 0;
-    if (obs->data != nullptr && obs->device == cpu) {
-        gpu_obs = (float*)(device_memory_block + trace);
-        trace += obs_size;
-        if (shuffle){
-            shuffled_obs = (float*)(device_memory_block + trace);
+    if (obs->data != nullptr){ 
+        if (obs->device == cpu) {
+            gpu_obs = (float*)(device_memory_block + trace);
             trace += obs_size;
-            cudaMemcpy(shuffled_obs, obs->data, obs_size, cudaMemcpyHostToDevice);
+            if (shuffle){
+                shuffled_obs = (float*)(device_memory_block + trace);
+                trace += obs_size;
+                cudaMemcpy(shuffled_obs, obs->data, obs_size, cudaMemcpyHostToDevice);
+            } else {
+                cudaMemcpy(gpu_obs, obs->data, obs_size, cudaMemcpyHostToDevice);
+            }
         } else {
-            cudaMemcpy(gpu_obs, obs->data, obs_size, cudaMemcpyHostToDevice);
+            if (shuffle){
+                shuffled_obs = (float*)(device_memory_block + trace);
+                trace += obs_size;
+                shuffled_obs = obs->data;
+            } else {
+                gpu_obs = obs->data;
+            }
         }
         trans_obs = (float*)(device_memory_block + trace);
         trace += obs_size;
     }
 
-    if (targets->data != nullptr && targets->device == cpu){
-        gpu_targets = (float*)(device_memory_block + trace);
-        trace += grads_size;
-        if (shuffle){
-            shuffled_targets = (float*)(device_memory_block + trace);
+    if (targets->data != nullptr){
+        if (targets->device == cpu){
+            gpu_targets = (float*)(device_memory_block + trace);
             trace += grads_size;
-            cudaMemcpy(shuffled_targets, targets->data, grads_size, cudaMemcpyHostToDevice);
+            if (shuffle){
+                shuffled_targets = (float*)(device_memory_block + trace);
+                trace += grads_size;
+                cudaMemcpy(shuffled_targets, targets->data, grads_size, cudaMemcpyHostToDevice);
+            } else {
+                cudaMemcpy(gpu_targets, targets->data, grads_size, cudaMemcpyHostToDevice);
+            }
         } else {
-            cudaMemcpy(gpu_targets, targets->data, grads_size, cudaMemcpyHostToDevice);
+            if (shuffle){
+                shuffled_targets = (float*)(device_memory_block + trace);
+                trace += grads_size;
+                shuffled_targets = targets->data;
+            } else {
+                gpu_targets = targets->data;
+            }
         }
     }
 
@@ -737,14 +761,24 @@ float GBRL::_fit_gpu(dataHolder<float> *obs,
     char *candidate_categories = (char*)(device_memory_block + trace);
 
     if (categorical_obs->data != nullptr){
-        gpu_categorical_obs = (char*)(device_memory_block + trace);
-        trace += cat_obs_size;
-        if (shuffle){
-            shuffled_categorical_obs = (char*)(device_memory_block + trace);
+        if (categorical_obs->device == cpu){
+            gpu_categorical_obs = (char*)(device_memory_block + trace);
             trace += cat_obs_size;
-            cudaMemcpy(shuffled_categorical_obs, categorical_obs->data, cat_obs_size, cudaMemcpyHostToDevice);
-        } else{
-            cudaMemcpy(gpu_categorical_obs, categorical_obs->data, cat_obs_size, cudaMemcpyHostToDevice);
+            if (shuffle){
+                shuffled_categorical_obs = (char*)(device_memory_block + trace);
+                trace += cat_obs_size;
+                cudaMemcpy(shuffled_categorical_obs, categorical_obs->data, cat_obs_size, cudaMemcpyHostToDevice);
+            } else{
+                cudaMemcpy(gpu_categorical_obs, categorical_obs->data, cat_obs_size, cudaMemcpyHostToDevice);
+            }
+        } else {
+            if (shuffle){
+                shuffled_categorical_obs = (char*)(device_memory_block + trace);
+                trace += cat_obs_size;
+                shuffled_categorical_obs = categorical_obs->data;
+            } else {
+                gpu_categorical_obs = categorical_obs->data;
+            }
         }
     }
 

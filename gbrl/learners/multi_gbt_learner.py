@@ -130,8 +130,11 @@ class MultiGBTLearner(BaseLearner):
         assert model_idx is not None or ((isinstance(grads, list) or isinstance(grads, tuple)) and
                                          len(grads) == self.n_learners), "Invalid model index or gradients"
         assert self._cpp_models is not None, "Model not initialized."
-        if guidance_labels is None or (guidance_labels != 0).any():
+        if guidance_labels is not None and (guidance_labels == 0).all():
             guidance_labels = None
+            guidance_grads = None
+
+        if guidance_labels is None:
             guidance_grads = None
 
         num_inputs, cat_inputs = preprocess_features(inputs)

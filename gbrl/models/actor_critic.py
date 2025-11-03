@@ -19,6 +19,7 @@ from gbrl.learners.actor_critic_learner import (SeparateActorCriticLearner,
 from gbrl.learners.cost_actor_critic_learner import SharedCostActorCriticLearner, SeparateCostActorCriticLearner
 from gbrl.models.base import BaseGBT
 from gbrl.common.utils import (clip_grad_norm, numerical_dtype, setup_optimizer,
+                               pad_array,
                                validate_array)
 
 
@@ -259,6 +260,9 @@ class ActorCritic(BaseGBT):
 
         validate_array(policy_grads)
         validate_array(value_grads)
+
+        if guidance_grads is not None:
+            guidance_grads = pad_array(guidance_grads, n_dims=1, pad_value=0.0, axis=-1)
 
         self.learner.step(inputs=observations,
                           grads=(policy_grads, value_grads),
@@ -631,6 +635,9 @@ class CostActorCritic(ActorCritic):
         validate_array(policy_grads)
         validate_array(value_grads)
         validate_array(cost_grads)
+
+        if guidance_grads is not None:
+            guidance_grads = pad_array(guidance_grads, n_dims=2, pad_value=0.0, axis=-1)
 
         self.learner.step(inputs=observations,
                           grads=(policy_grads, value_grads, cost_grads),

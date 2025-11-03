@@ -280,6 +280,26 @@ def concatenate_arrays(arrays: Sequence[NumericalData],
     return np.concatenate(arrays, axis=axis)
 
 
+def pad_array(array: NumericalData, n_dims: int, pad_value: float = 0.0, axis: int = -1) -> NumericalData:
+    """
+    Pads an array with singleton dimensions to ensure it has at least
+    `n_dims` dimensions along the specified axis.
+
+    Args:
+        array (NumericalData): Input array (NumPy or PyTorch).
+        n_dims (int): Minimum number of dimensions required.
+        pad_value (float, optional): Value to use for padding. Defaults to 0.0.
+        axis (int, optional): Axis along which to pad. Defaults to 1.
+
+    Returns:
+        NumericalData: Padded array with the same type as the input.
+    """
+    if isinstance(array, th.Tensor):
+        return concatenate_arrays([array, pad_value*th.ones((len(array), n_dims), dtype=array.dtype, device=array.device)],
+                                  axis=axis)
+    return concatenate_arrays([array, pad_value*np.ones((len(array), n_dims), dtype=array.dtype)], axis=axis)
+
+
 def validate_array(arr: NumericalData) -> None:
     """Checks for NaN and Inf values in an array/tensor.
 

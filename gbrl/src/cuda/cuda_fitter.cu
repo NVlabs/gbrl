@@ -416,14 +416,14 @@ __global__ void split_score_cosine_cuda(
         
         if (passed){
             for (int d = 0; d < n_cols; ++d){
-                float eff_grad = (guidance_grads == nullptr) ? __ldg(&grads[sample_idx*n_cols + d]):  __ldg(&grads[sample_idx*n_cols + d]) * (1.0f - node->guidance_percent) * __ldg(&guidance_grads[sample_idx*n_cols + d]) * guidance_scale * node->guidance_percent;
+                float eff_grad = (guidance_grads == nullptr) ? __ldg(&grads[sample_idx*n_cols + d]):  __ldg(&grads[sample_idx*n_cols + d]) * (1.0f - node->guidance_percent) + __ldg(&guidance_grads[sample_idx*n_cols + d]) * guidance_scale * node->guidance_percent;
                 right_mean[threadIdx.x*n_cols + d] += eff_grad;
             }
             r_count[threadIdx.x] += 1;
         } 
         else {
             for (int d = 0; d < n_cols; ++d){
-                float eff_grad = (guidance_grads == nullptr) ? __ldg(&grads[sample_idx*n_cols + d]):  __ldg(&grads[sample_idx*n_cols + d]) * (1.0f - node->guidance_percent) * __ldg(&guidance_grads[sample_idx*n_cols + d]) * guidance_scale * node->guidance_percent;
+                float eff_grad = (guidance_grads == nullptr) ? __ldg(&grads[sample_idx*n_cols + d]):  __ldg(&grads[sample_idx*n_cols + d]) * (1.0f - node->guidance_percent) + __ldg(&guidance_grads[sample_idx*n_cols + d]) * guidance_scale * node->guidance_percent;
                 left_mean[threadIdx.x*n_cols + d] += eff_grad;
             }
             l_count[threadIdx.x] += 1;
@@ -458,12 +458,12 @@ __global__ void split_score_cosine_cuda(
         passed = passed || (!candidate_numeric[cand_idx] && strcmpCuda(&categorical_obs[(sample_idx*node->n_cat_features + __ldg(&candidate_indices[cand_idx]))* MAX_CHAR_SIZE], candidate_categories + cand_idx * MAX_CHAR_SIZE) == 0);
         if (passed){
             for (int d = 0; d < n_cols; ++d){
-                float eff_grad = (guidance_grads == nullptr) ? __ldg(&grads[sample_idx*n_cols + d]):  __ldg(&grads[sample_idx*n_cols + d]) * (1.0f - node->guidance_percent) * __ldg(&guidance_grads[sample_idx*n_cols + d]) * guidance_scale * node->guidance_percent;
+                float eff_grad = (guidance_grads == nullptr) ? __ldg(&grads[sample_idx*n_cols + d]):  __ldg(&grads[sample_idx*n_cols + d]) * (1.0f - node->guidance_percent) + __ldg(&guidance_grads[sample_idx*n_cols + d]) * guidance_scale * node->guidance_percent;
                 r_dot_sum[threadIdx.x] += eff_grad * right_mean[d];
             }
         } else {
             for (int d = 0; d < n_cols; ++d){
-                float eff_grad = (guidance_grads == nullptr) ? __ldg(&grads[sample_idx*n_cols + d]):  __ldg(&grads[sample_idx*n_cols + d]) * (1.0f - node->guidance_percent) * __ldg(&guidance_grads[sample_idx*n_cols + d]) * guidance_scale * node->guidance_percent;
+                float eff_grad = (guidance_grads == nullptr) ? __ldg(&grads[sample_idx*n_cols + d]):  __ldg(&grads[sample_idx*n_cols + d]) * (1.0f - node->guidance_percent) + __ldg(&guidance_grads[sample_idx*n_cols + d]) * guidance_scale * node->guidance_percent;
                 l_dot_sum[threadIdx.x] += eff_grad * left_mean[d];
             }
         }
@@ -564,13 +564,13 @@ __global__ void split_score_l2_cuda(
         int row_idx = sample_idx*n_cols;
         if ((candidate_numeric[cand_idx] && __ldg(&obs[__ldg(&candidate_indices[cand_idx])*global_n_samples + sample_idx]) > __ldg(&candidate_values[cand_idx])) || (!candidate_numeric[cand_idx] && strcmpCuda(&categorical_obs[(sample_idx*node->n_cat_features + __ldg(&candidate_indices[cand_idx]))* MAX_CHAR_SIZE], candidate_categories + cand_idx * MAX_CHAR_SIZE) == 0)){
             for (int d = 0; d < n_cols; ++d){
-                float eff_grad = (guidance_grads == nullptr) ? __ldg(&grads[row_idx + d]):  __ldg(&grads[row_idx + d]) * (1.0f - node->guidance_percent) * __ldg(&guidance_grads[row_idx + d]) * guidance_scale * node->guidance_percent;
+                float eff_grad = (guidance_grads == nullptr) ? __ldg(&grads[row_idx + d]):  __ldg(&grads[row_idx + d]) * (1.0f - node->guidance_percent) + __ldg(&guidance_grads[row_idx + d]) * guidance_scale * node->guidance_percent;
                 right_mean[threadIdx.x*n_cols + d] += eff_grad;
             }
             r_count[threadIdx.x] += 1;
         } else {
             for (int d = 0; d < n_cols; ++d){
-                float eff_grad = (guidance_grads == nullptr) ? __ldg(&grads[row_idx + d]):  __ldg(&grads[row_idx + d]) * (1.0f - node->guidance_percent) * __ldg(&guidance_grads[row_idx + d]) * guidance_scale * node->guidance_percent;
+                float eff_grad = (guidance_grads == nullptr) ? __ldg(&grads[row_idx + d]):  __ldg(&grads[row_idx + d]) * (1.0f - node->guidance_percent) + __ldg(&guidance_grads[row_idx + d]) * guidance_scale * node->guidance_percent;
                 left_mean[threadIdx.x*n_cols + d] += eff_grad;
             }
             l_count[threadIdx.x] += 1;
@@ -784,13 +784,13 @@ __global__ void split_conditional_sum_kernel(
         
         if (is_greater){
             for (int d = 0; d < output_dim; ++d){
-                float eff_grad = (guidance_grads == nullptr) ? __ldg(&grads[sample_idx*output_dim + d]):  __ldg(&grads[sample_idx*output_dim + d]) * (1.0f - node->guidance_percent) * __ldg(&guidance_grads[sample_idx*output_dim + d]) * guidance_scale * node->guidance_percent;
+                float eff_grad = (guidance_grads == nullptr) ? __ldg(&grads[sample_idx*output_dim + d]):  __ldg(&grads[sample_idx*output_dim + d]) * (1.0f - node->guidance_percent) + __ldg(&guidance_grads[sample_idx*output_dim + d]) * guidance_scale * node->guidance_percent;
                 atomicAdd(right_sum + cand_idx*output_dim + d, eff_grad);
             }
             atomicAdd(right_count + cand_idx, 1);
         } else {
             for (int d = 0; d < output_dim; ++d){
-                float eff_grad = (guidance_grads == nullptr) ? __ldg(&grads[sample_idx*output_dim + d]):  __ldg(&grads[sample_idx*output_dim + d]) * (1.0f - node->guidance_percent) * __ldg(&guidance_grads[sample_idx*output_dim + d]) * guidance_scale * node->guidance_percent;
+                float eff_grad = (guidance_grads == nullptr) ? __ldg(&grads[sample_idx*output_dim + d]):  __ldg(&grads[sample_idx*output_dim + d]) * (1.0f - node->guidance_percent) + __ldg(&guidance_grads[sample_idx*output_dim + d]) * guidance_scale * node->guidance_percent;
                 atomicAdd(left_sum + cand_idx*output_dim + d, eff_grad);
             }
             atomicAdd(left_count + cand_idx, 1);
@@ -833,14 +833,14 @@ __global__ void split_conditional_dot_kernel(
         bool is_greater = (candidate_numeric[cand_idx] && __ldg(&obs[sample_idx +  global_n_samples * __ldg(&candidate_indices[cand_idx])]) > __ldg(&candidate_values[cand_idx])) || (!candidate_numeric[cand_idx] && strcmpCuda(&categorical_obs[(sample_idx*node->n_cat_features + candidate_indices[cand_idx])* MAX_CHAR_SIZE], candidate_categories + cand_idx * MAX_CHAR_SIZE) == 0);
         if (is_greater){
             for (int d = 0; d < n_cols; ++d){
-                float eff_grads = (guidance_grads == nullptr) ? __ldg(&grads[row_idx + d]):  __ldg(&grads[row_idx + d]) * (1.0f - node->guidance_percent) * __ldg(&guidance_grads[row_idx + d]) * guidance_scale * node->guidance_percent;
+                float eff_grads = (guidance_grads == nullptr) ? __ldg(&grads[row_idx + d]):  __ldg(&grads[row_idx + d]) * (1.0f - node->guidance_percent) + __ldg(&guidance_grads[row_idx + d]) * guidance_scale * node->guidance_percent;
                 cdot += eff_grads * __ldg(&right_sum[cand_row + d]);
             }
             cdot /= __ldg(&right_count[cand_idx]);
             atomicAdd(rdot + cand_idx, cdot);
         } else {
             for (int d = 0; d < n_cols; ++d){
-                float eff_grads = (guidance_grads == nullptr) ? __ldg(&grads[row_idx + d]):  __ldg(&grads[row_idx + d]) * (1.0f - node->guidance_percent) * __ldg(&guidance_grads[row_idx + d]) * guidance_scale * node->guidance_percent;
+                float eff_grads = (guidance_grads == nullptr) ? __ldg(&grads[row_idx + d]):  __ldg(&grads[row_idx + d]) * (1.0f - node->guidance_percent) + __ldg(&guidance_grads[row_idx + d]) * guidance_scale * node->guidance_percent;
                 cdot += eff_grads * __ldg(&left_sum[cand_row + d]);
             }
             cdot /= __ldg(&left_count[cand_idx]);
@@ -1174,7 +1174,7 @@ __global__ void node_column_mean_reduce(
   for (size_t col = idx; col < full_width; col+=width_stride){          // grid-stride loop across matrix width
     sdata[threadIdx.y][threadIdx.x] = 0;
     for (size_t row = threadIdx.y; row < n_rows; row+=BLOCK_ROWS){ // block-stride loop across matrix height
-        float eff_in = (guidance_in == nullptr) ? in[col + node->sample_indices[row]*n_cols] : in[col + node->sample_indices[row]*n_cols] * (1.0f - node->guidance_percent) * guidance_in[col + node->sample_indices[row]*n_cols] * guidance_scale * node->guidance_percent;
+        float eff_in = (guidance_in == nullptr) ? in[col + node->sample_indices[row]*n_cols] : in[col + node->sample_indices[row]*n_cols] * (1.0f - node->guidance_percent) + guidance_in[col + node->sample_indices[row]*n_cols] * guidance_scale * node->guidance_percent;
         sdata[threadIdx.y][threadIdx.x] += (col < n_cols) ? eff_in : 0;
     }
     __syncthreads();
@@ -1222,7 +1222,7 @@ __global__ void node_cosine_kernel(
         int row_idx = sample_idx*n_cols;
         
         for (int d = 0; d < n_cols ; ++d){
-            float eff_grad = (guidance_grads == nullptr) ? grads[row_idx + d] : grads[row_idx + d] * (1.0f - node->guidance_percent) * guidance_grads[row_idx + d] * guidance_scale * node->guidance_percent;
+            float eff_grad = (guidance_grads == nullptr) ? grads[row_idx + d] : grads[row_idx + d] * (1.0f - node->guidance_percent) + guidance_grads[row_idx + d] * guidance_scale * node->guidance_percent;
             dot_sum[threadIdx.x] += eff_grad*mean[d];
         }
     }

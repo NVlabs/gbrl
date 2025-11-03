@@ -98,8 +98,11 @@ class GBTLearner(BaseLearner):
         """
         assert isinstance(grads, list) or isinstance(grads, tuple) or isinstance(grads, NumericalData), \
             "Invalid gradients type"
-        if guidance_labels is not None and (guidance_labels != 0).any():
+        if guidance_labels is not None and (guidance_labels == 0).all():
             guidance_labels = None
+            guidance_grads = None
+
+        if guidance_labels is None:
             guidance_grads = None
 
         if guidance_grads is not None:
