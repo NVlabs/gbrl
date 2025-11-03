@@ -36,7 +36,7 @@ void Fitter::step_cpu(dataSet *dataset, ensembleData *edata, ensembleMetaData *m
         Fitter::control_variates(dataset, edata, metadata);
     }
 
-    float *build_grads = copy_mat(dataset->grads, dataset->n_samples*output_dim, par_th);
+    float *build_grads = copy_mat(dataset->grads->data, dataset->n_samples*output_dim, par_th);
     if (metadata->split_score_func == L2){
         float *mean_grads = calculate_mean(build_grads, dataset->n_samples, output_dim, par_th);
         float *std = calculate_std_and_center(build_grads, mean_grads, dataset->n_samples, output_dim, par_th);
@@ -48,12 +48,12 @@ void Fitter::step_cpu(dataSet *dataset, ensembleData *edata, ensembleMetaData *m
     float *norm_grads = nullptr;
     if (metadata->n_cat_features > 0){
         norm_grads = init_zero_mat(dataset->n_samples*metadata->output_dim);
-        calculate_squared_norm(norm_grads, dataset->grads, dataset->n_samples, metadata->output_dim, par_th);
+        calculate_squared_norm(norm_grads, dataset->grads->data, dataset->n_samples, metadata->output_dim, par_th);
     }
 
     SplitCandidateGenerator generator = SplitCandidateGenerator(dataset->n_samples, metadata->n_num_features, metadata->n_cat_features, metadata->n_bins, metadata->par_th, metadata->generator_type);
     int **indices = nullptr;
-    const float *obs = dataset->obs;
+    const float *obs = dataset->obs->data;
     const int n_num_features = metadata->n_num_features;
 
     if (metadata->n_num_features > 0){
@@ -68,16 +68,17 @@ void Fitter::step_cpu(dataSet *dataset, ensembleData *edata, ensembleMetaData *m
             });
             indices[i] = col_inds;
         }
-        generator.generateNumericalSplitCandidates(dataset->obs, indices);
+        generator.generateNumericalSplitCandidates(dataset->obs->data, indices);
     }
     if (metadata->n_cat_features > 0)
-        generator.processCategoricalCandidates(dataset->categorical_obs, norm_grads);
+        generator.processCategoricalCandidates(dataset->categorical_obs->data, norm_grads);
 
-    dataset->build_grads = build_grads; 
+    dataHolder<float> build_grads_holder{build_grads, cpu};
+    dataset->build_grads = &build_grads_holder; 
 
     float *guidance_percent = nullptr;
 
-    if (dataset->guidance_labels != nullptr){
+    if (dataset->guidance_labels->data != nullptr){
         int max_n_leaves = 1 << metadata->max_depth;
         guidance_percent = new float[max_n_leaves];
     }
@@ -123,7 +124,7 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
 
     SplitCandidateGenerator generator = SplitCandidateGenerator(dataset->n_samples, metadata->n_num_features, metadata->n_cat_features, metadata->n_bins, metadata->par_th, metadata->generator_type);
     int **indices = nullptr;
-    const float *obs = dataset->obs;
+    const float *obs = dataset->obs->data;
     const int n_num_features = metadata->n_num_features;
     if (metadata->n_num_features > 0){
         indices = new int*[metadata->n_num_features];
@@ -137,7 +138,7 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
             });
             indices[i] = col_inds;
         }
-        generator.generateNumericalSplitCandidates(dataset->obs, indices);
+        generator.generateNumericalSplitCandidates(dataset->obs->data, indices);
     }
     float *full_preds = nullptr;
     if (metadata->n_cat_features > 0){
@@ -147,18 +148,30 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
         float *full_grad_norms = init_zero_mat(dataset->n_samples); 
         batch_loss = MultiRMSE::get_loss_and_gradients(full_preds, targets, full_grads, dataset->n_samples, metadata->output_dim, par_th);
         calculate_squared_norm(full_grad_norms, full_grads, dataset->n_samples, metadata->output_dim, metadata->par_th);
-        generator.processCategoricalCandidates(dataset->categorical_obs, full_grad_norms);
+        generator.processCategoricalCandidates(dataset->categorical_obs->data, full_grad_norms);
         delete[] full_preds;
         delete[] full_grads;
         delete[] full_grad_norms;
     }
     dataSet batch_dataset;
-    batch_dataset.guidance_labels = nullptr; // guidance_labels is not used in fit
-    batch_dataset.guidance_grads = nullptr; // guidance_grads is not used in fit
+
+    dataHolder<const float> obs_holder{nullptr, cpu};
+    batch_dataset.obs = &obs_holder;
+    dataHolder<float> grads_holder{nullptr, cpu};
+    batch_dataset.grads = &grads_holder;
+    dataHolder<float> build_grads_holder{nullptr, cpu};
+    batch_dataset.build_grads = &build_grads_holder;
+    dataHolder<const char> categorical_obs_holder{nullptr, cpu};
+    batch_dataset.categorical_obs = &categorical_obs_holder;
+
+    dataHolder<const float> guidance_label_holder{nullptr, cpu};
+    batch_dataset.guidance_labels = &guidance_label_holder;
+    dataHolder<const float> guidance_grads_holder{nullptr, cpu};
+    batch_dataset.guidance_grads = &guidance_grads_holder;
 
     for (int i = 0; i < iterations; ++i){
-        batch_dataset.obs = dataset->obs + batch_start_idx*metadata->n_num_features; 
-        batch_dataset.categorical_obs = dataset->categorical_obs + batch_start_idx*metadata->n_cat_features*MAX_CHAR_SIZE;
+        batch_dataset.obs->data = dataset->obs->data + batch_start_idx*metadata->n_num_features; 
+        batch_dataset.categorical_obs->data = dataset->categorical_obs->data + batch_start_idx*metadata->n_cat_features*MAX_CHAR_SIZE;
         batch_dataset.n_samples = batch_n_samples; 
 
         const float *shifted_targets = targets + batch_start_idx*metadata->output_dim; 
@@ -176,7 +189,7 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
         if (loss_type == MultiRMSE){
             batch_loss = MultiRMSE::get_loss_and_gradients(preds, shifted_targets, grads, batch_dataset.n_samples, metadata->output_dim, par_th);
         }
-        batch_dataset.grads = grads;
+        batch_dataset.grads->data = grads;
         if (metadata->use_cv && i > 0){
             Fitter::control_variates(&batch_dataset, edata, metadata);
         }
@@ -198,7 +211,7 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
         } else {
             calculate_squared_norm(norm_grads, grads, batch_dataset.n_samples, metadata->output_dim, metadata->par_th);
         }
-        batch_dataset.build_grads = build_grads; 
+        batch_dataset.build_grads->data = build_grads;
 
         int added_leaves = 0;
         if (metadata->grow_policy == GREEDY)
@@ -287,9 +300,9 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
         best_score = -INFINITY;
         if (to_split){
             if (metadata->split_score_func == Cosine){
-                parent_score = scoreCosine(crnt_node->sample_indices, crnt_node->n_samples, dataset->build_grads, metadata->output_dim);
+                parent_score = scoreCosine(crnt_node->sample_indices, crnt_node->n_samples, dataset->build_grads->data, metadata->output_dim);
             } else if (metadata->split_score_func == L2){
-                parent_score = scoreL2(crnt_node->sample_indices, crnt_node->n_samples, dataset->build_grads, metadata->output_dim);
+                parent_score = scoreL2(crnt_node->sample_indices, crnt_node->n_samples, dataset->build_grads->data, metadata->output_dim);
             } else{
                 std::cerr << "error invalid split score func!" << std::endl;
                 continue;
@@ -314,7 +327,7 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
                     int feat_idx = (split_candidates[j].categorical_value == nullptr) ? split_candidates[j].feature_idx : split_candidates[j].feature_idx + metadata->n_num_features; 
                     score = score * edata->feature_weights[feat_idx] - parent_score;
                     
-                    if (dataset->guidance_labels != nullptr){
+                    if (dataset->guidance_labels->data != nullptr){
                         float guidance_score = crnt_node->getSplitGuidanceScore(dataset, split_candidates[j], metadata->min_data_in_leaf);
 #ifdef DEBUG
                     std::cout << " cand: " <<  j << " score: " <<  score << " parent score: " <<  parent_score << " guidance score * weight: " << metadata->guidance_weight * guidance_score << " info: " << split_candidates[j] << std::endl;
@@ -344,7 +357,7 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
         }
 
         if (best_score >= 0 && to_split){           
-            int status = crnt_node->splitNode(dataset->obs, dataset->categorical_obs, dataset->guidance_labels, node_idx_cntr, split_candidates[chosen_idx], metadata);
+            int status = crnt_node->splitNode(dataset->obs->data, dataset->categorical_obs->data, dataset->guidance_labels->data, node_idx_cntr, split_candidates[chosen_idx]);
             if (status == -1){
                 std::cerr << "ERROR couldn't split best score" << std::endl;
                 break;
@@ -419,7 +432,7 @@ int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMe
                 for (int node_idx = 0; node_idx < (1 << depth); ++node_idx){
                     TreeNode *crnt_node = tree_nodes[node_idx];
                     score += crnt_node->getSplitScore(dataset, edata->feature_weights, metadata->split_score_func, split_candidates[j], metadata->min_data_in_leaf);
-                    if (dataset->guidance_labels != nullptr){
+                    if (dataset->guidance_labels->data != nullptr){
                         guidance_score += crnt_node->getSplitGuidanceScore(dataset, split_candidates[j], metadata->min_data_in_leaf);
                     }
                 }
@@ -452,7 +465,7 @@ int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMe
 
         for (int node_idx = 0; node_idx < (1 << depth); ++node_idx){
             TreeNode *crnt_node = tree_nodes[node_idx];
-            int status = crnt_node->splitNode(dataset->obs, dataset->categorical_obs, dataset->guidance_labels, node_idx_cntr, split_candidates[chosen_idx], metadata);
+            int status = crnt_node->splitNode(dataset->obs->data, dataset->categorical_obs->data, dataset->guidance_labels->data, node_idx_cntr, split_candidates[chosen_idx]);
             if (status == -1){
                 std::cerr << "ERROR couldn't split best score" << std::endl;
                 break;
@@ -538,8 +551,8 @@ void Fitter::update_ensemble_per_tree(ensembleData *edata, ensembleMetaData *met
 
 void Fitter::calc_leaf_value(dataSet *dataset, ensembleData *edata, ensembleMetaData *metadata, const int leaf_idx, const int tree_idx, const float* guidance_percent, const int rel_leaf_idx){
     int output_dim = metadata->output_dim;
-    const float *obs = dataset->obs, *grads = dataset->grads;
-    const char *categorical_obs = dataset->categorical_obs;
+    const float *obs = dataset->obs->data, *grads = dataset->grads->data;
+    const char *categorical_obs = dataset->categorical_obs->data;
     int depth = (metadata->grow_policy == OBLIVIOUS) ? edata->depths[tree_idx] : edata->depths[leaf_idx];
     int cond_idx = (metadata->grow_policy == OBLIVIOUS) ? tree_idx*metadata->max_depth : leaf_idx*metadata->max_depth;
     int ineq_cond = leaf_idx*metadata->max_depth;
@@ -593,19 +606,19 @@ void Fitter::control_variates(dataSet *dataset, ensembleData *edata, ensembleMet
             int start_idx = thread_id * elements_per_thread;
             int end_idx = (thread_id == n_sample_threads - 1) ? n_samples : start_idx + elements_per_thread;
             for (int sample_idx = start_idx; sample_idx < end_idx; ++sample_idx) {
-                momemntFunc(dataset->obs, dataset->categorical_obs, momentum, edata, metadata, 0, metadata->n_trees, sample_idx);
+                momemntFunc(dataset->obs->data, dataset->categorical_obs->data, momentum, edata, metadata, 0, metadata->n_trees, sample_idx);
             }
         }
     // no parallelization
     } else{ 
         for (int sample_idx = 0; sample_idx < n_samples; ++sample_idx){
-            momemntFunc(dataset->obs, dataset->categorical_obs, momentum, edata, metadata, 0, metadata->n_trees, sample_idx);
+            momemntFunc(dataset->obs->data, dataset->categorical_obs->data, momentum, edata, metadata, 0, metadata->n_trees, sample_idx);
         }
     }
 
     float error_correction = 1.0f / sqrtf(1.0f - powf(metadata->cv_beta, static_cast<float>(metadata->n_trees)));
     _multiply_mat_by_scalar(momentum, error_correction, n_samples, output_dim, par_th);
-    float *grads_copy = copy_mat(dataset->grads, n_samples*output_dim, par_th);
+    float *grads_copy = copy_mat(dataset->grads->data, n_samples*output_dim, par_th);
     float *grads_mean = calculate_mean(grads_copy, n_samples, output_dim, par_th);
     float *momentum_mean = calculate_mean(momentum, n_samples, output_dim, par_th);
     float *variance = calculate_var_and_center(momentum, momentum_mean, n_samples, output_dim, par_th);
@@ -618,7 +631,7 @@ void Fitter::control_variates(dataSet *dataset, ensembleData *edata, ensembleMet
         if (alpha[i] < -1)
             alpha[i] = -1;
     }
-    multiply_mat_by_vec_subtract_result(dataset->grads, momentum, alpha, n_samples, output_dim, par_th);
+    multiply_mat_by_vec_subtract_result(dataset->grads->data, momentum, alpha, n_samples, output_dim, par_th);
     delete[] grads_mean;
     delete[] momentum_mean;
     delete[] grads_copy;

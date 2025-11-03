@@ -89,6 +89,7 @@ class BaseLearner(ABC):
             feature_weights = np.ascontiguousarray(weights)
         self.feature_weights = feature_weights
         self._cpp_model = None
+        self.optimizers = None
 
         self._memory = []
 
@@ -211,7 +212,7 @@ class BaseLearner(ABC):
         pass
 
     @abstractmethod
-    def get_bias(self, *args, **kwargs) -> Union[np.ndarray, Tuple[np.ndarray, ...]]:
+    def get_bias(self, *args, **kwargs) -> Union[np.ndarray, Tuple[np.ndarray, ...], float]:
         """
         Retrieves the model bias.
 

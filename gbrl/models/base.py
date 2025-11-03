@@ -7,7 +7,7 @@
 #
 ##############################################################################
 from abc import ABC, abstractmethod
-from typing import Tuple, Union
+from typing import Optional, Tuple, Union
 
 import numpy as np
 import torch as th
@@ -21,8 +21,8 @@ class BaseGBT(ABC):
         """General class for gradient boosting trees
         """
         self.learner = None
-        self.grad = None
-        self.params = None
+        self.grads: Optional[Union[NumericalData, Tuple[Optional[NumericalData], ...]]] = None
+        self.params: Optional[Union[NumericalData, Tuple[NumericalData, ...]]] = None
         self.input = None
 
     def set_bias(self, *args, **kwargs) -> None:
@@ -35,6 +35,8 @@ class BaseGBT(ABC):
         Args:
             feature_weights (NumericalData)
         """
+        assert self.learner is not None, "learner must be initialized first"
+
         if isinstance(feature_weights, th.Tensor):
             feature_weights = feature_weights.clone().detach().cpu().numpy()
         # GBRL works with 2D numpy arrays.
@@ -47,6 +49,8 @@ class BaseGBT(ABC):
         Returns:
             Union[int, Tuple[int, ...]]: number of boosting iterations per learner.
         """
+        assert self.learner is not None, "learner must be initialized first"
+
         return self.learner.get_iteration()
 
     def get_total_iterations(self) -> int:
@@ -55,6 +59,8 @@ class BaseGBT(ABC):
             int: total number of boosting iterations
             (sum of actor and critic if they are not shared otherwise equals get_iteration())
         """
+        assert self.learner is not None, "learner must be initialized first"
+
         return self.learner.get_total_iterations()
 
     def get_schedule_learning_rates(self) -> Union[float, Tuple[float, ...]]:
@@ -65,6 +71,8 @@ class BaseGBT(ABC):
         Returns:
             Union[float, Tuple[float, ...]]: learning rate schedule per optimizer.
         """
+        assert self.learner is not None, "learner must be initialized first"
+
         return self.learner.get_schedule_learning_rates()
 
     @abstractmethod
@@ -89,6 +97,8 @@ class BaseGBT(ABC):
         Returns:
             Union[int, Tuple[int, ...]]: number of trees in the ensemble
         """
+        assert self.learner is not None, "learner must be initialized first"
+
         return self.learner.get_num_trees(*args, **kwargs)
 
     def tree_shap(self, tree_idx: int, features: NumericalData, *args, **kwargs) -> \
@@ -106,6 +116,8 @@ class BaseGBT(ABC):
             shap [n_samples, number of input features, number of outputs]. The
             output is a tuple of SHAP values per model only in the case of a separate actor-critic model.
         """
+        assert self.learner is not None, "learner must be initialized first"
+
         return self.learner.tree_shap(tree_idx, features, *args, **kwargs)
 
     def shap(self, features: NumericalData, *args, **kwargs) -> \
@@ -122,6 +134,8 @@ class BaseGBT(ABC):
             shap [n_samples, number of input features, number of outputs]. The
             output is a tuple of SHAP values per model only in the case of a separate actor-critic model.
         """
+        assert self.learner is not None, "learner must be initialized first"
+
         return self.learner.shap(features, *args, **kwargs)
 
     def save_learner(self, save_path: str) -> None:
@@ -131,18 +145,21 @@ class BaseGBT(ABC):
         Args:
             filename (str): Absolute path and name of save filename.
         """
+        assert self.learner is not None, "learner must be initialized first"
+
         self.learner.save(save_path)
 
-    def export_learner(self, filename: str, modelname: str = None) -> None:
+    def export_learner(self, filename: str, modelname: Optional[str] = None) -> None:
         """
         Exports learner model as a C-header file
 
         Args:
-            filename (str): Absolute path and name of exported filename.
+            filename (str, optional): Absolute path and name of exported filename.
         """
+        assert self.learner is not None, "learner must be initialized first"
+
         self.learner.export(filename, modelname)
 
-    @classmethod
     @classmethod
     def load_learner(cls, load_name: str, device: str) -> "BaseGBT":
         """
@@ -157,23 +174,46 @@ class BaseGBT(ABC):
         """
         instance = cls.__new__(cls)
         instance.learner = GBTLearner.load(load_name, device)
-        instance.grad = None
+        instance.grads = None
         instance.params = None
         instance.input = None
         return instance
 
-    def get_params(self) -> Tuple[np.ndarray, np.ndarray]:
+    def get_params(self) -> Optional[Union[NumericalData, Tuple[NumericalData, ...]]]:
         """
         Returns predicted model parameters and their respective gradients
 
         Returns:
-            Tuple[np.ndarray, np.ndarray]
+            Optional[Union[NumericalData, Tuple[NumericalData, ...]]]
         """
-        assert self.params is not None, "must run a forward pass first"
-        params = self.params
+        if self.params is None:
+            return None
+
         if isinstance(self.params, tuple):
-            params = (params[0].detach().cpu().numpy(), params[1].detach().cpu().numpy())
-        return params, self.grad
+            return tuple(p.detach().clone() if isinstance(p, th.Tensor) else p.copy() for p in self.params)
+
+        return self.params.detach().clone() if isinstance(self.params, th.Tensor) else self.params.copy()
+
+    def get_grads(self) -> Optional[Union[NumericalData, Tuple[NumericalData, ...]]]:
+        """
+        Returns predicted model parameters and their respective gradients
+
+        Returns:
+            Optional[Union[th.Tensor, Tuple[th.Tensor, ...]]]
+        """
+        if self.grads is None:
+            return None
+
+        if isinstance(self.grads, tuple):
+            grads = []
+            for g in self.grads:
+                if g is not None:
+                    grads.append(g.detach().clone() if isinstance(g, th.Tensor) else g.copy())
+                else:
+                    grads.append(None)
+            return tuple(grads)
+
+        return self.grads.detach().clone() if isinstance(self.grads, th.Tensor) else self.grads.copy()
 
     def set_device(self, device: str):
         """Sets GBRL device (either cpu or cuda)
@@ -182,18 +222,22 @@ class BaseGBT(ABC):
             device (str): choices are ['cpu', 'cuda']
         """
         assert device in ['cpu', 'cuda'], "device must be in ['cpu', 'cuda']"
+        assert self.learner is not None, "learner must be initialized first"
+
         self.learner.set_device(device)
 
-    def get_device(self) -> Union[str, Tuple[str, str]]:
+    def get_device(self) -> Union[str, Tuple[str, ...]]:
         """Returns GBRL device/devices per learner
 
         Returns:
-            Union[str, Tuple[str, str]]: GBRL device per model
+            Union[str, Tuple[str, ...]]: GBRL device per model
         """
+        assert self.learner is not None, "learner must be initialized first"
+
         return self.learner.get_device()
 
     @abstractmethod
-    def __call__(self, *args, **kwargs) -> Union[NumericalData, Tuple[Union[NumericalData], ...]]:
+    def __call__(self, *args, **kwargs) -> Union[NumericalData, Tuple[NumericalData, ...]]:
         """
         Returns GBRL's output as either a Tensor or a numpy array per learner.
         """
@@ -206,6 +250,8 @@ class BaseGBT(ABC):
         Args:
             tree_idx (int): tree index to print
         """
+        assert self.learner is not None, "learner must be initialized first"
+
         self.learner.print_tree(tree_idx, *args, **kwargs)
 
     def plot_tree(self, tree_idx: int, filename: str, *args, **kwargs) -> None:
@@ -216,6 +262,8 @@ class BaseGBT(ABC):
             tree_idx (int): tree index to plot
             filename (str): .png filename to save
         """
+        assert self.learner is not None, "learner must be initialized first"
+
         self.learner.plot_tree(tree_idx, filename, *args, **kwargs)
 
     def copy(self) -> "BaseGBT":

@@ -28,11 +28,15 @@ class MultiGBTLearner(BaseLearner):
     It supports training, prediction, saving, loading,
     and SHAP value computation.
     """
-    def __init__(self, input_dim: Union[int, List[int]], output_dim: Union[int, List[int]],
-                 tree_struct: Dict, optimizers: Union[Dict, List[Dict]],
-                 params: Dict, n_learners: int,
-                 policy_dim: Optional[Union[int, List[int]]] = None, 
-                 verbose: int = 0, device: str = 'cpu'):
+    def __init__(self, input_dim: Union[int, List[int]],
+                 output_dim: Union[int, List[int]],
+                 tree_struct: Dict,
+                 optimizers: Union[Dict, List[Dict]],
+                 params: Dict,
+                 n_learners: int,
+                 policy_dim: Optional[Union[int, List[int]]] = None,
+                 verbose: int = 0,
+                 device: str = 'cpu'):
         """
         Initializes the MultiGBTLearner.
 
@@ -87,7 +91,7 @@ class MultiGBTLearner(BaseLearner):
         params = self.params.copy()
         for i in range(self.n_learners):
             if isinstance(self.input_dim, list):
-                params['input_dim'] = self.input_dim[i]
+                params['input_dim'] = self.input_dim[i]  #  type: ignore
                 params['output_dim'] = self.output_dim[i]  #  type: ignore
                 params['policy_dim'] = self.policy_dim[i]  #  type: ignore
             cpp_model = GBRL_CPP(**params)
@@ -117,14 +121,14 @@ class MultiGBTLearner(BaseLearner):
 
         Args:
             inputs (Union[np.ndarray, th.Tensor, Tuple]): Input features.
-            grads (Union[List[NumericalData], NumericalData]): Gradients.
+            grads (Union[Sequence[NumericalData], NumericalData]): Gradients.
             guidance_labels (Optional[NumericalData]): guidance_label vector.
             guidance_grads (Optional[NumericalData]): guidance gradient vector.
             model_idx (int, optional): The index of the model.
             guidance_idx (int, optional): The index of the model that requires guidance.
         """
-        assert model_idx is not None or (isinstance(grads, list) and
-                                         len(grads) == self.n_learners)
+        assert model_idx is not None or ((isinstance(grads, list) or isinstance(grads, tuple)) and
+                                         len(grads) == self.n_learners), "Invalid model index or gradients"
         assert self._cpp_models is not None, "Model not initialized."
         if guidance_labels is None or (guidance_labels != 0).any():
             guidance_labels = None
@@ -147,7 +151,6 @@ class MultiGBTLearner(BaseLearner):
             self._memory = []
             self.iteration[model_idx] = self._cpp_models[model_idx].get_iteration()
         else:
-            assert isinstance(grads, list) and len(grads) == self.n_learners
             if guidance_grads is not None and guidance_idx is None:
                 guidance_idx = 0
 
@@ -156,7 +159,7 @@ class MultiGBTLearner(BaseLearner):
             self._memory = []
             for i in range(self.n_learners):
                 if guidance_grads is not None and guidance_idx == i:
-                    model_guidance_grads = guidance_grads.reshape(grads[i].shape) 
+                    model_guidance_grads = guidance_grads.reshape(grads[i].shape)
                 else:
                     model_guidance_grads = None
 
@@ -758,8 +761,11 @@ class MultiGBTLearner(BaseLearner):
 
         return total_preds
 
-    def distil(self, obs: NumericalData, targets: List[np.ndarray],  # type: ignore
-               params: Dict, verbose: int = 0) -> Tuple[List[float], List[Dict]]:
+    def distil(self,
+               obs: NumericalData,
+               targets: List[np.ndarray],  # type: ignore
+               params: Dict,
+               verbose: int = 0) -> Tuple[List[float], List[Dict]]:
         """
         Distills the model into a student model.
 

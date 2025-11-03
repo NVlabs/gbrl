@@ -56,7 +56,7 @@ TreeNode::~TreeNode(){
 }
 
 
-int TreeNode::splitNode(const float *obs, const char *categorical_obs, const float *guidance_labels, const int _node_idx, const splitCandidate &split_candidate, ensembleMetaData *metadata){
+int TreeNode::splitNode(const float *obs, const char *categorical_obs, const float *guidance_labels, const int _node_idx, const splitCandidate &split_candidate){
     std::vector<int> pre_left_indices(this->n_samples), pre_right_indices(this->n_samples);
     int left_count = 0, right_count = 0;
     bool is_categorical = split_candidate.categorical_value != nullptr;
@@ -177,15 +177,15 @@ float TreeNode::getSplitScore(dataSet *dataset, const float *feature_weights, sc
     switch (split_score_func) {
         case L2: {
             if (is_numeric)
-                return this->splitScoreL2(dataset->obs, feature_weights, dataset->build_grads, split_candidate, min_data_in_leaf);
+                return this->splitScoreL2(dataset->obs->data, feature_weights, dataset->build_grads->data, split_candidate, min_data_in_leaf);
             else
-                return this->splitScoreL2Categorical(dataset->categorical_obs, feature_weights, dataset->build_grads, split_candidate, min_data_in_leaf);
+                return this->splitScoreL2Categorical(dataset->categorical_obs->data, feature_weights, dataset->build_grads->data, split_candidate, min_data_in_leaf);
         }
         case Cosine: {
             if (is_numeric)
-                return this->splitScoreCosine(dataset->obs, feature_weights, dataset->build_grads, split_candidate, min_data_in_leaf);
+                return this->splitScoreCosine(dataset->obs->data, feature_weights, dataset->build_grads->data, split_candidate, min_data_in_leaf);
             else
-                return this->splitScoreCosineCategorical(dataset->categorical_obs, feature_weights, dataset->build_grads,  split_candidate, min_data_in_leaf);
+                return this->splitScoreCosineCategorical(dataset->categorical_obs->data, feature_weights, dataset->build_grads->data,  split_candidate, min_data_in_leaf);
         }
         default: {
             std::cerr << "Unknown scoreFunc." << std::endl;
@@ -211,9 +211,9 @@ float TreeNode::getSplitGuidanceScore(dataSet *dataset, const splitCandidate &sp
 
     for (int n = 0; n < this->n_samples; ++n){
         sample_idx = _sample_indices[n];
-        float val = dataset->guidance_labels[sample_idx];
-        bool split_right = is_numeric && dataset->obs[sample_idx*n_features + split_candidate.feature_idx] > split_candidate.feature_value;
-        split_right |= (!is_numeric && strcmp(&dataset->categorical_obs[(sample_idx*n_features + split_candidate.feature_idx) * MAX_CHAR_SIZE], split_candidate.categorical_value) == 0); 
+        float val = dataset->guidance_labels->data[sample_idx];
+        bool split_right = is_numeric && dataset->obs->data[sample_idx*n_features + split_candidate.feature_idx] > split_candidate.feature_value;
+        split_right |= (!is_numeric && strcmp(&dataset->categorical_obs->data[(sample_idx*n_features + split_candidate.feature_idx) * MAX_CHAR_SIZE], split_candidate.categorical_value) == 0); 
         if (split_right){
             right_mean += val;
             right_sq_mean += val * val;

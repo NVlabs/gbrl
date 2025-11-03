@@ -53,9 +53,9 @@ class SharedActorCriticLearner(GBTLearner):
         """
         if verbose > 0:
             print('****************************************')
-            print(f'Shared GBRL Tree with input dim: {input_dim},'
-                  f'output dim: {output_dim}, tree_struct: {tree_struct}'
-                  f'policy_optimizer: {policy_optimizer}'
+            print(f'Shared GBRL Tree with input dim: {input_dim}, '
+                  f'output dim: {output_dim}, tree_struct: {tree_struct}, '
+                  f'policy_optimizer: {policy_optimizer}, '
                   f'value_optimizer: {value_optimizer}')
             print('****************************************')
         super().__init__(input_dim, output_dim,
@@ -69,7 +69,8 @@ class SharedActorCriticLearner(GBTLearner):
     def distil(self, obs: np.ndarray,  # type: ignore
                policy_targets: np.ndarray,
                value_targets: np.ndarray,
-               params: Dict, verbose: int) -> Tuple[float, Dict]:
+               params: Dict,
+               verbose: int = 0) -> Tuple[float, Dict]:
         """
         Distills the trained model into a student model.
 
@@ -91,7 +92,7 @@ class SharedActorCriticLearner(GBTLearner):
 
     def predict(self,  # type: ignore
                 inputs: NumericalData,
-                requires_grad: bool = True, start_idx: int = 0,
+                requires_grad: bool = True, start_idx: Optional[int] = 0,
                 stop_idx: Optional[int] = None, tensor: bool = True) -> \
             Tuple[NumericalData, NumericalData]:
         """
@@ -120,7 +121,7 @@ class SharedActorCriticLearner(GBTLearner):
         return preds, pred_values
 
     def predict_policy(self, obs: NumericalData,
-                       requires_grad: bool = True, start_idx: int = 0,
+                       requires_grad: bool = True, start_idx: Optional[int] = 0,
                        stop_idx: Optional[int] = None, tensor: bool = True) -> NumericalData:
         """
         Predicts the policy (actor) output for the given observations.
@@ -144,7 +145,7 @@ class SharedActorCriticLearner(GBTLearner):
         return preds
 
     def predict_critic(self, obs: NumericalData,
-                       requires_grad: bool = True, start_idx: int = 0,
+                       requires_grad: bool = True, start_idx: Optional[int] = 0,
                        stop_idx: Optional[int] = None, tensor: bool = True) -> NumericalData:
         """
         Predicts the value function (critic) output for the given observations.
@@ -201,9 +202,14 @@ class SeparateActorCriticLearner(MultiGBTLearner):
     It provides separate `step_actor` and `step_critic` methods for updating
     the respective models.
     """
-    def __init__(self, input_dim: int, output_dim: int, tree_struct: Dict,
-                 policy_optimizer: Dict, value_optimizer: Dict,
-                 params: Dict = dict(), verbose: int = 0, device: str = 'cpu'):
+    def __init__(self, input_dim: int,
+                 output_dim: int,
+                 tree_struct: Dict,
+                 policy_optimizer: Dict,
+                 value_optimizer: Dict,
+                 params: Dict = dict(),
+                 verbose: int = 0,
+                 device: str = 'cpu'):
         """
         Initializes the SeparateActorCriticLearner with two independent GBT
         models.
@@ -220,9 +226,9 @@ class SeparateActorCriticLearner(MultiGBTLearner):
         """
         if verbose > 0:
             print('****************************************')
-            print(f'Separate GBRL Tree with input dim: {input_dim},'
-                  f'output dim: {output_dim}, tree_struct: {tree_struct}'
-                  f'policy_optimizer: {policy_optimizer}'
+            print(f'Separate GBRL Tree with input dim: {input_dim}, '
+                  f'output dim: {output_dim}, tree_struct: {tree_struct}, '
+                  f'policy_optimizer: {policy_optimizer}, '
                   f'value_optimizer: {value_optimizer}')
             print('****************************************')
         super().__init__(input_dim,
@@ -265,8 +271,10 @@ class SeparateActorCriticLearner(MultiGBTLearner):
         super().step(inputs=inputs, grads=grads, model_idx=1)
 
     def distil(self, obs: NumericalData,  # type: ignore
-               policy_targets: np.ndarray, value_targets: np.ndarray,
-               params: Dict, verbose: int) -> Tuple[List[float], List[Dict]]:
+               policy_targets: np.ndarray,
+               value_targets: np.ndarray,
+               params: Dict,
+               verbose: int = 0) -> Tuple[List[float], List[Dict]]:
         """
         Distills the trained model into a student model.
 
@@ -283,7 +291,7 @@ class SeparateActorCriticLearner(MultiGBTLearner):
         return super().distil(obs, [policy_targets, value_targets], params, verbose)
 
     def predict_policy(self, obs: NumericalData,
-                       requires_grad: bool = True, start_idx: int = 0,
+                       requires_grad: bool = True, start_idx: Optional[int] = 0,
                        stop_idx: Optional[int] = None, tensor: bool = True) -> NumericalData:
         """
         Predicts the policy (actor) output for the given observations.
@@ -301,7 +309,7 @@ class SeparateActorCriticLearner(MultiGBTLearner):
         return super().predict(obs, requires_grad, start_idx, stop_idx, tensor, model_idx=0)  # type: ignore
 
     def predict_critic(self, obs: NumericalData,
-                       requires_grad: bool = True, start_idx: int = 0,
+                       requires_grad: bool = True, start_idx: Optional[int] = 0,
                        stop_idx: Optional[int] = None, tensor: bool = True) -> NumericalData:
         """
         Predicts the value function (critic) output for the given observations.

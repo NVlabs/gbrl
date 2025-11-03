@@ -96,7 +96,8 @@ class GBTLearner(BaseLearner):
         Returns:
             None
         """
-        assert isinstance(grads, NumericalData), "grads should be a numpy array or torch tensor"
+        assert isinstance(grads, list) or isinstance(grads, tuple) or isinstance(grads, NumericalData), \
+            "Invalid gradients type"
         if guidance_labels is not None and (guidance_labels != 0).any():
             guidance_labels = None
             guidance_grads = None
@@ -270,12 +271,12 @@ class GBTLearner(BaseLearner):
             num_trees += self.student_model.get_num_trees()
         return num_trees
 
-    def set_bias(self, bias: NumericalData) -> None:
+    def set_bias(self, bias: Union[np.ndarray, float]) -> None:
         """
         Sets the bias of the model.
 
         Args:
-            bias (NumericalData): The bias value.
+            bias (Union[np.ndarray, float]): The bias value.
         """
         if not isinstance(bias, np.ndarray) and not isinstance(bias, float):
             raise TypeError("Input should be a numpy array or float")
@@ -437,7 +438,7 @@ class GBTLearner(BaseLearner):
 
     def predict(self, inputs: NumericalData,
                 requires_grad: bool = True,
-                start_idx: int = 0,
+                start_idx: Optional[int] = 0,
                 stop_idx: Optional[int] = None,
                 tensor: bool = True) -> NumericalData:
         """

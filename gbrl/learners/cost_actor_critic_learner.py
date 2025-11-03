@@ -55,10 +55,10 @@ class SharedCostActorCriticLearner(SharedActorCriticLearner):
         """
         if verbose > 0:
             print('****************************************')
-            print(f'Shared GBRL Tree with input dim: {input_dim},'
-                  f'output dim: {output_dim}, tree_struct: {tree_struct}'
-                  f'policy_optimizer: {policy_optimizer}'
-                  f'value_optimizer: {value_optimizer}'
+            print(f'Shared GBRL Tree with input dim: {input_dim}, '
+                  f'output dim: {output_dim}, tree_struct: {tree_struct}, '
+                  f'policy_optimizer: {policy_optimizer}, '
+                  f'value_optimizer: {value_optimizer}, '
                   f'cost_optimizer: {cost_optimizer}')
             print('****************************************')
         GBTLearner.__init__(self, input_dim, output_dim,
@@ -73,7 +73,8 @@ class SharedCostActorCriticLearner(SharedActorCriticLearner):
                policy_targets: np.ndarray,
                value_targets: np.ndarray,
                cost_targets: np.ndarray,
-               params: Dict, verbose: int) -> Tuple[float, Dict]:
+               params: Dict,
+               verbose: int = 0) -> Tuple[float, Dict]:
         """
         Distills the trained model into a student model.
 
@@ -90,13 +91,13 @@ class SharedCostActorCriticLearner(SharedActorCriticLearner):
             for distillation
         """
         targets = np.concatenate([policy_targets,
-                                  value_targets[:, np.newaxis],
+                                  value_targets,
                                   cost_targets[:, np.newaxis]], axis=1)
-        return super().distil(obs, targets, params, verbose)
+        return GBTLearner.distil(self, obs, targets, params, verbose)
 
     def predict(self,  # type: ignore
                 inputs: NumericalData,
-                requires_grad: bool = True, start_idx: int = 0,
+                requires_grad: bool = True, start_idx: Optional[int] = 0,
                 stop_idx: Optional[int] = None, tensor: bool = True) -> \
             Tuple[NumericalData, ...]:
         """
@@ -116,7 +117,7 @@ class SharedCostActorCriticLearner(SharedActorCriticLearner):
         Returns:
             Tuple[NumericalData, ...]: Predicted policy and value outputs.
         """
-        preds = super().predict(inputs, requires_grad, start_idx, stop_idx, tensor)
+        preds = GBTLearner.predict(self, inputs, requires_grad, start_idx, stop_idx, tensor)
         pred_values = preds[:, -2]
         pred_costs = preds[:, -1]
         preds = preds[:, :-2]
@@ -126,7 +127,7 @@ class SharedCostActorCriticLearner(SharedActorCriticLearner):
         return preds, pred_values, pred_costs
 
     def predict_policy(self, obs: NumericalData,
-                       requires_grad: bool = True, start_idx: int = 0,
+                       requires_grad: bool = True, start_idx: Optional[int] = 0,
                        stop_idx: Optional[int] = None, tensor: bool = True) -> NumericalData:
         """
         Predicts the policy (actor) output for the given observations.
@@ -150,7 +151,7 @@ class SharedCostActorCriticLearner(SharedActorCriticLearner):
         return preds
 
     def predict_critic(self, obs: NumericalData,
-                       requires_grad: bool = True, start_idx: int = 0,
+                       requires_grad: bool = True, start_idx: Optional[int] = 0,
                        stop_idx: Optional[int] = None, tensor: bool = True) -> NumericalData:
         """
         Predicts the value function (critic) output for the given observations.
@@ -170,7 +171,7 @@ class SharedCostActorCriticLearner(SharedActorCriticLearner):
         return pred_values
 
     def predict_cost(self, obs: NumericalData,
-                     requires_grad: bool = True, start_idx: int = 0,
+                     requires_grad: bool = True, start_idx: Optional[int] = 0,
                      stop_idx: Optional[int] = None, tensor: bool = True) -> NumericalData:
         """
         Predicts the cost value function output for the given observations.
@@ -229,9 +230,16 @@ class SeparateCostActorCriticLearner(SeparateActorCriticLearner):
     It provides separate `step_actor`, `step_critic`, and `step_cost` methods for updating
     the respective models.
     """
-    def __init__(self, input_dim: int, output_dim: int, tree_struct: Dict,
-                 policy_optimizer: Dict, value_optimizer: Dict, cost_optimizer: Dict,
-                 params: Dict = dict(), verbose: int = 0, device: str = 'cpu'):
+    def __init__(self,
+                 input_dim: int,
+                 output_dim: int,
+                 tree_struct: Dict,
+                 policy_optimizer: Dict,
+                 value_optimizer: Dict,
+                 cost_optimizer: Dict,
+                 params: Dict = dict(),
+                 verbose: int = 0,
+                 device: str = 'cpu'):
         """
         Initializes the SeparateCostActorCriticLearner with two independent GBT
         models.
@@ -249,10 +257,10 @@ class SeparateCostActorCriticLearner(SeparateActorCriticLearner):
         """
         if verbose > 0:
             print('****************************************')
-            print(f'Separate GBRL Tree with input dim: {input_dim},'
-                  f'output dim: {output_dim}, tree_struct: {tree_struct}'
-                  f'policy_optimizer: {policy_optimizer}'
-                  f'value_optimizer: {value_optimizer}',
+            print(f'Separate GBRL Tree with input dim: {input_dim}, '
+                  f'output dim: {output_dim}, tree_struct: {tree_struct}, '
+                  f'policy_optimizer: {policy_optimizer}, '
+                  f'value_optimizer: {value_optimizer}, '
                   f'cost_optimizer: {cost_optimizer}')
             print('****************************************')
         MultiGBTLearner.__init__(self,
@@ -279,9 +287,11 @@ class SeparateCostActorCriticLearner(SeparateActorCriticLearner):
         super().step(inputs=inputs, grads=grads, model_idx=2)
 
     def distil(self, obs: NumericalData,  # type: ignore
-               policy_targets: np.ndarray, value_targets: np.ndarray,
+               policy_targets: np.ndarray,
+               value_targets: np.ndarray,
                cost_targets: np.ndarray,
-               params: Dict, verbose: int) -> Tuple[List[float], List[Dict]]:
+               params: Dict,
+               verbose: int = 0) -> Tuple[List[float], List[Dict]]:
         """
         Distills the trained model into a student model.
 
@@ -300,7 +310,7 @@ class SeparateCostActorCriticLearner(SeparateActorCriticLearner):
     def predict_cost(self,
                      obs: NumericalData,
                      requires_grad: bool = True,
-                     start_idx: int = 0,
+                     start_idx: Optional[int] = 0,
                      stop_idx: Optional[int] = None,
                      tensor: bool = True) -> NumericalData:
         """

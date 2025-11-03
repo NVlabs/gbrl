@@ -46,18 +46,45 @@ class GBRL {
         int loadFromFile(const std::string& filename);
         void ensemble_check();
 
-        void step(const float *obs, const char *categorical_obs, float *grads, const float *guidance_label, const float *guidance_grads, const int n_samples, const int n_num_features, const int n_cat_features, deviceType _device);
+        void step(dataHolder<const float> *obs,
+                  dataHolder<const char> *categorical_obs,
+                  dataHolder<float> *grads,
+                  dataHolder<const float> *guidance_labels,
+                  dataHolder<const float> *guidance_grads,
+                  const int n_samples,
+                  const int n_num_features,
+                  const int n_cat_features);
+
+        float* predict(dataHolder<const float> *obs,
+                  dataHolder<const char> *categorical_obs,
+                  const int n_samples, const int n_num_features,
+                  const int n_cat_features,
+                  int start_tree_idx,
+                  int stop_tree_idx);
+
+        float fit(dataHolder<float> *obs,
+                  dataHolder<char> *categorical_obs,
+                  dataHolder<float> *targets,
+                  int iterations,
+                  const int n_samples,
+                  const int n_num_features,
+                  const int n_cat_features,
+                  bool shuffle = true,
+                  std::string _loss_type = "MultiRMSE");
 #ifdef USE_CUDA
         void _step_gpu(dataSet *dataset);
-        float _fit_gpu(dataSet *dataset, float *targets, const int n_iterations);
+        float _fit_gpu(dataHolder<float> *obs,
+                       dataHolder<char> *categorical_obs,
+                       dataHolder<float> *targets,
+                       std::vector<int> indices,
+                       const int n_iterations,
+                       const int n_samples,
+                       bool shuffle);
 #endif
-        float fit(float *obs, char *categorical_obs, float *targets, int iterations, const int n_samples, const int n_num_features, const int n_cat_features, bool shuffle = true, std::string _loss_type = "MultiRMSE");
-        void set_bias(float *bias, const int output_dim);
+        void set_bias(dataHolder<const float> *bias, const int output_dim);
         void set_feature_weights(float *feauture_weights, const int input_dim);
         float* get_bias();
         float* get_feature_weights();
-        float* predict(const float *obs, const char *categorical_obs, const int n_samples, const int n_num_features, const int n_cat_features, int start_tree_idx, int stop_tree_idx, deviceType _device);
-        
         float* get_scheduler_lrs();
 
         int get_num_trees();

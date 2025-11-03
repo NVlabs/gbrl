@@ -93,7 +93,7 @@ def process_array(arr: np.ndarray) -> Tuple[Optional[np.ndarray],
         raise ValueError(f"Unsupported array data type: {arr.dtype}")
 
 
-def to_numpy(arr: Union[np.ndarray, th.Tensor]) -> np.ndarray:
+def to_numpy(arr: NumericalData) -> np.ndarray:
     if isinstance(arr, th.Tensor):
         arr = arr.detach().cpu().numpy()
     return np.ascontiguousarray(arr, dtype=numerical_dtype)
@@ -132,16 +132,16 @@ def setup_optimizer(optimizer: Dict, prefix: str = '') -> Dict:
             and v is not None}
 
 
-def clip_grad_norm(grads: Union[np.ndarray, th.Tensor], grad_clip: float) ->\
-      Union[np.ndarray, th.Tensor]:
+def clip_grad_norm(grads: NumericalData, grad_clip: Optional[float]) ->\
+      NumericalData:
     """clip per sample gradients according to their norm
 
     Args:
-        grads (Union[np.ndarray, th.Tensor]): gradients
-        grad_clip (float): gradient clip value
+        grads (NumericalData): gradients
+        grad_clip (float, optional): gradient clip value
 
     Returns:
-        Union[np.ndarray, th.Tensor]: clipped gradients
+        NumericalData: clipped gradients
     """
     if grad_clip is None or grad_clip == 0.0:
         return grads
@@ -160,11 +160,11 @@ def clip_grad_norm(grads: Union[np.ndarray, th.Tensor], grad_clip: float) ->\
     return grads
 
 
-def get_input_dim(arr: Union[np.ndarray, th.Tensor]) -> int:
+def get_input_dim(arr: NumericalData) -> int:
     """Returns the column dimension of a 2D array
 
     Args:
-        arr (Union[np.ndarray, th.Tensor]):input array
+        arr (NumericalData):input array
 
     Returns:
         int: input dimension

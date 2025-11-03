@@ -141,15 +141,20 @@ struct ensembleMetaData {
     float guidance_scale;
 };
 
-struct dataSet {
-    const float *obs;
-    const char *categorical_obs;
-    float *grads;
-    const float *build_grads;
-    const float *guidance_labels;
-    const float *guidance_grads;
-    int n_samples;
+template<typename T>
+struct dataHolder {
+    T *data;
     deviceType device;
+};
+
+struct dataSet {
+    dataHolder<const float> *obs;
+    dataHolder<const char> *categorical_obs;
+    dataHolder<float> *grads;
+    dataHolder<float> *build_grads;
+    dataHolder<const float> *guidance_labels;
+    dataHolder<const float> *guidance_grads;
+    int n_samples;
 };
 
 struct ensembleData {
