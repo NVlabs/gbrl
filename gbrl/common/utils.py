@@ -194,7 +194,7 @@ def normalize_vector_input(data: Union[float, NumericalData]) -> Union[np.ndarra
     """
     # Convert float to numpy array
     if isinstance(data, (float, int)):
-        return np.array([data], dtype=numerical_dtype)
+        return np.ascontiguousarray(np.array([data], dtype=numerical_dtype))
 
     assert isinstance(data, (np.ndarray, th.Tensor)), \
         "Input must be a float, numpy array, or PyTorch tensor"

@@ -196,9 +196,8 @@ void GBRL::to_device(deviceType _device){
 void GBRL::set_bias(dataHolder<const float> *bias, const int output_dim){
     if (output_dim != this->metadata->output_dim)
     {
-        std::cerr << "Given bias vector has different dimensions than expect. " << " Given: " << output_dim << " expected: " << this->metadata->output_dim << std::endl; 
+        std::cerr << "Given bias vector has different dimensions than expected. Given: " << output_dim << " expected: " << this->metadata->output_dim << std::endl; 
         throw std::runtime_error("Incompatible dimensions");
-        return;
     }
 #ifdef USE_CUDA
     if (this->device == gpu){
@@ -223,19 +222,31 @@ void GBRL::set_bias(dataHolder<const float> *bias, const int output_dim){
         std::cout << "Setting GBRL bias " << std::endl;
 }
 
-void GBRL::set_feature_weights(float *feature_weights, const int input_dim){
+void GBRL::set_feature_weights(dataHolder<float> *feature_weights, const int input_dim){
     if (input_dim != this->metadata->input_dim)
     {
-        std::cerr << "Given feature_weights vector has different dimensions than expect. " << " Given: " << input_dim << " expected: " << this->metadata->input_dim << std::endl; 
+        std::cerr << "Given feature_weights vector has different dimensions than expected. Given: " << input_dim << " expected: " << this->metadata->input_dim << std::endl; 
         throw std::runtime_error("Incompatible dimensions");
-        return;
     }
 #ifdef USE_CUDA
-    if (this->device == gpu)
-        cudaMemcpy(this->edata->feature_weights, feature_weights, sizeof(float)*this->metadata->input_dim, cudaMemcpyHostToDevice);
+    if (this->device == gpu){
+        if (feature_weights->device == cpu){
+            cudaMemcpy(this->edata->feature_weights, feature_weights->data, sizeof(float)*this->metadata->input_dim, cudaMemcpyHostToDevice);
+        } else {
+            cudaMemcpy(this->edata->feature_weights, feature_weights->data, sizeof(float)*this->metadata->input_dim, cudaMemcpyDeviceToDevice);
+        }
+    }
 #endif
-    if (this->device == cpu)
-        memcpy(this->edata->feature_weights, feature_weights, sizeof(float)*this->metadata->input_dim);
+    if (this->device == cpu){
+        if (feature_weights->device == gpu){
+#ifdef USE_CUDA
+            cudaMemcpy(this->edata->feature_weights, feature_weights->data, sizeof(float)*this->metadata->input_dim, cudaMemcpyDeviceToHost);
+#else
+            throw std::runtime_error("GBRL was not compiled for GPU but GPU data detected!");
+#endif
+        } else
+            memcpy(this->edata->feature_weights, feature_weights->data, sizeof(float)*this->metadata->input_dim);
+    }
     if (this->metadata->verbose > 0)
         std::cout << "Setting GBRL feature weights " << std::endl;
 }
@@ -243,9 +254,8 @@ void GBRL::set_feature_weights(float *feature_weights, const int input_dim){
 void GBRL::set_feature_mapping(const int *feature_mapping, const bool *mapping_numerics, const int input_dim){
     if (input_dim != this->metadata->input_dim)
     {
-        std::cerr << "Given feature_mapping vector has different dimensions than expect. " << " Given: " << input_dim << " expected: " << this->metadata->input_dim << std::endl; 
+        std::cerr << "Given feature_mapping vector has different dimensions than expected. Given: " << input_dim << " expected: " << this->metadata->input_dim << std::endl; 
         throw std::runtime_error("Incompatible dimensions");
-        return;
     }
 
     int *reverse_num_feature_mapping = new int[this->metadata->input_dim];
@@ -280,8 +290,8 @@ void GBRL::set_feature_mapping(const int *feature_mapping, const bool *mapping_n
         memcpy(this->edata->reverse_num_feature_mapping, reverse_num_feature_mapping, sizeof(int)*this->metadata->input_dim);
         memcpy(this->edata->reverse_cat_feature_mapping, reverse_cat_feature_mapping, sizeof(int)*this->metadata->input_dim);
     }
-        if (this->metadata->verbose > 0)
-            std::cout << "Setting GBRL feature mapping " << std::endl;
+    if (this->metadata->verbose > 0)
+        std::cout << "Setting GBRL feature mapping " << std::endl;
 
     delete[] reverse_num_feature_mapping;
     delete[] reverse_cat_feature_mapping;

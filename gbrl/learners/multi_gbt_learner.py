@@ -99,9 +99,9 @@ class MultiGBTLearner(BaseLearner):
         params = self.params.copy()
         for i in range(self.n_learners):
             if isinstance(self.input_dim, list):
-                params['input_dim'] = self.input_dim[i]  #  type: ignore
-                params['output_dim'] = self.output_dim[i]  #  type: ignore
-                params['policy_dim'] = self.policy_dim[i]  #  type: ignore
+                params['input_dim'] = self.input_dim[i]   # type: ignore
+                params['output_dim'] = self.output_dim[i]   # type: ignore
+                params['policy_dim'] = self.policy_dim[i]   # type: ignore
             cpp_model = GBRL_CPP(**params)
             cpp_model.set_feature_weights(self.feature_weights)
             if self.student_models is not None:
@@ -134,10 +134,11 @@ class MultiGBTLearner(BaseLearner):
 
         super().step(inputs)
         if self.total_iterations == 0:
+            assert self.feature_mapping is not None, "Feature mapping not set"
             feature_mapping, numerical_mask = self.feature_mapping
-            for i in range(len(self._cpp_models))
+            for i in range(len(self._cpp_models)):
                 self._cpp_models[i].set_feature_mapping(np.ascontiguousarray(feature_mapping),
-                                                    np.ascontiguousarray(numerical_mask))
+                                                        np.ascontiguousarray(numerical_mask))
 
         num_inputs, cat_inputs = preprocess_features(inputs)
 
@@ -448,7 +449,8 @@ class MultiGBTLearner(BaseLearner):
         except RuntimeError as e:
             print(f"Caught an exception in GBRL: {e}")
 
-    def set_feature_weights(self, feature_weights: Union[NumericalData, float],
+    def set_feature_weights(self,
+                            feature_weights: Union[NumericalData, float],
                             model_idx: Optional[int] = None) -> None:
         """
         Sets the feature weights of the model.
@@ -458,30 +460,26 @@ class MultiGBTLearner(BaseLearner):
             model_idx (int, optional): The index of the model.
         """
         assert self._cpp_models is not None, "Model not initialized."
-        
         # Normalize to 1D vector (handles float, numpy, torch, 0D, and multi-D)
-        feature_weights = normalize_vector_input(feature_weights)
-        
-        # Convert to numpy if it's a tensor
         if isinstance(feature_weights, th.Tensor):
-            feature_weights = feature_weights.detach().cpu().numpy()
-        
-        # Ensure correct dtype
-        feature_weights = np.ascontiguousarray(feature_weights, dtype=numerical_dtype)
-        
-        assert len(feature_weights) == self.input_dim, (
-            "feature weights has to have the same number of elements as features"
-        )
-        assert np.all(feature_weights >= 0), "feature weights contains non-positive values"
-        
-        try:
-            if model_idx is None:
-                for i in range(self.n_learners):
-                    self._cpp_models[i].set_feature_weights(feature_weights)
-            else:
-                self._cpp_models[model_idx].set_feature_weights(feature_weights)
-        except RuntimeError as e:
-            print(f"Caught an exception in GBRL: {e}")
+            assert (feature_weights >= 0).all(), "feature weights contains non-positive values"
+        elif isinstance(feature_weights, np.ndarray):
+            assert np.all(feature_weights >= 0), "feature weights contains non-positive values"
+        else:
+            assert feature_weights >= 0, "feature weights contains non-positive values"
+
+        norm_feature_weights = normalize_vector_input(feature_weights)
+        if model_idx is None:
+            for i in range(self.n_learners):
+                try:
+                    self._cpp_models[i].set_feature_weights(norm_feature_weights)
+                except RuntimeError as e:
+                    print(f"Caught an exception in GBRL for model index {i}: {e}")
+        else:
+            try:
+                self._cpp_models[model_idx].set_feature_weights(norm_feature_weights)
+            except RuntimeError as e:
+                print(f"Caught an exception in GBRL for model index {model_idx}: {e}")
 
     def get_bias(self, model_idx: Optional[int] = None) -> Union[np.ndarray, Tuple[np.ndarray, ...]]:
         """
@@ -743,7 +741,7 @@ class MultiGBTLearner(BaseLearner):
 
         return total_preds
 
-    def distil(self,
+    def distil(self,  # type: ignore
                obs: NumericalData,
                targets: List[np.ndarray],  # type: ignore
                params: Dict,

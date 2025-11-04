@@ -106,6 +106,7 @@ class GBTLearner(BaseLearner):
 
         super().step(inputs)
         if self.total_iterations == 0:
+            assert self.feature_mapping is not None, "Feature mapping not set"
             feature_mapping, numerical_mask = self.feature_mapping
             self._cpp_model.set_feature_mapping(np.ascontiguousarray(feature_mapping),
                                                 np.ascontiguousarray(numerical_mask))
@@ -293,23 +294,17 @@ class GBTLearner(BaseLearner):
         Args:
             feature_weights (Union[NumericalData, float]): The feature weights.
         """
+        assert self._cpp_model is not None, "Model not initialized!"
         # Normalize to 1D vector (handles float, numpy, torch, 0D, and multi-D)
-        feature_weights = normalize_vector_input(feature_weights)  
-
-        # Convert to numpy if it's a tensor
         if isinstance(feature_weights, th.Tensor):
-            feature_weights = feature_weights.detach().cpu().numpy()
+            assert (feature_weights >= 0).all(), "feature weights contains non-positive values"
+        elif isinstance(feature_weights, np.ndarray):
+            assert np.all(feature_weights >= 0), "feature weights contains non-positive values"
+        else:
+            assert feature_weights >= 0, "feature weights contains non-positive values"
 
-        # Ensure correct dtype
-        feature_weights = np.ascontiguousarray(feature_weights, dtype=numerical_dtype)
-
-        assert len(feature_weights) == self.input_dim, (
-            "feature weights has to have the same number of elements as features"
-        )
-        assert np.all(feature_weights >= 0), "feature weights contains non-positive values"
-        
         try:
-            self._cpp_model.set_feature_weights(feature_weights)
+            self._cpp_model.set_feature_weights(normalize_vector_input(feature_weights))
         except RuntimeError as e:
             print(f"Caught an exception in GBRL: {e}")
 

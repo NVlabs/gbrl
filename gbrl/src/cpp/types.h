@@ -273,6 +273,10 @@ struct ensembleData {
     int *depths;                    /**< Depth of each leaf in tree structure */
     float *values;                  /**< Leaf prediction values */
     
+    // These arrays support reordering of features for mixed categorical/numerical inputs
+    int *feature_mapping;           /**< Maps original feature indices to internal indices (stored for documentation/export) */
+    int *reverse_num_feature_mapping;  /**< Maps internal numerical feature indices back to original feature indices (used in computation) */
+    int *reverse_cat_feature_mapping;  /**< Maps internal categorical feature indices back to original feature indices (used in computation) */
     // Leaf split condition data
     int* feature_indices;           /**< Feature used at each internal node */
     float* feature_values;          /**< Threshold values for numerical splits */
@@ -280,6 +284,9 @@ struct ensembleData {
     bool* is_numerics;              /**< Whether split is numerical (vs categorical) */
     bool* inequality_directions;    /**< Direction of inequality tests */
     char* categorical_values;       /**< Values for categorical splits */
+
+    bool *mapping_numerics;         /**< Indicates if each original feature is numerical (true) or categorical (false) (stored for documentation/export) */
+    
     size_t alloc_data_size;         /**< Total allocated memory size */
 };
 

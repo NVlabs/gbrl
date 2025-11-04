@@ -333,26 +333,55 @@ class GBRL {
         /**
          * @brief Set global bias term
          * 
-         * @param bias Bias values (output_dim)
-         * @param output_dim Output dimensionality
+         * Sets the global bias/intercept term for the ensemble output. Supports both CPU
+         * and GPU data through the dataHolder interface, with automatic device-to-device
+         * transfers.
+         * 
+         * @param bias Bias values (output_dim) wrapped in dataHolder with device info
+         * @param output_dim Output dimensionality (must match metadata->output_dim)
+         * @throws std::runtime_error if output_dim doesn't match metadata->output_dim
          */
         void set_bias(dataHolder<const float> *bias, const int output_dim);
         
         /**
          * @brief Set per-feature importance weights
          * 
-         * @param feauture_weights Feature weights (input_dim)
-         * @param input_dim Input dimensionality
+         * Sets the importance weight for each input feature. These weights are used during
+         * split scoring to scale the contribution of each feature. Supports both CPU and GPU
+         * data through the dataHolder interface, with automatic device-to-device transfers.
+         * 
+         * @param feature_weights Feature weights (input_dim) wrapped in dataHolder with device info
+         * @param input_dim Input dimensionality (must match metadata->input_dim)
+         * @throws std::runtime_error if input_dim doesn't match metadata->input_dim
          */
-        void set_feature_weights(float *feauture_weights, const int input_dim);
+        void set_feature_weights(dataHolder<float> *feature_weights, const int input_dim);
+        
+        /**
+         * @brief Set feature mapping for mixed categorical/numerical inputs
+         * 
+         * Configures how original feature indices map to internal feature representations,
+         * enabling proper handling of datasets with both numerical and categorical features.
+         * Creates 4 internal arrays:
+         * - feature_mapping: Maps original feature indices to internal indices (stored for export)
+         * - mapping_numerics: Flags indicating numerical (true) vs categorical (false) features (stored for export)
+         * - reverse_num_feature_mapping: Maps internal numerical feature indices back to original (used in computation)
+         * - reverse_cat_feature_mapping: Maps internal categorical feature indices back to original (used in computation)
+         * 
+         * Only the two reverse mapping arrays are actively used during training/prediction for
+         * looking up feature weights. The forward mapping arrays are maintained for model
+         * serialization and documentation purposes.
+         * 
+         * @param feature_mapping Array mapping original feature indices to internal indices (length: input_dim)
+         * @param mapping_numerics Boolean array indicating if each original feature is numerical (length: input_dim)
+         * @param input_dim Total number of input features (must match metadata->input_dim)
+         */
+        void set_feature_mapping(const int *feature_mapping, const bool *mapping_numerics, const int input_dim);
         
         /**
          * @brief Get current bias term
          * 
          * @return Pointer to bias array
          */
-
-         void set_feature_weights(float *feature_weights, const int input_dim);
         float* get_bias();
         
         /**

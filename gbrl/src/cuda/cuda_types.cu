@@ -22,6 +22,13 @@
 #include "cuda_utils.h"
 #include "types.h"
 
+// Implementation notes for ensemble_data_alloc_cuda:
+// Allocates unified memory block with feature mapping arrays (4 vectors):
+// - feature_mapping: Original to internal index mapping (stored for export)
+// - mapping_numerics: Feature type flags (stored for export)
+// - reverse_num_feature_mapping: Internal numerical to original mapping (used in computation)
+// - reverse_cat_feature_mapping: Internal categorical to original mapping (used in computation)
+// Only reverse mappings are actively used; forward mappings maintained for serialization.
 ensembleData* ensemble_data_alloc_cuda(ensembleMetaData *metadata){
     ensembleData *edata = new ensembleData;
     if (metadata == nullptr){
@@ -31,8 +38,10 @@ ensembleData* ensemble_data_alloc_cuda(ensembleMetaData *metadata){
 
     char *data;
     size_t bias_size = metadata->output_dim * sizeof(float);
+    // Feature mapping: 3x int arrays (feature_mapping, reverse_num, reverse_cat)
     size_t feature_mapping_size = metadata->input_dim * sizeof(int);
     size_t feature_size = metadata->input_dim * sizeof(float);
+    // Feature type flags: 1x bool array (mapping_numerics)
     size_t feature_numerics_size = metadata->input_dim * sizeof(bool);
     size_t tree_size = metadata->max_trees * sizeof(int);
     size_t split_sizes = (metadata->grow_policy == OBLIVIOUS) ? metadata->max_trees : metadata->max_leaves;
@@ -40,14 +49,14 @@ ensembleData* ensemble_data_alloc_cuda(ensembleMetaData *metadata){
     size_t cond_sizes = split_sizes*metadata->max_depth;
     size_t edge_size = metadata->max_depth * metadata->max_leaves;
     size_t data_size = bias_size 
-                     + feature_mapping_size * 3
+                     + feature_mapping_size * 3  // 3 int arrays: feature_mapping, reverse_num_feature_mapping, reverse_cat_feature_mapping
                      + feature_size 
                      + tree_size
                      + split_sizes * sizeof(int) // depths
                      + value_sizes 
                      + edge_size * (sizeof(bool) + sizeof(float)) // inequality directions + edge weights
                      + cond_sizes * (sizeof(int) + sizeof(float) + sizeof(bool) + sizeof(char)*MAX_CHAR_SIZE)
-                     + feature_numerics_size;
+                     + feature_numerics_size;  // 1 bool array: mapping_numerics
 #ifdef DEBUG 
     size_t sample_size = metadata->max_leaves * sizeof(int);
     data_size += sample_size;
@@ -60,6 +69,7 @@ ensembleData* ensemble_data_alloc_cuda(ensembleMetaData *metadata){
     size_t trace = 0;
     edata->bias = (float*)(data + trace);
     trace += bias_size;
+    // Feature mapping arrays (4 total: 3 int, 1 bool)
     edata->feature_mapping = (int*)(data + trace);
     trace += feature_mapping_size;
     edata->reverse_num_feature_mapping = (int*)(data + trace);
@@ -95,6 +105,9 @@ ensembleData* ensemble_data_alloc_cuda(ensembleMetaData *metadata){
     return edata;
 }
 
+// Implementation notes for ensemble_copy_data_alloc_cuda:
+// Same as ensemble_data_alloc_cuda but allocates exact size based on current state
+// (n_trees, n_leaves) instead of maximum capacity.
 ensembleData* ensemble_copy_data_alloc_cuda(ensembleMetaData *metadata){
     // Same function as normal alloc just allocates exact amount
     ensembleData *edata = new ensembleData;
@@ -114,13 +127,13 @@ ensembleData* ensemble_copy_data_alloc_cuda(ensembleMetaData *metadata){
     size_t edge_size = metadata->n_leaves*metadata->max_depth;
 
     size_t data_size = bias_size
-                     + feature_mapping_size * 3
+                     + feature_mapping_size * 3  // 3 int arrays: feature_mapping, reverse_num_feature_mapping, reverse_cat_feature_mapping
                      + feature_size
                      + tree_size
                      + split_sizes * sizeof(int) // depths
                      + value_sizes 
                      + edge_size * (sizeof(bool) + sizeof(float)) // inequality directions + edge_weights
-                     + sizeof(bool) * metadata->input_dim
+                     + sizeof(bool) * metadata->input_dim  // 1 bool array: mapping_numerics
                      + cond_sizes * (sizeof(int) + sizeof(float) + sizeof(bool) + sizeof(char)*MAX_CHAR_SIZE); 
 #ifdef DEBUG 
     size_t sample_size = metadata->max_leaves * sizeof(int);
@@ -134,11 +147,12 @@ ensembleData* ensemble_copy_data_alloc_cuda(ensembleMetaData *metadata){
     size_t trace = 0;
     edata->bias = (float*)(data + trace);
     trace += bias_size;
-    edata->feature_mapping = (int*)(data + trace);
+    // Feature mapping arrays (4 total: 3 int, 1 bool)
+    edata->feature_mapping = (int*)(data + trace);  // Forward mapping: original -> internal (stored for export)
     trace += feature_mapping_size;
-    edata->reverse_num_feature_mapping = (int*)(data + trace);
+    edata->reverse_num_feature_mapping = (int*)(data + trace);  // Reverse mapping for numerical features (used in computation)
     trace += feature_mapping_size;
-    edata->reverse_cat_feature_mapping = (int*)(data + trace);
+    edata->reverse_cat_feature_mapping = (int*)(data + trace);  // Reverse mapping for categorical features (used in computation)
     trace += feature_mapping_size;
     edata->feature_weights = (float*)(data + trace);
     trace += feature_size;
@@ -162,7 +176,7 @@ ensembleData* ensemble_copy_data_alloc_cuda(ensembleMetaData *metadata){
     trace += cond_sizes * sizeof(bool);
     edata->inequality_directions = (bool *)(data + trace);
     trace += edge_size * sizeof(bool);
-    edata->mapping_numerics = (bool *)(data + trace);
+    edata->mapping_numerics = (bool *)(data + trace);  // Feature type flags: true=numerical, false=categorical (stored for export)
     trace += metadata->input_dim * sizeof(bool);
     edata->categorical_values = (char *)(data + trace);
 

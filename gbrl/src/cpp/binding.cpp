@@ -648,17 +648,64 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         py::gil_scoped_release release; 
         self.set_bias(&bias_holder, output_dim); 
     }, "Set GBRL model bias");
-    gbrl.def("set_feature_weights", [](GBRL &self, const py::array_t<float> &feature_weights) {
-        if (!feature_weights.attr("flags").attr("c_contiguous").cast<bool>()) {
-            throw std::runtime_error("Arrays must be C-contiguous");
+    
+    // Set per-feature importance weights
+    // Supports both NumPy arrays and PyTorch tensors on CPU or GPU
+    // Automatically handles device-to-device transfers (CPU<->GPU)
+    gbrl.def("set_feature_weights", [](GBRL &self, py::object &feature_weights) {
+        const float *feature_weights_ptr = nullptr;
+        std::vector<size_t> feature_weights_shape;
+        std::string feature_weights_device;
+        int n_samples, feature_weights_dim;
+
+        handle_input_info<const float>(feature_weights, feature_weights_ptr, feature_weights_shape, feature_weights_device, "feature_weights", false, "set_feature_weights");
+
+        if (feature_weights_shape.size() == 1){
+            if (self.metadata->input_dim > 1){
+                n_samples = 1;
+                feature_weights_dim = static_cast<int>(feature_weights_shape[0]);
+            } else{
+                n_samples = static_cast<int>(feature_weights_shape[0]);
+                feature_weights_dim = 1;
+            }
+
+            if (n_samples > 1){
+                std::stringstream ss;
+                ss << "Set feature_weights with multiple samples is not supported!";
+                throw std::runtime_error(ss.str());
+            }
+        } else {
+            n_samples = static_cast<int>(feature_weights_shape[0]);
+            feature_weights_dim = static_cast<int>(feature_weights_shape[1]);
+
+            if (n_samples == self.metadata->output_dim && feature_weights_dim == 1){
+                // Transpose case
+                n_samples = 1;
+                feature_weights_dim = static_cast<int>(feature_weights_shape[0]);
+            }
         }
-        
-        py::buffer_info info = feature_weights.request(false);
-        float* feature_weights_ptr = static_cast<float*>(info.ptr);
+        if (feature_weights_dim != self.metadata->input_dim){
+            std::stringstream ss;
+            ss << "Feature weights input dim " << feature_weights_dim << " != correct input dim " << self.metadata->input_dim;
+            throw std::runtime_error(ss.str());
+        }
+        if (n_samples > 1){
+            std::stringstream ss;
+            ss << "Set feature_weights with multiple samples is not supported!";
+            throw std::runtime_error(ss.str());
+        }
+
+
+        // Note: set_feature_weights only reads the data, so const_cast is safe here
+        dataHolder<float> feature_weights_holder{const_cast<float*>(feature_weights_ptr), stringTodeviceType(feature_weights_device)};
         int input_dim = static_cast<int>(len(feature_weights));
-        py::gil_scoped_release release; 
-        self.set_feature_weights(feature_weights_ptr, input_dim); 
+        py::gil_scoped_release release;
+        self.set_feature_weights(&feature_weights_holder, input_dim);
     }, "Set GBRL model feature weights");
+    
+    // Set feature mapping for mixed categorical/numerical inputs
+    // Creates 4 arrays: feature_mapping, mapping_numerics (stored for export),
+    // reverse_num_feature_mapping, reverse_cat_feature_mapping (used in computation)
     gbrl.def("set_feature_mapping", [](GBRL &self, const py::array_t<int> &feature_mapping, const py::array_t<bool> &mapping_numerics) {
         if (!feature_mapping.attr("flags").attr("c_contiguous").cast<bool>()) {
             throw std::runtime_error("Arrays must be C-contiguous");

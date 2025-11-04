@@ -84,7 +84,6 @@ class TreeNode {
          * @brief Compute split quality score for a candidate
          * 
          * @param dataset Training dataset
-         * @param feature_weights Per-feature importance weights
          * @param split_score_func Scoring function to use (L2 or Cosine)
          * @param split_candidate Candidate split to evaluate
          * @param min_data_in_leaf Minimum samples required per leaf
@@ -92,7 +91,6 @@ class TreeNode {
          */
         float getSplitScore(
             dataSet *dataset,
-            const float *feature_weights,
             scoreFunc split_score_func,
             const splitCandidate &split_candidate,
             const int min_data_in_leaf
@@ -102,7 +100,6 @@ class TreeNode {
          * @brief Score numerical split using cosine similarity
          * 
          * @param obs Numerical observations
-         * @param feature_weights Feature importance weights
          * @param grads Gradient values
          * @param split_candidate Split to evaluate
          * @param min_data_in_leaf Minimum samples per leaf
@@ -110,7 +107,6 @@ class TreeNode {
          */
         float splitScoreCosine(
             const float *obs,
-            const float *feature_weights,
             const float *grads,
             const splitCandidate &split_candidate,
             const int min_data_in_leaf
@@ -120,7 +116,6 @@ class TreeNode {
          * @brief Score categorical split using cosine similarity
          * 
          * @param obs Categorical observations
-         * @param feature_weights Feature importance weights
          * @param grads Gradient values
          * @param split_candidate Split to evaluate
          * @param min_data_in_leaf Minimum samples per leaf
@@ -128,7 +123,6 @@ class TreeNode {
          */
         float splitScoreCosineCategorical(
             const char *obs,
-            const float *feature_weights,
             const float *grads,
             const splitCandidate &split_candidate,
             const int min_data_in_leaf
@@ -138,7 +132,6 @@ class TreeNode {
          * @brief Score numerical split using L2 norm
          * 
          * @param obs Numerical observations
-         * @param feature_weights Feature importance weights
          * @param grads Gradient values
          * @param split_candidate Split to evaluate
          * @param min_data_in_leaf Minimum samples per leaf
@@ -146,7 +139,6 @@ class TreeNode {
          */
         float splitScoreL2(
             const float *obs,
-            const float *feature_weights,
             const float *grads,
             const splitCandidate &split_candidate,
             const int min_data_in_leaf
@@ -156,7 +148,6 @@ class TreeNode {
          * @brief Score categorical split using L2 norm
          * 
          * @param obs Categorical observations
-         * @param feature_weights Feature importance weights
          * @param grads Gradient values
          * @param split_candidate Split to evaluate
          * @param min_data_in_leaf Minimum samples per leaf
@@ -164,7 +155,6 @@ class TreeNode {
          */
         float splitScoreL2Categorical(
             const char *obs,
-            const float *feature_weights,
             const float *grads,
             const splitCandidate &split_candidate,
             const int min_data_in_leaf

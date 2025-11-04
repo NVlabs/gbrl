@@ -148,7 +148,7 @@ int TreeNode::splitNode(const float *obs, const char *categorical_obs, const int
     return 0;
 }
 
-float TreeNode::getSplitScore(dataSet *dataset, const float *feature_weights, scoreFunc split_score_func, const splitCandidate &split_candidate, const int min_data_in_leaf){
+float TreeNode::getSplitScore(dataSet *dataset, scoreFunc split_score_func, const splitCandidate &split_candidate, const int min_data_in_leaf){
     // make sure that we do not re-use the same split candidate along a path
     bool is_numeric = split_candidate.categorical_value == nullptr;
     if (this->depth > 0){
