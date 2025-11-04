@@ -28,13 +28,6 @@
 #include "cuda_types.h"
 #endif
 
-/**
- * @brief Convert string to scoreFunc enum
- * 
- * @param str Score function name ("L2" or "Cosine", case-insensitive)
- * @return Corresponding scoreFunc enum value
- * @throws std::runtime_error if string is invalid
- */
 scoreFunc stringToScoreFunc(std::string str) {
     if (str == "L2" || str == "l2") return scoreFunc::L2;
     if (str == "Cosine" || str == "cosine") return scoreFunc::Cosine;
@@ -42,13 +35,6 @@ scoreFunc stringToScoreFunc(std::string str) {
     return scoreFunc::L2;
 }
 
-/**
- * @brief Convert string to generatorType enum
- * 
- * @param str Generator type name ("uniform" or "quantile", case-insensitive)
- * @return Corresponding generatorType enum value
- * @throws std::runtime_error if string is invalid
- */
 generatorType stringTogeneratorType(std::string str) {
     if (str == "uniform" || str == "Uniform") return generatorType::Uniform;
     if (str == "quantile" || str == "Quantile") return generatorType::Quantile;
@@ -56,13 +42,6 @@ generatorType stringTogeneratorType(std::string str) {
     return generatorType::Uniform;
 }
 
-/**
- * @brief Convert string to growPolicy enum
- * 
- * @param str Grow policy name ("oblivious" or "greedy", case-insensitive)
- * @return Corresponding growPolicy enum value
- * @throws std::runtime_error if string is invalid
- */
 growPolicy stringTogrowPolicy(std::string str) {
     if (str == "oblivious" || str == "Oblivious") return growPolicy::OBLIVIOUS;
     if (str == "greedy" || str == "Greedy") return growPolicy::GREEDY;

@@ -351,6 +351,8 @@ class GBRL {
          * 
          * @return Pointer to bias array
          */
+
+         void set_feature_weights(float *feature_weights, const int input_dim);
         float* get_bias();
         
         /**

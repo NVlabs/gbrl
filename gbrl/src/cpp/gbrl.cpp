@@ -240,6 +240,53 @@ void GBRL::set_feature_weights(float *feature_weights, const int input_dim){
         std::cout << "Setting GBRL feature weights " << std::endl;
 }
 
+void GBRL::set_feature_mapping(const int *feature_mapping, const bool *mapping_numerics, const int input_dim){
+    if (input_dim != this->metadata->input_dim)
+    {
+        std::cerr << "Given feature_mapping vector has different dimensions than expect. " << " Given: " << input_dim << " expected: " << this->metadata->input_dim << std::endl; 
+        throw std::runtime_error("Incompatible dimensions");
+        return;
+    }
+
+    int *reverse_num_feature_mapping = new int[this->metadata->input_dim];
+    int *reverse_cat_feature_mapping = new int[this->metadata->input_dim];
+
+    int j = 0;
+    int k = 0;
+    for (int i = 0 ; i < this->metadata->input_dim ; ++i){
+        reverse_num_feature_mapping[i] = -1;
+        reverse_cat_feature_mapping[i] = -1;
+        if (mapping_numerics[i]){
+            reverse_num_feature_mapping[j] = i;
+            j++;
+        }
+        else {
+            reverse_cat_feature_mapping[k] = i;
+            k++;
+        }
+    }
+
+#ifdef USE_CUDA
+    if (this->device == gpu){
+        cudaMemcpy(this->edata->feature_mapping, feature_mapping, sizeof(int)*this->metadata->input_dim, cudaMemcpyHostToDevice);
+        cudaMemcpy(this->edata->mapping_numerics, mapping_numerics, sizeof(bool)*this->metadata->input_dim, cudaMemcpyHostToDevice);
+        cudaMemcpy(this->edata->reverse_num_feature_mapping, reverse_num_feature_mapping, sizeof(int)*this->metadata->input_dim, cudaMemcpyHostToDevice);
+        cudaMemcpy(this->edata->reverse_cat_feature_mapping, reverse_cat_feature_mapping, sizeof(int)*this->metadata->input_dim, cudaMemcpyHostToDevice);
+    }
+#endif
+    if (this->device == cpu){
+        memcpy(this->edata->feature_mapping, feature_mapping, sizeof(int)*this->metadata->input_dim);
+        memcpy(this->edata->mapping_numerics, mapping_numerics, sizeof(bool)*this->metadata->input_dim);
+        memcpy(this->edata->reverse_num_feature_mapping, reverse_num_feature_mapping, sizeof(int)*this->metadata->input_dim);
+        memcpy(this->edata->reverse_cat_feature_mapping, reverse_cat_feature_mapping, sizeof(int)*this->metadata->input_dim);
+    }
+        if (this->metadata->verbose > 0)
+            std::cout << "Setting GBRL feature mapping " << std::endl;
+
+    delete[] reverse_num_feature_mapping;
+    delete[] reverse_cat_feature_mapping;
+}
+
 float* GBRL::get_bias(){
     // returns a copy. must deallocated new float pointer!
 #ifdef USE_CUDA

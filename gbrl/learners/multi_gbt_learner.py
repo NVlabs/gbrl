@@ -132,6 +132,13 @@ class MultiGBTLearner(BaseLearner):
                                          len(grads) == self.n_learners), "Invalid model index or gradients"
         assert self._cpp_models is not None, "Model not initialized."
 
+        super().step(inputs)
+        if self.total_iterations == 0:
+            feature_mapping, numerical_mask = self.feature_mapping
+            for i in range(len(self._cpp_models))
+                self._cpp_models[i].set_feature_mapping(np.ascontiguousarray(feature_mapping),
+                                                    np.ascontiguousarray(numerical_mask))
+
         num_inputs, cat_inputs = preprocess_features(inputs)
 
         if model_idx is not None:

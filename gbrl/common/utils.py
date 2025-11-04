@@ -116,7 +116,42 @@ def process_array(arr: np.ndarray) -> Tuple[Optional[np.ndarray],
         raise ValueError(f"Unsupported array data type: {arr.dtype}")
 
 
-def to_numpy(arr: NumericalData) -> np.ndarray:
+def get_index_mapping(arr: NumericalData) -> Tuple[np.ndarray, np.ndarray]:
+    """Returns a mapping from original column indices to their new \
+        indices after separating numerical and categorical features."""
+    if not isinstance(arr, th.Tensor):
+        if arr.ndim == 1:
+            # For 1D array, use the array itself as first_row
+            first_row = arr
+        else:
+            # For 2D array, get the first row
+            first_row = arr[0]
+        # Vectorized function to check if a type is numerical
+        is_numerical_type = np.vectorize(
+            lambda x: isinstance(x, (int, float, np.integer, np.floating))
+        )(first_row)
+
+        # Create masks for numerical and categorical columns
+        numerical_mask = is_numerical_type
+        categorical_mask = ~is_numerical_type
+
+        numerical_indices = np.where(numerical_mask)[0]
+        categorical_indices = np.where(categorical_mask)[0]
+        # Create the index mapping array
+        index_mapping = np.empty_like(np.arange(arr.shape[-1]), dtype=int)
+        index_mapping[numerical_indices] = np.arange(len(numerical_indices))
+        index_mapping[categorical_indices] = np.arange(len(categorical_indices))
+
+        # Boolean mask: True for categorical, False for numerical
+        numerical_mask = np.zeros(arr.shape[-1], dtype=bool)
+        numerical_mask[numerical_indices] = True
+
+        return index_mapping, numerical_mask
+    else:
+        return np.arange(arr.shape[-1]), np.ones(arr.shape[-1], dtype=bool)
+
+
+def to_numpy(arr: Union[np.ndarray, th.Tensor]) -> np.ndarray:
     if isinstance(arr, th.Tensor):
         arr = arr.detach().cpu().numpy()
     return np.ascontiguousarray(arr, dtype=numerical_dtype)

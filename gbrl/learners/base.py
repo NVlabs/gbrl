@@ -18,7 +18,9 @@ from typing import Dict, List, Optional, Tuple, Union
 import numpy as np
 import torch as th
 
-from gbrl.common.utils import (NumericalData, TensorInfo, get_tensor_info,
+from gbrl.common.utils import (NumericalData, TensorInfo, 
+                               get_index_mapping,
+                               get_tensor_info,
                                numerical_dtype, to_numpy)
 
 
@@ -92,6 +94,7 @@ class BaseLearner(ABC):
         self.feature_weights = feature_weights
         self._cpp_model = None
         self.optimizers = None
+        self.feature_mapping = None
 
         self._memory = []
 
@@ -100,10 +103,10 @@ class BaseLearner(ABC):
         """Resets the model, reinitializing internal states and parameters."""
         pass
 
-    @abstractmethod
-    def step(self, *args, **kwargs) -> None:
+    def step(self, inputs: NumericalData, *args, **kwargs) -> None:
         """Performs a single update step using provided gradients."""
-        pass
+        if self.feature_mapping is None:
+            self.feature_mapping = get_index_mapping(inputs)
 
     @abstractmethod
     def fit(self, *args, **kwargs) -> Union[float, List[float]]:

@@ -415,8 +415,9 @@ int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMe
                     TreeNode *crnt_node = tree_nodes[node_idx];
                     score += crnt_node->getSplitScore(dataset, edata->feature_weights, metadata->split_score_func, split_candidates[j], metadata->min_data_in_leaf);
                 }
-                int feat_idx = (split_candidates[j].categorical_value == nullptr) ? split_candidates[j].feature_idx : split_candidates[j].feature_idx + metadata->n_num_features; 
-                score = score*edata->feature_weights[feat_idx];
+                int feat_idx = (split_candidates[j].categorical_value == nullptr) ? edata->reverse_num_feature_mapping[split_candidates[j].feature_idx] : edata->reverse_cat_feature_mapping[split_candidates[j].feature_idx];
+                score = score*edata->feature_weights[feat_idx] - parent_score;
+                
 #ifdef DEBUG
                 std::cout << " cand: " <<  j << " score: " <<  score << " info: " << split_candidates[j] << std::endl;
 #endif

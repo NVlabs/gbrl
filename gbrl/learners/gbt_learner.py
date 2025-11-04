@@ -100,8 +100,16 @@ class GBTLearner(BaseLearner):
         Returns:
             None
         """
+        assert self._cpp_model is not None, "Model not initialized!"
         assert isinstance(grads, list) or isinstance(grads, tuple) or isinstance(grads, NumericalData), \
             "Invalid gradients type"
+
+        super().step(inputs)
+        if self.total_iterations == 0:
+            feature_mapping, numerical_mask = self.feature_mapping
+            self._cpp_model.set_feature_mapping(np.ascontiguousarray(feature_mapping),
+                                                np.ascontiguousarray(numerical_mask))
+
 
         if isinstance(grads, tuple):
             grads = concatenate_arrays(grads)
