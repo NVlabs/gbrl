@@ -6,6 +6,12 @@
 # https://nvlabs.github.io/gbrl/license.html
 #
 ##############################################################################
+"""
+Gradient Boosted Tree Model Module
+
+This module provides the GBTModel class, a general-purpose gradient boosting
+model for supervised learning and reinforcement learning tasks.
+"""
 from typing import Dict, List, Optional, Union
 
 import numpy as np

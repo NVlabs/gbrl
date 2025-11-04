@@ -6,6 +6,13 @@
 # https://nvlabs.github.io/gbrl/license.html
 #
 ##############################################################################
+"""
+GBRL Utility Functions
+
+This module provides utility functions for data preprocessing, array manipulation,
+tensor operations, optimizer setup, and SHAP value computation used throughout
+the GBRL library.
+"""
 from typing import Dict, Sequence, Optional, Tuple, Union
 
 import numpy as np
@@ -42,7 +49,23 @@ def get_tensor_info(tensor: th.Tensor) -> TensorInfo:
 
 def process_array(arr: np.ndarray) -> Tuple[Optional[np.ndarray],
                                             Optional[np.ndarray]]:
-    """ Formats numpy array for C++ GBRL.
+    """
+    Formats numpy array for C++ GBRL by separating numerical and categorical data.
+
+    This function processes input arrays and separates them into numerical and
+    categorical components based on their data types. It handles various dtype
+    formats including floating point, integer, string, and object arrays.
+
+    Args:
+        arr (np.ndarray): Input array to process.
+
+    Returns:
+        Tuple[Optional[np.ndarray], Optional[np.ndarray]]: A tuple containing:
+            - numerical_array: Array with numerical data (float32) or None
+            - categorical_array: Array with categorical data (S128) or None
+
+    Raises:
+        ValueError: If the array has an unsupported data type.
     """
     if np.issubdtype(arr.dtype, np.floating) or np.issubdtype(arr.dtype,
                                                               np.integer):
@@ -97,6 +120,61 @@ def to_numpy(arr: NumericalData) -> np.ndarray:
     if isinstance(arr, th.Tensor):
         arr = arr.detach().cpu().numpy()
     return np.ascontiguousarray(arr, dtype=numerical_dtype)
+
+
+def normalize_vector_input(data: Union[float, NumericalData]) -> Union[np.ndarray, TensorInfo]:
+    """
+    Normalizes scalar, numpy array, or torch tensor input to a 1D vector for C++ pybind.
+
+    This function handles conversion and reshaping of various input types to ensure
+    the output is always a 1D vector suitable for passing to C++ pybind interfaces.
+    It converts scalars to numpy arrays, flattens multi-dimensional arrays, and
+    reshapes 0-dimensional arrays. For PyTorch tensors, returns TensorInfo tuple
+    containing raw pointer information for direct C++ access.
+
+    Args:
+        data (Union[float, NumericalData]): Input data which can be:
+            - A Python float or int
+            - A 0D, 1D, or multi-dimensional numpy array
+            - A 0D, 1D, or multi-dimensional PyTorch tensor
+
+    Returns:
+        Union[np.ndarray, TensorInfo]:
+            - For float/int/numpy: A contiguous 1D numpy array with dtype float32
+            - For PyTorch tensors: TensorInfo tuple (data_ptr, shape, dtype, device)
+              containing raw pointer information for C++ backend
+
+    Examples:
+        >>> normalize_vector_input(3.14)
+        # Returns: np.array([3.14], dtype=float32)
+
+        >>> normalize_vector_input(np.array(5.0))
+        # Returns: np.array([5.0], dtype=float32)
+
+        >>> normalize_vector_input(np.array([[1, 2], [3, 4]]))
+        # Returns: np.array([1, 2, 3, 4], dtype=float32)
+
+        >>> normalize_vector_input(torch.tensor([[1.0, 2.0]]))
+        # Returns: TensorInfo(data_ptr, (2,), 'torch.float32', 'cpu')
+    """
+    # Convert float to numpy array
+    if isinstance(data, (float, int)):
+        return np.array([data], dtype=numerical_dtype)
+
+    assert isinstance(data, (np.ndarray, th.Tensor)), \
+        "Input must be a float, numpy array, or PyTorch tensor"
+
+    # Handle array shape
+    if data.ndim == 0:
+        # 0D tensor: reshape to 1D
+        data = data.reshape(1)
+    elif data.ndim > 1:
+        # Multi-dimensional: flatten
+        data = data.flatten()
+
+    if isinstance(data, np.ndarray):
+        return np.ascontiguousarray(data.astype(numerical_dtype))
+    return get_tensor_info(data)
 
 
 def setup_optimizer(optimizer: Dict, prefix: str = '') -> Dict:
@@ -169,11 +247,15 @@ def clip_grad_norm(grads: NumericalData, grad_clip: Optional[float]) ->\
     return grads
 
 
-def get_input_dim(arr: NumericalData) -> int:
-    """Returns the column dimension of a 2D array
+def get_input_dim(arr: Union[NumericalData, Tuple[NumericalData, ...]]) -> int:
+    """
+    Returns the column dimension of a 2D array (number of features).
+
+    This function handles both single arrays and tuples of arrays,
+    summing their dimensions when necessary.
 
     Args:
-        arr (NumericalData):input array
+        arr (Union[NumericalData, Tuple[NumericalData, ...]]): Input array or tuple of arrays.
 
     Returns:
         int: Number of input features/dimensions.
@@ -342,10 +424,15 @@ def validate_array(arr: NumericalData) -> None:
 
 def constant_like(arr: NumericalData,
                   constant: float = 1) -> NumericalData:
-    """Returns a ones array with the same shape as arr multiplid by a constant
+    """
+    Returns an array of the same shape as input, filled with a constant value.
 
     Args:
-        arr (NumericalData): array
+        arr (NumericalData): Reference array for shape and type.
+        constant (float, optional): Value to fill the array with. Defaults to 1.
+
+    Returns:
+        NumericalData: Array of ones (or constant value) matching input type and shape.
     """
     if isinstance(arr, th.Tensor):
         return th.ones_like(arr, device=arr.device) * constant
@@ -355,7 +442,12 @@ def constant_like(arr: NumericalData,
 
 def separate_numerical_categorical(arr: np.ndarray) -> Tuple[Optional[np.ndarray],
                                                              Optional[np.ndarray]]:
-    """Separate a numpy array to a categorical and numerical numpy arrays.
+    """
+    Separates a numpy array into categorical and numerical components.
+
+    This function handles various input formats including tuples, lists, dictionaries,
+    and raw arrays, extracting and processing numerical and categorical data separately.
+
     Args:
         arr (np.ndarray): Input array, tuple, list, or dictionary to separate.
 
@@ -381,19 +473,20 @@ def separate_numerical_categorical(arr: np.ndarray) -> Tuple[Optional[np.ndarray
 def preprocess_features(arr: NumericalData) -> Tuple[Optional[NumericalData],
                                                      Optional[np.ndarray]]:
     """
-    Preprocess array such that dimensions and data types match GBRL requirements.
+    Preprocesses array to match GBRL requirements for dimensions and data types.
 
     Separates input array into numerical and categorical features, ensuring proper
     dimensionality for the C++ GBRL backend. Handles 1D to 2D conversion and
-    squeezing of excess dimensions.
+    squeezing of excess dimensions. For PyTorch tensors, returns them as-is for
+    numerical data.
 
     Args:
-        arr (np.ndarray): Input array containing features to preprocess.
+        arr (NumericalData): Input array containing features to preprocess.
 
     Returns:
-        Tuple[Optional[np.ndarray], Optional[np.ndarray]]: A tuple containing:
-            - numerical_features: Processed numerical features or None
-            - categorical_features: Processed categorical features or None
+        Tuple[Optional[NumericalData], Optional[np.ndarray]]: A tuple containing:
+            - numerical_features: Processed numerical features (Tensor or ndarray) or None
+            - categorical_features: Processed categorical features (ndarray) or None
     """
     if isinstance(arr, th.Tensor):
         return arr, None
@@ -422,27 +515,26 @@ def ensure_leaf_tensor_or_array(array: NumericalData,
                                 requires_grad: bool,
                                 device: str) -> NumericalData:
     """
-    Ensures that the output is:
-    1) A PyTorch **leaf tensor** if both `tensor=True` and
-    `requires_grad=True`.
-    2) A PyTorch tensor (detached) if `tensor=True` and `requires_grad=False`.
-    3) A NumPy array if `tensor=False`.
+    Ensures the output is either a PyTorch leaf tensor or a NumPy array.
 
-    - If `tensor=True` and `requires_grad=True`, ensures the tensor is a
-    **leaf tensor**.
-    - If `tensor=True` and `requires_grad=False`, ensures `requires_grad` is
-    disabled.
-    - If `tensor=False`, converts to NumPy if necessary.
+    This function converts between PyTorch tensors and NumPy arrays while ensuring
+    proper gradient tracking for leaf tensors when needed.
+
+    Behavior:
+    1) If tensor=True and requires_grad=True, returns a **leaf tensor** with gradients enabled.
+    2) If tensor=True and requires_grad=False, returns a detached PyTorch tensor.
+    3) If tensor=False, converts to and returns a NumPy array.
 
     Args:
         array (NumericalData): Input array (NumPy array or PyTorch tensor).
         tensor (bool): If True, ensures output is a PyTorch tensor.
-        requires_grad (bool): If True and `tensor=True`, ensures output is a
-        **leaf tensor**.
+        requires_grad (bool): If True and tensor=True, ensures output is a
+            **leaf tensor** with gradient tracking enabled.
+        device (str): Device for PyTorch tensor ('cpu' or 'cuda').
 
     Returns:
-        NumericalData: A PyTorch tensor (if `tensor=True`) or a NumPy array
-        (if `tensor=False`).
+        NumericalData: A PyTorch tensor (if tensor=True) or a NumPy array
+            (if tensor=False).
     """
     if tensor:
         if isinstance(array, np.ndarray):

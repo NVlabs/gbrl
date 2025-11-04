@@ -6,6 +6,12 @@
 # https://nvlabs.github.io/gbrl/license.html
 #
 ##############################################################################
+"""
+Actor-Critic Model Module
+
+This module provides the ActorCritic model, which combines policy and value
+function learning in a single or separate tree architecture.
+"""
 import os
 from typing import Dict, Optional, Tuple, Union
 
@@ -13,7 +19,7 @@ import numpy as np
 import torch as th
 
 from gbrl.common.utils import (NumericalData, clip_grad_norm, numerical_dtype,
-                               pad_array, setup_optimizer, validate_array)
+                               setup_optimizer, validate_array)
 from gbrl.learners.actor_critic_learner import (SeparateActorCriticLearner,
                                                 SharedActorCriticLearner)
 from gbrl.models.base import BaseGBT

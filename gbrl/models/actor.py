@@ -6,6 +6,13 @@
 # https://nvlabs.github.io/gbrl/license.html
 #
 ##############################################################################
+"""
+Actor Model Module
+
+This module provides actor models for reinforcement learning, including
+ParametricActor for deterministic/discrete policies and GaussianActor
+for continuous stochastic policies with Gaussian distributions.
+"""
 from typing import Dict, Optional, Tuple, Union
 
 import numpy as np

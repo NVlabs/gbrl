@@ -419,7 +419,7 @@ PYBIND11_MODULE(gbrl_cpp, m) {
                 std::stringstream ss;
                 ss << "Targets output dim " << target_output_dim << " != correct output dim " << self.metadata->output_dim;
                 throw std::runtime_error(ss.str());
-            }
+        }
 
         dataHolder<float> targets_handler{targets_ptr, stringTodeviceType(targets_device)};
 
@@ -481,21 +481,44 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         const float *bias_ptr = nullptr;
         std::vector<size_t> bias_shape;
         std::string bias_device;
+        int n_samples, bias_dim;
 
         handle_input_info<const float>(bias, bias_ptr, bias_shape, bias_device, "bias", false, "set_bias");
 
-        int n_samples = (bias_shape.size() == 1) ? 1 : static_cast<int>(bias_shape[0]);
-        int bias_dim = (bias_shape.size() == 1) ? static_cast<int>(bias_shape[0]) : static_cast<int>(bias_shape[1]);
-        if (n_samples > 1){
-            std::stringstream ss;
-            ss << "Bias should be a vector not a tensor -> 1 single sample";
-            throw std::runtime_error(ss.str());
+        if (bias_shape.size() == 1){
+            if (self.metadata->output_dim > 1){
+                n_samples = 1;
+                bias_dim = static_cast<int>(bias_shape[0]);
+            } else{
+                n_samples = static_cast<int>(bias_shape[0]);
+                bias_dim = 1;
+            }
+            if (n_samples > 1){
+                std::stringstream ss;
+                ss << "Set bias with multiple samples is not supported!";
+                throw std::runtime_error(ss.str());
+            }
+        } else {
+            n_samples = static_cast<int>(bias_shape[0]);
+            bias_dim = static_cast<int>(bias_shape[1]);
+
+            if (n_samples == self.metadata->output_dim && bias_dim == 1){
+                // Transpose case
+                n_samples = 1;
+                bias_dim = static_cast<int>(bias_shape[0]);
+            }
         }
         if (bias_dim != self.metadata->output_dim){
             std::stringstream ss;
-            ss << "Bias dim " << bias_dim << " != correct output dim " << self.metadata->output_dim;
+            ss << "Targets output dim " << bias_dim << " != correct output dim " << self.metadata->output_dim;
             throw std::runtime_error(ss.str());
         }
+        if (n_samples > 1){
+            std::stringstream ss;
+            ss << "Set bias with multiple samples is not supported!";
+            throw std::runtime_error(ss.str());
+        }
+    
 
         dataHolder<const float> bias_holder{bias_ptr, stringTodeviceType(bias_device)};
         int output_dim = static_cast<int>(len(bias));

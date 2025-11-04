@@ -6,3 +6,9 @@
 # https://nvlabs.github.io/gbrl/license.html
 #
 ##############################################################################
+"""
+GBRL Models Module
+
+This module provides high-level model interfaces for gradient boosting trees
+in various applications including supervised learning and reinforcement learning.
+"""

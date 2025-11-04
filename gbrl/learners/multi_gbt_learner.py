@@ -6,6 +6,13 @@
 # https://nvlabs.github.io/gbrl/license.html
 #
 ##############################################################################
+"""
+Multi-Gradient Boosted Tree Learner Module
+
+This module provides the MultiGBTLearner class for managing multiple
+independent gradient boosted tree models. It's used in actor-critic
+architectures with separate models.
+"""
 import json
 import os
 from typing import Dict, List, Optional, Sequence, Tuple, Union
@@ -16,7 +23,8 @@ import torch as th
 from gbrl import GBRL_CPP
 from gbrl.common.utils import (NumericalData, ensure_leaf_tensor_or_array,
                                get_poly_vectors, get_tensor_info,
-                               numerical_dtype, preprocess_features, to_numpy)
+                               normalize_vector_input, numerical_dtype,
+                               preprocess_features, to_numpy)
 from gbrl.learners.base import BaseLearner
 
 
@@ -409,68 +417,57 @@ class MultiGBTLearner(BaseLearner):
             num_trees.append(_num_trees)
         return tuple(num_trees)
 
-    def set_bias(self, bias: Union[np.ndarray, float],
+    def set_bias(self, bias: Union[NumericalData, float],
                  model_idx: Optional[int] = None) -> None:
         """
         Sets the bias of the model.
 
         Args:
-            bias (Union[np.ndarray, float]): The bias value.
+            bias (Union[NumericalData, float]): The bias value.
             model_idx (int, optional): model index to set bias to.
         """
-        if not isinstance(bias, np.ndarray) and not isinstance(bias, float):
-            raise TypeError("Input should be a numpy array or float")
         assert self._cpp_models is not None, "Model not initialized."
-
-        if isinstance(bias, float):
-            bias = np.array([float])
-
-        if bias.ndim > 1:
-            bias = bias.ravel()
-        elif bias.ndim == 0:
-            bias = np.ndarray([bias.item()])  # Converts 0D arrays to 1D
         try:
             if model_idx is None:
                 for i in range(self.n_learners):
-                    self._cpp_models[i].set_bias(bias)
+                    self._cpp_models[i].set_bias(normalize_vector_input(bias))
             else:
-                self._cpp_models[model_idx].set_bias(bias)
+                self._cpp_models[model_idx].set_bias(normalize_vector_input(bias))
         except RuntimeError as e:
             print(f"Caught an exception in GBRL: {e}")
 
-    def set_feature_weights(self, feature_weights:
-                            Union[np.ndarray, float],
+    def set_feature_weights(self, feature_weights: Union[NumericalData, float],
                             model_idx: Optional[int] = None) -> None:
         """
         Sets the feature weights of the model.
 
         Args:
-            feature_weights (Union[np.ndarray, float]): The feature weights.
+            feature_weights (Union[NumericalData, float]): The feature weights.
             model_idx (int, optional): The index of the model.
         """
-        if not isinstance(feature_weights, np.ndarray) and not isinstance(feature_weights, float):
-            raise TypeError("Input should be a numpy array or float")
-
         assert self._cpp_models is not None, "Model not initialized."
-
-        if isinstance(feature_weights, float):
-            feature_weights = np.array([float])
-
-        if feature_weights.ndim > 1:
-            feature_weights = feature_weights.ravel()
-        elif feature_weights.ndim == 0:
-            # Converts 0D arrays to 1D
-            feature_weights = np.array([feature_weights.item()])
-        assert len(feature_weights) == self.input_dim, \
+        
+        # Normalize to 1D vector (handles float, numpy, torch, 0D, and multi-D)
+        feature_weights = normalize_vector_input(feature_weights)
+        
+        # Convert to numpy if it's a tensor
+        if isinstance(feature_weights, th.Tensor):
+            feature_weights = feature_weights.detach().cpu().numpy()
+        
+        # Ensure correct dtype
+        feature_weights = np.ascontiguousarray(feature_weights, dtype=numerical_dtype)
+        
+        assert len(feature_weights) == self.input_dim, (
             "feature weights has to have the same number of elements as features"
+        )
         assert np.all(feature_weights >= 0), "feature weights contains non-positive values"
+        
         try:
             if model_idx is None:
                 for i in range(self.n_learners):
                     self._cpp_models[i].set_feature_weights(feature_weights)
             else:
-                self._cpp_models[model_idx].set_feature_weights(
-                    feature_weights)
+                self._cpp_models[model_idx].set_feature_weights(feature_weights)
         except RuntimeError as e:
             print(f"Caught an exception in GBRL: {e}")
 

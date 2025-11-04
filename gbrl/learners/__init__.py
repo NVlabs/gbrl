@@ -6,3 +6,9 @@
 # https://nvlabs.github.io/gbrl/license.html
 #
 ##############################################################################
+"""
+GBRL Learners Module
+
+This module provides learner classes that wrap the C++ GBRL backend,
+handling training, prediction, and model management for gradient boosting trees.
+"""

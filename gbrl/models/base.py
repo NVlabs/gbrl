@@ -6,6 +6,12 @@
 # https://nvlabs.github.io/gbrl/license.html
 #
 ##############################################################################
+"""
+Base Model Module
+
+This module provides the abstract base class for all GBRL models,
+defining the common interface for gradient boosting tree models.
+"""
 from abc import ABC, abstractmethod
 from typing import Optional, Tuple, Union
 
@@ -17,8 +23,24 @@ from gbrl.learners.gbt_learner import GBTLearner
 
 
 class BaseGBT(ABC):
+    """
+    Abstract base class for gradient boosting tree models.
+
+    This class defines the fundamental interface for all GBRL models and manages
+    common functionality such as parameter storage, gradient tracking, and
+    model serialization.
+
+    Attributes:
+        learner: The underlying GBTLearner instance.
+        grads: Stored gradients from the last backward pass.
+        params: Stored parameters (predictions) from the last forward pass.
+        input: Stored input from the last forward pass (when requires_grad=True).
+    """
     def __init__(self):
-        """General class for gradient boosting trees
+        """
+        Initializes the BaseGBT model.
+
+        Sets up internal state for gradient tracking and parameter storage.
         """
         self.learner = None
         self.grads: Optional[Union[NumericalData, Tuple[Optional[NumericalData], ...]]] = None
@@ -26,14 +48,32 @@ class BaseGBT(ABC):
         self.input = None
 
     def set_bias(self, *args, **kwargs) -> None:
-        """Sets GBRL bias"""
+        """
+        Sets the bias term for the GBRL model.
+
+        This method should be implemented by subclasses to set the initial
+        bias value for predictions.
+
+        Raises:
+            NotImplementedError: This is an abstract method that must be
+                implemented by subclasses.
+        """
         raise NotImplementedError
 
     def set_feature_weights(self, feature_weights: NumericalData) -> None:
-        """Sets GBRL feature_weights
+        """
+        Sets per-feature importance weights for split selection.
+
+        Feature weights are used to scale the contribution of each feature
+        when selecting the best split during tree construction. Higher weights
+        give features more importance in the splitting process.
 
         Args:
-            feature_weights (NumericalData)
+            feature_weights (NumericalData): Array of weights (one per feature).
+                All weights must be >= 0.
+
+        Raises:
+            AssertionError: If learner is not initialized or weights are invalid.
         """
         assert self.learner is not None, "learner must be initialized first"
 
@@ -46,8 +86,14 @@ class BaseGBT(ABC):
 
     def get_iteration(self) -> Union[int, Tuple[int, ...]]:
         """
+        Gets the current number of boosting iterations completed.
+
         Returns:
-            Union[int, Tuple[int, ...]]: number of boosting iterations per learner.
+            Union[int, Tuple[int, ...]]: Number of boosting iterations per learner.
+                Returns a single int for single models or a tuple for multi-models.
+
+        Raises:
+            AssertionError: If learner is not initialized.
         """
         assert self.learner is not None, "learner must be initialized first"
 
@@ -55,9 +101,17 @@ class BaseGBT(ABC):
 
     def get_total_iterations(self) -> int:
         """
+        Gets the total cumulative number of boosting iterations.
+
+        For actor-critic models with separate learners, this returns the sum
+        of iterations across both actor and critic. For single models or shared
+        architectures, this equals get_iteration().
+
         Returns:
-            int: total number of boosting iterations
-            (sum of actor and critic if they are not shared otherwise equals get_iteration())
+            int: Total number of boosting iterations across all learners.
+
+        Raises:
+            AssertionError: If learner is not initialized.
         """
         assert self.learner is not None, "learner must be initialized first"
 
@@ -65,11 +119,17 @@ class BaseGBT(ABC):
 
     def get_schedule_learning_rates(self) -> Union[float, Tuple[float, ...]]:
         """
-        Gets learning rate values for optimizers according to schedule of ensemble.
-        Constant schedule - no change in values.
-        Linear schedule - learning rate value accordign to number of trees in the ensemble.
+        Gets current scheduled learning rate values for all optimizers.
+
+        For constant schedules, returns the initial learning rate unchanged.
+        For linear schedules, returns the learning rate adjusted based on the
+        number of trees in the ensemble relative to the total expected iterations.
+
         Returns:
-            Union[float, Tuple[float, ...]]: learning rate schedule per optimizer.
+            Union[float, Tuple[float, ...]]: Current learning rate(s) per optimizer.
+
+        Raises:
+            AssertionError: If learner is not initialized.
         """
         assert self.learner is not None, "learner must be initialized first"
 
@@ -77,25 +137,45 @@ class BaseGBT(ABC):
 
     @abstractmethod
     def step(self, *args, **kwargs) -> None:
-        """Perform a boosting step (fits a single tree on the gradients)"""
+        """
+        Performs a single boosting step by fitting one tree to gradients.
+
+        This method should be implemented by subclasses to add a new tree to
+        the ensemble based on the computed gradients.
+
+        Raises:
+            NotImplementedError: This is an abstract method that must be
+                implemented by subclasses.
+        """
         pass
 
     def fit(self, *args, **kwargs) -> Union[float, Tuple[float, ...]]:
         """
-        Fit multiple iterations (as in supervised learning)
+        Fits the model for multiple iterations (supervised learning mode).
+
+        This method performs batch training by fitting multiple trees
+        sequentially on the provided data.
 
         Returns:
-            Union[float, Tuple[float, ...]: final loss per learner over all
-            examples.
+            Union[float, Tuple[float, ...]]: Final loss value(s) per learner
+                averaged over all examples.
+
+        Raises:
+            NotImplementedError: This method must be implemented by subclasses
+                that support supervised learning.
         """
         raise NotImplementedError
 
     def get_num_trees(self, *args, **kwargs) -> Union[int, Tuple[int, ...]]:
         """
-        Returns number of trees in the ensemble per learner
+        Gets the total number of trees in the ensemble.
 
         Returns:
-            Union[int, Tuple[int, ...]]: number of trees in the ensemble
+            Union[int, Tuple[int, ...]]: Number of trees in the ensemble per learner.
+                Returns a single int for single models or a tuple for multi-models.
+
+        Raises:
+            AssertionError: If learner is not initialized.
         """
         assert self.learner is not None, "learner must be initialized first"
 
@@ -103,18 +183,24 @@ class BaseGBT(ABC):
 
     def tree_shap(self, tree_idx: int, features: NumericalData, *args, **kwargs) -> \
             Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
-        """Calculates SHAP values for a single tree
-            Implementation based on - https://github.com/yupbank/linear_tree_shap.
-            See Linear TreeShap, Yu et al, 2023, https://arxiv.org/pdf/2209.08192.
+        """
+        Calculates SHAP values for a single tree in the ensemble.
+
+        Implementation based on Linear TreeShap algorithm by Yu et al., 2023.
+        See: https://arxiv.org/pdf/2209.08192 and
+        https://github.com/yupbank/linear_tree_shap
 
         Args:
-            tree_idx (int): tree index
-            features (NumericalData)
+            tree_idx (int): Index of the tree to compute SHAP values for.
+            features (NumericalData): Input features for SHAP computation.
 
         Returns:
-            Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]: SHAP values of
-            shap [n_samples, number of input features, number of outputs]. The
-            output is a tuple of SHAP values per model only in the case of a separate actor-critic model.
+            Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]: SHAP values with
+                shape [n_samples, n_features, n_outputs]. Returns a tuple of SHAP
+                values for separate actor-critic models.
+
+        Raises:
+            AssertionError: If learner is not initialized.
         """
         assert self.learner is not None, "learner must be initialized first"
 
@@ -122,17 +208,24 @@ class BaseGBT(ABC):
 
     def shap(self, features: NumericalData, *args, **kwargs) -> \
             Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
-        """Calculates SHAP values for the entire ensemble
-            Implementation based on - https://github.com/yupbank/linear_tree_shap.
-            See Linear TreeShap, Yu et al, 2023, https://arxiv.org/pdf/2209.08192.
+        """
+        Calculates SHAP values for the entire ensemble.
+
+        Implementation based on Linear TreeShap algorithm by Yu et al., 2023.
+        Computes SHAP values sequentially for each tree and aggregates them.
+        See: https://arxiv.org/pdf/2209.08192 and
+        https://github.com/yupbank/linear_tree_shap
 
         Args:
-            features (NumericalData)
+            features (NumericalData): Input features for SHAP computation.
 
         Returns:
-            Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]: SHAP values of
-            shap [n_samples, number of input features, number of outputs]. The
-            output is a tuple of SHAP values per model only in the case of a separate actor-critic model.
+            Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]: SHAP values with
+                shape [n_samples, n_features, n_outputs]. Returns a tuple of SHAP
+                values for separate actor-critic models.
+
+        Raises:
+            AssertionError: If learner is not initialized.
         """
         assert self.learner is not None, "learner must be initialized first"
 
@@ -140,10 +233,14 @@ class BaseGBT(ABC):
 
     def save_learner(self, save_path: str) -> None:
         """
-        Saves model to file
+        Saves the model to disk.
 
         Args:
-            filename (str): Absolute path and name of save filename.
+            save_path (str): Absolute path and filename for saving the model.
+                The .gbrl_model extension will be added automatically.
+
+        Raises:
+            AssertionError: If learner is not initialized.
         """
         assert self.learner is not None, "learner must be initialized first"
 
@@ -151,10 +248,16 @@ class BaseGBT(ABC):
 
     def export_learner(self, filename: str, modelname: Optional[str] = None) -> None:
         """
-        Exports learner model as a C-header file
+        Exports the model as a C header file for embedded deployment.
 
         Args:
-            filename (str, optional): Absolute path and name of exported filename.
+            filename (str): Absolute path and filename for the exported header.
+                The .h extension will be added automatically.
+            modelname (Optional[str], optional): Name to use for the model in
+                the C code. Defaults to None (empty string).
+
+        Raises:
+            AssertionError: If learner is not initialized.
         """
         assert self.learner is not None, "learner must be initialized first"
 
@@ -163,14 +266,14 @@ class BaseGBT(ABC):
     @classmethod
     def load_learner(cls, load_name: str, device: str) -> "BaseGBT":
         """
-        Loads a BaseGBT model from a file.
+        Loads a model from disk.
 
         Args:
             load_name (str): Full path to the saved model file.
             device (str): Device to load the model onto ('cpu' or 'cuda').
 
         Returns:
-            BaseGBT: Loaded ParametricActor model.
+            BaseGBT: Loaded model instance of the appropriate subclass.
         """
         instance = cls.__new__(cls)
         instance.learner = GBTLearner.load(load_name, device)
@@ -181,10 +284,11 @@ class BaseGBT(ABC):
 
     def get_params(self) -> Optional[Union[NumericalData, Tuple[NumericalData, ...]]]:
         """
-        Returns predicted model parameters and their respective gradients
+        Gets a copy of the model's predicted parameters from the last forward pass.
 
         Returns:
-            Optional[Union[NumericalData, Tuple[NumericalData, ...]]]
+            Optional[Union[NumericalData, Tuple[NumericalData, ...]]]: Cloned/copied
+                parameters or None if no forward pass has been performed.
         """
         if self.params is None:
             return None
@@ -196,10 +300,11 @@ class BaseGBT(ABC):
 
     def get_grads(self) -> Optional[Union[NumericalData, Tuple[NumericalData, ...]]]:
         """
-        Returns predicted model parameters and their respective gradients
+        Gets a copy of the gradients from the last backward pass.
 
         Returns:
-            Optional[Union[th.Tensor, Tuple[th.Tensor, ...]]]
+            Optional[Union[NumericalData, Tuple[NumericalData, ...]]]: Cloned/copied
+                gradients or None if no backward pass has been performed.
         """
         if self.grads is None:
             return None
@@ -216,10 +321,15 @@ class BaseGBT(ABC):
         return self.grads.detach().clone() if isinstance(self.grads, th.Tensor) else self.grads.copy()
 
     def set_device(self, device: str):
-        """Sets GBRL device (either cpu or cuda)
+        """
+        Sets the computation device for the GBRL model.
 
         Args:
-            device (str): choices are ['cpu', 'cuda']
+            device (str): Target device, must be either 'cpu' or 'cuda'.
+
+        Raises:
+            AssertionError: If device is not 'cpu' or 'cuda', or if learner
+                is not initialized.
         """
         assert device in ['cpu', 'cuda'], "device must be in ['cpu', 'cuda']"
         assert self.learner is not None, "learner must be initialized first"
@@ -227,10 +337,15 @@ class BaseGBT(ABC):
         self.learner.set_device(device)
 
     def get_device(self) -> Union[str, Tuple[str, ...]]:
-        """Returns GBRL device/devices per learner
+        """
+        Gets the current computation device(s) for the model.
 
         Returns:
-            Union[str, Tuple[str, ...]]: GBRL device per model
+            Union[str, Tuple[str, ...]]: Device string ('cpu' or 'cuda') per learner.
+                Returns a single string for single models or a tuple for multi-models.
+
+        Raises:
+            AssertionError: If learner is not initialized.
         """
         assert self.learner is not None, "learner must be initialized first"
 
@@ -239,16 +354,30 @@ class BaseGBT(ABC):
     @abstractmethod
     def __call__(self, *args, **kwargs) -> Union[NumericalData, Tuple[NumericalData, ...]]:
         """
-        Returns GBRL's output as either a Tensor or a numpy array per learner.
+        Performs forward pass through the model.
+
+        This method should be implemented by subclasses to compute predictions
+        and optionally store parameters for gradient computation.
+
+        Returns:
+            Union[NumericalData, Tuple[NumericalData, ...]]: Model predictions
+                (Tensor or numpy array) per learner.
+
+        Raises:
+            NotImplementedError: This is an abstract method that must be
+                implemented by subclasses.
         """
         pass
 
     def print_tree(self, tree_idx: int, *args, **kwargs) -> None:
         """
-        Prints tree information
+        Prints detailed information about a specific tree to stdout.
 
         Args:
-            tree_idx (int): tree index to print
+            tree_idx (int): Index of the tree to print.
+
+        Raises:
+            AssertionError: If learner is not initialized.
         """
         assert self.learner is not None, "learner must be initialized first"
 
@@ -256,11 +385,16 @@ class BaseGBT(ABC):
 
     def plot_tree(self, tree_idx: int, filename: str, *args, **kwargs) -> None:
         """
-        Plots tree using (only works if GBRL was compiled with graphviz)
+        Visualizes a tree and saves it as a PNG image.
+
+        Note: Only works if GBRL was compiled with Graphviz support.
 
         Args:
-            tree_idx (int): tree index to plot
-            filename (str): .png filename to save
+            tree_idx (int): Index of the tree to visualize.
+            filename (str): Output filename for the PNG image (extension optional).
+
+        Raises:
+            AssertionError: If learner is not initialized.
         """
         assert self.learner is not None, "learner must be initialized first"
 
@@ -268,13 +402,26 @@ class BaseGBT(ABC):
 
     def copy(self) -> "BaseGBT":
         """
-        Copy class instance
+        Creates a deep copy of the model instance.
+
+        Returns:
+            BaseGBT: A new instance with copied parameters and state.
         """
         return self.__copy__()
 
     @abstractmethod
     def __copy__(self) -> "BaseGBT":
         """
-        Copy Constructor
+        Copy constructor implementation.
+
+        This method should be implemented by subclasses to create a proper
+        deep copy of the model.
+
+        Returns:
+            BaseGBT: A new instance with copied parameters and state.
+
+        Raises:
+            NotImplementedError: This is an abstract method that must be
+                implemented by subclasses.
         """
         pass

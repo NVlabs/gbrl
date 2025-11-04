@@ -6,6 +6,12 @@
 # https://nvlabs.github.io/gbrl/license.html
 #
 ##############################################################################
+"""
+Base Learner Module
+
+This module provides the abstract base class for all GBRL learners,
+defining the interface for interacting with the C++ GBRL backend.
+"""
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Tuple, Union
 
@@ -188,22 +194,22 @@ class BaseLearner(ABC):
         pass
 
     @abstractmethod
-    def set_bias(self, bias: Union[np.ndarray, float], *args, **kwargs) -> None:
+    def set_bias(self, bias: Union[NumericalData, float], *args, **kwargs) -> None:
         """
         Sets the bias term for the model.
 
         Args:
-            bias (Union[np.ndarray, float]): Bias value(s).
+            bias (Union[NumericalData, float]): Bias value(s).
         """
         pass
 
     @abstractmethod
-    def set_feature_weights(self, feature_weights: Union[np.ndarray, float], *args, **kwargs) -> None:
+    def set_feature_weights(self, feature_weights: Union[NumericalData, float], *args, **kwargs) -> None:
         """
         Sets the feature importance weights.
 
         Args:
-            feature_weights (Union[np.ndarray, float]): Feature weights.
+            feature_weights (Union[NumericalData, float]): Feature weights.
         """
         pass
 

@@ -6,6 +6,12 @@
 # https://nvlabs.github.io/gbrl/license.html
 #
 ##############################################################################
+"""
+GBRL: Gradient Boosted Regression Trees Library
+
+A high-performance gradient boosting library with CPU and GPU support,
+designed for reinforcement learning tasks.
+"""
 __version__ = "1.1.2"
 
 import importlib.util
@@ -17,6 +23,20 @@ _loaded_cpp_module = None
 
 
 def load_cpp_module():
+    """
+    Dynamically loads the GBRL C++ extension module based on the current
+    platform and Python version.
+
+    This function searches for the compiled C++ module in expected directories
+    and loads the appropriate shared library (.so, .dylib, or .pyd) that matches
+    the current Python version and platform.
+
+    Returns:
+        module: The loaded C++ extension module containing the GBRL class.
+
+    Raises:
+        ImportError: If no compatible C++ module is found in the expected locations.
+    """
     global _loaded_cpp_module
     module_name = "gbrl_cpp"
     python_version = (f"cpython-{sys.version_info.major}"

@@ -6,6 +6,13 @@
 # https://nvlabs.github.io/gbrl/license.html
 #
 ##############################################################################
+"""
+Actor-Critic Learner Module
+
+This module provides learner classes for actor-critic architectures,
+supporting both shared and separate tree structures for policy and value
+function learning.
+"""
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np

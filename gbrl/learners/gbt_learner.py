@@ -6,6 +6,13 @@
 # https://nvlabs.github.io/gbrl/license.html
 #
 ##############################################################################
+"""
+Gradient Boosted Tree Learner Module
+
+This module provides the GBTLearner class, which wraps the C++ GBRL backend
+for single gradient boosted tree models. It supports training, prediction,
+SHAP computation, and model serialization.
+"""
 import os
 from typing import Dict, List, Optional, Tuple, Union
 
@@ -15,7 +22,8 @@ import torch as th
 from gbrl import GBRL_CPP
 from gbrl.common.utils import (NumericalData, concatenate_arrays,
                                ensure_leaf_tensor_or_array, get_poly_vectors,
-                               numerical_dtype, preprocess_features, to_numpy)
+                               normalize_vector_input, numerical_dtype,
+                               preprocess_features, to_numpy)
 from gbrl.learners.base import BaseLearner
 
 
@@ -258,50 +266,40 @@ class GBTLearner(BaseLearner):
             num_trees += self.student_model.get_num_trees()
         return num_trees
 
-    def set_bias(self, bias: Union[np.ndarray, float]) -> None:
+    def set_bias(self, bias: Union[NumericalData, float]) -> None:
         """
         Sets the bias of the model.
 
         Args:
-            bias (Union[np.ndarray, float]): The bias value.
+            bias (Union[NumericalData, float]): The bias value.
         """
-        if not isinstance(bias, np.ndarray) and not isinstance(bias, float):
-            raise TypeError("Input should be a numpy array or float")
-
-        if isinstance(bias, float):
-            bias = np.array([bias])
-
-        if bias.ndim > 1:
-            bias = bias.ravel()
-        elif bias.ndim == 0:
-            bias = np.array([bias.item()])  # Converts 0D arrays to 1D
         try:
-            bias = bias.astype(numerical_dtype)
-            self._cpp_model.set_bias(bias)
+            self._cpp_model.set_bias(normalize_vector_input(bias))
         except RuntimeError as e:
             print(f"Caught an exception in GBRL: {e}")
 
-    def set_feature_weights(self, feature_weights: NumericalData) -> None:
+    def set_feature_weights(self, feature_weights: Union[NumericalData, float]) -> None:
         """
         Sets the feature weights of the model.
 
         Args:
-            feature_weights (NumericalData): The feature weights.
+            feature_weights (Union[NumericalData, float]): The feature weights.
         """
-        if not isinstance(feature_weights, np.ndarray) and not isinstance(feature_weights, float):
-            raise TypeError("Input should be a numpy array or float")
-
-        if isinstance(feature_weights, float):
-            feature_weights = np.array([float])
-
-        if feature_weights.ndim > 1:
-            feature_weights = feature_weights.ravel()
-        elif feature_weights.ndim == 0:
-            # Converts 0D arrays to 1D
-            feature_weights = np.array([feature_weights.item()])
-        assert len(feature_weights) == self.input_dim, ("feature weights has to have the "
-                                                        "same number of elements as features")
+        # Normalize to 1D vector (handles float, numpy, torch, 0D, and multi-D)
+        feature_weights = normalize_vector_input(feature_weights)
+        
+        # Convert to numpy if it's a tensor
+        if isinstance(feature_weights, th.Tensor):
+            feature_weights = feature_weights.detach().cpu().numpy()
+        
+        # Ensure correct dtype
+        feature_weights = np.ascontiguousarray(feature_weights, dtype=numerical_dtype)
+        
+        assert len(feature_weights) == self.input_dim, (
+            "feature weights has to have the same number of elements as features"
+        )
         assert np.all(feature_weights >= 0), "feature weights contains non-positive values"
+        
         try:
             self._cpp_model.set_feature_weights(feature_weights)
         except RuntimeError as e:

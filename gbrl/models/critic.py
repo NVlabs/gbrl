@@ -6,6 +6,13 @@
 # https://nvlabs.github.io/gbrl/license.html
 #
 ##############################################################################
+"""
+Critic Model Module
+
+This module provides critic (value function) models for reinforcement learning,
+including ContinuousCritic for continuous action spaces and DiscreteCritic
+for discrete action spaces.
+"""
 from typing import Dict, Optional, Tuple, Union
 
 import numpy as np
