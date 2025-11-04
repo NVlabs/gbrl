@@ -417,21 +417,27 @@ class MultiGBTLearner(BaseLearner):
             num_trees.append(_num_trees)
         return tuple(num_trees)
 
-    def set_bias(self, bias: Union[NumericalData, float],
+    def set_bias(self, bias: Union[Union[NumericalData, float],
+                                   List[Union[NumericalData, float]]],
                  model_idx: Optional[int] = None) -> None:
         """
         Sets the bias of the model.
 
         Args:
-            bias (Union[NumericalData, float]): The bias value.
+            bias (Union[Union[NumericalData, float],
+                                   List[Union[NumericalData, float]]]): The bias value.
             model_idx (int, optional): model index to set bias to.
         """
         assert self._cpp_models is not None, "Model not initialized."
         try:
             if model_idx is None:
+                assert isinstance(bias, list) and len(bias) == self.n_learners, \
+                    "When model_idx is None, bias must be a list with length equal to n_learners"
                 for i in range(self.n_learners):
-                    self._cpp_models[i].set_bias(normalize_vector_input(bias))
+                    self._cpp_models[i].set_bias(normalize_vector_input(bias[i]))
             else:
+                assert not isinstance(bias, list), \
+                    "When model_idx is specified, bias should not be a list"
                 self._cpp_models[model_idx].set_bias(normalize_vector_input(bias))
         except RuntimeError as e:
             print(f"Caught an exception in GBRL: {e}")

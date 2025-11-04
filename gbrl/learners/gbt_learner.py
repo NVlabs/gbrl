@@ -287,14 +287,14 @@ class GBTLearner(BaseLearner):
         """
         # Normalize to 1D vector (handles float, numpy, torch, 0D, and multi-D)
         feature_weights = normalize_vector_input(feature_weights)
-        
+
         # Convert to numpy if it's a tensor
         if isinstance(feature_weights, th.Tensor):
             feature_weights = feature_weights.detach().cpu().numpy()
-        
+
         # Ensure correct dtype
         feature_weights = np.ascontiguousarray(feature_weights, dtype=numerical_dtype)
-        
+
         assert len(feature_weights) == self.input_dim, (
             "feature weights has to have the same number of elements as features"
         )

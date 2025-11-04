@@ -493,6 +493,7 @@ PYBIND11_MODULE(gbrl_cpp, m) {
                 n_samples = static_cast<int>(bias_shape[0]);
                 bias_dim = 1;
             }
+
             if (n_samples > 1){
                 std::stringstream ss;
                 ss << "Set bias with multiple samples is not supported!";

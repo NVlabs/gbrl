@@ -58,7 +58,8 @@ class BaseGBT(ABC):
             NotImplementedError: This is an abstract method that must be
                 implemented by subclasses.
         """
-        raise NotImplementedError
+        assert self.learner is not None, "learner must be initialized first"
+        self.learner.set_bias(*args, **kwargs)
 
     def set_feature_weights(self, feature_weights: NumericalData) -> None:
         """

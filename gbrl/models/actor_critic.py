@@ -13,7 +13,7 @@ This module provides the ActorCritic model, which combines policy and value
 function learning in a single or separate tree architecture.
 """
 import os
-from typing import Dict, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch as th
@@ -39,7 +39,8 @@ class ActorCritic(BaseGBT):
                  value_optimizer: Dict,
                  shared_tree_struct: bool = True,
                  params: Dict = dict(),
-                 bias: Optional[Union[float, np.ndarray]] = None,
+                 bias: Optional[Union[Union[float, NumericalData],
+                                List[Union[float, NumericalData]]]] = None,
                  verbose: int = 0,
                  device: str = 'cpu'):
         """
@@ -76,10 +77,17 @@ class ActorCritic(BaseGBT):
         self.shared_tree_struct = True if value_optimizer is None else \
             shared_tree_struct
 
-        bias = bias if bias is not None else np.zeros(output_dim if
-                                                      shared_tree_struct
-                                                      else output_dim - 1,
-                                                      dtype=numerical_dtype)
+        if bias is None:
+            if shared_tree_struct:
+                bias = np.zeros(output_dim, dtype=numerical_dtype)
+            else:
+                bias = [np.zeros(output_dim - 1, dtype=numerical_dtype), 0]
+
+        if not shared_tree_struct and not isinstance(bias, list):
+            raise ValueError("When using separate tree structures for actor"
+                             " and critic, bias must be a list of two "
+                             "elements: [actor_bias, critic_bias]")
+
         if isinstance(bias, float):
             bias = bias * np.ones(output_dim if shared_tree_struct else output_dim - 1,
                                   dtype=numerical_dtype)
@@ -92,8 +100,6 @@ class ActorCritic(BaseGBT):
                                                     policy_optimizer=policy_optimizer,
                                                     value_optimizer=value_optimizer,
                                                     params=params, verbose=verbose, device=device)
-            self.learner.reset()
-            self.learner.set_bias(bias)
         else:
             self.learner = SeparateActorCriticLearner(input_dim=input_dim,
                                                       output_dim=output_dim,
@@ -101,8 +107,8 @@ class ActorCritic(BaseGBT):
                                                       policy_optimizer=policy_optimizer,
                                                       value_optimizer=value_optimizer,
                                                       params=params, verbose=verbose, device=device)
-            self.learner.reset()
-            self.learner.set_bias(bias, model_idx=0)
+        self.learner.reset()
+        self.learner.set_bias(bias)  # type: ignore
         self.policy_grads = None
         self.value_grads = None
 
