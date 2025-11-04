@@ -53,8 +53,8 @@ TreeNode::~TreeNode(){
     // Setting to nullptr is optional in the destructor
     this->left_child = nullptr;
     this->right_child = nullptr;
-
 }
+
 
 int TreeNode::splitNode(const float *obs, const char *categorical_obs, const int _node_idx, const splitCandidate &split_candidate){
     std::vector<int> pre_left_indices(this->n_samples), pre_right_indices(this->n_samples);
@@ -139,6 +139,7 @@ int TreeNode::splitNode(const float *obs, const char *categorical_obs, const int
         std::copy(split_candidate.categorical_value, split_candidate.categorical_value + MAX_CHAR_SIZE, this->right_child->split_conditions[this->depth].categorical_value);
     }
     this->right_child->split_conditions[this->depth].inequality_direction = true;
+
     return 0;
 }
 
@@ -161,15 +162,15 @@ float TreeNode::getSplitScore(dataSet *dataset, const float *feature_weights, sc
     switch (split_score_func) {
         case L2: {
             if (is_numeric)
-                return this->splitScoreL2(dataset->obs, feature_weights, dataset->build_grads, split_candidate, min_data_in_leaf);
+                return this->splitScoreL2(dataset->obs->data, feature_weights, dataset->build_grads->data, split_candidate, min_data_in_leaf);
             else
-                return this->splitScoreL2Categorical(dataset->categorical_obs, feature_weights, dataset->build_grads, split_candidate, min_data_in_leaf);
+                return this->splitScoreL2Categorical(dataset->categorical_obs->data, feature_weights, dataset->build_grads->data, split_candidate, min_data_in_leaf);
         }
         case Cosine: {
             if (is_numeric)
-                return this->splitScoreCosine(dataset->obs, feature_weights, dataset->build_grads, split_candidate, min_data_in_leaf);
+                return this->splitScoreCosine(dataset->obs->data, feature_weights, dataset->build_grads->data, split_candidate, min_data_in_leaf);
             else
-                return this->splitScoreCosineCategorical(dataset->categorical_obs, feature_weights, dataset->build_grads,  split_candidate, min_data_in_leaf);
+                return this->splitScoreCosineCategorical(dataset->categorical_obs->data, feature_weights, dataset->build_grads->data,  split_candidate, min_data_in_leaf);
         }
         default: {
             std::cerr << "Unknown scoreFunc." << std::endl;

@@ -14,6 +14,7 @@
 #include <omp.h>
 
 #include "cuda_types.h"
+#include "cuda_utils.h"
 #include "types.h"
 
 ensembleData* ensemble_data_alloc_cuda(ensembleMetaData *metadata){
@@ -42,17 +43,8 @@ ensembleData* ensemble_data_alloc_cuda(ensembleMetaData *metadata){
     size_t sample_size = metadata->max_leaves * sizeof(int);
     data_size += sample_size;
 #endif
-    cudaError_t alloc_error = cudaMalloc((void**)&data, data_size);
+    cudaError_t alloc_error = allocateCudaMemory((void**)&data, data_size, "when trying to allocate memory for ensemble_data_alloc");
     if (alloc_error != cudaSuccess) {
-        size_t free_mem, total_mem;
-        cudaMemGetInfo(&free_mem, &total_mem);
-        std::cerr << "CUDA error: " << cudaGetErrorString(alloc_error)
-                << " when trying to allocate " << (data_size / (1024.0 * 1024.0)) << " MB."
-                << std::endl;
-        std::cerr << "Free memory: " << (free_mem / (1024.0 * 1024.0)) << " MB."
-                << std::endl;
-        std::cerr << "Total memory: " << (total_mem / (1024.0 * 1024.0)) << " MB."
-                << std::endl;
         return nullptr;
     }
     cudaMemset(data, 0, data_size);
@@ -114,17 +106,8 @@ ensembleData* ensemble_copy_data_alloc_cuda(ensembleMetaData *metadata){
     size_t sample_size = metadata->max_leaves * sizeof(int);
     data_size += sample_size;
 #endif
-    cudaError_t alloc_error = cudaMalloc((void**)&data, data_size);
+    cudaError_t alloc_error = allocateCudaMemory((void**)&data, data_size, "when trying to allocate memory for ensemble_copy_data");
     if (alloc_error != cudaSuccess) {
-        size_t free_mem, total_mem;
-        cudaMemGetInfo(&free_mem, &total_mem);
-        std::cerr << "CUDA error: " << cudaGetErrorString(alloc_error)
-                << " when trying to allocate " << (data_size / (1024.0 * 1024.0)) << " MB."
-                << std::endl;
-        std::cerr << "Free memory: " << (free_mem / (1024.0 * 1024.0)) << " MB."
-                << std::endl;
-        std::cerr << "Total memory: " << (total_mem / (1024.0 * 1024.0)) << " MB."
-                << std::endl;
         return nullptr;
     }
     cudaMemset(data, 0, data_size);
@@ -266,19 +249,11 @@ splitDataGPU* allocate_split_data(ensembleMetaData *metadata, const int n_candid
         data_alloc_size += sizeof(float) * n_candidates * nodes_per_evaluation;
 
     char *data_alloc;
-    cudaError_t err = cudaMalloc((void**)&data_alloc, data_alloc_size);
+    cudaError_t err = allocateCudaMemory((void**)&data_alloc, data_alloc_size, "when trying to allocate memory for allocate_split_data");
     if (err != cudaSuccess) {
-        size_t free_mem, total_mem;
-        cudaMemGetInfo(&free_mem, &total_mem);
-        std::cerr << "CUDA error: " << cudaGetErrorString(err)
-                << " when trying to allocate " << (data_alloc_size / (1024.0 * 1024.0)) << " MB."
-                << std::endl;
-        std::cerr << "Free memory: " << (free_mem / (1024.0 * 1024.0)) << " MB."
-                << std::endl;
-        std::cerr << "Total memory: " << (total_mem / (1024.0 * 1024.0)) << " MB."
-                << std::endl;
         return nullptr;
     }
+
     cudaMemset(data_alloc, 0, data_alloc_size);
     size_t trace = 0;
     split_data->split_scores = (float *)(data_alloc + trace);

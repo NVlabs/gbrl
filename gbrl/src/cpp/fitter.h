@@ -26,6 +26,7 @@ class Fitter {
         static void calc_leaf_value(dataSet *data, ensembleData *edata, ensembleMetaData *metadata, const int leaf_idx, const int tree_idx);
         
         static void control_variates(dataSet *dataset, ensembleData *edata, ensembleMetaData *metadata);
+
 };
 
 #endif

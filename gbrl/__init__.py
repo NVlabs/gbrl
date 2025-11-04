@@ -6,7 +6,7 @@
 # https://nvlabs.github.io/gbrl/license.html
 #
 ##############################################################################
-__version__ = "1.1.1"
+__version__ = "1.1.2"
 
 import importlib.util
 import os

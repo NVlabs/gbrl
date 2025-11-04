@@ -284,7 +284,7 @@ void linear_tree_shap(const ensembleMetaData *metadata, const ensembleData *edat
         _broadcast_mat_elementwise_mult_by_vec_into_mat(G_depth, C_depth, shap_data->predictions + crnt_node * metadata->output_dim, 0.0f, metadata->max_depth, metadata->output_dim, metadata->par_th, true);
     }
     else{
-        bool is_greater = (shap_data->numerics[crnt_node]) ? dataset->obs[sample_offset*metadata->n_num_features + shap_data->feature_indices[crnt_node]] > shap_data->feature_values[crnt_node]: strcmp(&dataset->categorical_obs[(sample_offset*metadata->n_cat_features + shap_data->feature_indices[crnt_node]) * MAX_CHAR_SIZE],  shap_data->categorical_values + crnt_node*MAX_CHAR_SIZE) == 0;
+        bool is_greater = (shap_data->numerics[crnt_node]) ? dataset->obs->data[sample_offset*metadata->n_num_features + shap_data->feature_indices[crnt_node]] > shap_data->feature_values[crnt_node]: strcmp(&dataset->categorical_obs->data[(sample_offset*metadata->n_cat_features + shap_data->feature_indices[crnt_node]) * MAX_CHAR_SIZE],  shap_data->categorical_values + crnt_node*MAX_CHAR_SIZE) == 0;
         shap_data->active_nodes[right] = (is_greater) ? true : false;
         shap_data->active_nodes[left] = (is_greater) ? false : true;
         linear_tree_shap(metadata, edata, shap_data, dataset, shap_values, left, crnt_depth + 1, shap_data->feature_indices[crnt_node], sample_offset);

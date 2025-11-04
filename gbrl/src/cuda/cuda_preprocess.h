@@ -21,6 +21,26 @@ int quantile_candidates_cuda(const float* __restrict__ obs, const int* __restric
 int uniform_candidates_cuda(const float* __restrict__ obs, int* candidate_indices, float* candidate_values,const int n_samples, const int n_features, const int n_bins);
 int process_candidates_cuda(const float* gpu_obs, const char* categorical_obs, const float *grad_norms, int* candidate_indices, float *candidate_values, char* candidate_categories, bool* candidate_numerics, const int n_samples, const int n_num_features, const int n_cat_features, const int n_bins, const generatorType generator_type);
 float* transpose_matrix(const float *mat, float *trans_mat, const int width, const int height);
+void shuffle_and_copy_cuda(
+    const float* d_obs,
+    const float* d_targets,
+    const char* d_categorical_obs,
+    const int* d_indices,
+    float* d_training_obs,
+    float* d_training_targets,
+    char* d_training_cat_obs,
+    int n_samples,
+    int n_num_features,
+    int n_cat_features,
+    int output_dim,
+    int max_char_size
+);
+void column_mean_reduce(
+    const float* d_in,
+    float* d_out,
+    size_t n_rows,
+    size_t n_cols
+);
 #ifdef __CUDACC__  // This macro is defined by NVCC
 __global__ void iota_kernel(int *arr, int size);
 __global__ void bitonic_sort_kernel(const float* __restrict__ input, int* __restrict__ indices, int n_rows, int n_features);
@@ -32,6 +52,26 @@ __global__ void get_colwise_min(const float* __restrict__ input, const int n_col
 __global__ void get_colwise_max(const float* __restrict__ input, const int n_cols, float* __restrict__ per_col_max, const int n_rows);
 __global__ void linspace_kernel(const float* __restrict__ min_vec, const float* __restrict__ max_vec, int n_features, int n_bins, int* __restrict__ candidate_indices, float* __restrict__ candidate_values, char* __restrict__ candidate_cateogories, bool* __restrict__ candidate_numerics);
 __global__ void transpose1D(float *out, const float *in, int width, int height);
+__global__ void shuffle_and_copy_kernel(
+    const float* __restrict__ obs,
+    const float* __restrict__ targets,
+    const char* __restrict__ categorical_obs,
+    const int* __restrict__ indices,
+    float* __restrict__ training_obs,
+    float* __restrict__ training_targets,
+    char* __restrict__ training_cat_obs,
+    int n_samples,
+    int n_num_features,
+    int n_cat_features,
+    int output_dim,
+    int max_char_size
+);
+__global__ void column_mean_reduce_kernel(
+    const float * __restrict__ in,
+    float * __restrict__ out,
+    size_t n_rows,
+    size_t n_cols
+);
 #endif 
 
 #ifdef __cplusplus

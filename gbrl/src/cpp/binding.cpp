@@ -57,7 +57,7 @@ void get_tensor_info(py::tuple tensor_info, T*& ptr, std::vector<size_t>& shape,
     // size_t raw_ptr = tensor_info[0].cast<size_t>();
     size_t raw_ptr = tensor_info[0].cast<uintptr_t>();
 
-    if (raw_ptr == 0 || raw_ptr == (size_t)-1) {  // Check for null or invalid pointer values
+    if (raw_ptr == 0 || raw_ptr == (size_t) - 1) {  // Check for null or invalid pointer values
         std::cerr << "ERROR: Extracted an invalid pointer! Setting ptr to nullptr." << std::endl;
         ptr = nullptr;
     } else {
@@ -99,8 +99,11 @@ void handle_input_info(py::object& input, T*& ptr, std::vector<size_t>& shape, s
     if (input.is_none()) {
         if (!none_allowed)
             throw std::runtime_error("Cannot call " + function_name + " without " + name + "!");
-        else
+        else{
+            device = "cpu";
+            ptr = nullptr;
             return;
+        }
     } 
     if (py::isinstance<py::array>(input)) {
         get_numpy_array_info<T>(input, ptr, shape, expected_format);  // Handle NumPy array input
@@ -158,6 +161,10 @@ py::object return_tensor_info(int num_samples, int output_dim, float *ptr, devic
     } else {
         shape = {static_cast<int64_t>(num_samples), static_cast<int64_t>(output_dim)};  // 2D case
     }
+#ifdef USE_CUDA
+    if (device == gpu && !is_torch)
+        is_torch = true;
+#endif
     if (is_torch){
         DLDevice device_dl = {kDLCPU, 0};
         DLDataType dtype = {kDLFloat, 32, 1};
@@ -181,6 +188,7 @@ py::dict metadataToDict(const ensembleMetaData* metadata){
     if (metadata != nullptr){
         d["input_dim"] = metadata->input_dim;
         d["output_dim"] = metadata->output_dim;
+        d["policy_dim"] = metadata->policy_dim;
         d["split_score_func"] = scoreFuncToString(metadata->split_score_func);
         d["generator_type"] = generatorTypeToString(metadata->generator_type);
         d["use_control_variates"] = metadata->use_cv;
@@ -195,6 +203,57 @@ py::dict metadataToDict(const ensembleMetaData* metadata){
     }
     return d;
 }
+
+py::dict ensembleDataToDict(const ensembleData* data, const ensembleMetaData* metadata) {
+    py::dict d;
+    if (data != nullptr) {
+        // Convert float pointers to NumPy arrays with ownership transfer
+        auto bias_capsule = py::capsule(data->bias, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
+        d["bias"] = py::array_t<float>({metadata->output_dim}, data->bias, bias_capsule);
+
+        auto feature_weights_capsule = py::capsule(data->feature_weights, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
+        d["feature_weights"] = py::array_t<float>({metadata->input_dim}, data->feature_weights, feature_weights_capsule);
+
+        auto tree_indices_capsule = py::capsule(data->tree_indices, [](void* ptr) { delete[] reinterpret_cast<int*>(ptr); });
+        d["tree_indices"] = py::array_t<int>({metadata->n_trees}, data->tree_indices, tree_indices_capsule);
+
+        int split_sizes = (metadata->grow_policy == OBLIVIOUS) ? metadata->n_trees : metadata->n_leaves;
+
+        auto depths_capsule = py::capsule(data->depths, [](void* ptr) { delete[] reinterpret_cast<int*>(ptr); });
+        d["depths"] = py::array_t<int>({split_sizes}, data->depths, depths_capsule);
+
+        auto values_capsule = py::capsule(data->values, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
+        d["values"] = py::array_t<float>({metadata->n_leaves, metadata->output_dim}, data->values, values_capsule);
+
+        auto feature_indices_capsule = py::capsule(data->feature_indices, [](void* ptr) { delete[] reinterpret_cast<int*>(ptr); });
+        d["feature_indices"] = py::array_t<int>({split_sizes, metadata->max_depth}, data->feature_indices, feature_indices_capsule);
+
+        auto feature_values_capsule = py::capsule(data->feature_values, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
+        d["feature_values"] = py::array_t<float>({split_sizes, metadata->max_depth}, data->feature_values, feature_values_capsule);
+
+        auto edge_weights_capsule = py::capsule(data->edge_weights, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
+        d["edge_weights"] = py::array_t<float>({metadata->n_leaves, metadata->max_depth}, data->edge_weights, edge_weights_capsule);
+
+        auto is_numerics_capsule = py::capsule(data->is_numerics, [](void* ptr) { delete[] reinterpret_cast<bool*>(ptr); });
+        d["is_numerics"] = py::array_t<bool>({split_sizes, metadata->max_depth}, data->is_numerics, is_numerics_capsule);
+
+        auto inequality_directions_capsule = py::capsule(data->inequality_directions, [](void* ptr) { delete[] reinterpret_cast<bool*>(ptr); });
+        d["inequality_directions"] = py::array_t<bool>({metadata->n_leaves, metadata->max_depth}, data->inequality_directions, inequality_directions_capsule);
+      
+        // Convert char* categorical_values to NumPy string array (S128)
+        auto categorical_capsule = py::capsule(data->categorical_values, [](void* ptr) { delete[] reinterpret_cast<char*>(ptr); });
+        d["categorical_values"] = py::array(py::dtype("S128"), {split_sizes, metadata->max_depth}, data->categorical_values, categorical_capsule);
+        
+        d["alloc_data_size"] = data->alloc_data_size;
+
+#ifdef DEBUG
+        auto n_samples_capsule = py::capsule(data->n_samples, [](void* ptr) { delete[] reinterpret_cast<int*>(ptr); });
+        d["n_samples"] = py::array_t<int>({metadata->n_leaves}, data->n_samples, n_samples_capsule);
+#endif
+    }
+    return d;
+}
+
 
 py::dict optimizerToDict(const optimizerConfig* conf){
     py::dict d;
@@ -226,9 +285,10 @@ py::list getOptimizerConfigs(const std::vector<Optimizer*>& opts) {
 
 PYBIND11_MODULE(gbrl_cpp, m) {
     py::class_<GBRL> gbrl(m, "GBRL");
-    gbrl.def(py::init<int, int, int, int, int, int, float, std::string, std::string, bool, int, std::string, int, std::string>(),
+    gbrl.def(py::init<int, int, int, int, int, int, int, float, std::string, std::string, bool, int, std::string, int, std::string>(),
          py::arg("input_dim")=1, 
          py::arg("output_dim")=1, 
+         py::arg("policy_dim")=1, 
          py::arg("max_depth")=4, 
          py::arg("min_data_in_leaf")=0, 
          py::arg("n_bins")=256, 
@@ -259,95 +319,157 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         float* grads_ptr = nullptr;
         std::vector<size_t> obs_shape, cat_obs_shape, grads_shape;
         std::string obs_device, cat_obs_device, grads_device;
-        int n_samples, n_num_features = 0, n_cat_features = 0;
+        int n_samples, n_num_features = 0, n_cat_features = 0, grad_output_dim;
+        int n_obs_samples, n_cat_samples;
+        
         handle_input_info<float>(grads, grads_ptr, grads_shape, grads_device, "grads", false, "step");
         if (grads_shape.size() == 1){
-            if (self.metadata->output_dim == 1){
-                n_samples  = static_cast<int>(grads_shape[0]);
-            }
-            else{
+            if (self.metadata->output_dim > 1){
                 n_samples = 1;
+                grad_output_dim = static_cast<int>(grads_shape[0]);
+            } else{
+                n_samples = static_cast<int>(grads_shape[0]);
+                grad_output_dim = 1;
             }
-        } else if (grads_shape.size() > 1){
-            n_samples  = static_cast<int>(grads_shape[0]);
+        } else {
+            n_samples = static_cast<int>(grads_shape[0]);
+            grad_output_dim = static_cast<int>(grads_shape[1]);
         }
-        handle_input_info<const float>(obs, obs_ptr, obs_shape, obs_device, "obs", true, "step"); 
+        if (grad_output_dim != self.metadata->output_dim){
+                std::stringstream ss;
+                ss << "Gradient output dim " << grad_output_dim << " != correct output dim " << self.metadata->output_dim;
+                throw std::runtime_error(ss.str());
+            }
+
+        dataHolder<float> grads_handler{grads_ptr, stringTodeviceType(grads_device)};
+
+        handle_input_info<const float>(obs, obs_ptr, obs_shape, obs_device, "obs", true, "step");
         if (obs_ptr != nullptr){
-            int n_obs_samples = 0;
-            if (obs_shape.size() == 1){
-                n_obs_samples = 1;
-                n_num_features = static_cast<int>(obs_shape[0]);
-            } else if (obs_shape.size() > 1){
-                n_obs_samples  = static_cast<int>(obs_shape[0]);
-                n_num_features = static_cast<int>(obs_shape[1]);
-            }
-            if (obs_device != grads_device){
-                std::stringstream ss;
-                ss << "Observations device: " << obs_device << " != Gradient device " << grads_device;
-                throw std::runtime_error(ss.str());
-            }
-            if (n_obs_samples != n_samples){
-                std::stringstream ss;
-                ss << "Number of observations " << n_obs_samples << " != number of gradient samples " << n_samples;
-                throw std::runtime_error(ss.str());
-            }
-        }
-        handle_input_info<const char>(categorical_obs, cat_obs_ptr, cat_obs_shape, cat_obs_device, "cat_obs", true, "step", CAT_TYPE);
-        int n_cat_samples = 0;
-        if (cat_obs_ptr != nullptr)
-        {
-            if (cat_obs_shape.size() == 1){
-                n_cat_samples = 1;
-                n_cat_features = static_cast<int>(cat_obs_shape[0]);
-            } else if (cat_obs_shape.size() > 1){
-                n_cat_samples  = static_cast<int>(cat_obs_shape[0]);
-                n_cat_features = static_cast<int>(cat_obs_shape[1]);
-            }
-            if (n_cat_samples != n_samples){
-                std::stringstream ss;
-                ss << "Number of categorical observations " << n_cat_samples << " != number of gradient samples " << n_samples;
-                throw std::runtime_error(ss.str());
+            if (n_samples == 1){
+               n_num_features = static_cast<int>(obs_shape[0]);
+               if (obs_shape.size() > 1){
+                    std::stringstream ss;
+                    ss << "gradients has 1 sample but observations have multiple.";
+                    throw std::runtime_error(ss.str());
+               }
+            } else {
+                n_obs_samples = static_cast<int>(obs_shape[0]);
+                n_num_features = (obs_shape.size() == 1) ? 1 : static_cast<int>(obs_shape[1]);
+                if (n_obs_samples != n_samples){
+                    std::stringstream ss;
+                    ss << "Number of observations " << n_obs_samples << " != number of gradient samples " << n_samples;
+                    throw std::runtime_error(ss.str());
+                }
             }
         }
 
-        py::gil_scoped_release release; 
-        self.step(obs_ptr, cat_obs_ptr, grads_ptr, n_samples, n_num_features, n_cat_features, stringTodeviceType(grads_device)); 
+        dataHolder<const float> obs_handler{obs_ptr, stringTodeviceType(obs_device)};
+
+        handle_input_info<const char>(categorical_obs, cat_obs_ptr, cat_obs_shape, cat_obs_device, "cat_obs", true, "step", CAT_TYPE);
+        if (cat_obs_ptr != nullptr){
+            if (n_samples == 1){
+               n_cat_features = static_cast<int>(cat_obs_shape[0]);
+               if (cat_obs_shape.size() > 1){
+                    std::stringstream ss;
+                    ss << "gradients has 1 sample but categorical observations have multiple.";
+                    throw std::runtime_error(ss.str());
+               }
+            } else {
+                n_cat_samples = static_cast<int>(cat_obs_shape[0]);
+                n_cat_features = (cat_obs_shape.size() == 1) ? 1 : static_cast<int>(cat_obs_shape[1]);
+                if (n_cat_samples != n_samples){
+                    std::stringstream ss;
+                    ss << "Number of categorical observations " << n_cat_samples << " != number of gradient samples " << n_samples;
+                    throw std::runtime_error(ss.str());
+                }
+            }
+        }
+
+        dataHolder<const char> cat_obs_handler{cat_obs_ptr, stringTodeviceType(cat_obs_device)};
+
+        py::gil_scoped_release release;
+        self.step(&obs_handler, &cat_obs_handler, &grads_handler, n_samples, n_num_features, n_cat_features);
     },  py::arg("obs"),
         py::arg("categorical_obs"),
         py::arg("grads"),
     "Fit a decision tree with the given observations and gradients");
-    gbrl.def("fit", [](GBRL &self, py::object &obs, py::object &categorical_obs, py::array_t<float> &targets, int iterations, bool shuffle, std::string loss_type) -> float {
-        if (!targets.attr("flags").attr("c_contiguous").cast<bool>()) {
-            throw std::runtime_error("Arrays must be C-contiguous");
-        }
-
+    gbrl.def("fit", [](GBRL &self, py::object &obs, py::object &categorical_obs, py::object &targets, int iterations, bool shuffle, std::string loss_type) -> float {
         float* obs_ptr = nullptr;
-        int n_num_features = 0;
-        if (!obs.is_none()) {
-            py::array_t<float> obs_array = py::cast<py::array_t<float>>(obs);
-            if (!obs_array.attr("flags").attr("c_contiguous").cast<bool>())
-                throw std::runtime_error("Arrays must be C-contiguous");
-            py::buffer_info info_obs = obs_array.request();
-            obs_ptr = static_cast<float*>(info_obs.ptr);
-            n_num_features = static_cast<int>(info_obs.shape[1]);
+        char* cat_obs_ptr = nullptr;
+        float* targets_ptr = nullptr;
+        std::vector<size_t> obs_shape, cat_obs_shape, targets_shape;
+        std::string obs_device, cat_obs_device, targets_device;
+        int n_samples, n_num_features = 0, n_cat_features = 0;
+        int target_output_dim, n_obs_samples, n_cat_samples;
+
+        handle_input_info<float>(targets, targets_ptr, targets_shape, targets_device, "targets", false, "fit");
+        if (targets_shape.size() == 1){
+            if (self.metadata->output_dim > 1){
+                n_samples = 1;
+                target_output_dim = static_cast<int>(targets_shape[0]);
+            } else{
+                n_samples = static_cast<int>(targets_shape[0]);
+                target_output_dim = 1;
+            }
+        } else {
+            n_samples = static_cast<int>(targets_shape[0]);
+            target_output_dim = static_cast<int>(targets_shape[1]);
+        }
+        if (target_output_dim != self.metadata->output_dim){
+                std::stringstream ss;
+                ss << "Targets output dim " << target_output_dim << " != correct output dim " << self.metadata->output_dim;
+                throw std::runtime_error(ss.str());
+            }
+
+        dataHolder<float> targets_handler{targets_ptr, stringTodeviceType(targets_device)};
+
+        handle_input_info<float>(obs, obs_ptr, obs_shape, obs_device, "obs", true, "fit"); 
+        if (obs_ptr != nullptr){
+            if (n_samples == 1){
+               n_num_features = static_cast<int>(obs_shape[0]);
+               if (obs_shape.size() > 1){
+                    std::stringstream ss;
+                    ss << "gradients has 1 sample but observations have multiple.";
+                    throw std::runtime_error(ss.str());
+               }
+            } else {
+                n_obs_samples = static_cast<int>(obs_shape[0]);
+                n_num_features = (obs_shape.size() == 1) ? 1 : static_cast<int>(obs_shape[1]);
+                if (n_obs_samples != n_samples){
+                    std::stringstream ss;
+                    ss << "Number of observations " << n_obs_samples << " != number of gradient samples " << n_samples;
+                    throw std::runtime_error(ss.str());
+                }
+            }
         }
 
-        char* cat_obs_ptr = nullptr;
-        int n_cat_features = 0;
-        if (!categorical_obs.is_none()) {
-            py::array py_array = py::cast<py::array>(categorical_obs);
-            if (!py_array.attr("flags").attr("c_contiguous").cast<bool>())
-                throw std::runtime_error("Arrays must be C-contiguous");
-            py::buffer_info info_categorical_obs = py_array.request();
-            cat_obs_ptr = static_cast<char*>(info_categorical_obs.ptr);
-            n_cat_features = static_cast<int>(info_categorical_obs.shape[1]);
+        dataHolder<float> obs_handler{obs_ptr, stringTodeviceType(obs_device)};
+
+        handle_input_info<char>(categorical_obs, cat_obs_ptr, cat_obs_shape, cat_obs_device, "cat_obs", true, "fit", CAT_TYPE);
+
+        if (cat_obs_ptr != nullptr){
+            if (n_samples == 1){
+               n_cat_features = static_cast<int>(cat_obs_shape[0]);
+               if (cat_obs_shape.size() > 1){
+                    std::stringstream ss;
+                    ss << "gradients has 1 sample but categorical observations have multiple.";
+                    throw std::runtime_error(ss.str());
+               }
+            } else {
+                n_cat_samples = static_cast<int>(cat_obs_shape[0]);
+                n_cat_features = (cat_obs_shape.size() == 1) ? 1 : static_cast<int>(cat_obs_shape[1]);
+                if (n_cat_samples != n_samples){
+                    std::stringstream ss;
+                    ss << "Number of categorical observations " << n_cat_samples << " != number of gradient samples " << n_samples;
+                    throw std::runtime_error(ss.str());
+                }
+            }
         }
-        
-        py::buffer_info info_targets = targets.request();
-        float* targets_ptr = static_cast<float*>(info_targets.ptr);
-        int n_samples = static_cast<int>(info_targets.shape[0]);
+
+        dataHolder<char> cat_obs_handler{cat_obs_ptr, stringTodeviceType(cat_obs_device)};
+
         py::gil_scoped_release release; 
-        return self.fit(obs_ptr, cat_obs_ptr, targets_ptr, iterations, n_samples, n_num_features, n_cat_features, shuffle, loss_type); 
+        return self.fit(&obs_handler, &cat_obs_handler, &targets_handler, iterations, n_samples, n_num_features, n_cat_features, shuffle, loss_type); 
     },  py::arg("obs"),
         py::arg("categorical_obs"),
         py::arg("targets"),
@@ -355,16 +477,30 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         py::arg("shuffle")=true,  
         py::arg("loss_type")="MultiRMSE",  
     "Fit a decision tree with the given observations and targets for <iterations> boosting rounds");
-    gbrl.def("set_bias", [](GBRL &self, const py::array_t<float> &bias) {
-        if (!bias.attr("flags").attr("c_contiguous").cast<bool>()) {
-            throw std::runtime_error("Arrays must be C-contiguous");
+    gbrl.def("set_bias", [](GBRL &self, py::object &bias) {
+        const float *bias_ptr = nullptr;
+        std::vector<size_t> bias_shape;
+        std::string bias_device;
+
+        handle_input_info<const float>(bias, bias_ptr, bias_shape, bias_device, "bias", false, "set_bias");
+
+        int n_samples = (bias_shape.size() == 1) ? 1 : static_cast<int>(bias_shape[0]);
+        int bias_dim = (bias_shape.size() == 1) ? static_cast<int>(bias_shape[0]) : static_cast<int>(bias_shape[1]);
+        if (n_samples > 1){
+            std::stringstream ss;
+            ss << "Bias should be a vector not a tensor -> 1 single sample";
+            throw std::runtime_error(ss.str());
         }
-        
-        py::buffer_info info = bias.request();
-        float* bias_ptr = static_cast<float*>(info.ptr);
+        if (bias_dim != self.metadata->output_dim){
+            std::stringstream ss;
+            ss << "Bias dim " << bias_dim << " != correct output dim " << self.metadata->output_dim;
+            throw std::runtime_error(ss.str());
+        }
+
+        dataHolder<const float> bias_holder{bias_ptr, stringTodeviceType(bias_device)};
         int output_dim = static_cast<int>(len(bias));
         py::gil_scoped_release release; 
-        self.set_bias(bias_ptr, output_dim); 
+        self.set_bias(&bias_holder, output_dim); 
     }, "Set GBRL model bias");
     gbrl.def("set_feature_weights", [](GBRL &self, const py::array_t<float> &feature_weights) {
         if (!feature_weights.attr("flags").attr("c_contiguous").cast<bool>()) {
@@ -407,66 +543,135 @@ PYBIND11_MODULE(gbrl_cpp, m) {
        py::arg("eps")=1.0e-8, py::arg("shrinkage")=0.0,
        "Set optimizer!");
    // predict method
-    gbrl.def("predict", [](GBRL &self, py::object &obs, py::object &categorical_obs, int start_tree_idx, int stop_tree_idx) -> py::object {
+    gbrl.def("predict", [](GBRL &self, py::object &obs, py::object &categorical_obs, int start_tree_idx, int stop_tree_idx, bool return_torch) -> py::object {
         const float* obs_ptr = nullptr;
         const char* cat_obs_ptr= nullptr;
         std::vector<size_t> obs_shape, cat_obs_shape;
-        std::string obs_device, cat_obs_device, device;
+        std::string obs_device, cat_obs_device;
         int n_samples = 0, n_num_features = 0, n_cat_features = 0;
+
         handle_input_info<const float>(obs, obs_ptr, obs_shape, obs_device, "obs", true, "predict");
-        if (obs_ptr != nullptr){
-            device = obs_device;
-            if (obs_shape.size() == 1){
-                n_samples = 1;
-                n_num_features = static_cast<int>(obs_shape[0]);
-            } else if (obs_shape.size() > 1){
-                n_samples  = static_cast<int>(obs_shape[0]);
-                n_num_features = static_cast<int>(obs_shape[1]);
-            }
-        }
         handle_input_info<const char>(categorical_obs, cat_obs_ptr, cat_obs_shape, cat_obs_device, "cat_obs", true, "predict", CAT_TYPE); 
-        if (cat_obs_ptr != nullptr)
-        {
-            device = "cpu";
-            int n_cat_samples = 0;
-            if (cat_obs_shape.size() == 1){
-                n_cat_samples = 1;
-                n_cat_features = static_cast<int>(cat_obs_shape[0]);
-            } else if (cat_obs_shape.size() > 1){
-                n_cat_samples  = static_cast<int>(cat_obs_shape[0]);
-                n_cat_features = static_cast<int>(cat_obs_shape[1]);
-            }
-            if (obs_ptr != nullptr){
-                if (n_cat_samples != n_samples){
-                    std::stringstream ss;
-                    ss << "Number of categorical observations " << n_cat_samples << " != number of numerical observations " << n_samples;
-                    throw std::runtime_error(ss.str());
-                }
-                if (cat_obs_device != obs_device){
-                    std::stringstream ss;
-                    ss << "Categorical observations device: " << cat_obs_device << " != numerical observations device: " << obs_device;
-                    throw std::runtime_error(ss.str());
-                } 
-            } else {
-                n_samples = n_cat_samples;
-            }
+        if (cat_obs_ptr == nullptr && obs_ptr == nullptr){
+            throw std::runtime_error("Cannot call predict without observations!");
         }
 
+        if (obs_ptr != nullptr && cat_obs_ptr != nullptr){
+            if (obs_shape.size() == 1 && cat_obs_shape.size() == 1){
+                if (static_cast<int>(obs_shape[0]) + static_cast<int>(cat_obs_shape[0]) == self.metadata->input_dim){
+                    n_samples = 1;
+                    n_num_features = static_cast<int>(obs_shape[0]);
+                    n_cat_features = static_cast<int>(cat_obs_shape[0]);
+                } else {
+                    if (static_cast<int>(obs_shape[0]) != static_cast<int>(cat_obs_shape[0])){
+                        std::stringstream ss;
+                        ss << "Number of samples is not equal between obs and categorical obs " << obs_shape[0] << " != " << cat_obs_shape[0];
+                        throw std::runtime_error(ss.str());
+                    }
+                    n_samples = static_cast<int>(obs_shape[0]);
+                    n_num_features = 1;
+                    n_cat_features = 1;
+                    if (n_num_features + n_cat_features != self.metadata->input_dim){
+                        std::stringstream ss;
+                        ss << "Total number of features " << n_num_features + n_cat_features << " != input dim " << self.metadata->input_dim;
+                        throw std::runtime_error(ss.str());
+                    }
+                }
+            } else if (obs_shape.size() == 1){
+                if (static_cast<int>(obs_shape[0]) != static_cast<int>(cat_obs_shape[0])){
+                    std::stringstream ss;
+                    ss << "Number of samples is not equal between obs and categorical obs " << obs_shape[0] << " != " << cat_obs_shape[0];
+                    throw std::runtime_error(ss.str());
+                }
+                n_samples = static_cast<int>(obs_shape[0]);
+                n_num_features = 1;
+                n_cat_features = static_cast<int>(cat_obs_shape[1]);
+            } else if (cat_obs_shape.size() == 1){
+                if (static_cast<int>(obs_shape[0]) != static_cast<int>(cat_obs_shape[0])){
+                    std::stringstream ss;
+                    ss << "Number of samples is not equal between obs and categorical obs " << obs_shape[0] << " != " << cat_obs_shape[0];
+                    throw std::runtime_error(ss.str());
+                }
+                n_samples = static_cast<int>(obs_shape[0]);
+                n_num_features = static_cast<int>(obs_shape[1]);
+                n_cat_features = 1;
+            } else {
+                if (static_cast<int>(obs_shape[0]) != static_cast<int>(cat_obs_shape[0])){
+                    std::stringstream ss;
+                    ss << "Number of samples is not equal between obs and categorical obs " << obs_shape[0] << " != " << cat_obs_shape[0];
+                    throw std::runtime_error(ss.str());
+                }
+                n_samples = static_cast<int>(obs_shape[0]);
+                n_num_features = static_cast<int>(obs_shape[1]);
+                n_cat_features = static_cast<int>(cat_obs_shape[1]);
+            }
+        } else if (obs_ptr != nullptr){
+            if (obs_shape.size() == 1){
+                if (static_cast<int>(obs_shape[0]) == self.metadata->input_dim){
+                    n_samples = 1;
+                    n_num_features = static_cast<int>(obs_shape[0]);
+                } else {
+                    n_samples = static_cast<int>(obs_shape[0]);
+                    n_num_features = 1;
+                    if (n_num_features != self.metadata->input_dim){
+                        std::stringstream ss;
+                        ss << "Total number of features " << n_num_features << " != input dim " << self.metadata->input_dim;
+                        throw std::runtime_error(ss.str());
+                    }
+                }
+
+            } else {
+                n_samples = static_cast<int>(obs_shape[0]);
+                n_num_features = static_cast<int>(obs_shape[1]);
+                if (n_num_features != self.metadata->input_dim){
+                    std::stringstream ss;
+                    ss << "Total number of features " << n_num_features << " != input dim " << self.metadata->input_dim;
+                    throw std::runtime_error(ss.str());
+                }
+            }
+        } else {
+            if (cat_obs_shape.size() == 1){
+                if (static_cast<int>(cat_obs_shape[0]) == self.metadata->input_dim){
+                    n_samples = 1;
+                    n_cat_features = static_cast<int>(cat_obs_shape[0]);
+                } else {
+                    n_samples = static_cast<int>(cat_obs_shape[0]);
+                    n_cat_features = 1;
+                    if (n_cat_features != self.metadata->input_dim){
+                        std::stringstream ss;
+                        ss << "Total number of features " << n_cat_features << " != input dim " << self.metadata->input_dim;
+                        throw std::runtime_error(ss.str());
+                    }
+                }
+
+            } else {
+                n_samples = static_cast<int>(cat_obs_shape[0]);
+                n_cat_features = static_cast<int>(cat_obs_shape[1]);
+                if (n_cat_features != self.metadata->input_dim){
+                    std::stringstream ss;
+                    ss << "Total number of features " << n_cat_features << " != input dim " << self.metadata->input_dim;
+                    throw std::runtime_error(ss.str());
+                }
+            }
+        }
+        
+        dataHolder<const float> obs_handler{obs_ptr, stringTodeviceType(obs_device)};
+        dataHolder<const char> cat_obs_handler{cat_obs_ptr,stringTodeviceType(cat_obs_device)};
+
         py::gil_scoped_release release; 
-        float* result_ptr = self.predict(obs_ptr, cat_obs_ptr, n_samples, n_num_features, n_cat_features, start_tree_idx, stop_tree_idx, stringTodeviceType(device));
+        float* result_ptr = self.predict(&obs_handler, &cat_obs_handler, n_samples, n_num_features, n_cat_features, start_tree_idx, stop_tree_idx);
         py::gil_scoped_acquire acquire;
-        bool is_torch = (obs_ptr != nullptr && !py::isinstance<py::array>(obs) && cat_obs_ptr == nullptr);
-        return return_tensor_info(n_samples, self.metadata->output_dim, result_ptr, stringTodeviceType(device), is_torch);
-    }, py::arg("obs"), py::arg("categorical_obs"), py::arg("start_tree_idx")=0, py::arg("stop_tree_idx")=0, "Predict using the model");
+        return return_tensor_info(n_samples, self.metadata->output_dim, result_ptr, self.device, return_torch);
+    }, py::arg("obs"), py::arg("categorical_obs"), py::arg("start_tree_idx")=0, py::arg("stop_tree_idx")=0, py::arg("return_torch")=false, "Predict using the model");
         // saveToFile method
     gbrl.def("save", [](GBRL &self, const std::string& filename) -> int {
         py::gil_scoped_release release; 
         return self.saveToFile(filename); 
     }, "Save the model to a file");
-    gbrl.def("export", [](GBRL &self, const std::string& filename, const std::string& modelname) -> int {
+    gbrl.def("export", [](GBRL &self, const std::string& filename, const std::string& modelname, const std::string& export_format, const std::string &export_type, const std::string& prefix) -> int {
         py::gil_scoped_release release; 
-        return self.exportModel(filename, modelname); 
-    }, py::arg("filename"), py::arg("modelname") = "", "Export model as a C-header file");
+        return self.exportModel(filename, modelname, export_format, export_type, prefix); 
+    }, py::arg("filename"), py::arg("modelname") = "", py::arg("export_format") = "float", py::arg("export_type") = "full", py::arg("prefix") = "", "Export model as a C-header file");
     gbrl.def("get_scheduler_lrs", [](GBRL &self) ->  py::array_t<float> {
         py::gil_scoped_release release; 
         float* lrs = self.get_scheduler_lrs(); 
@@ -483,6 +688,12 @@ PYBIND11_MODULE(gbrl_cpp, m) {
     gbrl.def("get_metadata", [](GBRL &self) ->  py::dict {
         return metadataToDict(self.metadata); 
     }, "Return ensemble metadata");  
+    gbrl.def("get_ensemble_data", [](GBRL &self) -> py::dict{
+        py::gil_scoped_release release; 
+        ensembleData *edata = self.get_ensemble_data(); 
+        py::gil_scoped_acquire acquire;
+        return ensembleDataToDict(edata, self.metadata);
+    }, "Return ensemble data");
     gbrl.def("get_device", [](GBRL &self) ->  std::string {
         py::gil_scoped_release release; 
         return self.get_device(); 
@@ -494,7 +705,7 @@ PYBIND11_MODULE(gbrl_cpp, m) {
     gbrl.def("print_tree", [](GBRL &self, int tree_idx) {
         py::gil_scoped_release release; 
         self.print_tree(tree_idx); 
-    }, "Print specified tree index");
+    }, py::arg("tree_idx") = -1, "Print specified tree index");
     gbrl.def("tree_shap", [](GBRL &self, const int tree_idx, py::object &obs, py::object &categorical_obs, 
                             py::object &norm_values, py::object &base_poly, py::object &offset) -> py::array_t<float> {
         const float* obs_ptr = nullptr;
@@ -617,5 +828,11 @@ PYBIND11_MODULE(gbrl_cpp, m) {
     gbrl.def("plot_tree", [](GBRL &self, int tree_idx, const std::string &filename) {
         py::gil_scoped_release release; 
         self.plot_tree(tree_idx, filename); 
-    }, "Plot specified tree index to png file"); 
+    }, py::arg("tree_idx") = -1,
+       py::arg("filename"),
+     "Plot specified tree index to png file"); 
+    gbrl.def("print_ensemble_metadata", [](GBRL &self) {
+        py::gil_scoped_release release; 
+        self.print_ensemble_metadata(); 
+    }, "Print ensemble metadata"); 
 }

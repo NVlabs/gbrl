@@ -25,12 +25,14 @@
 
 class GBRL {
     public:
-        GBRL(int input_dim, int output_dim, int max_depth, int min_data_in_leaf, 
+        GBRL(int input_dim, int output_dim, int policy_dim, int max_depth, int min_data_in_leaf, 
              int n_bins, int par_th, float cv_beta, scoreFunc split_score_func, generatorType generator_type, bool use_control_variates, 
-             int batch_size, growPolicy grow_policy, int verbose, deviceType _device);
-        GBRL(int input_dim, int output_dim, int max_depth, int min_data_in_leaf, 
+             int batch_size, growPolicy grow_policy,
+             int verbose, deviceType _device);
+        GBRL(int input_dim, int output_dim, int policy_dim, int max_depth, int min_data_in_leaf, 
              int n_bins, int par_th, float cv_beta, std::string split_score_func, std::string generator_type, bool use_control_variates, 
-             int batch_size, std::string grow_policy, int verbose, std::string _device);
+             int batch_size, std::string grow_policy,
+             int verbose, std::string _device);
         GBRL(const std::string& filename);
         GBRL(GBRL& other);
         ~GBRL();
@@ -40,22 +42,47 @@ class GBRL {
         void to_device(deviceType _device);
         std::string get_device();
         int saveToFile(const std::string& filename);
-        int exportModel(const std::string& filename, const std::string& modelname);
+        int exportModel(const std::string& filename, const std::string& modelname, const std::string& export_format, const std::string &export_type, const std::string& prefix);
         int loadFromFile(const std::string& filename);
         void ensemble_check();
 
-        void step(const float *obs, const char *categorical_obs, float *grads, const int n_samples, const int n_num_features, const int n_cat_features, deviceType _device);
+        void step(dataHolder<const float> *obs,
+                  dataHolder<const char> *categorical_obs,
+                  dataHolder<float> *grads,
+                  const int n_samples,
+                  const int n_num_features,
+                  const int n_cat_features);
+
+        float* predict(dataHolder<const float> *obs,
+                  dataHolder<const char> *categorical_obs,
+                  const int n_samples, const int n_num_features,
+                  const int n_cat_features,
+                  int start_tree_idx,
+                  int stop_tree_idx);
+
+        float fit(dataHolder<float> *obs,
+                  dataHolder<char> *categorical_obs,
+                  dataHolder<float> *targets,
+                  int iterations,
+                  const int n_samples,
+                  const int n_num_features,
+                  const int n_cat_features,
+                  bool shuffle = true,
+                  std::string _loss_type = "MultiRMSE");
 #ifdef USE_CUDA
         void _step_gpu(dataSet *dataset);
-        float _fit_gpu(dataSet *dataset, float *targets, const int n_iterations);
+        float _fit_gpu(dataHolder<float> *obs,
+                       dataHolder<char> *categorical_obs,
+                       dataHolder<float> *targets,
+                       std::vector<int> indices,
+                       const int n_iterations,
+                       const int n_samples,
+                       bool shuffle);
 #endif
-        float fit(float *obs, char *categorical_obs, float *targets, int iterations, const int n_samples, const int n_num_features, const int n_cat_features, bool shuffle = true, std::string _loss_type = "MultiRMSE");
-        void set_bias(float *bias, const int output_dim);
+        void set_bias(dataHolder<const float> *bias, const int output_dim);
         void set_feature_weights(float *feauture_weights, const int input_dim);
         float* get_bias();
         float* get_feature_weights();
-        float* predict(const float *obs, const char *categorical_obs, const int n_samples, const int n_num_features, const int n_cat_features, int start_tree_idx, int stop_tree_idx, deviceType _device);
-        
         float* get_scheduler_lrs();
 
         int get_num_trees();
@@ -66,6 +93,8 @@ class GBRL {
         void print_tree(int tree_idx);
         void print_ensemble_metadata();
         void plot_tree(int tree_idx, const std::string &filename);
+
+        ensembleData* get_ensemble_data();
 
         ensembleData *edata;
         ensembleMetaData *metadata;

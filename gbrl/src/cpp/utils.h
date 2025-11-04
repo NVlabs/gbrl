@@ -15,6 +15,11 @@
 #include <iostream>
 #include <stdexcept>
 #include <omp.h>
+#include <cmath>  // For std::round
+#include <cstdint> // For int16_t
+#include <algorithm> // For std::clamp
+#include <tuple>
+#include <functional>
 
 #include "types.h"
 
@@ -24,6 +29,10 @@ int binaryToDecimal(const BoolVector& binaryPath);
 inline int calculate_num_threads(int total_elements, int min_elements_per_thread) {
     int max_threads = omp_get_max_threads();
     int n_threads = total_elements / min_elements_per_thread;
+    
+    if (n_threads > total_elements)
+        n_threads = total_elements;
+
     if (n_threads <= 1) {
         return 1; // At least one thread
     } else if (n_threads > max_threads) {
@@ -68,4 +77,36 @@ serializationHeader create_header();
 serializationHeader read_header(std::ifstream& file);
 
 void display_header(serializationHeader header);
+
+// Function to convert float to int16
+inline int16_t float_to_int16(float value) {
+    // Multiply by 256 (2^8) and round to nearest integer
+    float scaled_value = value * 256.0f;
+    if (scaled_value < static_cast<float>(INT16_MIN))
+        scaled_value = static_cast<float>(INT16_MIN);
+
+    if (scaled_value > static_cast<float>(INT16_MAX))
+        scaled_value = static_cast<float>(INT16_MAX);
+    int16_t result = static_cast<int16_t>(std::round(scaled_value));
+    return result;
+}
+
+inline int32_t float_to_int32(float value) {
+    // Multiply by 256 (2^16) and round to nearest integer
+    float scaled_value = value * 65536.0f;
+    if (scaled_value < static_cast<float>(INT32_MIN))
+        scaled_value = static_cast<float>(INT32_MIN);
+
+    if (scaled_value > static_cast<float>(INT32_MAX))
+        scaled_value = static_cast<float>(INT32_MAX);
+    int32_t result = static_cast<int32_t>(std::round(scaled_value));
+    return result;
+}
+
+struct tuple_hash {
+    std::size_t operator()(const std::tuple<int, bool>& t) const {
+        return std::hash<int>()(std::get<0>(t)) ^ (std::hash<bool>()(std::get<1>(t)) << 1);
+    }
+};
+
 #endif 

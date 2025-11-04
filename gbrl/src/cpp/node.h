@@ -40,6 +40,7 @@ class TreeNode {
 
         float feature_value;
         int feature_idx;
+
         splitCondition *split_conditions = nullptr;
         
         TreeNode *left_child = nullptr;

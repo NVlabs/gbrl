@@ -19,7 +19,7 @@ cudaError_t allocateCudaMemory(void** device_ptr, size_t size, const std::string
 extern "C" {
 #endif
 void get_grid_dimensions(int elements, int& blocks, int& threads_per_block);
-
+void get_tpb_dimensions(int n_elements, int blocks, int& threads_per_block);
 #ifdef __cplusplus
 }
 #endif

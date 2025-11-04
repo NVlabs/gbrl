@@ -6,7 +6,7 @@
 # https://nvlabs.github.io/gbrl/license.html
 #
 ##############################################################################
-from typing import Dict, Tuple, Optional, Union
+from typing import Dict, Sequence, Optional, Tuple, Union
 
 import numpy as np
 import torch as th
@@ -14,14 +14,13 @@ from scipy.special import binom
 
 from gbrl.common.config import APPROVED_OPTIMIZERS, VALID_OPTIMIZER_ARGS
 
-
 numerical_dtype = np.dtype('float32')
 categorical_dtype = np.dtype('S128')
 NumericalData = Union[np.ndarray, th.Tensor]
+TensorInfo = Tuple[int, Tuple[int, ...], str, str]
 
 
-def get_tensor_info(tensor: th.Tensor) -> \
-        Tuple[int, Tuple[int, ...], str, str]:
+def get_tensor_info(tensor: th.Tensor) -> TensorInfo:
     """Extracts pytorch tensor information for usage in C++
 
     Args:
@@ -41,23 +40,9 @@ def get_tensor_info(tensor: th.Tensor) -> \
     return (data_ptr, shape, dtype, device)
 
 
-def process_array(arr: np.ndarray) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
-    """Formats numpy array for C++ GBRL by separating numerical and categorical data.
-
-    Processes a numpy array and separates it into numerical and categorical components
-    based on data types. Numerical data (floats, integers) is converted to numerical_dtype,
-    while string/categorical data is encoded as UTF-8 bytes.
-
-    Args:
-        arr (np.ndarray): Input numpy array to process.
-
-    Returns:
-        Tuple[Optional[np.ndarray], Optional[np.ndarray]]: A tuple containing:
-            - numerical_array: Array of numerical data or None if no numerical data
-            - categorical_array: Array of categorical data or None if no categorical data
-
-    Raises:
-        ValueError: If the array data type is not supported.
+def process_array(arr: np.ndarray) -> Tuple[Optional[np.ndarray],
+                                            Optional[np.ndarray]]:
+    """ Formats numpy array for C++ GBRL.
     """
     if np.issubdtype(arr.dtype, np.floating) or np.issubdtype(arr.dtype,
                                                               np.integer):
@@ -108,15 +93,7 @@ def process_array(arr: np.ndarray) -> Tuple[Optional[np.ndarray], Optional[np.nd
         raise ValueError(f"Unsupported array data type: {arr.dtype}")
 
 
-def to_numpy(arr: Union[np.ndarray, th.Tensor]) -> np.ndarray:
-    """Converts input array to a contiguous numpy array with numerical_dtype.
-
-    Args:
-        arr (Union[np.ndarray, th.Tensor]): Input array (numpy array or PyTorch tensor).
-
-    Returns:
-        np.ndarray: Contiguous numpy array with numerical_dtype (float32).
-    """
+def to_numpy(arr: NumericalData) -> np.ndarray:
     if isinstance(arr, th.Tensor):
         arr = arr.detach().cpu().numpy()
     return np.ascontiguousarray(arr, dtype=numerical_dtype)
@@ -164,20 +141,16 @@ def setup_optimizer(optimizer: Dict, prefix: str = '') -> Dict:
             and v is not None}
 
 
-def clip_grad_norm(grads: NumericalData, grad_clip: Optional[float]) -> NumericalData:
-    """Clip per-sample gradients according to their L2 norm.
-
-    Applies gradient clipping to prevent gradients from becoming too large.
-    For 1D gradients, applies element-wise clipping. For multi-dimensional
-    gradients, computes L2 norm per sample and scales gradients proportionally.
+def clip_grad_norm(grads: NumericalData, grad_clip: Optional[float]) ->\
+      NumericalData:
+    """clip per sample gradients according to their norm
 
     Args:
-        grads (NumericalData): Input gradients (numpy array or PyTorch tensor).
-        grad_clip (Optional[float]): Maximum allowed gradient norm. If None or 0.0,
-            no clipping is performed.
+        grads (NumericalData): gradients
+        grad_clip (float, optional): gradient clip value
 
     Returns:
-        NumericalData: Clipped gradients with the same type as input.
+        NumericalData: clipped gradients
     """
     if grad_clip is None or grad_clip == 0.0:
         return grads
@@ -196,14 +169,11 @@ def clip_grad_norm(grads: NumericalData, grad_clip: Optional[float]) -> Numerica
     return grads
 
 
-def get_input_dim(arr: Union[np.ndarray, th.Tensor]) -> int:
-    """Returns the feature dimension of an array.
-
-    For 1D arrays, returns 1. For 2D arrays, returns the number of columns (features).
-    For tuples of arrays, returns the sum of dimensions from both arrays.
+def get_input_dim(arr: NumericalData) -> int:
+    """Returns the column dimension of a 2D array
 
     Args:
-        arr (Union[np.ndarray, th.Tensor]): Input array or tuple of arrays.
+        arr (NumericalData):input array
 
     Returns:
         int: Number of input features/dimensions.
@@ -271,10 +241,9 @@ def get_poly_vectors(max_depth: int, dtype: np.dtype) -> \
     return base_poly, norm_values, offset
 
 
-def ensure_same_type(arr_a: Union[th.Tensor, np.ndarray],
-                     arr_b: Union[th.Tensor, np.ndarray]) -> \
-                        Tuple[Union[th.Tensor, np.ndarray], Union[th.Tensor,
-                                                                  np.ndarray]]:
+def ensure_same_type(arr_a: NumericalData,
+                     arr_b: NumericalData) -> \
+                        Tuple[NumericalData, NumericalData]:
     """Ensures both arrays are of the same type (either Tensor or ndarray).
 
     If the arrays are of different types, transforms array B to match the type
@@ -282,12 +251,10 @@ def ensure_same_type(arr_a: Union[th.Tensor, np.ndarray],
     operands to be of the same type.
 
     Args:
-        arr_a (Union[th.Tensor, np.ndarray]): Reference array (type is preserved).
-        arr_b (Union[th.Tensor, np.ndarray]): Array to potentially convert.
-
+        arr_a (NumericalData): array A
+        arr_b (NumericalData): array B
     Returns:
-        Tuple[Union[th.Tensor, np.ndarray], Union[th.Tensor, np.ndarray]]:
-            Both arrays with the same type as arr_a.
+        Tuple[NumericalData, NumericalData]
     """
     if isinstance(arr_a, th.Tensor) and not isinstance(arr_b, th.Tensor):
         arr_b = th.tensor(arr_b, device=arr_a.device).float()
@@ -297,23 +264,28 @@ def ensure_same_type(arr_a: Union[th.Tensor, np.ndarray],
     return arr_a, arr_b
 
 
-def concatenate_arrays(arr_a: Union[th.Tensor, np.ndarray],
-                       arr_b: Union[th.Tensor, np.ndarray], axis: int = 1) -> \
-                        Union[th.Tensor, np.ndarray]:
+def concatenate_arrays(arrays: Sequence[NumericalData],
+                       axis: int = 1) -> \
+                        NumericalData:
     """
-    Concatenates to arrays together. If both arrays are not of the same
-    type then transforms array B to the type and device of array A.
+    Concatenates multiple arrays along a specified axis. All arrays must be of the same type
+    (either all NumPy arrays or all PyTorch tensors). If an array has fewer dimensions than
+    required for concatenation, an axis is added to match the dimensionality.
 
     Args:
-        arr_a (Union[th.Tensor, np.ndarray]): array A
-        arr_b (Union[th.Tensor, np.ndarray]): Array B
-        axis (int, optional): concatenation axis. Defaults to 1.
+        arrays (Sequence[NumericalData]): Sequence of arrays (NumPy or PyTorch) to concatenate.
+        axis (int, optional): Axis along which to concatenate. Defaults to 1.
 
     Returns:
-        Union[th.Tensor, np.ndarray]: concatenated array of device and type of
-        array A
+        NumericalData: Concatenated array with the type and device of the first array.
+
+    Raises:
+        AssertionError: If fewer than two arrays are provided or if array types do not match.
     """
-    arr_a, arr_b = ensure_same_type(arr_a, arr_b)
+    assert len(arrays) > 1, "Need at least two arrays to concatenate"
+    sequence_type = type(arrays[0])
+    for arr in arrays[1:]:
+        assert isinstance(arr, sequence_type), "All arrays must be of the same type"
 
     # Check if we need to add an axis to match dimensionality
     def add_axis_if_needed(array, target_ndim, axis):
@@ -324,22 +296,41 @@ def concatenate_arrays(arr_a: Union[th.Tensor, np.ndarray],
                 array = np.expand_dims(array, axis=axis)
         return array
 
-    # Ensure both arrays have at least the right number of dimensions for
+    # Ensure all arrays have at least the right number of dimensions for
     # concatenation
-    max_ndim = max(arr_a.ndim, arr_b.ndim)
-    arr_a = add_axis_if_needed(arr_a, max_ndim, axis)
-    arr_b = add_axis_if_needed(arr_b, max_ndim, axis)
+    max_ndim = max([arr.ndim for arr in arrays])
+    arrays = [add_axis_if_needed(arr, max_ndim, axis) for arr in arrays]
 
-    if isinstance(arr_a, th.Tensor):
-        return th.cat([arr_a, arr_b], dim=axis)  # type: ignore 
-    return np.concatenate([arr_a, arr_b], axis=axis)
+    if isinstance(arrays[0], th.Tensor):
+        return th.cat(arrays, dim=axis)  # type: ignore
+    return np.concatenate(arrays, axis=axis)
 
 
-def validate_array(arr: Union[th.Tensor, np.ndarray]) -> None:
+def pad_array(array: NumericalData, n_dims: int, pad_value: float = 0.0, axis: int = -1) -> NumericalData:
+    """
+    Pads an array with singleton dimensions to ensure it has at least
+    `n_dims` dimensions along the specified axis.
+
+    Args:
+        array (NumericalData): Input array (NumPy or PyTorch).
+        n_dims (int): Minimum number of dimensions required.
+        pad_value (float, optional): Value to use for padding. Defaults to 0.0.
+        axis (int, optional): Axis along which to pad. Defaults to 1.
+
+    Returns:
+        NumericalData: Padded array with the same type as the input.
+    """
+    if isinstance(array, th.Tensor):
+        return concatenate_arrays([array, pad_value*th.ones((len(array), n_dims), dtype=array.dtype, device=array.device)],
+                                  axis=axis)
+    return concatenate_arrays([array, pad_value*np.ones((len(array), n_dims), dtype=array.dtype)], axis=axis)
+
+
+def validate_array(arr: NumericalData) -> None:
     """Checks for NaN and Inf values in an array/tensor.
 
     Args:
-        arr (Union[th.Tensor, np.ndarray]): array/tensor
+        arr (NumericalData): array/tensor
     """
     if isinstance(arr, np.ndarray):
         assert not np.isnan(arr).any(), "nan in array"
@@ -349,19 +340,12 @@ def validate_array(arr: Union[th.Tensor, np.ndarray]) -> None:
         assert not th.isinf(arr).any(), "infinity in tensor"
 
 
-def constant_like(arr: Union[th.Tensor, np.ndarray],
+def constant_like(arr: NumericalData,
                   constant: float = 1) -> NumericalData:
-    """Returns an array with the same shape as input filled with a constant value.
-
-    Creates a new array with the same shape and type as the input array,
-    filled with the specified constant value.
+    """Returns a ones array with the same shape as arr multiplid by a constant
 
     Args:
-        arr (Union[th.Tensor, np.ndarray]): Reference array for shape and type.
-        constant (float, optional): Value to fill the array with. Defaults to 1.
-
-    Returns:
-        NumericalData: Array of the same shape and type as input, filled with constant.
+        arr (NumericalData): array
     """
     if isinstance(arr, th.Tensor):
         return th.ones_like(arr, device=arr.device) * constant
@@ -371,12 +355,7 @@ def constant_like(arr: Union[th.Tensor, np.ndarray],
 
 def separate_numerical_categorical(arr: np.ndarray) -> Tuple[Optional[np.ndarray],
                                                              Optional[np.ndarray]]:
-    """Separate a numpy array into categorical and numerical components.
-
-    Analyzes the input array and separates it into numerical and categorical
-    parts based on data types. Handles various input formats including tuples,
-    lists, dictionaries, and raw arrays.
-
+    """Separate a numpy array to a categorical and numerical numpy arrays.
     Args:
         arr (np.ndarray): Input array, tuple, list, or dictionary to separate.
 
@@ -399,8 +378,8 @@ def separate_numerical_categorical(arr: np.ndarray) -> Tuple[Optional[np.ndarray
         return process_array(arr)
 
 
-def preprocess_features(arr: np.ndarray) -> Tuple[Optional[np.ndarray],
-                                                  Optional[np.ndarray]]:
+def preprocess_features(arr: NumericalData) -> Tuple[Optional[NumericalData],
+                                                     Optional[np.ndarray]]:
     """
     Preprocess array such that dimensions and data types match GBRL requirements.
 
@@ -416,6 +395,9 @@ def preprocess_features(arr: np.ndarray) -> Tuple[Optional[np.ndarray],
             - numerical_features: Processed numerical features or None
             - categorical_features: Processed categorical features or None
     """
+    if isinstance(arr, th.Tensor):
+        return arr, None
+
     input_dim = get_input_dim(arr)
     num_arr, cat_arr = separate_numerical_categorical(arr)
     if num_arr is not None and len(num_arr.shape) == 1:

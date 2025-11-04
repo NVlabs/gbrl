@@ -53,7 +53,7 @@ struct splitDataGPU{
 };
 
 struct TreeNodeGPU {
-    int n_samples; 
+    int n_samples;
     int depth;
     int n_num_features;
     int n_cat_features;
