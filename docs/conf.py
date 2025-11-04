@@ -29,7 +29,7 @@ class Mock(MagicMock):
 
 sys.modules['gbrl.gbrl_cpp'] = Mock()
 project = 'GBRL'
-copyright = '2024, NVIDIA Corporation'
+copyright = '2024-2025, NVIDIA Corporation'
 author = 'Benjamin Fuhrer, Chen Tessler, Gal Dalal'
 release = __version__
 version = "master (" + __version__ + " )"

@@ -1,11 +1,19 @@
 //////////////////////////////////////////////////////////////////////////////
-// Copyright (c) 2024, NVIDIA Corporation. All rights reserved.
+// Copyright (c) 2024-2025, NVIDIA Corporation. All rights reserved.
 //
 // This work is made available under the Nvidia Source Code License-NC.
 // To view a copy of this license, visit
 // https://nvlabs.github.io/gbrl/license.html
 //
 //////////////////////////////////////////////////////////////////////////////
+/**
+ * @file types.cpp
+ * @brief Implementation of type conversion and data structure management functions
+ * 
+ * Provides string-to-enum conversions, data structure allocation/deallocation,
+ * and serialization utilities for gradient boosting types.
+ */
+
 #include <stdexcept>
 #include <string>
 #include <cstring>
@@ -20,7 +28,13 @@
 #include "cuda_types.h"
 #endif
 
-
+/**
+ * @brief Convert string to scoreFunc enum
+ * 
+ * @param str Score function name ("L2" or "Cosine", case-insensitive)
+ * @return Corresponding scoreFunc enum value
+ * @throws std::runtime_error if string is invalid
+ */
 scoreFunc stringToScoreFunc(std::string str) {
     if (str == "L2" || str == "l2") return scoreFunc::L2;
     if (str == "Cosine" || str == "cosine") return scoreFunc::Cosine;
@@ -28,6 +42,13 @@ scoreFunc stringToScoreFunc(std::string str) {
     return scoreFunc::L2;
 }
 
+/**
+ * @brief Convert string to generatorType enum
+ * 
+ * @param str Generator type name ("uniform" or "quantile", case-insensitive)
+ * @return Corresponding generatorType enum value
+ * @throws std::runtime_error if string is invalid
+ */
 generatorType stringTogeneratorType(std::string str) {
     if (str == "uniform" || str == "Uniform") return generatorType::Uniform;
     if (str == "quantile" || str == "Quantile") return generatorType::Quantile;
@@ -35,6 +56,13 @@ generatorType stringTogeneratorType(std::string str) {
     return generatorType::Uniform;
 }
 
+/**
+ * @brief Convert string to growPolicy enum
+ * 
+ * @param str Grow policy name ("oblivious" or "greedy", case-insensitive)
+ * @return Corresponding growPolicy enum value
+ * @throws std::runtime_error if string is invalid
+ */
 growPolicy stringTogrowPolicy(std::string str) {
     if (str == "oblivious" || str == "Oblivious") return growPolicy::OBLIVIOUS;
     if (str == "greedy" || str == "Greedy") return growPolicy::GREEDY;
@@ -42,13 +70,26 @@ growPolicy stringTogrowPolicy(std::string str) {
     return growPolicy::GREEDY;
 }
 
+/**
+ * @brief Convert string to lossType enum
+ * 
+ * @param str Loss function name (currently only "MultiRMSE" supported)
+ * @return Corresponding lossType enum value
+ * @throws std::runtime_error if string is invalid
+ */
 lossType stringTolossType(std::string str) {
     if (str == "MultiRMSE") return lossType::MultiRMSE;
     throw std::runtime_error("Invalid loss function! Options are: MultiRMSE");
     return lossType::MultiRMSE;
 }
 
-deviceType stringTodeviceType(std::string str) {
+/**
+ * @brief Convert string to deviceType enum
+ * 
+ * @param str Device type name ("cpu" or "cuda", case-insensitive)
+ * @return Corresponding deviceType enum value
+ * @throws std::runtime_error if string is invalid
+ */
     if (str == "cpu") return deviceType::cpu;
     if (str == "cuda" || str == "gpu") return deviceType::gpu;
     throw std::runtime_error("Invalid device! Options are: cpu/cuda");

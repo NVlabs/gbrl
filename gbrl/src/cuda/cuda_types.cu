@@ -1,12 +1,17 @@
 
 //////////////////////////////////////////////////////////////////////////////
-// Copyright (c) 2024, NVIDIA Corporation. All rights reserved.
+// Copyright (c) 2024-2025, NVIDIA Corporation. All rights reserved.
 //
 // This work is made available under the Nvidia Source Code License-NC.
 // To view a copy of this license, visit
 // https://nvlabs.github.io/gbrl/license.html
 //
 //////////////////////////////////////////////////////////////////////////////
+/**
+ * @file cuda_types.cu
+ * @brief Implementation of CUDA data structure management and GPU memory operations
+ */
+
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 #include <cstring>
