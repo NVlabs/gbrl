@@ -6,6 +6,14 @@
 // https://nvlabs.github.io/gbrl/license.html
 //
 //////////////////////////////////////////////////////////////////////////////
+/**
+ * @file binding.cpp
+ * @brief Python bindings for GBRL using pybind11
+ * 
+ * Provides Python interface to the C++ GBRL implementation, handling
+ * NumPy arrays, PyTorch tensors, and DLPack for efficient data interchange.
+ */
+
 #define PYBIND11_DETAILED_ERROR_MESSAGES
 #include <pybind11/pybind11.h>
 #include <pybind11/numpy.h> 
@@ -15,22 +23,39 @@
 
 #include "gbrl.h"
 #include "types.h"
-
 #include "dlpack/dlpack.h"
 
 namespace py = pybind11;
 
+/**
+ * @brief Extract NumPy array information
+ * 
+ * @tparam T Array element type
+ * @param obj Python object (should be NumPy array)
+ * @param ptr Output pointer to array data
+ * @param shape Output array shape
+ * @param expected_format Expected data format string (optional)
+ * @throws std::runtime_error if object is not a valid NumPy array
+ */
 template <typename T>
-void get_numpy_array_info(py::object obj, T*& ptr, std::vector<size_t>& shape, const std::string& expected_format = ""){
+void get_numpy_array_info(
+    py::object obj,
+    T*& ptr,
+    std::vector<size_t>& shape,
+    const std::string& expected_format = ""
+) {
     // Check if the object is a NumPy array
     if (!py::isinstance<py::array>(obj)) {
         throw std::runtime_error("Expected a NumPy array");
     }
+    
     py::array arr = py::array::ensure(obj, py::array::c_style | py::array::forcecast);
-        if (!arr) {
+    if (!arr) {
         throw std::runtime_error("Could not convert object to a contiguous NumPy array");
     }
+    
     py::buffer_info info = arr.request();
+    
     // Determine the expected format
     std::string expected;
     if (expected_format.empty()) {
@@ -38,26 +63,43 @@ void get_numpy_array_info(py::object obj, T*& ptr, std::vector<size_t>& shape, c
     } else {
         expected = expected_format;
     }
+    
     // Verify the data format
     if (info.format != expected) {
         std::stringstream ss;
         ss << "Expected array of format '" << expected << "', but got '" << info.format << "'";
         throw std::runtime_error(ss.str());
     }
+    
     // Extract the data pointer, shape, and item size
     ptr = static_cast<T*>(info.ptr);
     shape.assign(info.shape.begin(), info.shape.end());
 }
 
+/**
+ * @brief Extract tensor information from PyTorch tensor tuple
+ * 
+ * @tparam T Tensor element type
+ * @param tensor_info Tuple containing (data_ptr, shape, dtype, device)
+ * @param ptr Output pointer to tensor data
+ * @param shape Output tensor shape
+ * @param device Output device string ("cpu" or "cuda")
+ * @throws std::runtime_error if tuple format is invalid
+ */
 template <typename T>
-void get_tensor_info(py::tuple tensor_info, T*& ptr, std::vector<size_t>& shape, std::string& device) {
+void get_tensor_info(
+    py::tuple tensor_info,
+    T*& ptr,
+    std::vector<size_t>& shape,
+    std::string& device
+) {
     if (tensor_info.size() != 4) {
         throw std::runtime_error("Expected a tuple of size 4: (data_ptr, shape, dtype, device)");
     }
-    // size_t raw_ptr = tensor_info[0].cast<size_t>();
+    
     size_t raw_ptr = tensor_info[0].cast<uintptr_t>();
 
-    if (raw_ptr == 0 || raw_ptr == (size_t) - 1) {  // Check for null or invalid pointer values
+    if (raw_ptr == 0 || raw_ptr == (size_t)-1) {
         std::cerr << "ERROR: Extracted an invalid pointer! Setting ptr to nullptr." << std::endl;
         ptr = nullptr;
     } else {
@@ -69,12 +111,14 @@ void get_tensor_info(py::tuple tensor_info, T*& ptr, std::vector<size_t>& shape,
             std::cerr << "ERROR: Pointer is not properly aligned! Possible misaligned memory access." << std::endl;
         }
     }
+    
     // Extract shape
     py::tuple shape_tuple = tensor_info[1].cast<py::tuple>();
     shape.clear();
     for (py::handle dim : shape_tuple) {
         shape.push_back(dim.cast<size_t>());
     }
+    
     // Extract and verify dtype
     std::string dtype = tensor_info[2].cast<std::string>();
     std::string expected_dtype;
@@ -85,53 +129,100 @@ void get_tensor_info(py::tuple tensor_info, T*& ptr, std::vector<size_t>& shape,
     } else if (std::is_same<T, int>::value || std::is_same<T, const int>::value) {
         expected_dtype = "torch.int32";
     } else {
-        throw std::runtime_error("Unsupported data type: " + dtype) ;
+        throw std::runtime_error("Unsupported data type: " + dtype);
     }
+    
     if (dtype != expected_dtype) {
         throw std::runtime_error("Expected dtype " + expected_dtype + ", but got " + dtype);
     }
+    
     // Extract device
     device = tensor_info[3].cast<std::string>();
 }
 
+/**
+ * @brief Handle input from Python (NumPy array or PyTorch tensor)
+ * 
+ * @tparam T Element type
+ * @param input Python input object
+ * @param ptr Output data pointer
+ * @param shape Output shape vector
+ * @param device Output device string
+ * @param name Parameter name for error messages
+ * @param none_allowed Whether None input is allowed
+ * @param function_name Function name for error messages
+ * @param expected_format Expected data format (optional)
+ * @throws std::runtime_error if input is invalid
+ */
 template <typename T>
-void handle_input_info(py::object& input, T*& ptr, std::vector<size_t>& shape, std::string& device, const std::string& name, const bool none_allowed, const std::string& function_name, const std::string& expected_format = ""){
+void handle_input_info(
+    py::object& input,
+    T*& ptr,
+    std::vector<size_t>& shape,
+    std::string& device,
+    const std::string& name,
+    const bool none_allowed,
+    const std::string& function_name,
+    const std::string& expected_format = ""
+) {
     if (input.is_none()) {
-        if (!none_allowed)
+        if (!none_allowed) {
             throw std::runtime_error("Cannot call " + function_name + " without " + name + "!");
-        else{
+        } else {
             device = "cpu";
             ptr = nullptr;
             return;
         }
-    } 
+    }
+    
     if (py::isinstance<py::array>(input)) {
-        get_numpy_array_info<T>(input, ptr, shape, expected_format);  // Handle NumPy array input
+        get_numpy_array_info<T>(input, ptr, shape, expected_format);
         device = "cpu";
     } else if (py::isinstance<py::tuple>(input)) {
-        get_tensor_info<T>(input, ptr, shape, device);  // Handle tuple input
+        get_tensor_info<T>(input, ptr, shape, device);
     } else {
         throw std::runtime_error("Unknown " + name + " type! Must be a NumPy array or tuple.");
     }
 }
 
+/**
+ * @brief DLPack tensor deleter function
+ * 
+ * Frees memory for DLPack managed tensors on CPU or GPU.
+ * 
+ * @param self DLManagedTensor to delete
+ */
 void dlpack_deleter_function(DLManagedTensor* self) {
 #ifdef USE_CUDA
     if (self->dl_tensor.device.device_type == kDLCUDA) {
-        cudaFree(static_cast<float*>(self->dl_tensor.data));  // GPU memory
+        cudaFree(static_cast<float*>(self->dl_tensor.data));
     }
 #endif 
     if (self->dl_tensor.device.device_type == kDLCPU) {
-        delete[] static_cast<float*>(self->dl_tensor.data);  // CPU memory
+        delete[] static_cast<float*>(self->dl_tensor.data);
     }
     delete[] self->dl_tensor.shape;
     delete self;
 }
 
-
-py::capsule create_dlpack_tensor(void* raw_ptr, const std::vector<int64_t>& shape, DLDataType dtype, DLDevice device) {
+/**
+ * @brief Create DLPack tensor capsule for Python interop
+ * 
+ * @param raw_ptr Pointer to tensor data
+ * @param shape Tensor shape
+ * @param dtype Data type descriptor
+ * @param device Device descriptor
+ * @return PyCapsule containing DLManagedTensor
+ */
+py::capsule create_dlpack_tensor(
+    void* raw_ptr,
+    const std::vector<int64_t>& shape,
+    DLDataType dtype,
+    DLDevice device
+) {
     // Allocate memory for DLTensor
     DLManagedTensor* managed_tensor = new DLManagedTensor;
+    
     // Assign raw pointer and device
     managed_tensor->dl_tensor.data = raw_ptr;
     managed_tensor->dl_tensor.device = device;
@@ -140,20 +231,39 @@ py::capsule create_dlpack_tensor(void* raw_ptr, const std::vector<int64_t>& shap
     managed_tensor->dl_tensor.ndim = static_cast<int32_t>(shape.size());
     managed_tensor->dl_tensor.shape = new int64_t[shape.size()];
     std::copy(shape.begin(), shape.end(), managed_tensor->dl_tensor.shape);
+    
     // Set dtype
     managed_tensor->dl_tensor.dtype = dtype;
+    
     // Strides are optional; set to nullptr for default behavior
     managed_tensor->dl_tensor.strides = nullptr;
     managed_tensor->dl_tensor.byte_offset = 0;
-    // Create a PyCapsule and pass the DLTensor to Python
-    managed_tensor->manager_ctx = nullptr;
+    
     // Set the deleter function
+    managed_tensor->manager_ctx = nullptr;
     managed_tensor->deleter = dlpack_deleter_function;
+    
     // Return the PyCapsule containing the DLManagedTensor
     return py::capsule(managed_tensor, "dltensor");
 }
 
-py::object return_tensor_info(int num_samples, int output_dim, float *ptr, deviceType device, bool is_torch) {
+/**
+ * @brief Return tensor information as NumPy array or DLPack capsule
+ * 
+ * @param num_samples Number of samples
+ * @param output_dim Output dimensionality
+ * @param ptr Data pointer
+ * @param device Device type
+ * @param is_torch Whether to return as PyTorch-compatible DLPack
+ * @return Python object (NumPy array or DLPack capsule)
+ */
+py::object return_tensor_info(
+    int num_samples,
+    int output_dim,
+    float *ptr,
+    deviceType device,
+    bool is_torch
+) {
     // Allocate memory
     std::vector<int64_t> shape;
     if (output_dim == 1) {
@@ -566,108 +676,132 @@ PYBIND11_MODULE(gbrl_cpp, m) {
        py::arg("stop_lr")=1.0e-8, py::arg("T")=10000, py::arg("beta_1")=0.9, py::arg("beta_2")=0.999, 
        py::arg("eps")=1.0e-8, py::arg("shrinkage")=0.0,
        "Set optimizer!");
-   // predict method
-    gbrl.def("predict", [](GBRL &self, py::object &obs, py::object &categorical_obs, int start_tree_idx, int stop_tree_idx, bool return_torch) -> py::object {
+    // Predict method
+    gbrl.def("predict", [](GBRL &self, py::object &obs, py::object &categorical_obs, py::object start_tree_obj, py::object stop_tree_obj, bool return_torch) -> py::object {
         const float* obs_ptr = nullptr;
-        const char* cat_obs_ptr= nullptr;
+        const char* cat_obs_ptr = nullptr;
         std::vector<size_t> obs_shape, cat_obs_shape;
         std::string obs_device, cat_obs_device;
         int n_samples = 0, n_num_features = 0, n_cat_features = 0;
+        
+        // Handle start_tree_idx and stop_tree_idx - set to 0 if None
+        int start_tree_idx = start_tree_obj.is_none() ? 0 : start_tree_obj.cast<int>();
+        int stop_tree_idx = stop_tree_obj.is_none() ? 0 : stop_tree_obj.cast<int>();
+
+        if (start_tree_idx < 0 || (start_tree_idx >= self.metadata->n_trees) && (self.metadata->n_trees > 0)) {
+            std::stringstream ss;
+            ss << "start_tree_idx is out of bounds! Got " << start_tree_idx 
+               << ", but valid range is [0, " << self.metadata->n_trees - 1 << "]";
+            throw std::runtime_error(ss.str());
+        }
+        if (stop_tree_idx < 0 || stop_tree_idx > self.metadata->n_trees) {
+            std::stringstream ss;
+            ss << "stop_tree_idx is out of bounds! Got " << stop_tree_idx 
+               << ", but valid range is [0, " << self.metadata->n_trees << "]";
+            throw std::runtime_error(ss.str());
+        }
 
         handle_input_info<const float>(obs, obs_ptr, obs_shape, obs_device, "obs", true, "predict");
-        handle_input_info<const char>(categorical_obs, cat_obs_ptr, cat_obs_shape, cat_obs_device, "cat_obs", true, "predict", CAT_TYPE); 
-        if (cat_obs_ptr == nullptr && obs_ptr == nullptr){
+        handle_input_info<const char>(categorical_obs, cat_obs_ptr, cat_obs_shape, cat_obs_device, "cat_obs", true, "predict", CAT_TYPE);
+        
+        if (cat_obs_ptr == nullptr && obs_ptr == nullptr) {
             throw std::runtime_error("Cannot call predict without observations!");
         }
 
-        if (obs_ptr != nullptr && cat_obs_ptr != nullptr){
-            if (obs_shape.size() == 1 && cat_obs_shape.size() == 1){
-                if (static_cast<int>(obs_shape[0]) + static_cast<int>(cat_obs_shape[0]) == self.metadata->input_dim){
+        if (obs_ptr != nullptr && cat_obs_ptr != nullptr) {
+            if (obs_shape.size() == 1 && cat_obs_shape.size() == 1) {
+                if (static_cast<int>(obs_shape[0]) + static_cast<int>(cat_obs_shape[0]) == self.metadata->input_dim) {
                     n_samples = 1;
                     n_num_features = static_cast<int>(obs_shape[0]);
                     n_cat_features = static_cast<int>(cat_obs_shape[0]);
                 } else {
-                    if (static_cast<int>(obs_shape[0]) != static_cast<int>(cat_obs_shape[0])){
+                    if (static_cast<int>(obs_shape[0]) != static_cast<int>(cat_obs_shape[0])) {
                         std::stringstream ss;
-                        ss << "Number of samples is not equal between obs and categorical obs " << obs_shape[0] << " != " << cat_obs_shape[0];
+                        ss << "Number of samples is not equal between obs and categorical obs " 
+                           << obs_shape[0] << " != " << cat_obs_shape[0];
                         throw std::runtime_error(ss.str());
                     }
                     n_samples = static_cast<int>(obs_shape[0]);
                     n_num_features = 1;
                     n_cat_features = 1;
-                    if (n_num_features + n_cat_features != self.metadata->input_dim){
+                    if (n_num_features + n_cat_features != self.metadata->input_dim) {
                         std::stringstream ss;
-                        ss << "Total number of features " << n_num_features + n_cat_features << " != input dim " << self.metadata->input_dim;
+                        ss << "Total number of features " << n_num_features + n_cat_features 
+                           << " != input dim " << self.metadata->input_dim;
                         throw std::runtime_error(ss.str());
                     }
                 }
-            } else if (obs_shape.size() == 1){
-                if (static_cast<int>(obs_shape[0]) != static_cast<int>(cat_obs_shape[0])){
+            } else if (obs_shape.size() == 1) {
+                if (static_cast<int>(obs_shape[0]) != static_cast<int>(cat_obs_shape[0])) {
                     std::stringstream ss;
-                    ss << "Number of samples is not equal between obs and categorical obs " << obs_shape[0] << " != " << cat_obs_shape[0];
+                    ss << "Number of samples is not equal between obs and categorical obs " 
+                       << obs_shape[0] << " != " << cat_obs_shape[0];
                     throw std::runtime_error(ss.str());
                 }
                 n_samples = static_cast<int>(obs_shape[0]);
                 n_num_features = 1;
                 n_cat_features = static_cast<int>(cat_obs_shape[1]);
-            } else if (cat_obs_shape.size() == 1){
-                if (static_cast<int>(obs_shape[0]) != static_cast<int>(cat_obs_shape[0])){
+            } else if (cat_obs_shape.size() == 1) {
+                if (static_cast<int>(obs_shape[0]) != static_cast<int>(cat_obs_shape[0])) {
                     std::stringstream ss;
-                    ss << "Number of samples is not equal between obs and categorical obs " << obs_shape[0] << " != " << cat_obs_shape[0];
+                    ss << "Number of samples is not equal between obs and categorical obs " 
+                       << obs_shape[0] << " != " << cat_obs_shape[0];
                     throw std::runtime_error(ss.str());
                 }
                 n_samples = static_cast<int>(obs_shape[0]);
                 n_num_features = static_cast<int>(obs_shape[1]);
                 n_cat_features = 1;
             } else {
-                if (static_cast<int>(obs_shape[0]) != static_cast<int>(cat_obs_shape[0])){
+                if (static_cast<int>(obs_shape[0]) != static_cast<int>(cat_obs_shape[0])) {
                     std::stringstream ss;
-                    ss << "Number of samples is not equal between obs and categorical obs " << obs_shape[0] << " != " << cat_obs_shape[0];
+                    ss << "Number of samples is not equal between obs and categorical obs " 
+                       << obs_shape[0] << " != " << cat_obs_shape[0];
                     throw std::runtime_error(ss.str());
                 }
                 n_samples = static_cast<int>(obs_shape[0]);
                 n_num_features = static_cast<int>(obs_shape[1]);
                 n_cat_features = static_cast<int>(cat_obs_shape[1]);
             }
-        } else if (obs_ptr != nullptr){
-            if (obs_shape.size() == 1){
-                if (static_cast<int>(obs_shape[0]) == self.metadata->input_dim){
+        } else if (obs_ptr != nullptr) {
+            if (obs_shape.size() == 1) {
+                if (static_cast<int>(obs_shape[0]) == self.metadata->input_dim) {
                     n_samples = 1;
                     n_num_features = static_cast<int>(obs_shape[0]);
                 } else {
                     n_samples = static_cast<int>(obs_shape[0]);
                     n_num_features = 1;
-                    if (n_num_features != self.metadata->input_dim){
+                    if (n_num_features != self.metadata->input_dim) {
                         std::stringstream ss;
-                        ss << "Total number of features " << n_num_features << " != input dim " << self.metadata->input_dim;
+                        ss << "Total number of features " << n_num_features 
+                           << " != input dim " << self.metadata->input_dim;
                         throw std::runtime_error(ss.str());
                     }
                 }
-
             } else {
                 n_samples = static_cast<int>(obs_shape[0]);
                 n_num_features = static_cast<int>(obs_shape[1]);
-                if (n_num_features != self.metadata->input_dim){
+                if (n_num_features != self.metadata->input_dim) {
                     std::stringstream ss;
-                    ss << "Total number of features " << n_num_features << " != input dim " << self.metadata->input_dim;
+                    ss << "Total number of features " << n_num_features 
+                       << " != input dim " << self.metadata->input_dim;
                     throw std::runtime_error(ss.str());
                 }
             }
         } else {
-            if (cat_obs_shape.size() == 1){
-                if (static_cast<int>(cat_obs_shape[0]) == self.metadata->input_dim){
+            if (cat_obs_shape.size() == 1) {
+                if (static_cast<int>(cat_obs_shape[0]) == self.metadata->input_dim) {
                     n_samples = 1;
                     n_cat_features = static_cast<int>(cat_obs_shape[0]);
                 } else {
                     n_samples = static_cast<int>(cat_obs_shape[0]);
                     n_cat_features = 1;
-                    if (n_cat_features != self.metadata->input_dim){
+                    if (n_cat_features != self.metadata->input_dim) {
                         std::stringstream ss;
-                        ss << "Total number of features " << n_cat_features << " != input dim " << self.metadata->input_dim;
+                        ss << "Total number of features " << n_cat_features 
+                           << " != input dim " << self.metadata->input_dim;
                         throw std::runtime_error(ss.str());
                     }
                 }
-
             } else {
                 n_samples = static_cast<int>(cat_obs_shape[0]);
                 n_cat_features = static_cast<int>(cat_obs_shape[1]);

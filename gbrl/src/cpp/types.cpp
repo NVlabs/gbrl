@@ -70,26 +70,13 @@ growPolicy stringTogrowPolicy(std::string str) {
     return growPolicy::GREEDY;
 }
 
-/**
- * @brief Convert string to lossType enum
- * 
- * @param str Loss function name (currently only "MultiRMSE" supported)
- * @return Corresponding lossType enum value
- * @throws std::runtime_error if string is invalid
- */
 lossType stringTolossType(std::string str) {
     if (str == "MultiRMSE") return lossType::MultiRMSE;
     throw std::runtime_error("Invalid loss function! Options are: MultiRMSE");
     return lossType::MultiRMSE;
 }
 
-/**
- * @brief Convert string to deviceType enum
- * 
- * @param str Device type name ("cpu" or "cuda", case-insensitive)
- * @return Corresponding deviceType enum value
- * @throws std::runtime_error if string is invalid
- */
+deviceType stringTodeviceType(std::string str) {
     if (str == "cpu") return deviceType::cpu;
     if (str == "cuda" || str == "gpu") return deviceType::gpu;
     throw std::runtime_error("Invalid device! Options are: cpu/cuda");

@@ -286,7 +286,7 @@ class GBTLearner(BaseLearner):
             feature_weights (Union[NumericalData, float]): The feature weights.
         """
         # Normalize to 1D vector (handles float, numpy, torch, 0D, and multi-D)
-        feature_weights = normalize_vector_input(feature_weights)
+        feature_weights = normalize_vector_input(feature_weights)  
 
         # Convert to numpy if it's a tensor
         if isinstance(feature_weights, th.Tensor):
@@ -423,7 +423,7 @@ class GBTLearner(BaseLearner):
 
     def predict(self, inputs: NumericalData,
                 requires_grad: bool = True,
-                start_idx: Optional[int] = 0,
+                start_idx: Optional[int] = None,
                 stop_idx: Optional[int] = None,
                 tensor: bool = True) -> NumericalData:
         """

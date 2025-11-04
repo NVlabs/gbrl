@@ -424,8 +424,7 @@ class MultiGBTLearner(BaseLearner):
         Sets the bias of the model.
 
         Args:
-            bias (Union[Union[NumericalData, float],
-                                   List[Union[NumericalData, float]]]): The bias value.
+            bias (Union[Union[NumericalData, float], List[Union[NumericalData, float]]]): The bias value.
             model_idx (int, optional): model index to set bias to.
         """
         assert self._cpp_models is not None, "Model not initialized."
@@ -668,7 +667,7 @@ class MultiGBTLearner(BaseLearner):
             print(f"Caught an exception in GBRL: {e}")
 
     def predict(self, features: NumericalData,  # type: ignore
-                requires_grad: bool = True, start_idx: Optional[int] = 0,
+                requires_grad: bool = True, start_idx: Optional[int] = None,
                 stop_idx: Optional[int] = None, tensor: bool = True,
                 model_idx: Optional[int] = None) -> Union[NumericalData, List[NumericalData]]:
         """

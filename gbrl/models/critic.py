@@ -172,7 +172,7 @@ class ContinuousCritic(BaseGBT):
                  observations: NumericalData,
                  requires_grad: bool = True,
                  target: bool = False,
-                 start_idx: Optional[int] = 0,
+                 start_idx: Optional[int] = None,
                  stop_idx: Optional[int] = None,
                  tensor: bool = True) -> Tuple[NumericalData,
                                                NumericalData]:

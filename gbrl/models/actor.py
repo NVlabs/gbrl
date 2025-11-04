@@ -118,7 +118,7 @@ class ParametricActor(BaseGBT):
         self.input = None
 
     def __call__(self, observations: NumericalData,
-                 requires_grad: bool = True, start_idx: Optional[int] = 0,
+                 requires_grad: bool = True, start_idx: Optional[int] = None,
                  stop_idx: Optional[int] = None, tensor: bool = True) -> NumericalData:
         """
         Returns actor output as Tensor. If `requires_grad=True`, stores
@@ -307,7 +307,7 @@ class GaussianActor(BaseGBT):
 
     def __call__(self, observations: NumericalData,
                  requires_grad: bool = True,
-                 start_idx: Optional[int] = 0,
+                 start_idx: Optional[int] = None,
                  stop_idx: Optional[int] = None,
                  tensor: bool = True) -> Tuple[NumericalData, NumericalData]:
         """

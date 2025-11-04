@@ -203,7 +203,7 @@ class GBTModel(BaseGBT):
         return instance
 
     def __call__(self, X: Union[th.Tensor, np.ndarray],
-                 requires_grad: bool = True, start_idx: Optional[int] = 0,
+                 requires_grad: bool = True, start_idx: Optional[int] = None,
                  stop_idx: Optional[int] = None, tensor: bool = True) -> Union[th.Tensor, np.ndarray]:
         """
         Returns GBRL's output as either a Tensor or a numpy array. if

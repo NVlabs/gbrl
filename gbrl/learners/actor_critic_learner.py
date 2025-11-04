@@ -99,7 +99,7 @@ class SharedActorCriticLearner(GBTLearner):
 
     def predict(self,  # type: ignore
                 inputs: NumericalData,
-                requires_grad: bool = True, start_idx: Optional[int] = 0,
+                requires_grad: bool = True, start_idx: Optional[int] = None,
                 stop_idx: Optional[int] = None, tensor: bool = True) -> \
             Tuple[NumericalData, NumericalData]:
         """
@@ -128,7 +128,7 @@ class SharedActorCriticLearner(GBTLearner):
         return preds, pred_values  # type: ignore
 
     def predict_policy(self, obs: NumericalData,
-                       requires_grad: bool = True, start_idx: Optional[int] = 0,
+                       requires_grad: bool = True, start_idx: Optional[int] = None,
                        stop_idx: Optional[int] = None, tensor: bool = True) -> NumericalData:
         """
         Predicts the policy (actor) output for the given observations.
@@ -152,7 +152,7 @@ class SharedActorCriticLearner(GBTLearner):
         return preds
 
     def predict_critic(self, obs: NumericalData,
-                       requires_grad: bool = True, start_idx: Optional[int] = 0,
+                       requires_grad: bool = True, start_idx: Optional[int] = None,
                        stop_idx: Optional[int] = None, tensor: bool = True) -> NumericalData:
         """
         Predicts the value function (critic) output for the given observations.
@@ -292,7 +292,7 @@ class SeparateActorCriticLearner(MultiGBTLearner):
         return super().distil(obs, [policy_targets, value_targets], params, verbose)
 
     def predict_policy(self, obs: NumericalData,
-                       requires_grad: bool = True, start_idx: Optional[int] = 0,
+                       requires_grad: bool = True, start_idx: Optional[int] = None,
                        stop_idx: Optional[int] = None, tensor: bool = True) -> NumericalData:
         """
         Predicts the policy (actor) output for the given observations.
@@ -310,7 +310,7 @@ class SeparateActorCriticLearner(MultiGBTLearner):
         return super().predict(obs, requires_grad, start_idx, stop_idx, tensor, model_idx=0)  # type: ignore
 
     def predict_critic(self, obs: NumericalData,
-                       requires_grad: bool = True, start_idx: Optional[int] = 0,
+                       requires_grad: bool = True, start_idx: Optional[int] = None,
                        stop_idx: Optional[int] = None, tensor: bool = True) -> NumericalData:
         """
         Predicts the value function (critic) output for the given observations.
