@@ -69,3 +69,12 @@ html_theme_options = {
     "language_selector": True,
     "version_selector": True,
 }
+
+autodoc_mock_imports = [
+    "torch",
+    "numpy",
+    "scipy",
+    "sklearn",
+    "shap",
+]
+
