@@ -14,7 +14,7 @@ sys.path.insert(0, ROOT_PATH)
 sys.path.insert(0, ROOT_PATH + '/gbrl')
 
 with open(ROOT_PATH + '/gbrl/__init__.py') as file_handler:
-    __version__ = file_handler.readlines()[8].split('"')[1]
+    __version__ = file_handler.readlines()[21].split('"')[1]
 
 from unittest.mock import MagicMock
 
