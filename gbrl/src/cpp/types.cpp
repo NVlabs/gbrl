@@ -1,11 +1,19 @@
 //////////////////////////////////////////////////////////////////////////////
-// Copyright (c) 2024, NVIDIA Corporation. All rights reserved.
+// Copyright (c) 2024-2025, NVIDIA Corporation. All rights reserved.
 //
 // This work is made available under the Nvidia Source Code License-NC.
 // To view a copy of this license, visit
 // https://nvlabs.github.io/gbrl/license.html
 //
 //////////////////////////////////////////////////////////////////////////////
+/**
+ * @file types.cpp
+ * @brief Implementation of type conversion and data structure management functions
+ * 
+ * Provides string-to-enum conversions, data structure allocation/deallocation,
+ * and serialization utilities for gradient boosting types.
+ */
+
 #include <stdexcept>
 #include <string>
 #include <cstring>
@@ -19,7 +27,6 @@
 #ifdef USE_CUDA
 #include "cuda_types.h"
 #endif
-
 
 scoreFunc stringToScoreFunc(std::string str) {
     if (str == "L2" || str == "l2") return scoreFunc::L2;
@@ -213,7 +220,7 @@ ensembleData* ensemble_data_alloc(ensembleMetaData *metadata){
     memset(edata->depths, 0, split_sizes * sizeof(int));
     edata->values = new float[metadata->max_leaves * metadata->output_dim];
     data_size += sizeof(float) * metadata->max_leaves * metadata->output_dim;
-    memset(edata->values, 0, metadata->max_leaves*metadata->output_dim * sizeof(float));
+    memset(edata->values, 0, metadata->max_leaves * metadata->output_dim * sizeof(float));
     // leaf data
     edata->feature_indices = new int[split_sizes * metadata->max_depth];
     data_size += sizeof(int) * split_sizes * metadata->max_depth;
@@ -224,15 +231,28 @@ ensembleData* ensemble_data_alloc(ensembleMetaData *metadata){
     edata->edge_weights = new float[metadata->max_leaves * metadata->max_depth];
     data_size += sizeof(float) * metadata->max_leaves * metadata->max_depth;
     memset(edata->edge_weights, 0, metadata->max_leaves * metadata->max_depth * sizeof(float));
+    
+    edata->reverse_num_feature_mapping = new int[metadata->input_dim];
+    data_size += sizeof(int) * metadata->input_dim;
+    memset(edata->reverse_num_feature_mapping, 0, metadata->input_dim * sizeof(int));
+    edata->reverse_cat_feature_mapping = new int[metadata->input_dim];
+    data_size += sizeof(int) * metadata->input_dim;
+    memset(edata->reverse_cat_feature_mapping, 0, metadata->input_dim * sizeof(int));
+    edata->feature_mapping = new int[metadata->input_dim];
+    data_size += sizeof(int) * metadata->input_dim;
+    memset(edata->feature_mapping, 0, metadata->input_dim * sizeof(int));
+    edata->mapping_numerics = new bool[metadata->input_dim];
+    data_size += sizeof(bool) * metadata->input_dim;
+    memset(edata->mapping_numerics, 0, metadata->input_dim * sizeof(bool));
     edata->is_numerics = new bool[split_sizes * metadata->max_depth];
     data_size += sizeof(bool) * split_sizes * metadata->max_depth;
     memset(edata->is_numerics, 0, split_sizes * metadata->max_depth * sizeof(bool));
     edata->inequality_directions = new bool[metadata->max_leaves * metadata->max_depth]; 
     data_size += sizeof(bool) * metadata->max_leaves * metadata->max_depth;
     memset(edata->inequality_directions, 0, metadata->max_leaves * metadata->max_depth * sizeof(bool));
-    edata->categorical_values = new char[split_sizes*metadata->max_depth * MAX_CHAR_SIZE];
-    data_size += sizeof(char) * split_sizes*metadata->max_depth*MAX_CHAR_SIZE;
-    memset(edata->categorical_values, 0, split_sizes * metadata->max_depth * sizeof(char)*MAX_CHAR_SIZE);
+    edata->categorical_values = new char[split_sizes * metadata->max_depth * MAX_CHAR_SIZE];
+    data_size += sizeof(char) * split_sizes * metadata->max_depth * MAX_CHAR_SIZE;
+    memset(edata->categorical_values, 0, split_sizes * metadata->max_depth * sizeof(char) * MAX_CHAR_SIZE);
     edata->alloc_data_size = data_size;
     return edata;
 }
@@ -276,6 +296,18 @@ ensembleData* ensemble_copy_data_alloc(ensembleMetaData *metadata){
     edata->edge_weights = new float[metadata->n_leaves * metadata->max_depth];
     data_size += sizeof(float) * metadata->n_leaves * metadata->max_depth;
     memset(edata->edge_weights, 0, metadata->n_leaves * metadata->max_depth * sizeof(float));
+    edata->reverse_num_feature_mapping = new int[metadata->input_dim];
+    data_size += sizeof(int) * metadata->input_dim;
+    memset(edata->reverse_num_feature_mapping, 0, metadata->input_dim * sizeof(int));
+    edata->reverse_cat_feature_mapping = new int[metadata->input_dim];
+    data_size += sizeof(int) * metadata->input_dim;
+    memset(edata->reverse_cat_feature_mapping, 0, metadata->input_dim * sizeof(int));
+    edata->feature_mapping = new int[metadata->input_dim];
+    data_size += sizeof(int) * metadata->input_dim;
+    memset(edata->feature_mapping, 0, metadata->input_dim * sizeof(int));
+    edata->mapping_numerics = new bool[metadata->input_dim];
+    data_size += sizeof(bool) * metadata->input_dim;
+    memset(edata->mapping_numerics, 0, metadata->input_dim * sizeof(bool));
     edata->is_numerics = new bool[split_sizes * metadata->max_depth];
     data_size += sizeof(bool) * split_sizes * metadata->max_depth;
     memset(edata->is_numerics, 0, split_sizes * metadata->max_depth * sizeof(bool));
@@ -284,7 +316,7 @@ ensembleData* ensemble_copy_data_alloc(ensembleMetaData *metadata){
     memset(edata->inequality_directions, 0, metadata->n_leaves * metadata->max_depth * sizeof(bool));
     edata->categorical_values = new char[split_sizes * metadata->max_depth * MAX_CHAR_SIZE];
     data_size += sizeof(char) * split_sizes * metadata->max_depth * MAX_CHAR_SIZE;
-    memset(edata->categorical_values, 0, split_sizes * metadata->max_depth * sizeof(char)*MAX_CHAR_SIZE);
+    memset(edata->categorical_values, 0, split_sizes * metadata->max_depth * sizeof(char) * MAX_CHAR_SIZE);
     edata->alloc_data_size = data_size;
     return edata;
 }
@@ -327,6 +359,18 @@ ensembleData* copy_ensemble_data(ensembleData *other_edata, ensembleMetaData *me
     edata->edge_weights = new float[metadata->n_leaves * metadata->max_depth];
     data_size += sizeof(float) * metadata->n_leaves * metadata->max_depth;
     memcpy(edata->edge_weights, other_edata->edge_weights, metadata->n_leaves * metadata->max_depth * sizeof(float));
+    edata->reverse_num_feature_mapping = new int[metadata->input_dim];
+    data_size += sizeof(int) * metadata->input_dim;
+    memcpy(edata->reverse_num_feature_mapping, other_edata->reverse_num_feature_mapping, metadata->input_dim * sizeof(int));
+    edata->reverse_cat_feature_mapping = new int[metadata->input_dim];
+    data_size += sizeof(int) * metadata->input_dim;
+    memcpy(edata->reverse_cat_feature_mapping, other_edata->reverse_cat_feature_mapping, metadata->input_dim * sizeof(int));
+    edata->feature_mapping = new int[metadata->input_dim];
+    data_size += sizeof(int) * metadata->input_dim;
+    memcpy(edata->feature_mapping, other_edata->feature_mapping, metadata->input_dim * sizeof(int));
+    edata->mapping_numerics = new bool[metadata->input_dim];
+    data_size += sizeof(bool) * metadata->input_dim;
+    memcpy(edata->mapping_numerics, other_edata->mapping_numerics, metadata->input_dim * sizeof(bool));
     edata->is_numerics = new bool[split_sizes * metadata->max_depth];
     data_size += sizeof(bool) * split_sizes * metadata->max_depth;
     memcpy(edata->is_numerics, other_edata->is_numerics, split_sizes * metadata->max_depth * sizeof(bool));
@@ -354,6 +398,10 @@ void ensemble_data_dealloc(ensembleData *edata){
     delete[] edata->feature_indices;
     delete[] edata->feature_values;
     delete[] edata->edge_weights;
+    delete[] edata->reverse_num_feature_mapping;
+    delete[] edata->reverse_cat_feature_mapping;
+    delete[] edata->feature_mapping;
+    delete[] edata->mapping_numerics;
     delete[] edata->is_numerics;
     delete[] edata->categorical_values;
     delete[] edata->inequality_directions; 
@@ -684,6 +732,22 @@ void save_ensemble_data(std::ofstream& file, ensembleData *edata, ensembleMetaDa
     file.write(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
     if (edata_cpu->edge_weights != nullptr)
         file.write(reinterpret_cast<char*>(edata_cpu->edge_weights), metadata->max_depth * metadata->n_leaves * sizeof(float));
+    check = edata_cpu->reverse_num_feature_mapping != nullptr ? VALID : NULL_OPT;
+    file.write(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
+    if (edata_cpu->reverse_num_feature_mapping != nullptr)
+        file.write(reinterpret_cast<char*>(edata_cpu->reverse_num_feature_mapping), metadata->input_dim * sizeof(int));
+    check = edata_cpu->reverse_cat_feature_mapping != nullptr ? VALID : NULL_OPT;
+    file.write(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
+    if (edata_cpu->reverse_cat_feature_mapping != nullptr)
+        file.write(reinterpret_cast<char*>(edata_cpu->reverse_cat_feature_mapping), metadata->input_dim * sizeof(int));
+    check = edata_cpu->feature_mapping != nullptr ? VALID : NULL_OPT;
+    file.write(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
+    if (edata_cpu->feature_mapping != nullptr)
+        file.write(reinterpret_cast<char*>(edata_cpu->feature_mapping), metadata->input_dim * sizeof(int));
+    check = edata_cpu->mapping_numerics != nullptr ? VALID : NULL_OPT;
+    file.write(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
+    if (edata_cpu->mapping_numerics != nullptr)
+        file.write(reinterpret_cast<char*>(edata_cpu->mapping_numerics), metadata->input_dim * sizeof(bool));
     check = edata_cpu->is_numerics != nullptr ? VALID : NULL_OPT;
     file.write(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
     if (edata_cpu->is_numerics != nullptr)
@@ -736,31 +800,47 @@ ensembleData* load_ensemble_data(std::ifstream& file, ensembleMetaData *metadata
     } 
     file.read(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
     if (check == VALID) {
-        file.read(reinterpret_cast<char*>(edata_cpu->values), metadata->output_dim * metadata->n_leaves *sizeof(float));
+        file.read(reinterpret_cast<char*>(edata_cpu->values), metadata->output_dim * metadata->n_leaves * sizeof(float));
     } 
     file.read(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
     if (check == VALID) {
-        file.read(reinterpret_cast<char*>(edata_cpu->feature_indices), metadata->max_depth * sizes *sizeof(int));
+        file.read(reinterpret_cast<char*>(edata_cpu->feature_indices), metadata->max_depth * sizes * sizeof(int));
     } 
     file.read(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
        if (check == VALID) {
-        file.read(reinterpret_cast<char*>(edata_cpu->feature_values), metadata->max_depth * sizes *sizeof(float));
+        file.read(reinterpret_cast<char*>(edata_cpu->feature_values), metadata->max_depth * sizes * sizeof(float));
     } 
     file.read(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
        if (check == VALID) {
-        file.read(reinterpret_cast<char*>(edata_cpu->edge_weights), metadata->max_depth * metadata->n_leaves *sizeof(float));
+        file.read(reinterpret_cast<char*>(edata_cpu->edge_weights), metadata->max_depth * metadata->n_leaves * sizeof(float));
+    } 
+    file.read(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
+       if (check == VALID) {
+        file.read(reinterpret_cast<char*>(edata_cpu->reverse_num_feature_mapping), metadata->input_dim * sizeof(int));
+    } 
+    file.read(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
+       if (check == VALID) {
+        file.read(reinterpret_cast<char*>(edata_cpu->reverse_cat_feature_mapping), metadata->input_dim * sizeof(int));
+    } 
+    file.read(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
+       if (check == VALID) {
+        file.read(reinterpret_cast<char*>(edata_cpu->feature_mapping), metadata->input_dim * sizeof(int));
+    } 
+    file.read(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
+       if (check == VALID) {
+        file.read(reinterpret_cast<char*>(edata_cpu->mapping_numerics), metadata->input_dim * sizeof(bool));
     } 
     file.read(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
     if (check == VALID) {
-        file.read(reinterpret_cast<char*>(edata_cpu->is_numerics), metadata->max_depth * sizes *sizeof(bool));
+        file.read(reinterpret_cast<char*>(edata_cpu->is_numerics), metadata->max_depth * sizes * sizeof(bool));
     } 
     file.read(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
     if (check == VALID) {
-        file.read(reinterpret_cast<char*>(edata_cpu->inequality_directions), metadata->max_depth * metadata->n_leaves *sizeof(bool));
+        file.read(reinterpret_cast<char*>(edata_cpu->inequality_directions), metadata->max_depth * metadata->n_leaves * sizeof(bool));
     } 
     file.read(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
     if (check == VALID) {
-        file.read(reinterpret_cast<char*>(edata_cpu->categorical_values), metadata->max_depth * sizes *sizeof(char) * MAX_CHAR_SIZE);
+        file.read(reinterpret_cast<char*>(edata_cpu->categorical_values), metadata->max_depth * sizes * sizeof(char) * MAX_CHAR_SIZE);
     } 
     return edata_cpu;
 }
@@ -774,27 +854,31 @@ void allocate_ensemble_memory(ensembleMetaData *metadata, ensembleData *edata){
         metadata->max_leaves = new_size_leaves;
         metadata->max_trees = new_tree_size;
         ensembleData *new_data = ensemble_data_alloc(metadata);
-        memcpy(new_data->bias, edata->bias, metadata->output_dim*sizeof(float));
-        memcpy(new_data->feature_weights, edata->feature_weights, metadata->input_dim*sizeof(float));
+        memcpy(new_data->bias, edata->bias, metadata->output_dim * sizeof(float));
+        memcpy(new_data->feature_weights, edata->feature_weights, metadata->input_dim * sizeof(float));
 #ifdef DEBUG
-        memcpy(new_data->n_samples, edata->n_samples, leaf_idx*sizeof(int));
+        memcpy(new_data->n_samples, edata->n_samples, leaf_idx * sizeof(int));
 #endif 
-        memcpy(new_data->values, edata->values, leaf_idx*metadata->output_dim*sizeof(float));
-        memcpy(new_data->tree_indices, edata->tree_indices, tree_idx*sizeof(int));
-        memcpy(new_data->inequality_directions, edata->inequality_directions, leaf_idx*metadata->max_depth*sizeof(bool));
-        memcpy(new_data->edge_weights, edata->edge_weights, leaf_idx*metadata->max_depth*sizeof(float));
+        memcpy(new_data->values, edata->values, leaf_idx * metadata->output_dim * sizeof(float));
+        memcpy(new_data->tree_indices, edata->tree_indices, tree_idx * sizeof(int));
+        memcpy(new_data->inequality_directions, edata->inequality_directions, leaf_idx * metadata->max_depth * sizeof(bool));
+        memcpy(new_data->edge_weights, edata->edge_weights, leaf_idx * metadata->max_depth * sizeof(float));
+        memcpy(new_data->reverse_cat_feature_mapping, edata->reverse_cat_feature_mapping, metadata->input_dim * sizeof(int));
+        memcpy(new_data->reverse_num_feature_mapping, edata->reverse_num_feature_mapping, metadata->input_dim * sizeof(int));
+        memcpy(new_data->feature_mapping, edata->feature_mapping, metadata->input_dim * sizeof(int));
+        memcpy(new_data->mapping_numerics, edata->mapping_numerics, metadata->input_dim * sizeof(bool));
         if (metadata->grow_policy == GREEDY){
-            memcpy(new_data->depths, edata->depths, leaf_idx*sizeof(int));
-            memcpy(new_data->feature_indices, edata->feature_indices, leaf_idx*metadata->max_depth*sizeof(int));
-            memcpy(new_data->feature_values, edata->feature_values, leaf_idx*metadata->max_depth*sizeof(float));
-            memcpy(new_data->is_numerics, edata->is_numerics, leaf_idx*metadata->max_depth*sizeof(bool));
-            memcpy(new_data->categorical_values, edata->categorical_values, leaf_idx*metadata->max_depth*sizeof(char)*MAX_CHAR_SIZE);
+            memcpy(new_data->depths, edata->depths, leaf_idx * sizeof(int));
+            memcpy(new_data->feature_indices, edata->feature_indices, leaf_idx * metadata->max_depth * sizeof(int));
+            memcpy(new_data->feature_values, edata->feature_values, leaf_idx * metadata->max_depth * sizeof(float));
+            memcpy(new_data->is_numerics, edata->is_numerics, leaf_idx * metadata->max_depth * sizeof(bool));
+            memcpy(new_data->categorical_values, edata->categorical_values, leaf_idx * metadata->max_depth * sizeof(char) * MAX_CHAR_SIZE);
         } else {
-            memcpy(new_data->depths, edata->depths, tree_idx*sizeof(int));
-            memcpy(new_data->feature_indices, edata->feature_indices, tree_idx*metadata->max_depth*sizeof(int));
-            memcpy(new_data->feature_values, edata->feature_values, tree_idx*metadata->max_depth*sizeof(float));
-            memcpy(new_data->is_numerics, edata->is_numerics, tree_idx*metadata->max_depth*sizeof(bool));
-            memcpy(new_data->categorical_values, edata->categorical_values, tree_idx*metadata->max_depth*sizeof(char)*MAX_CHAR_SIZE);
+            memcpy(new_data->depths, edata->depths, tree_idx * sizeof(int));
+            memcpy(new_data->feature_indices, edata->feature_indices, tree_idx * metadata->max_depth * sizeof(int));
+            memcpy(new_data->feature_values, edata->feature_values, tree_idx * metadata->max_depth * sizeof(float));
+            memcpy(new_data->is_numerics, edata->is_numerics, tree_idx * metadata->max_depth * sizeof(bool));
+            memcpy(new_data->categorical_values, edata->categorical_values, tree_idx * metadata->max_depth * sizeof(char) * MAX_CHAR_SIZE);
         }
         delete[] edata->bias;
         delete[] edata->feature_weights;
@@ -811,6 +895,10 @@ void allocate_ensemble_memory(ensembleMetaData *metadata, ensembleData *edata){
         delete[] edata->is_numerics;
         delete[] edata->categorical_values;
         delete[] edata->inequality_directions; 
+        delete[] edata->reverse_cat_feature_mapping;
+        delete[] edata->feature_mapping;
+        delete[] edata->reverse_num_feature_mapping;
+        delete[] edata->mapping_numerics;
 
         edata->bias = new_data->bias;
         edata->feature_weights = new_data->feature_weights;

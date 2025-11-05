@@ -1,11 +1,29 @@
 //////////////////////////////////////////////////////////////////////////////
-// Copyright (c) 2024, NVIDIA Corporation. All rights reserved.
+// Copyright (c) 2024-2025, NVIDIA Corporation. All rights reserved.
 //
-// This work is made available under the Nvidia Source Code License-NC.
-// To view a copy of this license, visit
-// https://nvlabs.github.io/gbrl/license.html
+// Permission is hereby granted, free of charge, to any person obtaining a
+// copy of this software and associated documentation files (the "Software"),
+// to deal in the Software without restriction, including without limitation
+// the rights to use, copy, modify, merge, publish, distribute, sublicense,
+// and/or sell copies of the Software, and to permit persons to whom the
+// Software is furnished to do so, subject to the following conditions:
 //
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+// THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+// DEALINGS IN THE SOFTWARE.
 //////////////////////////////////////////////////////////////////////////////
+/**
+ * @file fitter.cpp
+ * @brief Implementation of tree fitting and ensemble training functions
+ */
+
 #include <deque>
 #include <omp.h>
 #include <vector>
@@ -323,7 +341,7 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
                 int end_idx = (thread_num == n_threads - 1) ? n_candidates : start_idx + batch_size;
                 // Process the batch of candidates
                 for (int j = start_idx; j < end_idx; ++j) {
-                    float score = crnt_node->getSplitScore(dataset, edata->feature_weights, metadata->split_score_func, split_candidates[j], metadata->min_data_in_leaf);
+                    float score = crnt_node->getSplitScore(dataset, metadata->split_score_func, split_candidates[j], metadata->min_data_in_leaf);
                     int feat_idx = (split_candidates[j].categorical_value == nullptr) ? split_candidates[j].feature_idx : split_candidates[j].feature_idx + metadata->n_num_features; 
                     score = score * edata->feature_weights[feat_idx] - parent_score;
                     
@@ -431,18 +449,21 @@ int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMe
                 float guidance_score = 0.0f;
                 for (int node_idx = 0; node_idx < (1 << depth); ++node_idx){
                     TreeNode *crnt_node = tree_nodes[node_idx];
-                    score += crnt_node->getSplitScore(dataset, edata->feature_weights, metadata->split_score_func, split_candidates[j], metadata->min_data_in_leaf);
+                    score += crnt_node->getSplitScore(dataset, metadata->split_score_func, split_candidates[j], metadata->min_data_in_leaf);
                     if (dataset->guidance_labels->data != nullptr){
                         guidance_score += crnt_node->getSplitGuidanceScore(dataset, split_candidates[j], metadata->min_data_in_leaf);
                     }
                 }
-                int feat_idx = (split_candidates[j].categorical_value == nullptr) ? split_candidates[j].feature_idx : split_candidates[j].feature_idx + metadata->n_num_features; 
-                score = score*edata->feature_weights[feat_idx];
+                // Use reverse mapping to get original feature index for weighting
+                int feat_idx = (split_candidates[j].categorical_value == nullptr) 
+                    ? edata->reverse_num_feature_mapping[split_candidates[j].feature_idx] 
+                    : edata->reverse_cat_feature_mapping[split_candidates[j].feature_idx];
+                score = score * edata->feature_weights[feat_idx];
+                
 #ifdef DEBUG
                 std::cout << " cand: " <<  j << " score: " <<  score << " guidance: " << metadata->guidance_weight * guidance_score <<  " info: " << split_candidates[j] << std::endl;
 #endif
                 score -= metadata->guidance_weight * guidance_score;
-
                 if (score > local_best_score) {
                     local_best_score = score;
                     local_chosen_idx = j;

@@ -14,7 +14,7 @@ sys.path.insert(0, ROOT_PATH)
 sys.path.insert(0, ROOT_PATH + '/gbrl')
 
 with open(ROOT_PATH + '/gbrl/__init__.py') as file_handler:
-    __version__ = file_handler.readlines()[8].split('"')[1]
+    __version__ = file_handler.readlines()[21].split('"')[1]
 
 from unittest.mock import MagicMock
 
@@ -29,7 +29,7 @@ class Mock(MagicMock):
 
 sys.modules['gbrl.gbrl_cpp'] = Mock()
 project = 'GBRL'
-copyright = '2024, NVIDIA Corporation'
+copyright = '2024-2025, NVIDIA Corporation'
 author = 'Benjamin Fuhrer, Chen Tessler, Gal Dalal'
 release = __version__
 version = "master (" + __version__ + " )"
@@ -69,3 +69,12 @@ html_theme_options = {
     "language_selector": True,
     "version_selector": True,
 }
+
+autodoc_mock_imports = [
+    "torch",
+    "numpy",
+    "scipy",
+    "sklearn",
+    "shap",
+]
+

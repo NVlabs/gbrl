@@ -1,11 +1,31 @@
 ##############################################################################
-# Copyright (c) 2024, NVIDIA Corporation. All rights reserved.
+# Copyright (c) 2024-2025, NVIDIA Corporation. All rights reserved.
 #
-# This work is made available under the Nvidia Source Code License-NC.
-# To view a copy of this license, visit
-# https://nvlabs.github.io/gbrl/license.html
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the "Software"),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
 #
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
 ##############################################################################
+"""
+Gradient Boosted Tree Learner Module
+
+This module provides the GBTLearner class, which wraps the C++ GBRL backend
+for single gradient boosted tree models. It supports training, prediction,
+SHAP computation, and model serialization.
+"""
 import os
 from typing import Dict, List, Optional, Tuple, Union
 
@@ -15,7 +35,8 @@ import torch as th
 from gbrl import GBRL_CPP
 from gbrl.common.utils import (NumericalData, concatenate_arrays,
                                ensure_leaf_tensor_or_array, get_poly_vectors,
-                               numerical_dtype, preprocess_features, to_numpy)
+                               normalize_vector_input, numerical_dtype,
+                               preprocess_features, to_numpy)
 from gbrl.learners.base import BaseLearner
 
 
@@ -98,6 +119,13 @@ class GBTLearner(BaseLearner):
         """
         assert isinstance(grads, list) or isinstance(grads, tuple) or isinstance(grads, NumericalData), \
             "Invalid gradients type"
+        super().step(inputs)
+        if self.total_iterations == 0:
+            assert self.feature_mapping is not None, "Feature mapping not set"
+            feature_mapping, numerical_mask = self.feature_mapping
+            self._cpp_model.set_feature_mapping(np.ascontiguousarray(feature_mapping),
+                                                np.ascontiguousarray(numerical_mask))
+
         if guidance_labels is not None and (guidance_labels == 0).all():
             guidance_labels = None
             guidance_grads = None
@@ -238,6 +266,8 @@ class GBTLearner(BaseLearner):
             instance.student_model = None
             instance.feature_weights = instance._cpp_model.get_feature_weights()
             instance.device = instance.params['device']
+            instance.feature_mapping = instance._cpp_model.get_feature_mapping()
+            instance._memory = []
             return instance
         except RuntimeError as e:
             print(f"Caught an exception in GBRL: {e}")
@@ -274,52 +304,36 @@ class GBTLearner(BaseLearner):
             num_trees += self.student_model.get_num_trees()
         return num_trees
 
-    def set_bias(self, bias: Union[np.ndarray, float]) -> None:
+    def set_bias(self, bias: Union[NumericalData, float]) -> None:
         """
         Sets the bias of the model.
 
         Args:
-            bias (Union[np.ndarray, float]): The bias value.
+            bias (Union[NumericalData, float]): The bias value.
         """
-        if not isinstance(bias, np.ndarray) and not isinstance(bias, float):
-            raise TypeError("Input should be a numpy array or float")
-
-        if isinstance(bias, float):
-            bias = np.array([bias])
-
-        if bias.ndim > 1:
-            bias = bias.ravel()
-        elif bias.ndim == 0:
-            bias = np.array([bias.item()])  # Converts 0D arrays to 1D
         try:
-            bias = bias.astype(numerical_dtype)
-            self._cpp_model.set_bias(bias)
+            self._cpp_model.set_bias(normalize_vector_input(bias))
         except RuntimeError as e:
             print(f"Caught an exception in GBRL: {e}")
 
-    def set_feature_weights(self, feature_weights: NumericalData) -> None:
+    def set_feature_weights(self, feature_weights: Union[NumericalData, float]) -> None:
         """
         Sets the feature weights of the model.
 
         Args:
-            feature_weights (NumericalData): The feature weights.
+            feature_weights (Union[NumericalData, float]): The feature weights.
         """
-        if not isinstance(feature_weights, np.ndarray) and not isinstance(feature_weights, float):
-            raise TypeError("Input should be a numpy array or float")
+        assert self._cpp_model is not None, "Model not initialized!"
+        # Normalize to 1D vector (handles float, numpy, torch, 0D, and multi-D)
+        if isinstance(feature_weights, th.Tensor):
+            assert (feature_weights >= 0).all(), "feature weights contains non-positive values"
+        elif isinstance(feature_weights, np.ndarray):
+            assert np.all(feature_weights >= 0), "feature weights contains non-positive values"
+        else:
+            assert feature_weights >= 0, "feature weights contains non-positive values"
 
-        if isinstance(feature_weights, float):
-            feature_weights = np.array([float])
-
-        if feature_weights.ndim > 1:
-            feature_weights = feature_weights.ravel()
-        elif feature_weights.ndim == 0:
-            # Converts 0D arrays to 1D
-            feature_weights = np.array([feature_weights.item()])
-        assert len(feature_weights) == self.input_dim, ("feature weights has to have the "
-                                                        "same number of elements as features")
-        assert np.all(feature_weights >= 0), "feature weights contains non-positive values"
         try:
-            self._cpp_model.set_feature_weights(feature_weights)
+            self._cpp_model.set_feature_weights(normalize_vector_input(feature_weights))
         except RuntimeError as e:
             print(f"Caught an exception in GBRL: {e}")
 
@@ -441,7 +455,7 @@ class GBTLearner(BaseLearner):
 
     def predict(self, inputs: NumericalData,
                 requires_grad: bool = True,
-                start_idx: Optional[int] = 0,
+                start_idx: Optional[int] = None,
                 stop_idx: Optional[int] = None,
                 tensor: bool = True) -> NumericalData:
         """

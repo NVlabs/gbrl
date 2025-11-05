@@ -1,11 +1,30 @@
 ##############################################################################
-# Copyright (c) 2024, NVIDIA Corporation. All rights reserved.
+# Copyright (c) 2024-2025, NVIDIA Corporation. All rights reserved.
 #
-# This work is made available under the Nvidia Source Code License-NC.
-# To view a copy of this license, visit
-# https://nvlabs.github.io/gbrl/license.html
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the "Software"),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
 #
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
 ##############################################################################
+"""
+Gradient Boosted Tree Model Module
+
+This module provides the GBTModel class, a general-purpose gradient boosting
+model for supervised learning and reinforcement learning tasks.
+"""
 from typing import Dict, List, Optional, Union
 
 import numpy as np
@@ -160,7 +179,10 @@ class GBTModel(BaseGBT):
 
         grads = clip_grad_norm(grads, max_grad_norm)
         validate_array(grads)
-        self.learner.step(X, grads, guidance_labels, guidance_grads)
+        self.learner.step(inputs=X,
+                          grads=grads,
+                          guidance_labels=guidance_labels,
+                          guidance_grads=guidance_grads)
 
         self.grads = grads
         self.input = None
@@ -201,7 +223,7 @@ class GBTModel(BaseGBT):
         return instance
 
     def __call__(self, X: Union[th.Tensor, np.ndarray],
-                 requires_grad: bool = True, start_idx: Optional[int] = 0,
+                 requires_grad: bool = True, start_idx: Optional[int] = None,
                  stop_idx: Optional[int] = None, tensor: bool = True) -> Union[th.Tensor, np.ndarray]:
         """
         Returns GBRL's output as either a Tensor or a numpy array. if

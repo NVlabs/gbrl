@@ -6,6 +6,7 @@ include gbrl/src/cpp/*.h
 include gbrl/src/cpp/CMakeLists.txt
 recursive-include gbrl/include *
 include README.md
+include CLA.md
 include LICENSE
 include LICENSES.txt
 include CMakeLists.txt

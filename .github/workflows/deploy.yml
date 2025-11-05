@@ -5,8 +5,9 @@ on:
     branches:
       - master  # Or the branch you want to deploy from
     paths:
-      - 'docs/**'   # Trigger on changes to files in the src directory
-      - 'gbrl/**'   # Trigger on changes to files in the src directory
+      - 'docs/**'   # Trigger on changes to files in the docs directory
+      - 'gbrl/**'   # Trigger on changes to files in the gbrl directory
+      - '.github/workflows/deploy.yml'  # Trigger on changes to this workflow file
   workflow_dispatch:
 
 jobs:
@@ -27,15 +28,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install sphinx
           pip install sphinx-rtd-theme
-          pip install numpy
-          pip install torch
-          pip install .
+          # pip install numpy
+          # pip install torch
+          # pip install .
 
       - name: Build documentation
         run: |
           set -e
           cd docs
           make html
+        env:
+          SPHINX_BUILD: "1"
           
       - name: Deploy to GitHub Pages
         run: |

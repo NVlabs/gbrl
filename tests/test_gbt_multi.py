@@ -1,5 +1,5 @@
 ##############################################################################
-# Copyright (c) 2024, NVIDIA Corporation. All rights reserved.
+# Copyright (c) 2024-2025, NVIDIA Corporation. All rights reserved.
 #
 # This work is made available under the Nvidia Source Code License-NC.
 # To view a copy of this license, visit
@@ -164,9 +164,10 @@ class TestGBTMulti(unittest.TestCase):
         gbrl_shap = model.tree_shap(0, X_cpu[0, :])
         clf = DecisionTreeRegressor(max_depth=3).fit(X_cpu, y)
         target_shap = shap.TreeExplainer(clf).shap_values(X_cpu[0, :])
-        self.assertTrue(np.allclose(gbrl_shap, target_shap, rtol=1e-3),
-                        'GBRL sHAP values are not close to target '
-                        'SHAP values')
+        self.assertTrue(
+            np.allclose(gbrl_shap, target_shap, rtol=1e-3),
+            'GBRL SHAP values are not close to target SHAP values'
+        )
 
     def test_cosine_adam_cpu(self):
         print("Running Multi test_cosine_adam_cpu")

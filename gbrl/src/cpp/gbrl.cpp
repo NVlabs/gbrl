@@ -1,12 +1,30 @@
 
 //////////////////////////////////////////////////////////////////////////////
-// Copyright (c) 2024, NVIDIA Corporation. All rights reserved.
+// Copyright (c) 2024-2025, NVIDIA Corporation. All rights reserved.
 //
-// This work is made available under the Nvidia Source Code License-NC.
-// To view a copy of this license, visit
-// https://nvlabs.github.io/gbrl/license.html
+// Permission is hereby granted, free of charge, to any person obtaining a
+// copy of this software and associated documentation files (the "Software"),
+// to deal in the Software without restriction, including without limitation
+// the rights to use, copy, modify, merge, publish, distribute, sublicense,
+// and/or sell copies of the Software, and to permit persons to whom the
+// Software is furnished to do so, subject to the following conditions:
 //
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+// THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+// DEALINGS IN THE SOFTWARE.
 //////////////////////////////////////////////////////////////////////////////
+/**
+ * @file gbrl.cpp
+ * @brief Implementation of main GBRL class for gradient boosting
+ */
+
 #include <omp.h>
 #include <string>
 #include <fstream>
@@ -54,7 +72,6 @@ extern "C" {
 #include "math_ops.h"
 
 
-
 GBRL::GBRL(int input_dim, int output_dim, int policy_dim, int max_depth, int min_data_in_leaf, 
            int n_bins, int par_th, float cv_beta, scoreFunc split_score_func,
            generatorType generator_type, bool use_cv, int batch_size, growPolicy grow_policy, 
@@ -73,7 +90,6 @@ GBRL::GBRL(int input_dim, int output_dim, int policy_dim, int max_depth, int min
     this->to_device(_device);
         
 }
-
 GBRL::GBRL(int input_dim, int output_dim, int policy_dim, int max_depth, int min_data_in_leaf, 
            int n_bins, int par_th, float cv_beta, std::string split_score_func,
            std::string generator_type, bool use_cv, int batch_size, 
@@ -192,9 +208,8 @@ void GBRL::to_device(deviceType _device){
 void GBRL::set_bias(dataHolder<const float> *bias, const int output_dim){
     if (output_dim != this->metadata->output_dim)
     {
-        std::cerr << "Given bias vector has different dimensions than expect. " << " Given: " << output_dim << " expected: " << this->metadata->output_dim << std::endl; 
+        std::cerr << "Given bias vector has different dimensions than expected. Given: " << output_dim << " expected: " << this->metadata->output_dim << std::endl; 
         throw std::runtime_error("Incompatible dimensions");
-        return;
     }
 #ifdef USE_CUDA
     if (this->device == gpu){
@@ -219,21 +234,79 @@ void GBRL::set_bias(dataHolder<const float> *bias, const int output_dim){
         std::cout << "Setting GBRL bias " << std::endl;
 }
 
-void GBRL::set_feature_weights(float *feature_weights, const int input_dim){
+void GBRL::set_feature_weights(dataHolder<float> *feature_weights, const int input_dim){
     if (input_dim != this->metadata->input_dim)
     {
-        std::cerr << "Given feature_weights vector has different dimensions than expect. " << " Given: " << input_dim << " expected: " << this->metadata->input_dim << std::endl; 
+        std::cerr << "Given feature_weights vector has different dimensions than expected. Given: " << input_dim << " expected: " << this->metadata->input_dim << std::endl; 
         throw std::runtime_error("Incompatible dimensions");
-        return;
     }
 #ifdef USE_CUDA
-    if (this->device == gpu)
-        cudaMemcpy(this->edata->feature_weights, feature_weights, sizeof(float)*this->metadata->input_dim, cudaMemcpyHostToDevice);
+    if (this->device == gpu){
+        if (feature_weights->device == cpu){
+            cudaMemcpy(this->edata->feature_weights, feature_weights->data, sizeof(float)*this->metadata->input_dim, cudaMemcpyHostToDevice);
+        } else {
+            cudaMemcpy(this->edata->feature_weights, feature_weights->data, sizeof(float)*this->metadata->input_dim, cudaMemcpyDeviceToDevice);
+        }
+    }
 #endif
-    if (this->device == cpu)
-        memcpy(this->edata->feature_weights, feature_weights, sizeof(float)*this->metadata->input_dim);
+    if (this->device == cpu){
+        if (feature_weights->device == gpu){
+#ifdef USE_CUDA
+            cudaMemcpy(this->edata->feature_weights, feature_weights->data, sizeof(float)*this->metadata->input_dim, cudaMemcpyDeviceToHost);
+#else
+            throw std::runtime_error("GBRL was not compiled for GPU but GPU data detected!");
+#endif
+        } else
+            memcpy(this->edata->feature_weights, feature_weights->data, sizeof(float)*this->metadata->input_dim);
+    }
     if (this->metadata->verbose > 0)
         std::cout << "Setting GBRL feature weights " << std::endl;
+}
+
+void GBRL::set_feature_mapping(const int *feature_mapping, const bool *mapping_numerics, const int input_dim){
+    if (input_dim != this->metadata->input_dim)
+    {
+        std::cerr << "Given feature_mapping vector has different dimensions than expected. Given: " << input_dim << " expected: " << this->metadata->input_dim << std::endl; 
+        throw std::runtime_error("Incompatible dimensions");
+    }
+
+    int *reverse_num_feature_mapping = new int[this->metadata->input_dim];
+    int *reverse_cat_feature_mapping = new int[this->metadata->input_dim];
+
+    int j = 0;
+    int k = 0;
+    for (int i = 0 ; i < this->metadata->input_dim ; ++i){
+        reverse_num_feature_mapping[i] = -1;
+        reverse_cat_feature_mapping[i] = -1;
+        if (mapping_numerics[i]){
+            reverse_num_feature_mapping[j] = i;
+            j++;
+        }
+        else {
+            reverse_cat_feature_mapping[k] = i;
+            k++;
+        }
+    }
+
+#ifdef USE_CUDA
+    if (this->device == gpu){
+        cudaMemcpy(this->edata->feature_mapping, feature_mapping, sizeof(int)*this->metadata->input_dim, cudaMemcpyHostToDevice);
+        cudaMemcpy(this->edata->mapping_numerics, mapping_numerics, sizeof(bool)*this->metadata->input_dim, cudaMemcpyHostToDevice);
+        cudaMemcpy(this->edata->reverse_num_feature_mapping, reverse_num_feature_mapping, sizeof(int)*this->metadata->input_dim, cudaMemcpyHostToDevice);
+        cudaMemcpy(this->edata->reverse_cat_feature_mapping, reverse_cat_feature_mapping, sizeof(int)*this->metadata->input_dim, cudaMemcpyHostToDevice);
+    }
+#endif
+    if (this->device == cpu){
+        memcpy(this->edata->feature_mapping, feature_mapping, sizeof(int)*this->metadata->input_dim);
+        memcpy(this->edata->mapping_numerics, mapping_numerics, sizeof(bool)*this->metadata->input_dim);
+        memcpy(this->edata->reverse_num_feature_mapping, reverse_num_feature_mapping, sizeof(int)*this->metadata->input_dim);
+        memcpy(this->edata->reverse_cat_feature_mapping, reverse_cat_feature_mapping, sizeof(int)*this->metadata->input_dim);
+    }
+    if (this->metadata->verbose > 0)
+        std::cout << "Setting GBRL feature mapping " << std::endl;
+
+    delete[] reverse_num_feature_mapping;
+    delete[] reverse_cat_feature_mapping;
 }
 
 float* GBRL::get_bias(){
@@ -255,13 +328,35 @@ float* GBRL::get_feature_weights(){
 #ifdef USE_CUDA
     if (this->device == gpu){
         float *feature_weights = new float[this->metadata->input_dim];
-        cudaMemcpy(feature_weights, this->edata->feature_weights, sizeof(float)*this->metadata->input_dim, cudaMemcpyDeviceToHost);
+        cudaMemcpy(feature_weights, this->edata->feature_weights, sizeof(float) * this->metadata->input_dim, cudaMemcpyDeviceToHost);
         return feature_weights;
     }
 #endif 
     if (this->device == cpu)
         return copy_mat(this->edata->feature_weights, this->metadata->input_dim, this->metadata->par_th);
     return nullptr;
+}
+
+void GBRL::get_feature_mapping(int*& feature_mapping, bool*& mapping_numerics){
+    // returns copies. caller must delete[] both pointers!
+#ifdef USE_CUDA
+    if (this->device == gpu){
+        feature_mapping = new int[this->metadata->input_dim];
+        mapping_numerics = new bool[this->metadata->input_dim];
+        cudaMemcpy(feature_mapping, this->edata->feature_mapping, sizeof(int) * this->metadata->input_dim, cudaMemcpyDeviceToHost);
+        cudaMemcpy(mapping_numerics, this->edata->mapping_numerics, sizeof(bool) * this->metadata->input_dim, cudaMemcpyDeviceToHost);
+        return;
+    }
+#endif 
+    if (this->device == cpu){
+        feature_mapping = new int[this->metadata->input_dim];
+        mapping_numerics = new bool[this->metadata->input_dim];
+        memcpy(feature_mapping, this->edata->feature_mapping, sizeof(int) * this->metadata->input_dim);
+        memcpy(mapping_numerics, this->edata->mapping_numerics, sizeof(bool) * this->metadata->input_dim);
+        return;
+    }
+    feature_mapping = nullptr;
+    mapping_numerics = nullptr;
 }
 
 

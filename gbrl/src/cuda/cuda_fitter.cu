@@ -1,11 +1,16 @@
 //////////////////////////////////////////////////////////////////////////////
-// Copyright (c) 2024, NVIDIA Corporation. All rights reserved.
+// Copyright (c) 2024-2025, NVIDIA Corporation. All rights reserved.
 //
 // This work is made available under the Nvidia Source Code License-NC.
 // To view a copy of this license, visit
 // https://nvlabs.github.io/gbrl/license.html
 //
 //////////////////////////////////////////////////////////////////////////////
+/**
+ * @file cuda_fitter.cu
+ * @brief Implementation of CUDA kernels for tree fitting on GPU
+ */
+
 #include <cuda_runtime.h>
 #include <math_constants.h>
 #include <device_launch_parameters.h>
@@ -36,9 +41,9 @@ void calc_parallelism(
 
     int shared_mem;
     if (split_score_func == Cosine)
-        shared_mem = 2*(output_dim + 3)*sizeof(float);
+        shared_mem = 2 * (output_dim + 3) * sizeof(float);
     else if (split_score_func == L2)
-        shared_mem = 2*(output_dim + 1)*sizeof(float);
+        shared_mem = 2 * (output_dim + 1) * sizeof(float);
     while (threads_per_block*shared_mem > deviceProp.sharedMemPerBlock){
         if (threads_per_block == 1){
             std::cerr << "output_dim " << output_dim << "too large! cannot work with so many columns! use cpu version" << std::endl;
@@ -65,9 +70,9 @@ void calc_oblivious_parallelism(
 
     int shared_mem;
     if (split_score_func == Cosine)
-        shared_mem = 2*(output_dim + 3)*sizeof(float);
+        shared_mem = 2 * (output_dim + 3) * sizeof(float);
     else if (split_score_func == L2)
-        shared_mem = 2*(output_dim + 1)*sizeof(float);
+        shared_mem = 2 * (output_dim + 1) * sizeof(float);
     while (threads_per_block*shared_mem*(1 << depth) > deviceProp.sharedMemPerBlock){
         if (threads_per_block == 1){
             std::cerr << "output_dim " << output_dim << "too large! cannot work with so many columns! use cpu version" << std::endl;
@@ -191,6 +196,8 @@ void evaluate_greedy_splits(
             candidata->candidate_values,
             candidata->candidate_categories,
             candidata->candidate_numeric,
+            edata->reverse_num_feature_mapping,
+            edata->reverse_cat_feature_mapping,
             candidata->n_candidates,
             split_data->left_sum,
             split_data->right_sum,
@@ -228,6 +235,8 @@ void evaluate_greedy_splits(
             candidata->candidate_values,
             candidata->candidate_categories,
             candidata->candidate_numeric,
+            edata->reverse_num_feature_mapping,
+            edata->reverse_cat_feature_mapping,
             candidata->n_candidates,
             split_data->left_sum,
             split_data->right_sum,
@@ -257,11 +266,18 @@ void evaluate_greedy_splits(
             metadata->n_num_features,
             metadata->guidance_weight);
     }
+
     cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         std::cerr << "CUDA Error: " << cudaGetErrorString(err) << std::endl;
     }
+#ifdef DEBUG
+    if (metadata->verbose > 1){
+        print_candidate_scores<<<1, THREADS_PER_BLOCK>>>(candidata->candidate_indices, candidata->candidate_values,  candidata->candidate_categories, candidata->candidate_numeric, split_data->split_scores, candidata->n_candidates);
+        cudaDeviceSynchronize();
+    }
+#endif
     update_best_candidate_cuda<<<1, THREADS_PER_BLOCK>>>(split_data->split_scores, candidata->n_candidates, split_data->best_idx, split_data->best_score, node); 
     cudaDeviceSynchronize();
 }
@@ -294,6 +310,8 @@ void evaluate_oblivious_splits_cuda(
                 candidata->candidate_values,
                 candidata->candidate_categories,
                 candidata->candidate_numeric,
+                edata->reverse_num_feature_mapping,
+                edata->reverse_cat_feature_mapping,
                 metadata->min_data_in_leaf,
                 split_data->oblivious_split_scores + candidata->n_candidates*i,
                 dataset->n_samples,
@@ -311,6 +329,8 @@ void evaluate_oblivious_splits_cuda(
                 candidata->candidate_values,
                 candidata->candidate_categories,
                 candidata->candidate_numeric,
+                edata->reverse_num_feature_mapping,
+                edata->reverse_cat_feature_mapping,
                 metadata->min_data_in_leaf,
                 split_data->oblivious_split_scores + candidata->n_candidates*i,
                 dataset->n_samples,
@@ -360,6 +380,8 @@ __global__ void split_score_cosine_cuda(
     const float* __restrict__ candidate_values,
     const char* __restrict__ candidate_categories,
     const bool* __restrict__ candidate_numeric,
+    const int* __restrict__ r_num_mapping,
+    const int* __restrict__ r_cat_mapping,
     const int min_data_in_leaf,
     float* __restrict__ split_scores,
     const int global_n_samples,
@@ -368,8 +390,10 @@ __global__ void split_score_cosine_cuda(
     extern __shared__ float sdata[];
     int n_samples = __ldg(&node->n_samples), n_cols = __ldg(&node->output_dim);
     int cand_idx = blockIdx.x;
-    
-    
+
+    if (split_scores[cand_idx] == -INFINITY)
+        return;
+
     if (__ldg(&node->depth) > 0 && min_data_in_leaf == 0){
         if (candidate_numeric[cand_idx]){
             for (int i = 0; i < __ldg(&node->depth); ++i){
@@ -494,10 +518,10 @@ __global__ void split_score_cosine_cuda(
         if (denominator > 0.0f) {
             cosine = (l_dot_sum[0] + r_dot_sum[0]) / sqrtf(denominator);
         }
-
-        int feat_idx = __ldg(&candidate_indices[cand_idx]);
-        if (!candidate_numeric[cand_idx])
-            feat_idx += n_num_features;
+        
+        int tmp_idx = __ldg(&candidate_indices[cand_idx]);
+        int feat_idx = (candidate_numeric[cand_idx]) ? r_num_mapping[tmp_idx] : r_cat_mapping[tmp_idx];
+        
         split_scores[cand_idx] = cosine * __ldg(feature_weights + feat_idx);
     }  
 }
@@ -514,6 +538,8 @@ __global__ void split_score_l2_cuda(
     const float* __restrict__ candidate_values,
     const char* __restrict__ candidate_categories,
     const bool* __restrict__ candidate_numeric,
+    const int* __restrict__ r_num_mapping,
+    const int* __restrict__ r_cat_mapping,
     const int min_data_in_leaf,
     float* __restrict__ split_scores,
     const int global_n_samples,
@@ -523,6 +549,10 @@ __global__ void split_score_l2_cuda(
 
     int n_samples = node->n_samples, n_cols = node->output_dim;
     int cand_idx = blockIdx.x;
+
+    if (split_scores[cand_idx] == -INFINITY)
+        return;
+
     if (node->depth > 0 && min_data_in_leaf == 0){
         if (candidate_numeric[cand_idx]){
             for (int i = 0; i < node->depth; ++i){
@@ -605,9 +635,8 @@ __global__ void split_score_l2_cuda(
             right_mean[d] = (r_count[0] > 0) ? right_mean[d] / r_count[0] : 0.0f;
             r_mean_norm += right_mean[d] * right_mean[d];
         }
-        int feat_idx = __ldg(&candidate_indices[cand_idx]);
-        if (!candidate_numeric[cand_idx])
-            feat_idx += n_num_features;
+        int tmp_idx = __ldg(&candidate_indices[cand_idx]);
+        int feat_idx = (candidate_numeric[cand_idx]) ? r_num_mapping[tmp_idx] : r_cat_mapping[tmp_idx];
         split_scores[cand_idx] = (l_count[0]*l_mean_norm + r_count[0]*r_mean_norm) * __ldg(feature_weights + feat_idx);
     }  
 }
@@ -772,7 +801,7 @@ __global__ void split_conditional_sum_kernel(
     float* __restrict__ right_sum,
     float* __restrict__ left_count,
     float* __restrict__ right_count,
-    const int guidance_scale){
+    const float guidance_scale){
     // Accumulate per thread partial sum
     int global_idx = threadIdx.x + blockIdx.x*blockDim.x;
     int output_dim = __ldg(&node->output_dim);
@@ -857,6 +886,8 @@ __global__ void split_cosine_score_kernel(
     const float* __restrict__ candidate_values,
     const char* __restrict__ candidate_categories,
     const bool* __restrict__ candidate_numeric,
+    const int* __restrict__ r_num_mapping,
+    const int* __restrict__ r_cat_mapping,
     const int n_candidates,
     float* __restrict__ lsum,
     float* __restrict__ rsum,
@@ -871,6 +902,9 @@ __global__ void split_cosine_score_kernel(
     int n_cols = __ldg(&node->output_dim);
     int cand_row = cand_idx*n_cols;
     float lvalue, rvalue;
+
+    if (split_scores[cand_idx] == -INFINITY)
+        return;
 
     if (cand_idx < n_candidates){
         if (node->depth > 0 && min_data_in_leaf == 0){
@@ -916,9 +950,8 @@ __global__ void split_cosine_score_kernel(
             return;
         }
         float cos = numerator / sqrtf(denominator);
-        int feat_idx = __ldg(&candidate_indices[cand_idx]);
-        if (!candidate_numeric[cand_idx])
-            feat_idx += n_num_features;
+        int tmp_idx = __ldg(&candidate_indices[cand_idx]);
+        int feat_idx = (candidate_numeric[cand_idx]) ? r_num_mapping[tmp_idx] : r_cat_mapping[tmp_idx];
         split_scores[cand_idx] = cos * __ldg(feature_weights + feat_idx);
     }
 }
@@ -931,6 +964,8 @@ __global__ void split_l2_score_kernel(
     const float* __restrict__ candidate_values,
     const char* __restrict__ candidate_categories,
     const bool* __restrict__ candidate_numeric,
+    const int* __restrict__ r_num_mapping,
+    const int* __restrict__ r_cat_mapping,
     const int n_candidates,
     float* __restrict__ lsum,
     float* __restrict__ rsum,
@@ -943,6 +978,10 @@ __global__ void split_l2_score_kernel(
     int n_cols = __ldg(&node->output_dim);
     int cand_row = cand_idx*n_cols;
     float lvalue, rvalue;
+
+    if (split_scores[cand_idx] == -INFINITY)
+        return;
+        
     if (cand_idx < n_candidates){
         if (node->depth > 0 && min_data_in_leaf == 0){
             if (candidate_numeric[cand_idx]){
@@ -978,10 +1017,10 @@ __global__ void split_l2_score_kernel(
         rvalue = __ldg(&rcount[cand_idx]);
         l_mean_norm = (lvalue > 0.0f) ? l_mean_norm / lvalue : 0.0f; // n_count * l2 norm 
         r_mean_norm = (rvalue > 0.0f) ? r_mean_norm / rvalue : 0.0f; // n_count * l2 norm 
-        int feat_idx = __ldg(&candidate_indices[cand_idx]);
-        if (!candidate_numeric[cand_idx])
-            feat_idx += n_num_features;
-        split_scores[cand_idx] = (l_mean_norm + r_mean_norm) * __ldg(feature_weights + feat_idx);
+
+        int tmp_idx = __ldg(&candidate_indices[cand_idx]);
+        int feat_idx = (candidate_numeric[cand_idx]) ? r_num_mapping[tmp_idx] : r_cat_mapping[tmp_idx];
+        split_scores[cand_idx] = (l_mean_norm + r_mean_norm) * __ldg(feature_weights + feat_idx);    
     }
 }
 

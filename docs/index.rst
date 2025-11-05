@@ -17,13 +17,8 @@ GBRL is a Python-based Gradient Boosting Trees (GBT) library, similar to popular
 .. toctree::
    :maxdepth: 2
    :caption: Documentation:
+   :hidden:
 
    models/index
    learners/index
 
-Indices and tables
-==================
-
-* :ref:`genindex`
-* :ref:`modindex`
-* :ref:`search`
