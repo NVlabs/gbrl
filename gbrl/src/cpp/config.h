@@ -1,5 +1,5 @@
 //////////////////////////////////////////////////////////////////////////////
-// Copyright (c) 2025, NVIDIA Corporation. All rights reserved.
+// Copyright (c) 2024-2025, NVIDIA Corporation. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
 // copy of this software and associated documentation files (the "Software"),
@@ -19,11 +19,26 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 // DEALINGS IN THE SOFTWARE.
 //////////////////////////////////////////////////////////////////////////////
+
+/**
+ * @file config.h
+ * @brief Version configuration for the GBRL library
+ * 
+ * This header defines the semantic versioning constants for the GBRL library.
+ * The version follows the pattern MAJOR.MINOR.PATCH where:
+ * - MAJOR version indicates incompatible API changes
+ * - MINOR version indicates added functionality in a backward compatible manner
+ * - PATCH version indicates backward compatible bug fixes
+ */
+
 #ifndef VERSION_CONFIG_H
 #define VERSION_CONFIG_H
 
+/** @brief Major version number - incremented for incompatible API changes */
 #define MAJOR_VERSION 1
+
+/** @brief Minor version number - incremented for backward compatible new features */
 #define MINOR_VERSION 1
-#define PATCH_VERSION 1
+#define PATCH_VERSION 3
 
 #endif // VERSION_CONFIG_H

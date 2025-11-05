@@ -1,24 +1,16 @@
 //////////////////////////////////////////////////////////////////////////////
-// Copyright (c) 2025, NVIDIA Corporation. All rights reserved.
+// Copyright (c) 2024-2025, NVIDIA Corporation. All rights reserved.
 //
-// Permission is hereby granted, free of charge, to any person obtaining a
-// copy of this software and associated documentation files (the "Software"),
-// to deal in the Software without restriction, including without limitation
-// the rights to use, copy, modify, merge, publish, distribute, sublicense,
-// and/or sell copies of the Software, and to permit persons to whom the
-// Software is furnished to do so, subject to the following conditions:
+// This work is made available under the Nvidia Source Code License-NC.
+// To view a copy of this license, visit
+// https://nvlabs.github.io/gbrl/license.html
 //
-// The above copyright notice and this permission notice shall be included in
-// all copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-// THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-// DEALINGS IN THE SOFTWARE.
 //////////////////////////////////////////////////////////////////////////////
+/**
+ * @file cuda_preprocess.cu
+ * @brief Implementation of CUDA kernels for data preprocessing on GPU
+ */
+
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 
@@ -243,21 +235,35 @@ __global__ void bitonic_sort_kernel(const float* __restrict__ input, int* __rest
     }
 }
 
+void shuffle_and_copy_cuda(
+    const float* d_obs,
+    const float* d_targets,
+    const char* d_categorical_obs,
+    const int* d_indices,
+    float* d_training_obs,
+    float* d_training_targets,
+    char* d_training_cat_obs,
+    int n_samples,
+    int n_num_features,
+    int n_cat_features,
+    int output_dim,
+    int max_char_size
+) {
+    int threads = 256;
+    int blocks = (n_samples + threads - 1) / threads;
+    shuffle_and_copy_kernel<<<blocks, threads>>>(
+        d_obs, d_targets, d_categorical_obs, d_indices,
+        d_training_obs, d_training_targets, d_training_cat_obs,
+        n_samples, n_num_features, n_cat_features, output_dim, max_char_size
+    );
+    cudaDeviceSynchronize();
+}
 
 
 int* sort_indices_cuda(const float* __restrict__ obs, const int n_samples, const int n_features){
     int *indices;
-    cudaError_t err = cudaMalloc((void**)&indices, sizeof(int)*n_samples*n_features);
+    cudaError_t err = allocateCudaMemory((void**)&indices, sizeof(int)*n_samples*n_features, "when trying to allocate memory for sort_indices");
     if (err != cudaSuccess) {
-        size_t free_mem, total_mem;
-        cudaMemGetInfo(&free_mem, &total_mem);
-        std::cerr << "CUDA error: " << cudaGetErrorString(err)
-                << " when trying to allocate " << ((sizeof(int)*n_samples*n_features) / (1024.0 * 1024.0)) << " MB."
-                << std::endl;
-        std::cerr << "Free memory: " << (free_mem / (1024.0 * 1024.0)) << " MB."
-                << std::endl;
-        std::cerr << "Total memory: " << (total_mem / (1024.0 * 1024.0)) << " MB."
-                << std::endl;
         return nullptr;
     }
 
@@ -440,3 +446,85 @@ __global__ void linspaceKernel(const float* min_vec, const float* max_vec, int n
     }
 }
 
+__global__ void shuffle_and_copy_kernel(
+    const float* __restrict__ obs,
+    const float* __restrict__ targets,
+    const char* __restrict__ categorical_obs,
+    const int* __restrict__ indices,
+    float* __restrict__ training_obs,
+    float* __restrict__ training_targets,
+    char* __restrict__ training_cat_obs,
+    int n_samples,
+    int n_num_features,
+    int n_cat_features,
+    int output_dim,
+    int max_char_size
+) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n_samples) {
+        int src_idx = indices[i];
+
+        // Copy obs
+        for (int j = 0; j < n_num_features; ++j) {
+            training_obs[i * n_num_features + j] = obs[src_idx * n_num_features + j];
+        }
+
+        // Copy targets
+        for (int j = 0; j < output_dim; ++j) {
+            training_targets[i * output_dim + j] = targets[src_idx * output_dim + j];
+        }
+
+        // Copy categorical obs
+        for (int k = 0; k < n_cat_features; ++k) {
+            for (int c = 0; c < max_char_size; ++c) {
+                training_cat_obs[(i * n_cat_features + k) * max_char_size + c] =
+                    categorical_obs[(src_idx * n_cat_features + k) * max_char_size + c];
+            }
+        }
+    }
+}
+
+void column_mean_reduce(
+    const float* d_in,
+    float* d_out,
+    size_t n_rows,
+    size_t n_cols
+) {
+    const dim3 n_threads_per_blockdim3(BLOCK_COLS, BLOCK_ROWS);
+    column_mean_reduce_kernel<<<(n_cols + BLOCK_COLS - 1) / BLOCK_COLS, n_threads_per_blockdim3 >>>(
+        d_in, d_out, n_rows, n_cols
+    );
+    cudaDeviceSynchronize();
+}
+
+
+__global__ void column_mean_reduce_kernel(
+    const float * __restrict__ in,
+    float * __restrict__ out,
+    size_t n_rows,
+    size_t n_cols){
+
+    __shared__ float sdata[BLOCK_ROWS][BLOCK_COLS + 1];
+    size_t idx = threadIdx.x + blockDim.x*blockIdx.x;
+    size_t width_stride = gridDim.x*blockDim.x;
+
+    // bitwise round-up
+    size_t full_width = (n_cols & (~((unsigned long long)(BLOCK_COLS -1)))) + ((n_cols & (BLOCK_COLS-1)) ? BLOCK_COLS : 0); // round up to next block
+
+    for (size_t col = idx; col < full_width; col+=width_stride){          // grid-stride loop across matrix width
+        sdata[threadIdx.y][threadIdx.x] = 0;
+        for (size_t row = threadIdx.y; row < n_rows; row+=BLOCK_ROWS){ // block-stride loop across matrix height
+            sdata[threadIdx.y][threadIdx.x] += (col < n_cols) ? in[col + row*n_cols] : 0;
+        }
+        __syncthreads();
+        float tmp = sdata[threadIdx.x][threadIdx.y];
+        for (int i = WARP_SIZE >>1; i > 0; i >>= 1)                       // warp-wise parallel sum reduction
+        tmp += __shfl_xor_sync(0xFFFFFFFFU, tmp, i);
+        __syncthreads();
+        if (threadIdx.x == 0) 
+            sdata[0][threadIdx.y]  = tmp;
+        __syncthreads();
+        if ((threadIdx.y == 0) && (col < n_cols)) 
+            out[col] = sdata[0][threadIdx.x] / static_cast<float>(n_rows);
+    }
+}

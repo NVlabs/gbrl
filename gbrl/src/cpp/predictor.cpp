@@ -1,5 +1,5 @@
 //////////////////////////////////////////////////////////////////////////////
-// Copyright (c) 2025, NVIDIA Corporation. All rights reserved.
+// Copyright (c) 2024-2025, NVIDIA Corporation. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
 // copy of this software and associated documentation files (the "Software"),
@@ -19,6 +19,11 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 // DEALINGS IN THE SOFTWARE.
 //////////////////////////////////////////////////////////////////////////////
+/**
+ * @file predictor.cpp
+ * @brief Implementation of prediction functions for gradient boosted ensembles
+ */
+
 #include <cstring>
 #include <omp.h>
 #include <iostream>
@@ -151,7 +156,7 @@ void Predictor::predict_cpu(dataSet *dataset, float *preds, const ensembleData *
             int thread_start_tree_idx = thread_id * trees_per_thread + start_tree_idx;
             int thread_stop_tree_idx = (thread_id == n_tree_threads - 1) ? stop_tree_idx : thread_start_tree_idx + trees_per_thread;
             for (int sample_idx = 0; sample_idx < n_samples; ++sample_idx){
-                predictFunc(dataset->obs, dataset->categorical_obs, preds_buffer[thread_id], sample_idx, edata, metadata, thread_start_tree_idx, thread_stop_tree_idx, opts);
+                predictFunc(dataset->obs->data, dataset->categorical_obs->data, preds_buffer[thread_id], sample_idx, edata, metadata, thread_start_tree_idx, thread_stop_tree_idx, opts);
             }        
         }
         for (int thread_id = 0; thread_id < n_tree_threads; ++thread_id){
@@ -168,13 +173,13 @@ void Predictor::predict_cpu(dataSet *dataset, float *preds, const ensembleData *
             int start_idx = thread_id * samples_per_thread;
             int end_idx = (thread_id == n_sample_threads - 1) ? n_samples : start_idx + samples_per_thread;
             for (int sample_idx = start_idx; sample_idx < end_idx; ++sample_idx) {
-                predictFunc(dataset->obs, dataset->categorical_obs, preds, sample_idx, edata, metadata, start_tree_idx, stop_tree_idx, opts);
+                predictFunc(dataset->obs->data, dataset->categorical_obs->data, preds, sample_idx, edata, metadata, start_tree_idx, stop_tree_idx, opts);
             }
         }
     // no parallelization
     } else{ 
         for (int sample_idx = 0; sample_idx < n_samples; ++sample_idx){
-            predictFunc(dataset->obs, dataset->categorical_obs, preds, sample_idx, edata, metadata, start_tree_idx, stop_tree_idx, opts);
+            predictFunc(dataset->obs->data, dataset->categorical_obs->data, preds, sample_idx, edata, metadata, start_tree_idx, stop_tree_idx, opts);
         }
     }
 }

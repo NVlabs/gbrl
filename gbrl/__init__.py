@@ -1,5 +1,5 @@
 ##############################################################################
-# Copyright (c) 2025, NVIDIA Corporation. All rights reserved.
+# Copyright (c) 2024-2025, NVIDIA Corporation. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a
 # copy of this software and associated documentation files (the "Software"),
@@ -19,7 +19,7 @@
 # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 # DEALINGS IN THE SOFTWARE.
 ##############################################################################
-__version__ = "1.1.1"
+__version__ = "1.1.3"
 
 import importlib.util
 import os
@@ -30,6 +30,20 @@ _loaded_cpp_module = None
 
 
 def load_cpp_module():
+    """
+    Dynamically loads the GBRL C++ extension module based on the current
+    platform and Python version.
+
+    This function searches for the compiled C++ module in expected directories
+    and loads the appropriate shared library (.so, .dylib, or .pyd) that matches
+    the current Python version and platform.
+
+    Returns:
+        module: The loaded C++ extension module containing the GBRL class.
+
+    Raises:
+        ImportError: If no compatible C++ module is found in the expected locations.
+    """
     global _loaded_cpp_module
     module_name = "gbrl_cpp"
     python_version = (f"cpython-{sys.version_info.major}"
@@ -60,8 +74,8 @@ def load_cpp_module():
                     file_path = os.path.join(dir_path, file_name)
                     spec = importlib.util.spec_from_file_location(module_name,
                                                                   file_path)
-                    module = importlib.util.module_from_spec(spec)
-                    spec.loader.exec_module(module)
+                    module = importlib.util.module_from_spec(spec)  # type: ignore
+                    spec.loader.exec_module(module)  # type: ignore
                     _loaded_cpp_module = module = module
                     return module
 
@@ -80,8 +94,8 @@ def load_cpp_module():
                         file_path = os.path.join(dir_path, file_name)
                         spec = importlib.util.spec_from_file_location(
                             module_name, file_path)
-                        module = importlib.util.module_from_spec(spec)
-                        spec.loader.exec_module(module)
+                        module = importlib.util.module_from_spec(spec)  # type: ignore
+                        spec.loader.exec_module(module)  # type: ignore
                         _loaded_cpp_module = module = module
                         return module
     raise ImportError(f"Could not find {module_name}{ext} in any of the"
@@ -89,9 +103,19 @@ def load_cpp_module():
 
 
 # Load the C++ module dynamically
-_gbrl_cpp_module = load_cpp_module()
-
-# Create a global alias for the GBRL class
-GBRL_CPP = _gbrl_cpp_module.GBRL
-
-cuda_available = GBRL_CPP.cuda_available
+try:
+    _gbrl_cpp_module = load_cpp_module()
+    # Create a global alias for the GBRL class
+    GBRL_CPP = _gbrl_cpp_module.GBRL
+    cuda_available = GBRL_CPP.cuda_available
+except ImportError:
+    # If we're building documentation or the C++ module isn't available,
+    # use a mock instead
+    if os.environ.get('SPHINX_BUILD') or 'sphinx' in sys.modules:
+        from unittest.mock import MagicMock
+        _gbrl_cpp_module = MagicMock()
+        GBRL_CPP = MagicMock()
+        cuda_available = lambda: False  # noqa: E731
+    else:
+        # Re-raise the error if we're not building docs
+        raise
