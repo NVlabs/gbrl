@@ -37,6 +37,8 @@ jobs:
           set -e
           cd docs
           make html
+        env:
+          SPHINX_BUILD: "1"
           
       - name: Deploy to GitHub Pages
         run: |

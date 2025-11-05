@@ -96,9 +96,19 @@ def load_cpp_module():
 
 
 # Load the C++ module dynamically
-_gbrl_cpp_module = load_cpp_module()
-
-# Create a global alias for the GBRL class
-GBRL_CPP = _gbrl_cpp_module.GBRL
-
-cuda_available = GBRL_CPP.cuda_available
+try:
+    _gbrl_cpp_module = load_cpp_module()
+    # Create a global alias for the GBRL class
+    GBRL_CPP = _gbrl_cpp_module.GBRL
+    cuda_available = GBRL_CPP.cuda_available
+except ImportError:
+    # If we're building documentation or the C++ module isn't available,
+    # use a mock instead
+    if os.environ.get('SPHINX_BUILD') or 'sphinx' in sys.modules:
+        from unittest.mock import MagicMock
+        _gbrl_cpp_module = MagicMock()
+        GBRL_CPP = MagicMock()
+        cuda_available = lambda: False  # noqa: E731
+    else:
+        # Re-raise the error if we're not building docs
+        raise
