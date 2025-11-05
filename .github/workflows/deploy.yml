@@ -5,8 +5,9 @@ on:
     branches:
       - master  # Or the branch you want to deploy from
     paths:
-      - 'docs/**'   # Trigger on changes to files in the src directory
-      - 'gbrl/**'   # Trigger on changes to files in the src directory
+      - 'docs/**'   # Trigger on changes to files in the docs directory
+      - 'gbrl/**'   # Trigger on changes to files in the gbrl directory
+      - '.github/workflows/deploy.yml'  # Trigger on changes to this workflow file
   workflow_dispatch:
 
 jobs:
