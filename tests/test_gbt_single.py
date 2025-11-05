@@ -156,8 +156,9 @@ class TestGBTSingle(unittest.TestCase):
         copy_model = model.copy()
         y_pred = model(X, requires_grad=False, tensor=False)
         y_copy_pred = copy_model(X, requires_grad=False, tensor=False)
-        assert np.allclose(y_pred, y_copy_pred), "Expected copied GBRL model "
-        "to be equal to original"
+        assert np.allclose(y_pred, y_copy_pred), (
+            "Expected copied GBRL model to be equal to original"
+        )
 
     def test_continuation_cpu(self):
         print("Running test_continuation_cpu")
@@ -228,7 +229,7 @@ class TestGBTSingle(unittest.TestCase):
                          verbose=0,
                          device='cpu')
         model.learner.step(X, y)
-        gbrl_shap = model.tree_shap(0, X_cpu[0, :]).flatten()
+        gbrl_shap = model.tree_shap(0, X_cpu[0, :])[0].flatten()
         clf = DecisionTreeRegressor(max_depth=3).fit(X_cpu, y)
 
         target_shap = shap.TreeExplainer(clf).shap_values(X_cpu[0])
