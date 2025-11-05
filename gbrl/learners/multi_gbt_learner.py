@@ -49,7 +49,7 @@ class MultiGBTLearner(BaseLearner):
         Initializes the MultiGBTLearner.
 
         Args:
-            input_dim (int): The number of input features.
+            input_dim (Union[int, List[int]]): The number of input features.
             output_dim (int): The number of output dimensions.
             tree_struct (Dict): A dictionary containing tree structure parameters.
             optimizers (Union[Dict, List]): A dictionary or list of
@@ -68,8 +68,8 @@ class MultiGBTLearner(BaseLearner):
                 output_dim = [output_dim] * n_learners
         if isinstance(output_dim, list):
             assert len(output_dim) == n_learners
-            if isinstance(input_dim, int):
-                input_dim = [input_dim] * n_learners
+        if isinstance(input_dim, int):
+            input_dim = [input_dim] * n_learners
 
         if policy_dim is None:
             policy_dim = output_dim
@@ -103,7 +103,7 @@ class MultiGBTLearner(BaseLearner):
                 params['output_dim'] = self.output_dim[i]   # type: ignore
                 params['policy_dim'] = self.policy_dim[i]   # type: ignore
             cpp_model = GBRL_CPP(**params)
-            cpp_model.set_feature_weights(self.feature_weights)
+            cpp_model.set_feature_weights(self.feature_weights[i])
             if self.student_models is not None:
                 self.optimizers[i]['T'] -= self.total_iterations
             try:
@@ -359,6 +359,8 @@ class MultiGBTLearner(BaseLearner):
             instance.total_iterations = metadata['iteration']
             instance.student_models = None
             instance.feature_weights = instance._cpp_models[0].get_feature_weights()
+            instance.feature_mapping = instance._cpp_models[0].get_feature_mapping()
+            instance._memory = []
             return instance
         except RuntimeError as e:
             raise RuntimeError(f"Caught an exception in GBRL: {e}")

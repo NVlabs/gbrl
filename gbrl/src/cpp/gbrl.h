@@ -392,6 +392,17 @@ class GBRL {
         float* get_feature_weights();
         
         /**
+         * @brief Get feature mapping arrays
+         * 
+         * Returns copies of feature_mapping and mapping_numerics arrays.
+         * Caller must delete[] both returned pointers.
+         * 
+         * @param feature_mapping Output pointer to feature mapping array (int*)
+         * @param mapping_numerics Output pointer to numerics mask array (bool*)
+         */
+        void get_feature_mapping(int*& feature_mapping, bool*& mapping_numerics);
+        
+        /**
          * @brief Get learning rates from all schedulers
          * 
          * @return Pointer to learning rates array

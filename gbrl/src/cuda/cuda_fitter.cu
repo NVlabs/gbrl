@@ -41,9 +41,9 @@ void calc_parallelism(
 
     int shared_mem;
     if (split_score_func == Cosine)
-        shared_mem = 2*(output_dim + 3)*sizeof(float);
+        shared_mem = 2 * (output_dim + 3) * sizeof(float);
     else if (split_score_func == L2)
-        shared_mem = 2*(output_dim + 1)*sizeof(float);
+        shared_mem = 2 * (output_dim + 1) * sizeof(float);
     while (threads_per_block*shared_mem > deviceProp.sharedMemPerBlock){
         if (threads_per_block == 1){
             std::cerr << "output_dim " << output_dim << "too large! cannot work with so many columns! use cpu version" << std::endl;
@@ -70,9 +70,9 @@ void calc_oblivious_parallelism(
 
     int shared_mem;
     if (split_score_func == Cosine)
-        shared_mem = 2*(output_dim + 3)*sizeof(float);
+        shared_mem = 2 * (output_dim + 3) * sizeof(float);
     else if (split_score_func == L2)
-        shared_mem = 2*(output_dim + 1)*sizeof(float);
+        shared_mem = 2 * (output_dim + 1) * sizeof(float);
     while (threads_per_block*shared_mem*(1 << depth) > deviceProp.sharedMemPerBlock){
         if (threads_per_block == 1){
             std::cerr << "output_dim " << output_dim << "too large! cannot work with so many columns! use cpu version" << std::endl;
@@ -192,9 +192,9 @@ void evaluate_greedy_splits(
             candidata->candidate_values,
             candidata->candidate_categories,
             candidata->candidate_numeric,
-            candidata->n_candidates,
             edata->reverse_num_feature_mapping,
             edata->reverse_cat_feature_mapping,
+            candidata->n_candidates,
             split_data->left_sum,
             split_data->right_sum,
             split_data->left_count,
@@ -229,9 +229,9 @@ void evaluate_greedy_splits(
             candidata->candidate_values,
             candidata->candidate_categories,
             candidata->candidate_numeric,
-            candidata->n_candidates,
             edata->reverse_num_feature_mapping,
             edata->reverse_cat_feature_mapping,
+            candidata->n_candidates,
             split_data->left_sum,
             split_data->right_sum,
             split_data->left_count,

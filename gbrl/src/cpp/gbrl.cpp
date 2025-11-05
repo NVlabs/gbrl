@@ -316,13 +316,35 @@ float* GBRL::get_feature_weights(){
 #ifdef USE_CUDA
     if (this->device == gpu){
         float *feature_weights = new float[this->metadata->input_dim];
-        cudaMemcpy(feature_weights, this->edata->feature_weights, sizeof(float)*this->metadata->input_dim, cudaMemcpyDeviceToHost);
+        cudaMemcpy(feature_weights, this->edata->feature_weights, sizeof(float) * this->metadata->input_dim, cudaMemcpyDeviceToHost);
         return feature_weights;
     }
 #endif 
     if (this->device == cpu)
         return copy_mat(this->edata->feature_weights, this->metadata->input_dim, this->metadata->par_th);
     return nullptr;
+}
+
+void GBRL::get_feature_mapping(int*& feature_mapping, bool*& mapping_numerics){
+    // returns copies. caller must delete[] both pointers!
+#ifdef USE_CUDA
+    if (this->device == gpu){
+        feature_mapping = new int[this->metadata->input_dim];
+        mapping_numerics = new bool[this->metadata->input_dim];
+        cudaMemcpy(feature_mapping, this->edata->feature_mapping, sizeof(int) * this->metadata->input_dim, cudaMemcpyDeviceToHost);
+        cudaMemcpy(mapping_numerics, this->edata->mapping_numerics, sizeof(bool) * this->metadata->input_dim, cudaMemcpyDeviceToHost);
+        return;
+    }
+#endif 
+    if (this->device == cpu){
+        feature_mapping = new int[this->metadata->input_dim];
+        mapping_numerics = new bool[this->metadata->input_dim];
+        memcpy(feature_mapping, this->edata->feature_mapping, sizeof(int) * this->metadata->input_dim);
+        memcpy(mapping_numerics, this->edata->mapping_numerics, sizeof(bool) * this->metadata->input_dim);
+        return;
+    }
+    feature_mapping = nullptr;
+    mapping_numerics = nullptr;
 }
 
 

@@ -111,7 +111,6 @@ class GBTLearner(BaseLearner):
             self._cpp_model.set_feature_mapping(np.ascontiguousarray(feature_mapping),
                                                 np.ascontiguousarray(numerical_mask))
 
-
         if isinstance(grads, tuple):
             grads = concatenate_arrays(grads)
 
@@ -239,6 +238,8 @@ class GBTLearner(BaseLearner):
             instance.student_model = None
             instance.feature_weights = instance._cpp_model.get_feature_weights()
             instance.device = instance.params['device']
+            instance.feature_mapping = instance._cpp_model.get_feature_mapping()
+            instance._memory = []
             return instance
         except RuntimeError as e:
             print(f"Caught an exception in GBRL: {e}")

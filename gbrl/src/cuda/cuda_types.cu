@@ -85,7 +85,7 @@ ensembleData* ensemble_data_alloc_cuda(ensembleMetaData *metadata){
     edata->tree_indices = (int *)(data + trace);
     trace += tree_size;
     edata->depths = (int *)(data + trace);
-    trace += split_sizes*sizeof(int);
+    trace += split_sizes * sizeof(int);
     edata->values = (float *)(data + trace);
     trace += value_sizes;
     edata->feature_indices = (int *)(data + trace);
@@ -208,15 +208,15 @@ ensembleData* ensemble_data_copy_gpu_gpu(ensembleMetaData *metadata, ensembleDat
     cudaMemcpy(edata->n_samples, other_edata->n_samples, sample_size, cudaMemcpyDeviceToDevice);
 #endif
     cudaMemcpy(edata->tree_indices, other_edata->tree_indices, tree_size, cudaMemcpyDeviceToDevice);
-    cudaMemcpy(edata->depths, other_edata->depths, split_sizes*sizeof(int), cudaMemcpyDeviceToDevice);
+    cudaMemcpy(edata->depths, other_edata->depths, split_sizes * sizeof(int), cudaMemcpyDeviceToDevice);
     cudaMemcpy(edata->values, other_edata->values, value_sizes, cudaMemcpyDeviceToDevice);
-    cudaMemcpy(edata->feature_indices, other_edata->feature_indices, cond_sizes*sizeof(int), cudaMemcpyDeviceToDevice);
-    cudaMemcpy(edata->feature_values, other_edata->feature_values, cond_sizes*sizeof(float), cudaMemcpyDeviceToDevice);
+    cudaMemcpy(edata->feature_indices, other_edata->feature_indices, cond_sizes * sizeof(int), cudaMemcpyDeviceToDevice);
+    cudaMemcpy(edata->feature_values, other_edata->feature_values, cond_sizes * sizeof(float), cudaMemcpyDeviceToDevice);
     cudaMemcpy(edata->edge_weights, other_edata->edge_weights, edge_size * sizeof(float), cudaMemcpyDeviceToDevice);
     cudaMemcpy(edata->is_numerics, other_edata->is_numerics, cond_sizes * sizeof(bool), cudaMemcpyDeviceToDevice);
     cudaMemcpy(edata->inequality_directions, other_edata->inequality_directions, edge_size * sizeof(bool), cudaMemcpyDeviceToDevice);
     cudaMemcpy(edata->mapping_numerics, other_edata->mapping_numerics, metadata->input_dim * sizeof(bool), cudaMemcpyDeviceToDevice);
-    cudaMemcpy(edata->categorical_values, other_edata->categorical_values, cond_sizes * sizeof(char)*MAX_CHAR_SIZE, cudaMemcpyDeviceToDevice); 
+    cudaMemcpy(edata->categorical_values, other_edata->categorical_values, cond_sizes * sizeof(char) * MAX_CHAR_SIZE, cudaMemcpyDeviceToDevice); 
     return edata;
 }
 
@@ -243,14 +243,14 @@ ensembleData* ensemble_data_copy_gpu_cpu(ensembleMetaData *metadata, ensembleDat
     cudaMemcpy(edata->n_samples, other_edata->n_samples, sample_size, cudaMemcpyDeviceToHost);
 #endif
     cudaMemcpy(edata->tree_indices, other_edata->tree_indices, tree_size, cudaMemcpyDeviceToHost);
-    cudaMemcpy(edata->depths, other_edata->depths, split_sizes*sizeof(int), cudaMemcpyDeviceToHost);
+    cudaMemcpy(edata->depths, other_edata->depths, split_sizes * sizeof(int), cudaMemcpyDeviceToHost);
     cudaMemcpy(edata->values, other_edata->values, value_sizes, cudaMemcpyDeviceToHost);
-    cudaMemcpy(edata->feature_indices, other_edata->feature_indices, cond_sizes*sizeof(int), cudaMemcpyDeviceToHost);
-    cudaMemcpy(edata->feature_values, other_edata->feature_values, cond_sizes*sizeof(float), cudaMemcpyDeviceToHost);
-    cudaMemcpy(edata->edge_weights, other_edata->edge_weights,edge_size * sizeof(float), cudaMemcpyDeviceToHost);
+    cudaMemcpy(edata->feature_indices, other_edata->feature_indices, cond_sizes * sizeof(int), cudaMemcpyDeviceToHost);
+    cudaMemcpy(edata->feature_values, other_edata->feature_values, cond_sizes * sizeof(float), cudaMemcpyDeviceToHost);
+    cudaMemcpy(edata->edge_weights, other_edata->edge_weights, edge_size * sizeof(float), cudaMemcpyDeviceToHost);
     cudaMemcpy(edata->is_numerics, other_edata->is_numerics, cond_sizes * sizeof(bool), cudaMemcpyDeviceToHost);
     cudaMemcpy(edata->inequality_directions, other_edata->inequality_directions, edge_size * sizeof(bool), cudaMemcpyDeviceToHost);
-    cudaMemcpy(edata->categorical_values, other_edata->categorical_values, cond_sizes * sizeof(char)*MAX_CHAR_SIZE, cudaMemcpyDeviceToHost); 
+    cudaMemcpy(edata->categorical_values, other_edata->categorical_values, cond_sizes * sizeof(char) * MAX_CHAR_SIZE, cudaMemcpyDeviceToHost); 
     return edata;
 }
 
@@ -276,14 +276,14 @@ ensembleData* ensemble_data_copy_cpu_gpu(ensembleMetaData *metadata, ensembleDat
     cudaMemcpy(edata->n_samples, other_edata->n_samples, sample_size, cudaMemcpyHostToDevice);
 #endif
     cudaMemcpy(edata->tree_indices, other_edata->tree_indices, tree_size, cudaMemcpyHostToDevice);
-    cudaMemcpy(edata->depths, other_edata->depths, split_sizes*sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(edata->depths, other_edata->depths, split_sizes * sizeof(int), cudaMemcpyHostToDevice);
     cudaMemcpy(edata->values, other_edata->values, value_sizes, cudaMemcpyHostToDevice);
-    cudaMemcpy(edata->feature_indices, other_edata->feature_indices, cond_sizes*sizeof(int), cudaMemcpyHostToDevice);
-    cudaMemcpy(edata->feature_values, other_edata->feature_values, cond_sizes*sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(edata->feature_indices, other_edata->feature_indices, cond_sizes * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(edata->feature_values, other_edata->feature_values, cond_sizes * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(edata->edge_weights, other_edata->edge_weights, edge_size * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(edata->is_numerics, other_edata->is_numerics, cond_sizes * sizeof(bool), cudaMemcpyHostToDevice);
     cudaMemcpy(edata->inequality_directions, other_edata->inequality_directions, edge_size * sizeof(bool), cudaMemcpyHostToDevice);
-    cudaMemcpy(edata->categorical_values, other_edata->categorical_values, cond_sizes * sizeof(char)*MAX_CHAR_SIZE, cudaMemcpyHostToDevice); 
+    cudaMemcpy(edata->categorical_values, other_edata->categorical_values, cond_sizes * sizeof(char) * MAX_CHAR_SIZE, cudaMemcpyHostToDevice); 
     return edata;
 }
 
@@ -357,31 +357,31 @@ void allocate_ensemble_memory_cuda(ensembleMetaData *metadata, ensembleData *eda
         metadata->max_leaves = new_size_leaves;
         metadata->max_trees = new_tree_size;
         ensembleData *new_data = ensemble_data_alloc_cuda(metadata);
-        cudaMemcpy(new_data->bias, edata->bias, metadata->output_dim*sizeof(float), cudaMemcpyDeviceToDevice);
-        cudaMemcpy(new_data->feature_mapping, edata->feature_mapping, metadata->input_dim*sizeof(int), cudaMemcpyDeviceToDevice);
-        cudaMemcpy(new_data->reverse_num_feature_mapping, edata->reverse_num_feature_mapping, metadata->input_dim*sizeof(int), cudaMemcpyDeviceToDevice);
-        cudaMemcpy(new_data->reverse_cat_feature_mapping, edata->reverse_cat_feature_mapping, metadata->input_dim*sizeof(int), cudaMemcpyDeviceToDevice);
-        cudaMemcpy(new_data->feature_weights, edata->feature_weights, metadata->input_dim*sizeof(float), cudaMemcpyDeviceToDevice);
-        cudaMemcpy(new_data->mapping_numerics, edata->mapping_numerics, metadata->input_dim*sizeof(int), cudaMemcpyDeviceToDevice);
+        cudaMemcpy(new_data->bias, edata->bias, metadata->output_dim * sizeof(float), cudaMemcpyDeviceToDevice);
+        cudaMemcpy(new_data->feature_mapping, edata->feature_mapping, metadata->input_dim * sizeof(int), cudaMemcpyDeviceToDevice);
+        cudaMemcpy(new_data->reverse_num_feature_mapping, edata->reverse_num_feature_mapping, metadata->input_dim * sizeof(int), cudaMemcpyDeviceToDevice);
+        cudaMemcpy(new_data->reverse_cat_feature_mapping, edata->reverse_cat_feature_mapping, metadata->input_dim * sizeof(int), cudaMemcpyDeviceToDevice);
+        cudaMemcpy(new_data->feature_weights, edata->feature_weights, metadata->input_dim * sizeof(float), cudaMemcpyDeviceToDevice);
+        cudaMemcpy(new_data->mapping_numerics, edata->mapping_numerics, metadata->input_dim * sizeof(int), cudaMemcpyDeviceToDevice);
 #ifdef DEBUG
-        cudaMemcpy(new_data->n_samples, edata->n_samples, leaf_idx*sizeof(int), cudaMemcpyDeviceToDevice);
+        cudaMemcpy(new_data->n_samples, edata->n_samples, leaf_idx * sizeof(int), cudaMemcpyDeviceToDevice);
 #endif 
-        cudaMemcpy(new_data->values, edata->values, leaf_idx*metadata->output_dim*sizeof(float), cudaMemcpyDeviceToDevice);
-        cudaMemcpy(new_data->tree_indices, edata->tree_indices, tree_idx*sizeof(int), cudaMemcpyDeviceToDevice);
-        cudaMemcpy(new_data->inequality_directions, edata->inequality_directions, leaf_idx*metadata->max_depth*sizeof(bool), cudaMemcpyDeviceToDevice);
-        cudaMemcpy(new_data->edge_weights, edata->edge_weights, leaf_idx*metadata->max_depth*sizeof(float), cudaMemcpyDeviceToDevice);
+        cudaMemcpy(new_data->values, edata->values, leaf_idx * metadata->output_dim * sizeof(float), cudaMemcpyDeviceToDevice);
+        cudaMemcpy(new_data->tree_indices, edata->tree_indices, tree_idx * sizeof(int), cudaMemcpyDeviceToDevice);
+        cudaMemcpy(new_data->inequality_directions, edata->inequality_directions, leaf_idx * metadata->max_depth * sizeof(bool), cudaMemcpyDeviceToDevice);
+        cudaMemcpy(new_data->edge_weights, edata->edge_weights, leaf_idx * metadata->max_depth * sizeof(float), cudaMemcpyDeviceToDevice);
         if (metadata->grow_policy == GREEDY){
-            cudaMemcpy(new_data->depths, edata->depths, leaf_idx*sizeof(int), cudaMemcpyDeviceToDevice);
-            cudaMemcpy(new_data->feature_indices, edata->feature_indices, leaf_idx*metadata->max_depth*sizeof(int), cudaMemcpyDeviceToDevice);
-            cudaMemcpy(new_data->feature_values, edata->feature_values, leaf_idx*metadata->max_depth*sizeof(float), cudaMemcpyDeviceToDevice);
-            cudaMemcpy(new_data->is_numerics, edata->is_numerics, leaf_idx*metadata->max_depth*sizeof(bool), cudaMemcpyDeviceToDevice);
-            cudaMemcpy(new_data->categorical_values, edata->categorical_values, leaf_idx*metadata->max_depth*sizeof(char)*MAX_CHAR_SIZE, cudaMemcpyDeviceToDevice);
+            cudaMemcpy(new_data->depths, edata->depths, leaf_idx * sizeof(int), cudaMemcpyDeviceToDevice);
+            cudaMemcpy(new_data->feature_indices, edata->feature_indices, leaf_idx * metadata->max_depth * sizeof(int), cudaMemcpyDeviceToDevice);
+            cudaMemcpy(new_data->feature_values, edata->feature_values, leaf_idx * metadata->max_depth * sizeof(float), cudaMemcpyDeviceToDevice);
+            cudaMemcpy(new_data->is_numerics, edata->is_numerics, leaf_idx * metadata->max_depth * sizeof(bool), cudaMemcpyDeviceToDevice);
+            cudaMemcpy(new_data->categorical_values, edata->categorical_values, leaf_idx * metadata->max_depth * sizeof(char) * MAX_CHAR_SIZE, cudaMemcpyDeviceToDevice);
         } else {
-            cudaMemcpy(new_data->depths, edata->depths, tree_idx*sizeof(int), cudaMemcpyDeviceToDevice);
-            cudaMemcpy(new_data->feature_indices, edata->feature_indices, tree_idx*metadata->max_depth*sizeof(int), cudaMemcpyDeviceToDevice);
-            cudaMemcpy(new_data->feature_values, edata->feature_values, tree_idx*metadata->max_depth*sizeof(float), cudaMemcpyDeviceToDevice);
-            cudaMemcpy(new_data->is_numerics, edata->is_numerics, tree_idx*metadata->max_depth*sizeof(bool), cudaMemcpyDeviceToDevice);
-            cudaMemcpy(new_data->categorical_values, edata->categorical_values, tree_idx*metadata->max_depth*sizeof(char)*MAX_CHAR_SIZE, cudaMemcpyDeviceToDevice);
+            cudaMemcpy(new_data->depths, edata->depths, tree_idx * sizeof(int), cudaMemcpyDeviceToDevice);
+            cudaMemcpy(new_data->feature_indices, edata->feature_indices, tree_idx * metadata->max_depth * sizeof(int), cudaMemcpyDeviceToDevice);
+            cudaMemcpy(new_data->feature_values, edata->feature_values, tree_idx * metadata->max_depth * sizeof(float), cudaMemcpyDeviceToDevice);
+            cudaMemcpy(new_data->is_numerics, edata->is_numerics, tree_idx * metadata->max_depth * sizeof(bool), cudaMemcpyDeviceToDevice);
+            cudaMemcpy(new_data->categorical_values, edata->categorical_values, tree_idx * metadata->max_depth * sizeof(char) * MAX_CHAR_SIZE, cudaMemcpyDeviceToDevice);
         }
         cudaFree(edata->bias);
         edata->bias = new_data->bias;

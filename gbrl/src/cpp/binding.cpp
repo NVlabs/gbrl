@@ -741,7 +741,27 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         auto capsule = py::capsule(feature_weights_ptr, [](void* ptr) {
             delete[] reinterpret_cast<float*>(ptr);});
         return py::array(size, feature_weights_ptr, capsule);
-    }, "Get GBRL model bias");
+    }, "Get GBRL model feature weights");
+    gbrl.def("get_feature_mapping", [](GBRL &self) -> py::tuple {
+        py::gil_scoped_release release;
+        int* feature_mapping_ptr = nullptr;
+        bool* mapping_numerics_ptr = nullptr;
+        self.get_feature_mapping(feature_mapping_ptr, mapping_numerics_ptr);
+        int size = self.metadata->input_dim;
+        py::gil_scoped_acquire acquire;
+        
+        auto feature_mapping_capsule = py::capsule(feature_mapping_ptr, [](void* ptr) {
+            delete[] reinterpret_cast<int*>(ptr);
+        });
+        auto mapping_numerics_capsule = py::capsule(mapping_numerics_ptr, [](void* ptr) {
+            delete[] reinterpret_cast<bool*>(ptr);
+        });
+        
+        return py::make_tuple(
+            py::array(size, feature_mapping_ptr, feature_mapping_capsule),
+            py::array(size, mapping_numerics_ptr, mapping_numerics_capsule)
+        );
+    }, "Get GBRL model feature mapping (returns tuple of (feature_mapping, mapping_numerics))");
     gbrl.def("get_optimizers", [](GBRL &self) -> py::list {
         return getOptimizerConfigs(self.opts);
     }, "Get GBRL optimizers");
