@@ -81,7 +81,7 @@ url={https://arxiv.org/abs/2407.08250}
 }
 ```
 # Licenses
-Copyright © 2025, NVIDIA Corporation. All rights reserved.
+Copyright © 2024-2025, NVIDIA Corporation. All rights reserved.
 
 This work is made available under the NVIDIA The MIT License. Click [here](https://github.com/NVlabs/gbrl/blob/master/LICENSE). to view a copy of this license.
 
