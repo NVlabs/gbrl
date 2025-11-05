@@ -1,5 +1,5 @@
 ##############################################################################
-# Copyright (c) 2024, NVIDIA Corporation. All rights reserved.
+# Copyright (c) 2024-2025, NVIDIA Corporation. All rights reserved.
 #
 # This work is made available under the Nvidia Source Code License-NC.
 # To view a copy of this license, visit
@@ -32,7 +32,10 @@ N_EPOCHS = 100
 
 def rmse_model(model, X, y, n_epochs, device='cpu'):
     y_ = th.tensor(y, dtype=th.float32, device=device).squeeze()
-    X_ = X.copy()
+    if isinstance(X, th.Tensor):
+        X_ = X.clone().to(device)
+    else:
+        X_ = X.copy()
     epoch = 0
     while epoch < n_epochs:
         y_pred = model(X_, requires_grad=True)
@@ -61,6 +64,8 @@ class TestGBTSingle(unittest.TestCase):
                                           as_frame=False, scaled=False)
         except TypeError:  # python3.7 uses older version of scikit-learn
             X, y = datasets.load_diabetes(return_X_y=True, as_frame=False)
+
+        X = th.tensor(X, dtype=th.float32)
         out_dim = 1 if len(y.shape) == 1 else y.shape[1]
         if out_dim == 1:
             y = y[:, np.newaxis]
@@ -151,8 +156,9 @@ class TestGBTSingle(unittest.TestCase):
         copy_model = model.copy()
         y_pred = model(X, requires_grad=False, tensor=False)
         y_copy_pred = copy_model(X, requires_grad=False, tensor=False)
-        assert np.allclose(y_pred, y_copy_pred), "Expected copied GBRL model "
-        "to be equal to original"
+        assert np.allclose(y_pred, y_copy_pred), (
+            "Expected copied GBRL model to be equal to original"
+        )
 
     def test_continuation_cpu(self):
         print("Running test_continuation_cpu")
@@ -207,6 +213,7 @@ class TestGBTSingle(unittest.TestCase):
     def test_shap_cpu(self):
         print("Running test_shap_cpu")
         X, y = self.single_data
+        X_cpu = X.detach().clone().cpu().numpy()
         tree_struct = {'max_depth': 3,
                        'n_bins': 256, 'min_data_in_leaf': 1,
                        'par_th': 2,
@@ -222,10 +229,10 @@ class TestGBTSingle(unittest.TestCase):
                          verbose=0,
                          device='cpu')
         model.learner.step(X, y)
-        gbrl_shap = model.tree_shap(0, X[0, :]).flatten()
-        clf = DecisionTreeRegressor(max_depth=3).fit(X, y)
+        gbrl_shap = model.tree_shap(0, X_cpu[0, :])[0].flatten()
+        clf = DecisionTreeRegressor(max_depth=3).fit(X_cpu, y)
 
-        target_shap = shap.TreeExplainer(clf).shap_values(X[0])
+        target_shap = shap.TreeExplainer(clf).shap_values(X_cpu[0])
         self.assertTrue(np.allclose(gbrl_shap, target_shap, rtol=1e-3),
                         'GBRL SHAP values are not close to target SHAP values')
 

@@ -1,11 +1,16 @@
 //////////////////////////////////////////////////////////////////////////////
-// Copyright (c) 2024, NVIDIA Corporation. All rights reserved.
+// Copyright (c) 2024-2025, NVIDIA Corporation. All rights reserved.
 //
 // This work is made available under the Nvidia Source Code License-NC.
 // To view a copy of this license, visit
 // https://nvlabs.github.io/gbrl/license.html
 //
 //////////////////////////////////////////////////////////////////////////////
+/**
+ * @file cuda_predictor.cu
+ * @brief Implementation of CUDA kernels for prediction on GPU
+ */
+
 #include <iostream>
 
 #include <cuda_runtime.h>
@@ -21,7 +26,7 @@ SGDOptimizerGPU** deepCopySGDOptimizerVectorToGPU(const std::vector<Optimizer*>&
     cudaError_t error;
     SGDOptimizerGPU** device_opts;
     int n_opts = host_opts.size();
-    error = cudaMalloc((void**)&device_opts, sizeof(SGDOptimizerGPU*) * n_opts);
+    error = allocateCudaMemory((void**)&device_opts, sizeof(SGDOptimizerGPU*) * n_opts, "when trying to allocate device_opts");
     if (error != cudaSuccess) {
     // Handle the error (e.g., print an error message and exit)
         std::cout << "Cuda error: " << error << " when trying to allocate device_opts." <<std::endl;
@@ -30,7 +35,7 @@ SGDOptimizerGPU** deepCopySGDOptimizerVectorToGPU(const std::vector<Optimizer*>&
     // For each leaf, deep copy it to GPU and store its pointer in the array
     for (int i = 0; i < n_opts; ++i) {
         SGDOptimizerGPU* device_opt;
-        error = cudaMalloc((void**)&device_opt, sizeof(SGDOptimizerGPU));
+        error = allocateCudaMemory((void**)&device_opt, sizeof(SGDOptimizerGPU), "when trying to allocate device_opt");
         if (error != cudaSuccess) {
         // Handle the error (e.g., print an error message and exit)
             std::cout << "Cuda error: " << error << " when trying to allocate device_opt " << i << "." <<std::endl;
@@ -89,65 +94,63 @@ __global__ void add_vec_to_mat_kernel(const float *vec, float *mat, const int n_
 }
 
 void predict_cuda(dataSet *dataset, float *&preds, ensembleMetaData *metadata, ensembleData *edata, SGDOptimizerGPU** opts, const int n_opts, int start_tree_idx, int stop_tree_idx){
-    const float *device_batch_obs;
+    float *device_batch_obs;
     float *device_preds;
     char *device_batch_cat_obs = nullptr;
     char *device_data;
+    char *extra_data = nullptr;
     // assuming row-major order
     size_t preds_matrix_size = dataset->n_samples * metadata->output_dim * sizeof(float);
     size_t obs_matrix_size = dataset->n_samples * metadata->n_num_features * sizeof(float);
     size_t cat_obs_matrix_size = dataset->n_samples * metadata->n_cat_features * sizeof(char) * MAX_CHAR_SIZE;
-    size_t alloc_size = obs_matrix_size + cat_obs_matrix_size + preds_matrix_size;
-    if (dataset->device == deviceType::cpu){
-        cudaError_t alloc_error = cudaMalloc((void**)&device_data, alloc_size);
-        if (alloc_error != cudaSuccess) {
-            size_t free_mem, total_mem;
-            cudaMemGetInfo(&free_mem, &total_mem);
-            std::cerr << "CUDA predict_cuda error: " << cudaGetErrorString(alloc_error)
-                    << " when trying to allocate " << ((alloc_size) / (1024.0 * 1024.0)) << " MB."
-                    << std::endl;
-            std::cerr << "Free memory: " << (free_mem / (1024.0 * 1024.0)) << " MB."
-                    << std::endl;
-            std::cerr << "Total memory: " << (total_mem / (1024.0 * 1024.0)) << " MB."
-                    << std::endl;
-            return;
-        }
-        preds = new float[dataset->n_samples * metadata->output_dim];
-        memset(preds, 0, preds_matrix_size);
-        // Allocate host buffer
-        char* host_data = new char[preds_matrix_size + obs_matrix_size + cat_obs_matrix_size];
-        // Copy data into host buffer
-        std::memcpy(host_data, dataset->obs, obs_matrix_size);
-        std::memcpy(host_data + obs_matrix_size, preds, preds_matrix_size);
-        std::memcpy(host_data + obs_matrix_size + preds_matrix_size,  dataset->categorical_obs, cat_obs_matrix_size);
-        
-        cudaMemcpy(device_data, host_data, obs_matrix_size + cat_obs_matrix_size  + preds_matrix_size, cudaMemcpyHostToDevice);
-        delete[] host_data;
-        
-        size_t trace = 0;
-        device_batch_obs = (float*)device_data;
-        trace += obs_matrix_size;
-        device_preds = (float *)(device_data + trace);
-        trace += preds_matrix_size;
-        device_batch_cat_obs = (char *)(device_data + trace);
-    } else {
-        cudaError_t alloc_error_preds = cudaMalloc((void**)&device_preds, preds_matrix_size);
-            if (alloc_error_preds != cudaSuccess) {
-            size_t free_mem, total_mem;
-            cudaMemGetInfo(&free_mem, &total_mem);
-            std::cerr << "CUDA predict_cuda error: " << cudaGetErrorString(alloc_error_preds)
-                    << " when trying to allocate " << ((preds_matrix_size) / (1024.0 * 1024.0)) << " MB."
-                    << std::endl;
-            std::cerr << "Free memory: " << (free_mem / (1024.0 * 1024.0)) << " MB."
-                    << std::endl;
-            std::cerr << "Total memory: " << (total_mem / (1024.0 * 1024.0)) << " MB."
-                    << std::endl;
-            return;
-        }
-        cudaMemset(device_preds, 0, preds_matrix_size);
-        device_batch_obs = dataset->obs;
+
+    size_t alloc_size = preds_matrix_size;
+    size_t extra_alloc_size = 0;
+
+    if (dataset->obs->data != nullptr && dataset->obs->device == cpu)
+        extra_alloc_size += obs_matrix_size;
+    if (dataset->categorical_obs->data != nullptr && dataset->categorical_obs->device == cpu)
+        extra_alloc_size += cat_obs_matrix_size;
+
+    cudaError_t alloc_error = allocateCudaMemory((void**)&device_data, alloc_size, "when trying to allocate in predict_cuda");
+    if (alloc_error != cudaSuccess) {
+        return;
     }
-    
+
+    if (extra_alloc_size > 0) {
+        cudaError_t extra_alloc_error = allocateCudaMemory((void**)&extra_data, extra_alloc_size, "when trying to allocate extra data in predict_cuda");
+        if (extra_alloc_error != cudaSuccess) {
+            cudaFree(device_data);
+            return;
+        }
+    }
+
+    size_t trace = 0;
+    size_t extra_trace = 0;
+    cudaMemset(device_data, 0, alloc_size);
+    device_preds = (float *)(device_data + trace);
+    trace += preds_matrix_size;
+
+    if (dataset->obs->data != nullptr){
+        if (dataset->obs->device == cpu){
+            device_batch_obs = (float*)(extra_data + extra_trace);
+            extra_trace += obs_matrix_size;
+            cudaMemcpy(device_batch_obs, dataset->obs->data, obs_matrix_size, cudaMemcpyHostToDevice);
+        } else {
+            device_batch_obs = const_cast<float*>(dataset->obs->data);
+        }
+    }
+
+    if (dataset->categorical_obs->data != nullptr){
+        if (dataset->categorical_obs->device == cpu){
+            device_batch_cat_obs = (char *)(extra_data + extra_trace);
+            extra_trace += cat_obs_matrix_size;
+            cudaMemcpy(device_batch_cat_obs, dataset->categorical_obs->data, cat_obs_matrix_size, cudaMemcpyHostToDevice);
+        } else {
+            device_batch_cat_obs = const_cast<char*>(dataset->categorical_obs->data);
+        }
+    }
+
     int n_blocks, threads_per_block;
     get_grid_dimensions(dataset->n_samples, n_blocks, threads_per_block);
     size_t shared_n_cols_size = metadata->output_dim * sizeof(float);
@@ -156,21 +159,18 @@ void predict_cuda(dataSet *dataset, float *&preds, ensembleMetaData *metadata, e
 
     if (stop_tree_idx > metadata->n_trees){
         std::cerr << "Given stop_tree_idx idx: " << stop_tree_idx << " greater than number of trees in model: " << metadata->n_trees << std::endl;
-        if (dataset->device == deviceType::cpu){
-            cudaMemcpy(preds, device_preds, preds_matrix_size, cudaMemcpyDeviceToHost);
-            cudaFree(device_data);
-        } else {
-            preds = device_preds;
-        }
+
+        preds = device_preds;
+        if (extra_alloc_size > 0) 
+            cudaFree(extra_data);
+        
         return;
     } 
     if (metadata->n_trees == 0){
-        if (dataset->device == deviceType::cpu){
-            cudaMemcpy(preds, device_preds, preds_matrix_size, cudaMemcpyDeviceToHost);
-            cudaFree(device_data);
-        } else {
-            preds = device_preds;
-        }
+        if (extra_alloc_size > 0) 
+            cudaFree(extra_data);
+        
+        preds = device_preds;
         return; 
     }
     
@@ -179,12 +179,9 @@ void predict_cuda(dataSet *dataset, float *&preds, ensembleMetaData *metadata, e
 
     if (n_opts == 0){
         std::cerr << "No optimizers." << std::endl;
-        if (dataset->device == deviceType::cpu){
-            cudaMemcpy(preds, device_preds, preds_matrix_size, cudaMemcpyDeviceToHost);
-            cudaFree(device_data);
-        } else {
-            preds = device_preds;
-        }
+        if (extra_alloc_size > 0) 
+            cudaFree(extra_data);
+        preds = device_preds;
         return;
     }
     cudaDeviceProp deviceProp;
@@ -213,17 +210,24 @@ void predict_cuda(dataSet *dataset, float *&preds, ensembleMetaData *metadata, e
             predict_oblivious_kernel_tree_wise<<<n_trees, threads_per_block>>>(device_batch_obs, device_batch_cat_obs, device_preds, dataset->n_samples, metadata->n_num_features, metadata->n_cat_features, edata->feature_indices, edata->depths, edata->feature_values, edata->inequality_directions, edata->values, edata->tree_indices, edata->categorical_values, edata->is_numerics, opts, n_opts, metadata->output_dim, metadata->max_depth, start_tree_idx);
     }
     cudaDeviceSynchronize();
-    // Copy results back to CPU
-    if (dataset->device == deviceType::cpu){
-        cudaMemcpy(preds, device_preds, preds_matrix_size, cudaMemcpyDeviceToHost);
-        cudaFree(device_data);
-    } else {
-        preds = device_preds;
-    }
+
+    preds = device_preds;
+
+    if (extra_alloc_size > 0) 
+        cudaFree(extra_data);
 }
 
 
-void predict_cuda_no_host(dataSet *dataset, float *device_preds, ensembleMetaData *metadata, ensembleData *edata, SGDOptimizerGPU** opts, const int n_opts, int start_tree_idx, int stop_tree_idx, const bool add_bias){
+void predict_cuda_no_host(
+    dataSet *dataset,
+    float *device_preds,
+    ensembleMetaData *metadata,
+    ensembleData *edata,
+    SGDOptimizerGPU** opts,
+    const int n_opts,
+    int start_tree_idx,
+    int stop_tree_idx,
+    const bool add_bias){
 
     int n_blocks, threads_per_block;
     get_grid_dimensions(dataset->n_samples, n_blocks, threads_per_block);
@@ -264,18 +268,18 @@ void predict_cuda_no_host(dataSet *dataset, float *device_preds, ensembleMetaDat
         
         int n_leaves = stop_leaf_idx - start_leaf_idx;
         if (dataset->n_samples > n_leaves)
-            predict_sample_wise_kernel_tree_wise<<<dataset->n_samples, threads_per_block>>>(dataset->obs, dataset->categorical_obs, device_preds, dataset->n_samples, metadata->n_num_features, metadata->n_cat_features, edata->feature_indices, edata->depths, edata->feature_values, edata->inequality_directions, edata->values, edata->categorical_values, edata->is_numerics, opts, n_opts, metadata->output_dim, metadata->max_depth, start_leaf_idx, n_leaves);
+            predict_sample_wise_kernel_tree_wise<<<dataset->n_samples, threads_per_block>>>(dataset->obs->data, dataset->categorical_obs->data, device_preds, dataset->n_samples, metadata->n_num_features, metadata->n_cat_features, edata->feature_indices, edata->depths, edata->feature_values, edata->inequality_directions, edata->values, edata->categorical_values, edata->is_numerics, opts, n_opts, metadata->output_dim, metadata->max_depth, start_leaf_idx, n_leaves);
         else if (metadata->n_cat_features == 0){
-            predict_kernel_numerical_only<<<n_leaves, threads_per_block>>>(dataset->obs, device_preds, dataset->n_samples, metadata->n_num_features, edata->feature_indices, edata->depths, edata->feature_values, edata->inequality_directions, edata->values, opts, n_opts, metadata->output_dim, metadata->max_depth, start_leaf_idx);
+            predict_kernel_numerical_only<<<n_leaves, threads_per_block>>>(dataset->obs->data, device_preds, dataset->n_samples, metadata->n_num_features, edata->feature_indices, edata->depths, edata->feature_values, edata->inequality_directions, edata->values, opts, n_opts, metadata->output_dim, metadata->max_depth, start_leaf_idx);
         }
         else
-            predict_kernel_tree_wise<<<n_leaves, threads_per_block>>>(dataset->obs, dataset->categorical_obs, device_preds, dataset->n_samples, metadata->n_num_features, metadata->n_cat_features, edata->feature_indices, edata->depths, edata->feature_values, edata->inequality_directions, edata->values, edata->categorical_values, edata->is_numerics, opts, n_opts, metadata->output_dim, metadata->max_depth, start_leaf_idx);
+            predict_kernel_tree_wise<<<n_leaves, threads_per_block>>>(dataset->obs->data, dataset->categorical_obs->data, device_preds, dataset->n_samples, metadata->n_num_features, metadata->n_cat_features, edata->feature_indices, edata->depths, edata->feature_values, edata->inequality_directions, edata->values, edata->categorical_values, edata->is_numerics, opts, n_opts, metadata->output_dim, metadata->max_depth, start_leaf_idx);
     } else {
         int n_trees = stop_tree_idx - start_tree_idx;
         if (metadata->n_cat_features == 0)
-            predict_oblivious_kernel_numerical_only<<<n_trees, threads_per_block>>>(dataset->obs, device_preds, dataset->n_samples, metadata->n_num_features, edata->feature_indices, edata->depths, edata->feature_values, edata->inequality_directions, edata->values, edata->tree_indices, opts, n_opts, metadata->output_dim, metadata->max_depth, start_tree_idx);
+            predict_oblivious_kernel_numerical_only<<<n_trees, threads_per_block>>>(dataset->obs->data, device_preds, dataset->n_samples, metadata->n_num_features, edata->feature_indices, edata->depths, edata->feature_values, edata->inequality_directions, edata->values, edata->tree_indices, opts, n_opts, metadata->output_dim, metadata->max_depth, start_tree_idx);
         else
-            predict_oblivious_kernel_tree_wise<<<n_trees, threads_per_block>>>(dataset->obs, dataset->categorical_obs, device_preds, dataset->n_samples, metadata->n_num_features, metadata->n_cat_features, edata->feature_indices, edata->depths, edata->feature_values, edata->inequality_directions, edata->values, edata->tree_indices, edata->categorical_values, edata->is_numerics, opts, n_opts, metadata->output_dim, metadata->max_depth, start_tree_idx);
+            predict_oblivious_kernel_tree_wise<<<n_trees, threads_per_block>>>(dataset->obs->data, dataset->categorical_obs->data, device_preds, dataset->n_samples, metadata->n_num_features, metadata->n_cat_features, edata->feature_indices, edata->depths, edata->feature_values, edata->inequality_directions, edata->values, edata->tree_indices, edata->categorical_values, edata->is_numerics, opts, n_opts, metadata->output_dim, metadata->max_depth, start_tree_idx);
     }
     cudaDeviceSynchronize();
 }

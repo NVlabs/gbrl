@@ -1,5 +1,5 @@
 ##############################################################################
-# Copyright (c) 2024, NVIDIA Corporation. All rights reserved.
+# Copyright (c) 2024-2025, NVIDIA Corporation. All rights reserved.
 #
 # This work is made available under the Nvidia Source Code License-NC.
 # To view a copy of this license, visit
@@ -10,26 +10,25 @@ import os
 import shutil
 import tempfile
 import unittest
-from typing import Union, Tuple
+from typing import Tuple
 
 import numpy as np
-import torch as th
-from sklearn.tree import DecisionTreeRegressor
 import shap
+import torch as th
+from sklearn import datasets
+from sklearn.tree import DecisionTreeRegressor
 from torch.nn.functional import mse_loss
 
-from sklearn import datasets
-
 from gbrl import cuda_available
-from gbrl.models.gbt import GBTModel
+from gbrl.common.utils import NumericalData
 from gbrl.models.actor_critic import ActorCritic
-
+from gbrl.models.gbt import GBTModel
 
 N_EPOCHS = 100
 
 
-def rmse(preds: Union[np.array, th.Tensor],
-         targets: Union[np.array, th.Tensor]) -> Tuple[float, np.array]:
+def rmse(preds: NumericalData,
+         targets: NumericalData) -> Tuple[float, np.ndarray]:
     if isinstance(preds, th.Tensor):
         preds = preds.detach().cpu().numpy()
     if isinstance(targets, th.Tensor):
@@ -44,7 +43,10 @@ def rmse(preds: Union[np.array, th.Tensor],
 
 def rmse_model(model, X, y, n_epochs, device='cpu'):
     y_ = th.tensor(y, dtype=th.float32, device=device)
-    X_ = X.copy()
+    if isinstance(X, th.Tensor):
+        X_ = X.clone().to(device)
+    else:
+        X_ = X.copy()
     epoch = 0
     while epoch < n_epochs:
         y_pred = model(X_, requires_grad=True)
@@ -61,7 +63,10 @@ def rmse_model(model, X, y, n_epochs, device='cpu'):
 def ac_rmse_model(model, X, y, n_epochs, device='cpu'):
     y_ac = th.tensor(y[:, :-1], dtype=th.float32, device=device)
     y_value = th.tensor(y[:, -1], dtype=th.float32, device=device)
-    X_ = X.copy()
+    if isinstance(X, th.Tensor):
+        X_ = X.clone().to(device)
+    else:
+        X_ = X.copy()
     epoch = 0
     while epoch < n_epochs:
         theta, value = model(X_, requires_grad=True)
@@ -93,6 +98,7 @@ class TestGBTMulti(unittest.TestCase):
         out_dim = 1 if len(y.shape) == 1 else y.shape[1]
         if out_dim == 1:
             y = y[:, np.newaxis]
+        X = th.tensor(X, dtype=th.float32)
         y_fake = y.copy()
         n_cols = 10
         for _ in range(n_cols - 1):
@@ -139,6 +145,7 @@ class TestGBTMulti(unittest.TestCase):
     def test_shap_cpu(self):
         print("Running test_shap_cpu")
         X, y = self.data
+        X_cpu = X.detach().clone().cpu().numpy()
         tree_struct = {'max_depth': 3,
                        'n_bins': 256, 'min_data_in_leaf': 1,
                        'par_th': 2,
@@ -154,12 +161,13 @@ class TestGBTMulti(unittest.TestCase):
                          verbose=0,
                          device='cpu')
         model.learner.step(X, y)
-        gbrl_shap = model.tree_shap(0, X[0, :])
-        clf = DecisionTreeRegressor(max_depth=3).fit(X, y)
-        target_shap = shap.TreeExplainer(clf).shap_values(X[0])
-        self.assertTrue(np.allclose(gbrl_shap, target_shap, rtol=1e-3),
-                        'GBRL sHAP values are not close to target '
-                        'SHAP values')
+        gbrl_shap = model.tree_shap(0, X_cpu[0, :])
+        clf = DecisionTreeRegressor(max_depth=3).fit(X_cpu, y)
+        target_shap = shap.TreeExplainer(clf).shap_values(X_cpu[0, :])
+        self.assertTrue(
+            np.allclose(gbrl_shap, target_shap, rtol=1e-3),
+            'GBRL SHAP values are not close to target SHAP values'
+        )
 
     def test_cosine_adam_cpu(self):
         print("Running Multi test_cosine_adam_cpu")

@@ -1,19 +1,26 @@
 
 //////////////////////////////////////////////////////////////////////////////
-// Copyright (c) 2024, NVIDIA Corporation. All rights reserved.
+// Copyright (c) 2024-2025, NVIDIA Corporation. All rights reserved.
 //
 // This work is made available under the Nvidia Source Code License-NC.
 // To view a copy of this license, visit
 // https://nvlabs.github.io/gbrl/license.html
 //
 //////////////////////////////////////////////////////////////////////////////
+
+/**
+ * @file data_structs.cpp
+ * @brief Implementation of fundamental data structures
+ */
+
 #include <iostream>
 
 #include "data_structs.h"
 #include "types.h"
 
 template <typename T>
-stack<T>::stack(int max_elements) : max_size(max_elements), top_index(-1) {
+stack<T>::stack(int max_elements) 
+    : max_size(max_elements), top_index(-1) {
     data = new T[max_size];
 }
 
@@ -35,7 +42,7 @@ bool stack<T>::is_full() const {
 template <typename T>
 void stack<T>::push(const T &element) {
     if (is_full()) {
-        std::cerr << "Stack overflow\n";
+        std::cerr << "Stack overflow: cannot push element\n";
         return;
     }
     data[++top_index] = element;
@@ -44,20 +51,20 @@ void stack<T>::push(const T &element) {
 template <typename T>
 void stack<T>::pop() {
     if (is_empty()) {
-        std::cerr << "Stack underflow\n";
+        std::cerr << "Stack underflow: cannot pop from empty stack\n";
         return;
     }
     --top_index;
 }
 
-
 template <typename T>
 T& stack<T>::top() const {
     if (is_empty()) {
-        throw std::out_of_range("Stack is empty");
+        throw std::out_of_range("Stack is empty: cannot access top element");
     }
     return data[top_index];
 }
 
+// Explicit template instantiations
 template struct stack<int>;
 template struct stack<nodeInfo>;

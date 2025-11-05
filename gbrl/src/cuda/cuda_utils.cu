@@ -1,11 +1,16 @@
 //////////////////////////////////////////////////////////////////////////////
-// Copyright (c) 2024, NVIDIA Corporation. All rights reserved.
+// Copyright (c) 2024-2025, NVIDIA Corporation. All rights reserved.
 //
 // This work is made available under the Nvidia Source Code License-NC.
 // To view a copy of this license, visit
 // https://nvlabs.github.io/gbrl/license.html
 //
 //////////////////////////////////////////////////////////////////////////////
+/**
+ * @file cuda_utils.cu
+ * @brief Implementation of CUDA utility functions for GPU operations
+ */
+
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 
@@ -41,6 +46,14 @@ void get_grid_dimensions(int n_elements, int& blocks, int& threads_per_block) {
     cudaGetDeviceProperties(&deviceProp, 0);
 
     blocks = n_elements / max_threads_per_block + 1;
+
+    threads_per_block = 1 << static_cast<int>(ceilf(log2f(static_cast<float>(n_elements) / blocks)));
+    threads_per_block = (threads_per_block > deviceProp.maxThreadsPerBlock) ? deviceProp.maxThreadsPerBlock : threads_per_block;
+}
+
+void get_tpb_dimensions(int n_elements, int blocks, int& threads_per_block) {
+    cudaDeviceProp deviceProp;
+    cudaGetDeviceProperties(&deviceProp, 0);
 
     threads_per_block = 1 << static_cast<int>(ceilf(log2f(static_cast<float>(n_elements) / blocks)));
     threads_per_block = (threads_per_block > deviceProp.maxThreadsPerBlock) ? deviceProp.maxThreadsPerBlock : threads_per_block;
