@@ -480,44 +480,43 @@ PYBIND11_MODULE(gbrl_cpp, m) {
 
         handle_input_info<const float>(obs, obs_ptr, obs_shape, obs_device, "obs", true, "step");
         if (obs_ptr != nullptr){
-            if (n_samples == 1){
-               n_num_features = static_cast<int>(obs_shape[0]);
-               if (obs_shape.size() > 1){
-                    std::stringstream ss;
-                    ss << "gradients has 1 sample but observations have multiple.";
-                    throw std::runtime_error(ss.str());
-               }
+            if (obs_shape.size() == 1){
+               n_num_features = (n_samples == 1) ? static_cast<int>(obs_shape[0]) : 1;
+               n_obs_samples = (n_samples == 1) ? 1 : static_cast<int>(obs_shape[0]);
             } else {
                 n_obs_samples = static_cast<int>(obs_shape[0]);
                 n_num_features = (obs_shape.size() == 1) ? 1 : static_cast<int>(obs_shape[1]);
-                if (n_obs_samples != n_samples){
-                    std::stringstream ss;
-                    ss << "Number of observations " << n_obs_samples << " != number of gradient samples " << n_samples;
-                    throw std::runtime_error(ss.str());
-                }
+            }
+            if (n_obs_samples != n_samples){
+                std::stringstream ss;
+                ss << "Number of observations " << n_obs_samples << " != number of gradient samples " << n_samples;
+                throw std::runtime_error(ss.str());
             }
         }
+
 
         dataHolder<const float> obs_handler{obs_ptr, stringTodeviceType(obs_device)};
 
         handle_input_info<const char>(categorical_obs, cat_obs_ptr, cat_obs_shape, cat_obs_device, "cat_obs", true, "step", CAT_TYPE);
         if (cat_obs_ptr != nullptr){
-            if (n_samples == 1){
-               n_cat_features = static_cast<int>(cat_obs_shape[0]);
-               if (cat_obs_shape.size() > 1){
-                    std::stringstream ss;
-                    ss << "gradients has 1 sample but categorical observations have multiple.";
-                    throw std::runtime_error(ss.str());
-               }
+            if (cat_obs_shape.size() == 1){
+               n_cat_features = (n_samples == 1) ? static_cast<int>(cat_obs_shape[0]) : 1;
+               n_cat_samples = (n_samples == 1) ? 1 : static_cast<int>(cat_obs_shape[0]);
             } else {
                 n_cat_samples = static_cast<int>(cat_obs_shape[0]);
                 n_cat_features = (cat_obs_shape.size() == 1) ? 1 : static_cast<int>(cat_obs_shape[1]);
-                if (n_cat_samples != n_samples){
-                    std::stringstream ss;
-                    ss << "Number of categorical observations " << n_cat_samples << " != number of gradient samples " << n_samples;
-                    throw std::runtime_error(ss.str());
-                }
             }
+            if (n_cat_samples != n_samples){
+                std::stringstream ss;
+                ss << "Number of categorical observations " << n_cat_samples << " != number of gradient samples " << n_samples;
+                throw std::runtime_error(ss.str());
+            }
+        }
+
+        if (n_cat_features + n_num_features != self.metadata->input_dim){
+            std::stringstream ss;
+            ss << "Total number of features " << n_cat_features + n_num_features << " != correct input dim " << self.metadata->input_dim;
+            throw std::runtime_error(ss.str());
         }
 
         dataHolder<const char> cat_obs_handler{cat_obs_ptr, stringTodeviceType(cat_obs_device)};
@@ -560,21 +559,17 @@ PYBIND11_MODULE(gbrl_cpp, m) {
 
         handle_input_info<float>(obs, obs_ptr, obs_shape, obs_device, "obs", true, "fit"); 
         if (obs_ptr != nullptr){
-            if (n_samples == 1){
-               n_num_features = static_cast<int>(obs_shape[0]);
-               if (obs_shape.size() > 1){
-                    std::stringstream ss;
-                    ss << "gradients has 1 sample but observations have multiple.";
-                    throw std::runtime_error(ss.str());
-               }
+            if (obs_shape.size() == 1){
+               n_num_features = (n_samples == 1) ? static_cast<int>(obs_shape[0]) : 1;
+               n_obs_samples = (n_samples == 1) ? 1 : static_cast<int>(obs_shape[0]);
             } else {
                 n_obs_samples = static_cast<int>(obs_shape[0]);
                 n_num_features = (obs_shape.size() == 1) ? 1 : static_cast<int>(obs_shape[1]);
+            }
                 if (n_obs_samples != n_samples){
-                    std::stringstream ss;
-                    ss << "Number of observations " << n_obs_samples << " != number of gradient samples " << n_samples;
-                    throw std::runtime_error(ss.str());
-                }
+                std::stringstream ss;
+                ss << "Number of observations " << n_obs_samples << " != number of gradient samples " << n_samples;
+                throw std::runtime_error(ss.str());
             }
         }
 
@@ -583,25 +578,28 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         handle_input_info<char>(categorical_obs, cat_obs_ptr, cat_obs_shape, cat_obs_device, "cat_obs", true, "fit", CAT_TYPE);
 
         if (cat_obs_ptr != nullptr){
-            if (n_samples == 1){
-               n_cat_features = static_cast<int>(cat_obs_shape[0]);
-               if (cat_obs_shape.size() > 1){
-                    std::stringstream ss;
-                    ss << "gradients has 1 sample but categorical observations have multiple.";
-                    throw std::runtime_error(ss.str());
-               }
+            if (cat_obs_shape.size() == 1){
+               n_cat_features = (n_samples == 1) ? static_cast<int>(cat_obs_shape[0]) : 1;
+               n_cat_samples = (n_samples == 1) ? 1 : static_cast<int>(cat_obs_shape[0]);
             } else {
                 n_cat_samples = static_cast<int>(cat_obs_shape[0]);
                 n_cat_features = (cat_obs_shape.size() == 1) ? 1 : static_cast<int>(cat_obs_shape[1]);
-                if (n_cat_samples != n_samples){
-                    std::stringstream ss;
-                    ss << "Number of categorical observations " << n_cat_samples << " != number of gradient samples " << n_samples;
-                    throw std::runtime_error(ss.str());
-                }
+            }
+            if (n_cat_samples != n_samples){
+                std::stringstream ss;
+                ss << "Number of categorical observations " << n_cat_samples << " != number of gradient samples " << n_samples;
+                throw std::runtime_error(ss.str());
             }
         }
 
+
         dataHolder<char> cat_obs_handler{cat_obs_ptr, stringTodeviceType(cat_obs_device)};
+
+        if (n_cat_features + n_num_features != self.metadata->input_dim){
+            std::stringstream ss;
+            ss << "Total number of features " << n_cat_features + n_num_features << " != correct input dim " << self.metadata->input_dim;
+            throw std::runtime_error(ss.str());
+        }
 
         py::gil_scoped_release release; 
         return self.fit(&obs_handler, &cat_obs_handler, &targets_handler, iterations, n_samples, n_num_features, n_cat_features, shuffle, loss_type); 
@@ -926,6 +924,12 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         dataHolder<const float> obs_handler{obs_ptr, stringTodeviceType(obs_device)};
         dataHolder<const char> cat_obs_handler{cat_obs_ptr,stringTodeviceType(cat_obs_device)};
 
+        if (n_cat_features + n_num_features != self.metadata->input_dim){
+            std::stringstream ss;
+            ss << "Total number of features " << n_cat_features + n_num_features << " != correct input dim " << self.metadata->input_dim;
+            throw std::runtime_error(ss.str());
+        }
+
         py::gil_scoped_release release; 
         float* result_ptr = self.predict(&obs_handler, &cat_obs_handler, n_samples, n_num_features, n_cat_features, start_tree_idx, stop_tree_idx);
         py::gil_scoped_acquire acquire;
@@ -985,8 +989,13 @@ PYBIND11_MODULE(gbrl_cpp, m) {
                 throw std::runtime_error("Arrays must be C-contiguous");
             py::buffer_info info_obs = obs_array.request();
             obs_ptr = static_cast<const float*>(info_obs.ptr);
-            n_num_features = static_cast<int>(info_obs.shape[1]);
-            n_samples = static_cast<int>(info_obs.shape[0]);
+            if (info_obs.shape.size() == 1) {
+                n_num_features = static_cast<int>(info_obs.shape[0]);
+                n_samples = 1;
+            } else {
+                n_num_features = static_cast<int>(info_obs.shape[1]);
+                n_samples = static_cast<int>(info_obs.shape[0]);
+            }
         }
 
         int n_cat_features = 0;
@@ -998,8 +1007,13 @@ PYBIND11_MODULE(gbrl_cpp, m) {
 
             py::buffer_info info_categorical_obs = py_array.request();
             cat_obs_ptr = static_cast<const char*>(info_categorical_obs.ptr);
-            n_cat_features = static_cast<int>(info_categorical_obs.shape[1]);
-            n_samples = static_cast<int>(info_categorical_obs.shape[0]);
+            if (info_categorical_obs.shape.size() == 1) {
+                n_cat_features = static_cast<int>(info_categorical_obs.shape[0]);
+                if (n_samples == 0) n_samples = 1;
+            } else {
+                n_cat_features = static_cast<int>(info_categorical_obs.shape[1]);
+                if (n_samples == 0) n_samples = static_cast<int>(info_categorical_obs.shape[0]);
+            }
         }
         float *norm_ptr = nullptr;
         if (!norm_values.is_none()) {
@@ -1044,8 +1058,13 @@ PYBIND11_MODULE(gbrl_cpp, m) {
                 throw std::runtime_error("Arrays must be C-contiguous");
             py::buffer_info info_obs = obs_array.request();
             obs_ptr = static_cast<const float*>(info_obs.ptr);
-            n_num_features = static_cast<int>(info_obs.shape[1]);
-            n_samples = static_cast<int>(info_obs.shape[0]);
+            if (info_obs.shape.size() == 1) {
+                n_num_features = static_cast<int>(info_obs.shape[0]);
+                n_samples = 1;
+            } else {
+                n_num_features = static_cast<int>(info_obs.shape[1]);
+                n_samples = static_cast<int>(info_obs.shape[0]);
+            }
         }
 
         int n_cat_features = 0;
@@ -1057,8 +1076,13 @@ PYBIND11_MODULE(gbrl_cpp, m) {
 
             py::buffer_info info_categorical_obs = py_array.request();
             cat_obs_ptr = static_cast<const char*>(info_categorical_obs.ptr);
-            n_cat_features = static_cast<int>(info_categorical_obs.shape[1]);
-            n_samples = static_cast<int>(info_categorical_obs.shape[0]);
+            if (info_categorical_obs.shape.size() == 1) {
+                n_cat_features = static_cast<int>(info_categorical_obs.shape[0]);
+                if (n_samples == 0) n_samples = 1;
+            } else {
+                n_cat_features = static_cast<int>(info_categorical_obs.shape[1]);
+                if (n_samples == 0) n_samples = static_cast<int>(info_categorical_obs.shape[0]);
+            }
         }
         float *norm_ptr = nullptr;
         if (!norm_values.is_none()) {

@@ -49,7 +49,7 @@ class MultiGBTLearner(BaseLearner):
     It supports training, prediction, saving, loading,
     and SHAP value computation.
     """
-    def __init__(self, input_dim: Union[int, List[int]],
+    def __init__(self, input_dim: int,
                  output_dim: Union[int, List[int]],
                  tree_struct: Dict,
                  optimizers: Union[Dict, List[Dict]],
@@ -62,7 +62,7 @@ class MultiGBTLearner(BaseLearner):
         Initializes the MultiGBTLearner.
 
         Args:
-            input_dim (Union[int, List[int]]): The number of input features.
+            input_dim (int): The number of input features. Note that all learners share the same input dimension.
             output_dim (int): The number of output dimensions.
             tree_struct (Dict): A dictionary containing tree structure parameters.
             optimizers (Union[Dict, List]): A dictionary or list of
@@ -75,14 +75,10 @@ class MultiGBTLearner(BaseLearner):
         """
 
         assert len(optimizers) == 1 or len(optimizers) == n_learners
-        if isinstance(input_dim, list):
-            assert len(input_dim) == n_learners
-            if isinstance(output_dim, int):
-                output_dim = [output_dim] * n_learners
+        if isinstance(output_dim, int):
+            output_dim = [output_dim] * n_learners
         if isinstance(output_dim, list):
             assert len(output_dim) == n_learners
-        if isinstance(input_dim, int):
-            input_dim = [input_dim] * n_learners
 
         if policy_dim is None:
             policy_dim = output_dim
@@ -111,12 +107,12 @@ class MultiGBTLearner(BaseLearner):
         self._cpp_models = []
         params = self.params.copy()
         for i in range(self.n_learners):
-            if isinstance(self.input_dim, list):
-                params['input_dim'] = self.input_dim[i]   # type: ignore
+            params['input_dim'] = self.input_dim   # type: ignore
+            if isinstance(self.output_dim, list):
                 params['output_dim'] = self.output_dim[i]   # type: ignore
                 params['policy_dim'] = self.policy_dim[i]   # type: ignore
             cpp_model = GBRL_CPP(**params)
-            cpp_model.set_feature_weights(self.feature_weights[i])
+            cpp_model.set_feature_weights(self.feature_weights)
             if self.student_models is not None:
                 self.optimizers[i]['T'] -= self.total_iterations
             try:
@@ -211,8 +207,11 @@ class MultiGBTLearner(BaseLearner):
             assert not isinstance(targets, list), \
                 "when model_idx is specified, targets should not be a list"
             targets = to_numpy(targets)
-            targets = targets.reshape((len(targets),
-                                       self.params['output_dim']))
+            if isinstance(self.output_dim, list):
+                output_dim_idx = self.output_dim[model_idx]
+            else:
+                output_dim_idx = self.output_dim
+            targets = targets.reshape((len(targets), output_dim_idx))
             loss = self._cpp_models[model_idx].fit(num_inputs, cat_inputs,
                                                    targets.astype(
                                                        numerical_dtype),
@@ -226,8 +225,11 @@ class MultiGBTLearner(BaseLearner):
         losses = []
         for i in range(self.n_learners):
             targets[i] = to_numpy(targets[i])
-            targets[i] = targets[i].reshape((len(targets[i]),
-                                            self.params['output_dim']))
+            if isinstance(self.output_dim, list):
+                output_dim_i = self.output_dim[i]
+            else:
+                output_dim_i = self.output_dim
+            targets[i] = targets[i].reshape((len(targets[i]), output_dim_i))
             loss = self._cpp_models[i].fit(num_inputs, cat_inputs,
                                            targets[i],
                                            iterations, shuffle, loss_type)
@@ -330,9 +332,7 @@ class MultiGBTLearner(BaseLearner):
                 instance.optimizers.extend(cpp_model.get_optimizers())
                 instance._cpp_models.append(cpp_model)
                 model_metadata = cpp_model.get_metadata()
-                print(model_metadata)
                 instance.output_dim.append(model_metadata['output_dim'])
-                instance.input_dim.append(model_metadata['input_dim'])
                 instance.policy_dim.append(model_metadata['policy_dim'])
 
             instance.set_device(device)
@@ -344,7 +344,7 @@ class MultiGBTLearner(BaseLearner):
                                     'par_th': metadata['par_th'],
                                     'batch_size': metadata['batch_size'],
                                     'grow_policy': metadata['grow_policy']}
-            instance.params = {'input_dim': instance.input_dim,
+            instance.params = {'input_dim': metadata['input_dim'],
                                'output_dim': instance.output_dim,
                                'policy_dim': instance.policy_dim,
                                'split_score_func':
@@ -356,9 +356,8 @@ class MultiGBTLearner(BaseLearner):
                                'device': device,
                                **instance.tree_struct
                                }
-            instance.output_dim = metadata['output_dim']
+            # Keep the lists from the loop above, don't overwrite with single values
             instance.input_dim = metadata['input_dim']
-            instance.policy_dim = metadata['policy_dim']
             instance.verbose = metadata['verbose']
             instance.params = {'split_score_func':
                                metadata['split_score_func'],

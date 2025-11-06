@@ -115,7 +115,12 @@ class ParametricActor(BaseGBT):
             assert self.input is not None, "Cannot update trees without input."
             "Make sure model is called with requires_grad=True"
             observations = self.input
-        n_samples = len(observations)
+
+        # Handle 1D observations
+        if observations.ndim == 1:
+            n_samples = 1 if self.learner.input_dim > 1 else len(observations)
+        else:
+            n_samples = len(observations)
 
         if policy_grads is None:
             assert self.params is not None, "params must be set to compute gradients."
@@ -288,7 +293,12 @@ class GaussianActor(BaseGBT):
             assert self.input is not None, "Cannot update trees without input."
             "Make sure model is called with requires_grad=True"
             observations = self.input
-        n_samples = len(observations)
+        
+        # Handle 1D observations
+        if observations.ndim == 1:
+            n_samples = 1 if self.learner.input_dim > 1 else len(observations)
+        else:
+            n_samples = len(observations)
 
         if mu_grads is None:
             assert self.params is not None, "params must be set to compute gradients."
@@ -301,12 +311,12 @@ class GaussianActor(BaseGBT):
         if not self.fixed_std:
             if log_std_grads is None:
                 assert self.params is not None, "params must be set to compute gradients."
-                assert isinstance(self.params, list), "params must be a list to compute gradients."
+                assert isinstance(self.params, (list, tuple)), "params must be a (list or tuple) to compute gradients."
                 assert isinstance(self.params[1], th.Tensor), "params[1] must be a Tensor to compute gradients."
                 assert self.params[1].grad is not None, "params[1].grad must be set to compute gradients."  # type: ignore
                 log_std_grads = self.params[1].grad.detach() * n_samples  # type: ignore
             log_std_grads = clip_grad_norm(log_std_grads, log_std_grad_clip)  # type: ignore
-            theta_grad = concatenate_arrays(mu_grads, log_std_grads)  # type: ignore
+            theta_grad = concatenate_arrays((mu_grads, log_std_grads))  # type: ignore
         else:
             theta_grad = mu_grads
 
