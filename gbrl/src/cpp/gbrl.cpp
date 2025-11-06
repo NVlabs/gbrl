@@ -303,8 +303,9 @@ void GBRL::set_feature_mapping(const int *feature_mapping, const bool *mapping_n
         memcpy(this->edata->reverse_num_feature_mapping, reverse_num_feature_mapping, sizeof(int)*this->metadata->input_dim);
         memcpy(this->edata->reverse_cat_feature_mapping, reverse_cat_feature_mapping, sizeof(int)*this->metadata->input_dim);
     }
-    if (this->metadata->verbose > 0)
+    if (this->metadata->verbose > 0){
         std::cout << "Setting GBRL feature mapping " << std::endl;
+    }
 
     delete[] reverse_num_feature_mapping;
     delete[] reverse_cat_feature_mapping;
@@ -937,6 +938,9 @@ void GBRL::step(dataHolder<const float> *obs,
     if (this->metadata->iteration == 0){
         this->metadata->n_num_features = n_num_features;
         this->metadata->n_cat_features = n_cat_features;
+        if (this->metadata->verbose > 0) {
+            std::cout << "Initiating GBRL training" << std::endl;
+        }
     }
     if (n_num_features != metadata->n_num_features || n_cat_features != metadata->n_cat_features){
         std::cerr << "Error. Cannot use ensemble with this dataset. Excepted input with " << metadata->n_num_features << " numerical features followed by " << metadata->n_cat_features << " categorical features, but received " << n_num_features << " numerical features and " << n_cat_features << " categorical features.";

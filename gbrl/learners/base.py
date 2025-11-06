@@ -53,9 +53,9 @@ class BaseLearner(ABC):
         device (str): The device the model runs on (e.g., 'cpu' or 'cuda').
         iteration (int): The current training iteration.
         total_iterations (int): Total number of training iterations.
-        feature_weights (np.ndarray): Feature importance weights.
+        feature_weights (Union[float, NumericalData]): Feature importance weights.
     """
-    def __init__(self, input_dim: Union[int, List[int]],
+    def __init__(self, input_dim: int,
                  output_dim: Union[int, List[int]],
                  tree_struct: Dict,
                  params: Dict,
@@ -76,6 +76,11 @@ class BaseLearner(ABC):
             device (str, optional): Device to run the model on
             ('cpu' or 'cuda'). Defaults to 'cpu'.
         """
+        assert policy_dim is None or type(policy_dim) is type(output_dim), \
+            "policy_dim and output_dim must be of the same type"
+        if isinstance(output_dim, list) and policy_dim is not None and isinstance(policy_dim, list):
+            assert len(policy_dim) == len(output_dim), \
+                "policy_dim and output_dim lists must have the same length"
         self.tree_struct = tree_struct
         self.input_dim = input_dim
         self.output_dim = output_dim
@@ -97,8 +102,13 @@ class BaseLearner(ABC):
         self.verbose = verbose
         feature_weights = params.get('feature_weights', None)
         if feature_weights is not None:
-            feature_weights = to_numpy(feature_weights)
-            feature_weights = feature_weights.flatten()
+            if isinstance(feature_weights, (int, float)):
+                weights = np.full(input_dim, feature_weights,
+                                  dtype=np.single)
+                feature_weights = np.ascontiguousarray(weights)
+            else:
+                feature_weights = to_numpy(feature_weights)
+                feature_weights = feature_weights.flatten()
             message = "feature weights contains non-positive values"
             assert np.all(feature_weights >= 0), message
         else:
