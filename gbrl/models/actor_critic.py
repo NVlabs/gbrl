@@ -264,7 +264,12 @@ class ActorCritic(BaseGBT):
             assert self.inputs is not None, ("Cannot update trees without input."
                                              "Make sure model is called with requires_grad=True")
             observations = self.inputs
-        n_samples = len(observations)
+        
+        # Handle 1D observations
+        if observations.ndim == 1:
+            n_samples = 1 if self.learner.input_dim > 1 else len(observations)
+        else:
+            n_samples = len(observations)
 
         if policy_grads is None:
             assert self.params is not None, "params must be set to compute gradients."
@@ -323,7 +328,12 @@ class ActorCritic(BaseGBT):
             assert self.inputs is not None, ("Cannot update trees without input."
                                             "Make sure model is called with requires_grad=True")
             observations = self.inputs
-        n_samples = len(observations)
+        
+        # Handle 1D observations
+        if observations.ndim == 1:
+            n_samples = 1 if self.learner.input_dim > 1 else len(observations)
+        else:
+            n_samples = len(observations)
 
         if policy_grads is None:
             assert self.params is not None, "params must be set to compute gradients."
@@ -363,7 +373,12 @@ class ActorCritic(BaseGBT):
             assert self.inputs is not None, ("Cannot update trees without input."
                                             "Make sure model is called with requires_grad=True")
             observations = self.inputs
-        n_samples = len(observations)
+
+        # Handle 1D observations
+        if observations.ndim == 1:
+            n_samples = 1 if self.learner.input_dim > 1 else len(observations)
+        else:
+            n_samples = len(observations)
 
         if value_grads is None:
             assert self.params is not None, "params must be set to compute gradients."

@@ -110,6 +110,7 @@ class ContinuousCritic(BaseGBT):
                                   params=params, verbose=verbose, device=device)
         self.learner.reset()
         self.learner.set_bias(bias)
+        self.target_prefix = 0
 
     def step(self, observations: Optional[NumericalData] = None,
              weight_grads: Optional[NumericalData] = None,
@@ -129,7 +130,13 @@ class ContinuousCritic(BaseGBT):
             assert self.input is not None, ("Cannot update trees without input."
                                             "Make sure model is called with requires_grad=True")
             observations = self.input
-        n_samples = len(observations)
+        
+        # Handle 1D observations
+        if observations.ndim == 1:
+            n_samples = 1 if self.learner.input_dim > 1 else len(observations)
+        else:
+            n_samples = len(observations)
+        
         if weight_grads is None:
             assert self.params is not None, "params must be set to compute gradients."
             assert isinstance(self.params, tuple), "params must be a tuple to compute gradients."
@@ -155,6 +162,11 @@ class ContinuousCritic(BaseGBT):
         self.grads = (weight_grads, bias_grads)
         self.input = None
 
+        n_trees = self.learner.get_num_trees()
+
+        if (n_trees % self.target_update_interval) == 0:
+            self.target_prefix = n_trees
+
     def predict_target(self,
                        observations: NumericalData,
                        tensor: bool = True) -> Tuple[NumericalData,
@@ -173,9 +185,8 @@ class ContinuousCritic(BaseGBT):
 
         """
         assert self.bias_optimizer is not None, "bias_optimizer must be set to use target prediction."
-        n_trees = self.learner.get_num_trees()
         theta = self.learner.predict(observations, requires_grad=False,
-                                     stop_idx=max(n_trees - self.target_update_interval, 1), tensor=tensor)
+                                     stop_idx=self.target_prefix, tensor=tensor)
         weights = theta[:, self.weights_optimizer['start_idx']:self.weights_optimizer['stop_idx']]
         bias = theta[:, self.bias_optimizer['start_idx']:self.bias_optimizer['stop_idx']]
 
@@ -301,6 +312,7 @@ class DiscreteCritic(BaseGBT):
                                   device=device)
         self.learner.reset()
         self.learner.set_bias(bias)
+        self.target_prefix = 0
 
     def step(self,
              observations: Optional[NumericalData] = None,
@@ -320,7 +332,12 @@ class DiscreteCritic(BaseGBT):
             assert self.input is not None, ("Cannot update trees without input."
                                             "Make sure model is called with requires_grad=True")
             observations = self.input
-        n_samples = len(observations)
+        
+        # Handle 1D observations
+        if observations.ndim == 1:
+            n_samples = 1 if self.learner.input_dim > 1 else len(observations)
+        else:
+            n_samples = len(observations)
 
         if q_grads is None:
             assert self.params is not None, "params must be set to compute gradients."
@@ -332,6 +349,11 @@ class DiscreteCritic(BaseGBT):
         self.learner.step(observations, q_grads)
         self.grads = q_grads
         self.input = None
+
+        n_trees = self.learner.get_num_trees()
+
+        if (n_trees % self.target_update_interval) == 0:
+            self.target_prefix = n_trees
 
     def __call__(self, observations: NumericalData, requires_grad: bool = True,
                  start_idx: int = 0, stop_idx: Optional[int] = None,
@@ -373,10 +395,9 @@ class DiscreteCritic(BaseGBT):
         Returns:
             NumericalData: Target Critic's outputs.
         """
-        n_trees = self.learner.get_num_trees()
         return self.learner.predict(inputs=observations,
                                     requires_grad=False,
-                                    stop_idx=max(n_trees - self.target_update_interval, 1),
+                                    stop_idx=self.target_prefix,
                                     tensor=tensor)
 
     def __copy__(self) -> "DiscreteCritic":

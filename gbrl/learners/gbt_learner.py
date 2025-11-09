@@ -117,7 +117,8 @@ class GBTLearner(BaseLearner):
         Returns:
             None
         """
-        assert isinstance(grads, list) or isinstance(grads, tuple) or isinstance(grads, NumericalData), \
+        assert self._cpp_model is not None, "Model not initialized!"
+        assert isinstance(grads, (list, tuple, np.ndarray, th.Tensor)), \
             "Invalid gradients type"
         super().step(inputs)
         if self.total_iterations == 0:
@@ -138,6 +139,9 @@ class GBTLearner(BaseLearner):
 
         if isinstance(grads, tuple):
             grads = concatenate_arrays(grads)
+
+        if inputs.ndim == 1:
+            inputs = inputs.reshape((1, self.input_dim)) if self.input_dim > 1 else inputs.reshape((len(inputs), 1))   # type: ignore
 
         grads = grads.reshape((len(inputs), self.output_dim))  # type: ignore
         num_inputs, cat_inputs = preprocess_features(inputs)
@@ -175,7 +179,14 @@ class GBTLearner(BaseLearner):
             features = features.detach().cpu().numpy()
         num_features, cat_features = preprocess_features(features)
         targets = to_numpy(targets)
-        targets = targets.reshape((len(targets), self.params['output_dim']))
+        
+        # Handle 1D targets
+        if targets.ndim == 1:
+            n_samples = 1 if self.params['output_dim'] > 1 else len(targets)
+            targets = targets.reshape((n_samples, self.params['output_dim']))
+        else:
+            targets = targets.reshape((len(targets), self.params['output_dim']))
+        
         loss = self._cpp_model.fit(num_features, cat_features,
                                    targets.astype(numerical_dtype),
                                    iterations, shuffle, loss_type)
