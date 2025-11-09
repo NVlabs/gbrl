@@ -25,3 +25,17 @@ GBRL Models Module
 This module provides high-level model interfaces for gradient boosting trees
 in various applications including supervised learning and reinforcement learning.
 """
+
+from gbrl.models.gbt import GBTModel
+from gbrl.models.actor import ParametricActor, GaussianActor
+from gbrl.models.critic import ContinuousCritic, DiscreteCritic
+from gbrl.models.actor_critic import ActorCritic
+
+__all__ = [
+    'GBTModel',
+    'ParametricActor',
+    'GaussianActor',
+    'ContinuousCritic',
+    'DiscreteCritic',
+    'ActorCritic',
+]

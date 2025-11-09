@@ -423,7 +423,7 @@ py::list getOptimizerConfigs(const std::vector<Optimizer*>& opts) {
 
 PYBIND11_MODULE(gbrl_cpp, m) {
     py::class_<GBRL> gbrl(m, "GBRL");
-    gbrl.def(py::init<int, int, int, int, int, int, int, float, std::string, std::string, bool, int, std::string, float, float, int, std::string>(),
+    gbrl.def(py::init<int, int, int, int, int, int, int, float, std::string, std::string, bool, int, std::string, float, float, int, std::string, std::string>(),
          py::arg("input_dim")=1, 
          py::arg("output_dim")=1, 
          py::arg("policy_dim")=1, 
@@ -441,6 +441,7 @@ PYBIND11_MODULE(gbrl_cpp, m) {
          py::arg("guidance_scale")=1.0,
          py::arg("verbose")=0,
          py::arg("device")="cpu",
+         py::arg("learner_name")="GBRL",
          "Constructor of the GBRL class");
     gbrl.def(py::init<GBRL&>(), py::arg("model"), "Copy constructor"); // This exposes the filename constructor
     gbrl.def_static("load", [](const std::string& filename) {
@@ -1037,6 +1038,10 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         py::gil_scoped_release release; 
         return self.get_device(); 
     }, "Return the current device type");  
+    gbrl.def("get_learner_name", [](GBRL &self) ->  std::string {
+        py::gil_scoped_release release; 
+        return self.get_learner_name(); 
+    }, "Return the learner name");  
     gbrl.def("get_iteration", [](GBRL &self) ->  int {
         py::gil_scoped_release release; 
         return self.get_iteration(); 
