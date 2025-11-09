@@ -37,6 +37,7 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: Scientific/Engineering :: Artificial Intelligence"
 ]
@@ -59,7 +60,7 @@ readme = "README.md"
 packages = [{include = "gbrl"}]
 
 [tool.poetry.dependencies]
-python = ">=3.10,<3.14"
+python = ">=3.9,<3.14"
 pybind11 = {version = "2.13.1", extras = ["global"]}
 numpy = ">=1.21.0"
 cmake = ">=3.18"
