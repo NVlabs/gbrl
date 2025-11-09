@@ -19,12 +19,20 @@
 # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 # DEALINGS IN THE SOFTWARE.
 ##############################################################################
-__version__ = "1.1.4"
+__version__ = "1.1.5"
 
 import importlib.util
 import os
 import platform
 import sys
+
+# Windows Python 3.8+ requires explicit DLL directory registration
+if sys.platform == 'win32' and sys.version_info >= (3, 8):
+    cuda_path = os.environ.get('CUDA_PATH')
+    if cuda_path:
+        cuda_bin = os.path.join(cuda_path, 'bin')
+        if os.path.exists(cuda_bin):
+            os.add_dll_directory(cuda_bin)
 
 _loaded_cpp_module = None
 

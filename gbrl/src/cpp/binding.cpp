@@ -724,15 +724,15 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         if (!mapping_numerics.attr("flags").attr("c_contiguous").cast<bool>()) {
             throw std::runtime_error("Arrays must be C-contiguous");
         }
-        py::gil_scoped_release release; 
 
+        // Get buffer info while holding GIL
         py::buffer_info info = feature_mapping.request();
         int* feature_mapping_ptr = static_cast<int*>(info.ptr);
         int input_dim = static_cast<int>(len(feature_mapping));
 
         info = mapping_numerics.request();
         bool* mapping_numerics_ptr = static_cast<bool*>(info.ptr);
-        
+        py::gil_scoped_release release; 
         self.set_feature_mapping(feature_mapping_ptr, mapping_numerics_ptr, input_dim); 
     }, "Set GBRL model feature mapping");
     gbrl.def("get_bias", [](GBRL &self) -> py::array_t<float> {
@@ -960,7 +960,7 @@ PYBIND11_MODULE(gbrl_cpp, m) {
     gbrl.def("get_metadata", [](GBRL &self) ->  py::dict {
         return metadataToDict(self.metadata); 
     }, "Return ensemble metadata");  
-    gbrl.def("get_ensemble_data", [](GBRL &self) -> py::dict{
+    gbrl.def("get_ensemble_data", [](GBRL &self) -> py::dict {
         py::gil_scoped_release release; 
         ensembleData *edata = self.get_ensemble_data(); 
         py::gil_scoped_acquire acquire;

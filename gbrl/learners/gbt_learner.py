@@ -114,7 +114,7 @@ class GBTLearner(BaseLearner):
             None
         """
         assert self._cpp_model is not None, "Model not initialized!"
-        assert isinstance(grads, list) or isinstance(grads, tuple) or isinstance(grads, NumericalData), \
+        assert isinstance(grads, (list, tuple, np.ndarray, th.Tensor)), \
             "Invalid gradients type"
 
         super().step(inputs)
