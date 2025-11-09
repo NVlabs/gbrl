@@ -98,7 +98,7 @@ class MultiGBTLearner(BaseLearner):
         self._cpp_models = None
         self.student_models = None
         self.n_learners = n_learners
-        
+
         # Handle learner names
         if names is None:
             self.learner_names = [f"GBRL_{i}" for i in range(n_learners)]

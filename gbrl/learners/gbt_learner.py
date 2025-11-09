@@ -168,14 +168,14 @@ class GBTLearner(BaseLearner):
             features = features.detach().cpu().numpy()
         num_features, cat_features = preprocess_features(features)
         targets = to_numpy(targets)
-        
+
         # Handle 1D targets
         if targets.ndim == 1:
             n_samples = 1 if self.params['output_dim'] > 1 else len(targets)
             targets = targets.reshape((n_samples, self.params['output_dim']))
         else:
             targets = targets.reshape((len(targets), self.params['output_dim']))
-        
+
         loss = self._cpp_model.fit(num_features, cat_features,
                                    targets.astype(numerical_dtype),
                                    iterations, shuffle, loss_type)
