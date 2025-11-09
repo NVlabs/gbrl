@@ -57,7 +57,7 @@ class BaseGBT(ABC):
         """
         self.learner = None
         self.grads: Optional[Union[NumericalData, Tuple[Optional[NumericalData], ...]]] = None
-        self.params: Optional[Union[NumericalData, Tuple[NumericalData, ...]]] = None
+        self.params: Optional[Union[NumericalData, Tuple[Optional[NumericalData], ...]]] = None
         self.input = None
 
     def set_bias(self, *args, **kwargs) -> None:
@@ -296,19 +296,22 @@ class BaseGBT(ABC):
         instance.input = None
         return instance
 
-    def get_params(self) -> Optional[Union[NumericalData, Tuple[NumericalData, ...]]]:
+    def get_params(self) -> Optional[Union[Optional[NumericalData], Tuple[Optional[NumericalData], ...]]]:
         """
         Gets a copy of the model's predicted parameters from the last forward pass.
 
         Returns:
-            Optional[Union[NumericalData, Tuple[NumericalData, ...]]]: Cloned/copied
+            Optional[Union[Optional[NumericalData], Tuple[Optional[NumericalData], ...]]]: Cloned/copied
                 parameters or None if no forward pass has been performed.
         """
         if self.params is None:
             return None
 
         if isinstance(self.params, tuple):
-            return tuple(p.detach().clone() if isinstance(p, th.Tensor) else p.copy() for p in self.params)
+            return tuple(
+                p.detach().clone() if isinstance(p, th.Tensor) else (p.copy() if p is not None else None)
+                for p in self.params
+            )
 
         return self.params.detach().clone() if isinstance(self.params, th.Tensor) else self.params.copy()
 

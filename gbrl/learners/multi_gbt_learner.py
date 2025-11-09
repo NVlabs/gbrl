@@ -57,7 +57,8 @@ class MultiGBTLearner(BaseLearner):
                  n_learners: int,
                  policy_dim: Optional[Union[int, List[int]]] = None,
                  verbose: int = 0,
-                 device: str = 'cpu'):
+                 device: str = 'cpu',
+                 names: Optional[Union[str, List[str]]] = None):
         """
         Initializes the MultiGBTLearner.
 
@@ -72,6 +73,7 @@ class MultiGBTLearner(BaseLearner):
             policy_dim (Optional[Union[int, List[int]]]): The dimension of the policy space.
             verbose (int, optional): Verbosity level. Defaults to 0.
             device (str, optional): The device to run the model on. Defaults to 'cpu'.
+            names (Optional[Union[str, List[str]]], optional): Name(s) for the learner(s). Defaults to None.
         """
 
         assert len(optimizers) == 1 or len(optimizers) == n_learners
@@ -97,6 +99,15 @@ class MultiGBTLearner(BaseLearner):
         self.student_models = None
         self.n_learners = n_learners
 
+        # Handle learner names
+        if names is None:
+            self.learner_names = [f"GBRL_{i}" for i in range(n_learners)]
+        elif isinstance(names, str):
+            self.learner_names = [f"{names}_{i}" for i in range(n_learners)]
+        else:
+            assert len(names) == n_learners, f"Number of names ({len(names)}) must match n_learners ({n_learners})"
+            self.learner_names = names
+
     def reset(self) -> None:
         """Resets the learner to its initial state, reinitializing the C++ model and optimizers."""
         if self._cpp_models:
@@ -111,7 +122,7 @@ class MultiGBTLearner(BaseLearner):
             if isinstance(self.output_dim, list):
                 params['output_dim'] = self.output_dim[i]   # type: ignore
                 params['policy_dim'] = self.policy_dim[i]   # type: ignore
-            cpp_model = GBRL_CPP(**params)
+            cpp_model = GBRL_CPP(**params, learner_name=self.learner_names[i])
             cpp_model.set_feature_weights(self.feature_weights)
             if self.student_models is not None:
                 self.optimizers[i]['T'] -= self.total_iterations
@@ -394,7 +405,7 @@ class MultiGBTLearner(BaseLearner):
 
         if model_idx is not None:
             return self._cpp_models[model_idx].get_scheduler_lrs()
-        return (cpp_model.get_scheduler_lrs() for cpp_model in self._cpp_models)  # type: ignore
+        return tuple(cpp_model.get_scheduler_lrs() for cpp_model in self._cpp_models)  # type: ignore
 
     def get_iteration(self, model_idx: Optional[int] = None) -> Union[int, Tuple[int, ...]]:
         """
@@ -410,7 +421,7 @@ class MultiGBTLearner(BaseLearner):
             "Model not initialized."
         if model_idx is not None:
             return self._cpp_models[model_idx].get_iteration()
-        return (cpp_model.get_iteration() for cpp_model in self._cpp_models)  # type: ignore
+        return tuple(cpp_model.get_iteration() for cpp_model in self._cpp_models)  # type: ignore
 
     def get_num_trees(self, model_idx: Optional[int] = None) -> Union[int, Tuple[int, ...]]:
         """

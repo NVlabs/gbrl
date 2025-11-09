@@ -26,18 +26,20 @@ Basic imports and preprocessing
     from torch.nn.functional import mse_loss 
     from torch.distributions import Categorical
 
-    from gbrl import GradientBoostingTrees, cuda_available, ParametricActor
+    from gbrl import cuda_available
+    from gbrl.models import GBTModel, ParametricActor
 
 Pre-process data
 ~~~~~~~~~~~~~~~~
 .. code-block:: python
 
     # CUDA is not deterministic
-    device = 'cuda' if cuda_available else 'cpu'
+    device = 'cuda' if cuda_available() else 'cpu'
     # incremental learning dataset
     X_numpy, y_numpy = datasets.load_diabetes(return_X_y=True, as_frame=False, scaled=False)
     # Reshape target as GBRL works with 2D arrays
     out_dim = 1 if len(y_numpy.shape) == 1 else y_numpy.shape[1]
+    input_dim = X_numpy.shape[1]
 
     X, y = th.tensor(X_numpy, dtype=th.float32, device=device), th.tensor(y_numpy, dtype=th.float32, device=device)
 
@@ -54,7 +56,9 @@ Setting up a GBRL model
                    'grow_policy': 'oblivious'}
 
     optimizer = {'algo': 'SGD',
-                 'lr': 1.0}
+                 'lr': 1.0,
+                 'start_idx': 0,
+                 'stop_idx': out_dim}
 
     gbrl_params = {
                    "split_score_func": "Cosine",
@@ -62,11 +66,12 @@ Setting up a GBRL model
                   }
 
     # setting up model
-    gbt_model = GradientBoostingTrees(
+    gbt_model = GBTModel(
+                        input_dim=input_dim,
                         output_dim=out_dim,
                         tree_struct=tree_struct,
-                        optimizer=optimizer,
-                        gbrl_params=gbrl_params,
+                        optimizers=optimizer,
+                        params=gbrl_params,
                         verbose=0,
                         device=device)
     gbt_model.set_bias_from_targets(y)
@@ -94,11 +99,12 @@ For example: when using a summation reduction
 
 .. code-block:: python
 
-    gbt_model = GradientBoostingTrees(
+    gbt_model = GBTModel(
+                        input_dim=input_dim,
                         output_dim=out_dim,
                         tree_struct=tree_struct,
-                        optimizer=optimizer,
-                        gbrl_params=gbrl_params,
+                        optimizers=optimizer,
+                        params=gbrl_params,
                         verbose=0,
                         device=device)
     gbt_model.set_bias_from_targets(y)
@@ -119,11 +125,12 @@ or when working with multi-dimensional outputs
 
     y_multi = th.concat([y, y], dim=1)
     out_dim = y_multi.shape[1]
-    gbt_model = GradientBoostingTrees(
+    gbt_model = GBTModel(
+                        input_dim=input_dim,
                         output_dim=out_dim,
                         tree_struct=tree_struct,
-                        optimizer=optimizer,
-                        gbrl_params=gbrl_params,
+                        optimizers=optimizer,
+                        params=gbrl_params,
                         verbose=0,
                         device=device)
     gbt_model.set_bias_from_targets(y_multi)
@@ -144,13 +151,13 @@ Saving, loading, and copying a GBRL Model
 
 .. code-block:: python
 
-    # Call the save_model method of a GBRL class
+    # Call the save_learner method of a GBRL class
     # GBRL will automatically save the file with the .gbrl_model ending
     # The file will be saved in the current working directory
     # Provide the absolute path to save the file in a different directory.
-    gbt_model.save_model('gbt_model_tutorial')
+    gbt_model.save_learner('gbt_model_tutorial')
     # Loading a saved model is similar and is done by calling the specific class instance.
-    loaded_gbt_model = GradientBoostingTrees.load_model('gbt_model_tutorial')
+    loaded_gbt_model = GBTModel.load_learner('gbt_model_tutorial', device=device)
     # Copying a model is straighforward
     copied_model = gbt_model.copy()
 
@@ -169,18 +176,21 @@ Fitting manually calculated gradients is done using the `_model.step` method tha
                 'grow_policy': 'oblivious'}
                 
     optimizer = { 'algo': 'SGD',
-                'lr': 1.0}
+                'lr': 1.0,
+                'start_idx': 0,
+                'stop_idx': 1}
 
     gbrl_params = {
                 "split_score_func": "Cosine",
                 "generator_type": "Quantile"}
 
     # setting up model
-    gbt_model = GradientBoostingTrees(
+    gbt_model = GBTModel(
+                        input_dim=input_dim,
                         output_dim=1,
                         tree_struct=tree_struct,
-                        optimizer=optimizer,
-                        gbrl_params=gbrl_params,
+                        optimizers=optimizer,
+                        params=gbrl_params,
                         verbose=0,
                         device=device)
     # works with numpy arrays as well as PyTorch tensors
@@ -193,8 +203,8 @@ Fitting manually calculated gradients is done using the `_model.step` method tha
         y_pred = gbt_model(X_numpy, tensor=False)
         loss = np.sqrt(0.5 * ((y_pred - y_numpy)**2).mean())
         grads = y_pred - y_numpy
-        # perform a boosting step
-        gbt_model._model.step(X_numpy, grads)
+        # perform a boosting step with manual gradients
+        gbt_model.step(X_numpy, grads)
         print(f"Boosting iteration: {gbt_model.get_iteration()} RMSE loss: {loss}")
 
 Multiple boosting iterations
@@ -207,11 +217,12 @@ GBRL supports training multiple boosting iterations with targets similar to othe
 
 .. code-block:: python
 
-    gbt_model = GradientBoostingTrees(
+    gbt_model = GBTModel(
+                        input_dim=input_dim,
                         output_dim=1,
                         tree_struct=tree_struct,
-                        optimizer=optimizer,
-                        gbrl_params=gbrl_params,
+                        optimizers=optimizer,
+                        params=gbrl_params,
                         verbose=1,
                         device=device)
     final_loss = gbt_model.fit(X_numpy, y_numpy, iterations=10)
@@ -240,14 +251,17 @@ Let's start by training a simple Reinforce algorithm.
     num_episodes = 1000
     gamma = 0.99
     optimizer = { 'algo': 'SGD',
-                'lr': 0.05}
+                'lr': 0.05,
+                'start_idx': 0,
+                'stop_idx': env.action_space.n}
 
     bias = np.zeros(env.action_space.n, dtype=np.single)
     agent = ParametricActor(
+                        input_dim=env.observation_space.shape[0],
                         output_dim=env.action_space.n,
                         tree_struct=tree_struct,
                         policy_optimizer=optimizer,
-                        gbrl_params=gbrl_params,
+                        params=gbrl_params,
                         verbose=0,
                         bias=bias, 
                         device='cpu')
@@ -267,10 +281,10 @@ Let's start by training a simple Reinforce algorithm.
             action_logits = agent(obs)
             action = Categorical(logits=action_logits).sample()
             action_numpy = action.cpu().numpy()
+            rollout_buffer['obs'].append(obs)
             
             obs, reward, terminated, truncated, info = wrapped_env.step(action_numpy.squeeze())
             rollout_buffer['rewards'].append(reward)
-            rollout_buffer['obs'].append(obs)
             rollout_buffer['actions'].append(action)
 
             done = terminated or truncated

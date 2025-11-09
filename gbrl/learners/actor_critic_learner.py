@@ -52,7 +52,8 @@ class SharedActorCriticLearner(GBTLearner):
                  value_optimizer: Dict,
                  params: Dict = dict(),
                  verbose: int = 0,
-                 device: str = 'cpu'):
+                 device: str = 'cpu',
+                 name: str = 'SharedActorCritic'):
         """
         Initializes the SharedActorCriticLearner.
 
@@ -70,6 +71,8 @@ class SharedActorCriticLearner(GBTLearner):
             verbose (int, optional): Verbosity level. Defaults to 0.
             device (str, optional): Device to run the model on. Defaults to
             'cpu'.
+            name (str, optional): Name identifier for this learner. Defaults to
+            'SharedActorCritic'.
         """
         if verbose > 0:
             print('****************************************')
@@ -84,7 +87,8 @@ class SharedActorCriticLearner(GBTLearner):
                          params=params,
                          policy_dim=output_dim - 1,
                          verbose=verbose,
-                         device=device)
+                         device=device,
+                         name=name)
 
     def distil(self, obs: np.ndarray,  # type: ignore
                policy_targets: np.ndarray,
@@ -200,7 +204,8 @@ class SharedActorCriticLearner(GBTLearner):
                                          value_optimizer=self.optimizers[1].copy(),
                                          params=self.params,
                                          verbose=self.verbose,
-                                         device=self.device)
+                                         device=self.device,
+                                         name=self.learner_name)
         copy_.iteration = self.iteration
         copy_.total_iterations = self.total_iterations
         if self._cpp_model is not None:
@@ -229,7 +234,9 @@ class SeparateActorCriticLearner(MultiGBTLearner):
                  value_optimizer: Dict,
                  params: Dict = dict(),
                  verbose: int = 0,
-                 device: str = 'cpu'):
+                 device: str = 'cpu',
+                 actor_name: str = 'Actor',
+                 critic_name: str = 'Critic'):
         """
         Initializes the SeparateActorCriticLearner with two independent GBT
         models.
@@ -243,6 +250,8 @@ class SeparateActorCriticLearner(MultiGBTLearner):
             params (Dict, optional): Additional model parameters. Defaults to an empty dictionary.
             verbose (int, optional): Verbosity level for debugging. Defaults to 0.
             device (str, optional): Device to run the model on ('cpu' or 'cuda'). Defaults to 'cpu'.
+            actor_name (str, optional): Name for the actor learner. Defaults to 'Actor'.
+            critic_name (str, optional): Name for the critic learner. Defaults to 'Critic'.
         """
         if verbose > 0:
             print('****************************************')
@@ -258,7 +267,8 @@ class SeparateActorCriticLearner(MultiGBTLearner):
                          params=params,
                          n_learners=2,
                          policy_dim=[output_dim - 1, 0],
-                         verbose=verbose, device=device)
+                         verbose=verbose, device=device,
+                         names=[actor_name, critic_name])
 
     def step_actor(self,
                    inputs: NumericalData,
@@ -360,7 +370,9 @@ class SeparateActorCriticLearner(MultiGBTLearner):
                                            value_optimizer=opts[1],
                                            params=self.params,
                                            verbose=self.verbose,
-                                           device=self.device)
+                                           device=self.device,
+                                           actor_name=self.learner_names[0],
+                                           critic_name=self.learner_names[1])
         copy_.iteration = self.iteration
         copy_.total_iterations = self.total_iterations
 

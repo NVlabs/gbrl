@@ -77,7 +77,8 @@ GBRL::GBRL(int input_dim, int output_dim, int policy_dim, int max_depth, int min
            int n_bins, int par_th, float cv_beta, scoreFunc split_score_func,
            generatorType generator_type, bool use_cv, int batch_size, growPolicy grow_policy, 
            int verbose, 
-           deviceType _device){
+           deviceType _device, std::string _learner_name){
+    this->learner_name = _learner_name;
     this->metadata = ensemble_metadata_alloc(INITAL_MAX_TREES, INITAL_MAX_TREES * (1 << max_depth), TREES_BATCH, TREES_BATCH * (1 << max_depth), input_dim, output_dim, policy_dim, max_depth, min_data_in_leaf, n_bins, par_th, cv_beta, verbose, batch_size, use_cv, split_score_func, generator_type, grow_policy);
     this->sheader = create_header();
 #ifdef USE_CUDA
@@ -95,7 +96,8 @@ GBRL::GBRL(int input_dim, int output_dim, int policy_dim, int max_depth, int min
 GBRL::GBRL(int input_dim, int output_dim, int policy_dim, int max_depth, int min_data_in_leaf, 
            int n_bins, int par_th, float cv_beta, std::string split_score_func,
            std::string generator_type, bool use_cv, int batch_size, 
-           std::string grow_policy, int verbose, std::string _device){
+           std::string grow_policy, int verbose, std::string _device, std::string _learner_name){
+    this->learner_name = _learner_name;
     this->metadata = ensemble_metadata_alloc(INITAL_MAX_TREES, INITAL_MAX_TREES * (1 << max_depth), TREES_BATCH, TREES_BATCH * (1 << max_depth), input_dim, output_dim, policy_dim, max_depth, min_data_in_leaf, n_bins, par_th, cv_beta, verbose, batch_size, use_cv, stringToScoreFunc(split_score_func), stringTogeneratorType(generator_type), stringTogrowPolicy(grow_policy));
     this->sheader = create_header();
 #ifdef USE_CUDA
@@ -112,6 +114,7 @@ GBRL::GBRL(int input_dim, int output_dim, int policy_dim, int max_depth, int min
 }
 
 GBRL::GBRL(const std::string& filename){
+    this->learner_name = "GBRL";  // Will be overwritten when loaded
     int status = this->loadFromFile(filename);
     if (status != 0){
         std::cerr << "Error loading . " <<  filename  << std::endl; 
@@ -121,6 +124,7 @@ GBRL::GBRL(const std::string& filename){
 
 GBRL::GBRL(GBRL& other):  
            opts(), parallel_predict(other.parallel_predict){
+        this->learner_name = other.learner_name;
         this->metadata = new ensembleMetaData;
         memcpy(this->metadata, other.metadata, sizeof(ensembleMetaData));
         this->device= other.device;
@@ -162,12 +166,12 @@ GBRL::~GBRL() {
 
 void GBRL::to_device(deviceType _device){
     if (_device == this->device){
-        std::cout << "GBRL device is already " << deviceTypeToString(_device) << std::endl;
+        std::cout << this->learner_name << " device is already " << deviceTypeToString(_device) << std::endl;
         return;
     }
 #ifndef USE_CUDA
     if (_device == gpu)
-        std::cerr << "GBRL was not compiled for GPU. Using cpu device" << std::endl;
+        std::cerr << this->learner_name << " was not compiled for GPU. Using cpu device" << std::endl;
     this->edata = ensemble_data_alloc(this->metadata);
     this->device = cpu;
 #else
@@ -203,7 +207,7 @@ void GBRL::to_device(deviceType _device){
     }
 #endif 
     if (this->metadata->verbose > 0)
-        std::cout << "Setting GBRL device to " << deviceTypeToString(_device) << std::endl;
+        std::cout << "Setting " << this->learner_name << " device to " << deviceTypeToString(_device) << std::endl;
 }
 
 void GBRL::set_bias(dataHolder<const float> *bias, const int output_dim){
@@ -232,7 +236,7 @@ void GBRL::set_bias(dataHolder<const float> *bias, const int output_dim){
             memcpy(this->edata->bias, bias->data, sizeof(float)*this->metadata->output_dim);
     }
     if (this->metadata->verbose > 0)
-        std::cout << "Setting GBRL bias " << std::endl;
+        std::cout << "Setting " << this->learner_name << " bias " << std::endl;
 }
 
 void GBRL::set_feature_weights(dataHolder<float> *feature_weights, const int input_dim){
@@ -261,7 +265,7 @@ void GBRL::set_feature_weights(dataHolder<float> *feature_weights, const int inp
             memcpy(this->edata->feature_weights, feature_weights->data, sizeof(float)*this->metadata->input_dim);
     }
     if (this->metadata->verbose > 0)
-        std::cout << "Setting GBRL feature weights " << std::endl;
+        std::cout << "Setting " << this->learner_name << " feature weights " << std::endl;
 }
 
 void GBRL::set_feature_mapping(const int *feature_mapping, const bool *mapping_numerics, const int input_dim){
@@ -304,7 +308,7 @@ void GBRL::set_feature_mapping(const int *feature_mapping, const bool *mapping_n
         memcpy(this->edata->reverse_cat_feature_mapping, reverse_cat_feature_mapping, sizeof(int)*this->metadata->input_dim);
     }
     if (this->metadata->verbose > 0){
-        std::cout << "Setting GBRL feature mapping " << std::endl;
+        std::cout << "Setting " << this->learner_name << " feature mapping " << std::endl;
     }
 
     delete[] reverse_num_feature_mapping;
@@ -439,6 +443,10 @@ int GBRL::get_iteration(){
 
 std::string GBRL::get_device(){
     return deviceTypeToString(this->device);
+}
+
+std::string GBRL::get_learner_name(){
+    return this->learner_name;
 }
 
 void GBRL::set_optimizer(optimizerAlgo algo, schedulerFunc scheduler_func, float init_lr, 
@@ -907,7 +915,7 @@ float GBRL::_fit_gpu(dataHolder<float> *obs,
         else{
             cudaMemset(result_tmp, 0, result_tmp_size);
             float loss = MultiRMSEGradandLoss(gpu_preds, gpu_targets, gpu_grads, result_tmp, output_dim, n_samples, n_blocks, threads_per_block);
-            std::cout << "Boosting iteration: " << this->metadata->iteration << " - MultiRMSE Loss: " << loss << std::endl;
+            std::cout << this->learner_name << " - Boosting iteration: " << this->metadata->iteration << " - MultiRMSE Loss: " << loss << std::endl;
         }
         cudaMemcpy(gpu_build_grads, gpu_grads, grads_size, cudaMemcpyDeviceToDevice);
         
@@ -939,7 +947,7 @@ void GBRL::step(dataHolder<const float> *obs,
         this->metadata->n_num_features = n_num_features;
         this->metadata->n_cat_features = n_cat_features;
         if (this->metadata->verbose > 0) {
-            std::cout << "Initiating GBRL training" << std::endl;
+            std::cout << "Initiating " << this->learner_name << " training" << std::endl;
         }
     }
     if (n_num_features != metadata->n_num_features || n_cat_features != metadata->n_cat_features){
@@ -1135,6 +1143,11 @@ int GBRL::saveToFile(const std::string& filename){
     byte = static_cast<char>(this->metadata->use_cv);
     file.write(&byte, sizeof(byte));
 
+    // Save learner name
+    size_t name_length = this->learner_name.length();
+    file.write(reinterpret_cast<const char*>(&name_length), sizeof(size_t));
+    file.write(this->learner_name.c_str(), name_length);
+
     save_ensemble_data(file, this->edata, this->metadata, this->device);
 
     int num_opts = static_cast<int>(this->opts.size());
@@ -1181,6 +1194,12 @@ int GBRL::loadFromFile(const std::string& filename){
     file.read(&byte, sizeof(byte));
     this->metadata->use_cv = static_cast<bool>(byte);
 
+    // Read learner name length and name
+    size_t name_length;
+    file.read(reinterpret_cast<char*>(&name_length), sizeof(size_t));
+    this->learner_name.resize(name_length);
+    file.read(&this->learner_name[0], name_length);
+
     if (!file.good()) {
         std::cerr << "Error occurred while reading the file." << std::endl;
         throw std::runtime_error("Reading file error");
@@ -1216,7 +1235,7 @@ int GBRL::loadFromFile(const std::string& filename){
     }
 
     this->device = cpu;
-    std::cout << "######## Loaded GBRL model ########" << std::endl;
+    std::cout << "######## Loaded " << this->learner_name << " model ########" << std::endl;
     std::cout << "input_dim: " << this->metadata->input_dim;
     std::cout << " output_dim: " << this->metadata->output_dim;
     std::cout << " policy_dim: " << this->metadata->policy_dim;
@@ -1233,7 +1252,7 @@ int GBRL::loadFromFile(const std::string& filename){
 }
 
 void GBRL::print_ensemble_metadata(){
-    std::cout << "######## GBRL model ########" << std::endl;
+    std::cout << "######## " << this->learner_name << " model ########" << std::endl;
     std::cout << "input dim: " << this->metadata->input_dim;
     std::cout << " output dim: " << this->metadata->output_dim;
     std::cout << " policy dim: " << this->metadata->policy_dim;

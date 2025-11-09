@@ -31,10 +31,8 @@ from typing import Dict, List, Optional, Tuple, Union
 import numpy as np
 import torch as th
 
-from gbrl.common.utils import (NumericalData, TensorInfo, 
-                               get_index_mapping,
-                               get_tensor_info,
-                               numerical_dtype, to_numpy)
+from gbrl.common.utils import (NumericalData, TensorInfo, get_index_mapping,
+                               get_tensor_info, numerical_dtype, to_numpy)
 
 
 class BaseLearner(ABC):
