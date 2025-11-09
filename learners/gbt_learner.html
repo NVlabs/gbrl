@@ -1,0 +1,488 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GBTLearner &mdash; GBRL 1.1.6 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=937269b5"></script>
+      <script src="../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="MultiGBTLearner" href="multi_gbt_learner.html" />
+    <link rel="prev" title="BaseLearner" href="base_learner.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            GBRL
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">User Guide:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../quickstart.html">Quickstart</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../quickstart.html#source-compilation">Source Compilation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../examples.html">Examples</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Documentation:</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../models/index.html">Models</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="index.html">Learners</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="base_learner.html">BaseLearner</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">GBTLearner</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#gbrl.learners.gbt_learner.GBTLearner"><code class="docutils literal notranslate"><span class="pre">GBTLearner</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.gbt_learner.GBTLearner.distil"><code class="docutils literal notranslate"><span class="pre">GBTLearner.distil()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.gbt_learner.GBTLearner.export"><code class="docutils literal notranslate"><span class="pre">GBTLearner.export()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.gbt_learner.GBTLearner.fit"><code class="docutils literal notranslate"><span class="pre">GBTLearner.fit()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.gbt_learner.GBTLearner.get_bias"><code class="docutils literal notranslate"><span class="pre">GBTLearner.get_bias()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.gbt_learner.GBTLearner.get_device"><code class="docutils literal notranslate"><span class="pre">GBTLearner.get_device()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.gbt_learner.GBTLearner.get_feature_weights"><code class="docutils literal notranslate"><span class="pre">GBTLearner.get_feature_weights()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.gbt_learner.GBTLearner.get_iteration"><code class="docutils literal notranslate"><span class="pre">GBTLearner.get_iteration()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.gbt_learner.GBTLearner.get_num_trees"><code class="docutils literal notranslate"><span class="pre">GBTLearner.get_num_trees()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.gbt_learner.GBTLearner.get_schedule_learning_rates"><code class="docutils literal notranslate"><span class="pre">GBTLearner.get_schedule_learning_rates()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.gbt_learner.GBTLearner.load"><code class="docutils literal notranslate"><span class="pre">GBTLearner.load()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.gbt_learner.GBTLearner.plot_tree"><code class="docutils literal notranslate"><span class="pre">GBTLearner.plot_tree()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.gbt_learner.GBTLearner.predict"><code class="docutils literal notranslate"><span class="pre">GBTLearner.predict()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.gbt_learner.GBTLearner.print_ensemble_metadata"><code class="docutils literal notranslate"><span class="pre">GBTLearner.print_ensemble_metadata()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.gbt_learner.GBTLearner.print_tree"><code class="docutils literal notranslate"><span class="pre">GBTLearner.print_tree()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.gbt_learner.GBTLearner.reset"><code class="docutils literal notranslate"><span class="pre">GBTLearner.reset()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.gbt_learner.GBTLearner.save"><code class="docutils literal notranslate"><span class="pre">GBTLearner.save()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.gbt_learner.GBTLearner.set_bias"><code class="docutils literal notranslate"><span class="pre">GBTLearner.set_bias()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.gbt_learner.GBTLearner.set_device"><code class="docutils literal notranslate"><span class="pre">GBTLearner.set_device()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.gbt_learner.GBTLearner.set_feature_weights"><code class="docutils literal notranslate"><span class="pre">GBTLearner.set_feature_weights()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.gbt_learner.GBTLearner.shap"><code class="docutils literal notranslate"><span class="pre">GBTLearner.shap()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.gbt_learner.GBTLearner.step"><code class="docutils literal notranslate"><span class="pre">GBTLearner.step()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.gbt_learner.GBTLearner.tree_shap"><code class="docutils literal notranslate"><span class="pre">GBTLearner.tree_shap()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="multi_gbt_learner.html">MultiGBTLearner</a></li>
+<li class="toctree-l2"><a class="reference internal" href="shared_actor_critic_learner.html">SharedActorCriticLearner</a></li>
+<li class="toctree-l2"><a class="reference internal" href="separate_actor_critic_learner.html">SeparateActorCriticLearner</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">GBRL</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="index.html">Learners</a></li>
+      <li class="breadcrumb-item active">GBTLearner</li>
+      <li class="wy-breadcrumbs-aside">
+              <a href="https://github.com///blob/learners/gbt_learner.rst" class="fa fa-github"> Edit on GitHub</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="gbtlearner">
+<h1>GBTLearner<a class="headerlink" href="#gbtlearner" title="Link to this heading"></a></h1>
+<p>Concrete implementation of BaseLearner that wraps a single gradient boosting tree ensemble using the GBRL C++ backend.
+It supports training, prediction, saving/loading, and SHAP value computation.</p>
+<dl class="py class">
+<dt class="sig sig-object py" id="gbrl.learners.gbt_learner.GBTLearner">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">gbrl.learners.gbt_learner.</span></span><span class="sig-name descname"><span class="pre">GBTLearner</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">input_dim</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">output_dim</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">tree_struct</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Dict</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">optimizers</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Dict</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">List</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">params</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Dict</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">policy_dim</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">verbose</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">device</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'cpu'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'GBRL'</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/gbrl/learners/gbt_learner.html#GBTLearner"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.learners.gbt_learner.GBTLearner" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="base_learner.html#gbrl.learners.base.BaseLearner" title="gbrl.learners.base.BaseLearner"><code class="xref py py-class docutils literal notranslate"><span class="pre">BaseLearner</span></code></a></p>
+<p>GBTLearner is a gradient boosted tree learner that utilizes a C++ backend
+for efficient computation.
+It supports training, prediction, saving, loading,
+and SHAP value computation.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.learners.gbt_learner.GBTLearner.distil">
+<span class="sig-name descname"><span class="pre">distil</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">obs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">numpy.ndarray</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">targets</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">numpy.ndarray</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">params</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Dict</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">verbose</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">float</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Dict</span><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="../_modules/gbrl/learners/gbt_learner.html#GBTLearner.distil"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.learners.gbt_learner.GBTLearner.distil" title="Link to this definition"></a></dt>
+<dd><p>Distills the model into a student model.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>obs</strong> (<em>np.ndarray</em>) – Input observations.</p></li>
+<li><p><strong>targets</strong> (<em>np.ndarray</em>) – Target values.</p></li>
+<li><p><strong>params</strong> (<em>Dict</em>) – Distillation parameters.</p></li>
+<li><p><strong>verbose</strong> (<em>int</em><em>, </em><em>optional</em>) – Verbosity level. Defaults to 0.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The final loss and updated parameters.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Tuple[float, Dict]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.learners.gbt_learner.GBTLearner.export">
+<span class="sig-name descname"><span class="pre">export</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">filename</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">modelname</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="reference internal" href="../_modules/gbrl/learners/gbt_learner.html#GBTLearner.export"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.learners.gbt_learner.GBTLearner.export" title="Link to this definition"></a></dt>
+<dd><p>Exports the model to a C header file.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>filename</strong> (<em>str</em>) – The filename to export the model to.</p></li>
+<li><p><strong>modelname</strong> (<em>str</em><em>, </em><em>optional</em>) – The name of the model in the C code. Defaults to None.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.learners.gbt_learner.GBTLearner.fit">
+<span class="sig-name descname"><span class="pre">fit</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">features</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">numpy.ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">torch.Tensor</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">targets</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">numpy.ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">torch.Tensor</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">iterations</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">shuffle</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">loss_type</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'MultiRMSE'</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">float</span></span></span><a class="reference internal" href="../_modules/gbrl/learners/gbt_learner.html#GBTLearner.fit"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.learners.gbt_learner.GBTLearner.fit" title="Link to this definition"></a></dt>
+<dd><p>Fits the model to the provided features and targets for a
+given number of iterations.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>features</strong> (<em>NumericalData</em>) – Input features.</p></li>
+<li><p><strong>targets</strong> (<em>NumericalData</em>) – Target values.</p></li>
+<li><p><strong>iterations</strong> (<em>int</em>) – Number of training iterations.</p></li>
+<li><p><strong>shuffle</strong> (<em>bool</em><em>, </em><em>optional</em>) – Whether to shuffle the data. Defaults to True.</p></li>
+<li><p><strong>loss_type</strong> (<em>str</em><em>, </em><em>optional</em>) – Type of loss function. Defaults to ‘MultiRMSE’.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The final loss value.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.learners.gbt_learner.GBTLearner.get_bias">
+<span class="sig-name descname"><span class="pre">get_bias</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">numpy.ndarray</span></span></span><a class="reference internal" href="../_modules/gbrl/learners/gbt_learner.html#GBTLearner.get_bias"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.learners.gbt_learner.GBTLearner.get_bias" title="Link to this definition"></a></dt>
+<dd><p>Returns the bias of the model.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>The bias.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>np.ndarray</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.learners.gbt_learner.GBTLearner.get_device">
+<span class="sig-name descname"><span class="pre">get_device</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="reference internal" href="../_modules/gbrl/learners/gbt_learner.html#GBTLearner.get_device"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.learners.gbt_learner.GBTLearner.get_device" title="Link to this definition"></a></dt>
+<dd><p>Returns the device the model is running on.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>The device.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.learners.gbt_learner.GBTLearner.get_feature_weights">
+<span class="sig-name descname"><span class="pre">get_feature_weights</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">numpy.ndarray</span></span></span><a class="reference internal" href="../_modules/gbrl/learners/gbt_learner.html#GBTLearner.get_feature_weights"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.learners.gbt_learner.GBTLearner.get_feature_weights" title="Link to this definition"></a></dt>
+<dd><p>Returns the feature weights of the model.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>The feature weights.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>np.ndarray</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.learners.gbt_learner.GBTLearner.get_iteration">
+<span class="sig-name descname"><span class="pre">get_iteration</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">int</span></span></span><a class="reference internal" href="../_modules/gbrl/learners/gbt_learner.html#GBTLearner.get_iteration"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.learners.gbt_learner.GBTLearner.get_iteration" title="Link to this definition"></a></dt>
+<dd><p>Returns the current iteration number.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>The current iteration number.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.learners.gbt_learner.GBTLearner.get_num_trees">
+<span class="sig-name descname"><span class="pre">get_num_trees</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">int</span></span></span><a class="reference internal" href="../_modules/gbrl/learners/gbt_learner.html#GBTLearner.get_num_trees"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.learners.gbt_learner.GBTLearner.get_num_trees" title="Link to this definition"></a></dt>
+<dd><p>Returns the total number of trees in the ensemble.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>The total number of trees.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.learners.gbt_learner.GBTLearner.get_schedule_learning_rates">
+<span class="sig-name descname"><span class="pre">get_schedule_learning_rates</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">numpy.ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">numpy.ndarray</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="p"><span class="pre">...</span></span><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="../_modules/gbrl/learners/gbt_learner.html#GBTLearner.get_schedule_learning_rates"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.learners.gbt_learner.GBTLearner.get_schedule_learning_rates" title="Link to this definition"></a></dt>
+<dd><p>Returns the learning rates of the schedulers.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>The learning rates.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>Union[int, Tuple[int, int]]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.learners.gbt_learner.GBTLearner.load">
+<em class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">load</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">filename</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">device</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#gbrl.learners.gbt_learner.GBTLearner" title="gbrl.learners.gbt_learner.GBTLearner"><span class="pre">GBTLearner</span></a></span></span><a class="reference internal" href="../_modules/gbrl/learners/gbt_learner.html#GBTLearner.load"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.learners.gbt_learner.GBTLearner.load" title="Link to this definition"></a></dt>
+<dd><p>Loads a GBTLearner model from a file.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>filename</strong> (<em>str</em>) – The filename to load the model from.</p></li>
+<li><p><strong>device</strong> (<em>str</em>) – The device to load the model onto.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The loaded GBTLearner instance.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="#gbrl.learners.gbt_learner.GBTLearner" title="gbrl.learners.gbt_learner.GBTLearner">GBTLearner</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.learners.gbt_learner.GBTLearner.plot_tree">
+<span class="sig-name descname"><span class="pre">plot_tree</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tree_idx</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">filename</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="reference internal" href="../_modules/gbrl/learners/gbt_learner.html#GBTLearner.plot_tree"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.learners.gbt_learner.GBTLearner.plot_tree" title="Link to this definition"></a></dt>
+<dd><p>Plots the tree at the given index and saves it to a file.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>tree_idx</strong> (<em>int</em>) – The index of the tree to plot.</p></li>
+<li><p><strong>filename</strong> (<em>str</em>) – The filename to save the plot to.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.learners.gbt_learner.GBTLearner.predict">
+<span class="sig-name descname"><span class="pre">predict</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">inputs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">numpy.ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">torch.Tensor</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">requires_grad</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">start_idx</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">stop_idx</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">tensor</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">numpy.ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">torch.Tensor</span></span></span><a class="reference internal" href="../_modules/gbrl/learners/gbt_learner.html#GBTLearner.predict"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.learners.gbt_learner.GBTLearner.predict" title="Link to this definition"></a></dt>
+<dd><p>Predicts the output for the given features.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>inputs</strong> (<em>NumericalData</em>) – Input features.</p></li>
+<li><p><strong>requires_grad</strong> (<em>bool</em><em>, </em><em>optional</em>) – Whether to compute gradients. Defaults to True.</p></li>
+<li><p><strong>start_idx</strong> (<em>int</em><em>, </em><em>optional</em>) – Start index for prediction. Defaults to 0.</p></li>
+<li><p><strong>stop_idx</strong> (<em>int</em><em>, </em><em>optional</em>) – Stop index for prediction. Defaults to None.</p></li>
+<li><p><strong>tensor</strong> (<em>bool</em><em>, </em><em>optional</em>) – Whether to return a tensor. Defaults to True.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The predicted output.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>NumericalData</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.learners.gbt_learner.GBTLearner.print_ensemble_metadata">
+<span class="sig-name descname"><span class="pre">print_ensemble_metadata</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/gbrl/learners/gbt_learner.html#GBTLearner.print_ensemble_metadata"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.learners.gbt_learner.GBTLearner.print_ensemble_metadata" title="Link to this definition"></a></dt>
+<dd><p>Prints the metadata of the ensemble.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.learners.gbt_learner.GBTLearner.print_tree">
+<span class="sig-name descname"><span class="pre">print_tree</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tree_idx</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="reference internal" href="../_modules/gbrl/learners/gbt_learner.html#GBTLearner.print_tree"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.learners.gbt_learner.GBTLearner.print_tree" title="Link to this definition"></a></dt>
+<dd><p>Prints the tree at the given index.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>tree_idx</strong> (<em>int</em>) – The index of the tree to print.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.learners.gbt_learner.GBTLearner.reset">
+<span class="sig-name descname"><span class="pre">reset</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="reference internal" href="../_modules/gbrl/learners/gbt_learner.html#GBTLearner.reset"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.learners.gbt_learner.GBTLearner.reset" title="Link to this definition"></a></dt>
+<dd><p>Resets the learner to its initial state,
+reinitializing the C++ model and optimizers.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.learners.gbt_learner.GBTLearner.save">
+<span class="sig-name descname"><span class="pre">save</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">filename</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="reference internal" href="../_modules/gbrl/learners/gbt_learner.html#GBTLearner.save"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.learners.gbt_learner.GBTLearner.save" title="Link to this definition"></a></dt>
+<dd><p>Saves the model to a file.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>filename</strong> (<em>str</em>) – The filename to save the model to.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.learners.gbt_learner.GBTLearner.set_bias">
+<span class="sig-name descname"><span class="pre">set_bias</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">bias</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">numpy.ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">torch.Tensor</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">float</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="reference internal" href="../_modules/gbrl/learners/gbt_learner.html#GBTLearner.set_bias"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.learners.gbt_learner.GBTLearner.set_bias" title="Link to this definition"></a></dt>
+<dd><p>Sets the bias of the model.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>bias</strong> (<em>Union</em><em>[</em><em>NumericalData</em><em>, </em><em>float</em><em>]</em>) – The bias value.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.learners.gbt_learner.GBTLearner.set_device">
+<span class="sig-name descname"><span class="pre">set_device</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">device</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">torch.device</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="reference internal" href="../_modules/gbrl/learners/gbt_learner.html#GBTLearner.set_device"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.learners.gbt_learner.GBTLearner.set_device" title="Link to this definition"></a></dt>
+<dd><p>Sets the device the model should run on.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>device</strong> (<em>Union</em><em>[</em><em>str</em><em>, </em><em>th.device</em><em>]</em>) – The device to set.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.learners.gbt_learner.GBTLearner.set_feature_weights">
+<span class="sig-name descname"><span class="pre">set_feature_weights</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">feature_weights</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">numpy.ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">torch.Tensor</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">float</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="reference internal" href="../_modules/gbrl/learners/gbt_learner.html#GBTLearner.set_feature_weights"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.learners.gbt_learner.GBTLearner.set_feature_weights" title="Link to this definition"></a></dt>
+<dd><p>Sets the feature weights of the model.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>feature_weights</strong> (<em>Union</em><em>[</em><em>NumericalData</em><em>, </em><em>float</em><em>]</em>) – The feature weights.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.learners.gbt_learner.GBTLearner.shap">
+<span class="sig-name descname"><span class="pre">shap</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">features</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">numpy.ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">torch.Tensor</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">numpy.ndarray</span></span></span><a class="reference internal" href="../_modules/gbrl/learners/gbt_learner.html#GBTLearner.shap"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.learners.gbt_learner.GBTLearner.shap" title="Link to this definition"></a></dt>
+<dd><p>Computes SHAP values for the entire ensemble.</p>
+<p>Uses Linear tree shap for each tree in the ensemble (sequentially)
+Implementation based on - <a class="reference external" href="https://github.com/yupbank/linear_tree_shap">https://github.com/yupbank/linear_tree_shap</a>
+See Linear TreeShap, Yu et al, 2023, <a class="reference external" href="https://arxiv.org/pdf/2209.08192">https://arxiv.org/pdf/2209.08192</a>
+:param features:
+:type features: NumericalData</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>shap values</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>np.ndarray</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.learners.gbt_learner.GBTLearner.step">
+<span class="sig-name descname"><span class="pre">step</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">inputs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">numpy.ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">torch.Tensor</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">grads</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">numpy.ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">torch.Tensor</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">numpy.ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">torch.Tensor</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="p"><span class="pre">...</span></span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="reference internal" href="../_modules/gbrl/learners/gbt_learner.html#GBTLearner.step"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.learners.gbt_learner.GBTLearner.step" title="Link to this definition"></a></dt>
+<dd><p>Performs a single gradient update step by adding a decision tree to the ensemble.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>inputs</strong> (<em>NumericalData</em>) – Input features (NumPy array or PyTorch tensor).</p></li>
+<li><p><strong>grads</strong> (<em>NumericalData</em><em> or </em><em>Tuple</em><em>[</em><em>NumericalData</em><em>, </em><em>...</em><em>]</em>) – Gradients for the update step.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.learners.gbt_learner.GBTLearner.tree_shap">
+<span class="sig-name descname"><span class="pre">tree_shap</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tree_idx</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">features</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">numpy.ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">torch.Tensor</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">numpy.ndarray</span></span></span><a class="reference internal" href="../_modules/gbrl/learners/gbt_learner.html#GBTLearner.tree_shap"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.learners.gbt_learner.GBTLearner.tree_shap" title="Link to this definition"></a></dt>
+<dd><p>Computes SHAP values for a single tree.</p>
+<p>Implementation based on - <a class="reference external" href="https://github.com/yupbank/linear_tree_shap">https://github.com/yupbank/linear_tree_shap</a>
+See Linear TreeShap, Yu et al, 2023, <a class="reference external" href="https://arxiv.org/pdf/2209.08192">https://arxiv.org/pdf/2209.08192</a>
+:param tree_idx: tree index
+:type tree_idx: int
+:param features:
+:type features: NumericalData</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>shap values</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>np.ndarray</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="base_learner.html" class="btn btn-neutral float-left" title="BaseLearner" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="multi_gbt_learner.html" class="btn btn-neutral float-right" title="MultiGBTLearner" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024-2025, NVIDIA Corporation.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

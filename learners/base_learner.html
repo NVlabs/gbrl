@@ -1,0 +1,588 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BaseLearner &mdash; GBRL 1.1.6 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=937269b5"></script>
+      <script src="../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="GBTLearner" href="gbt_learner.html" />
+    <link rel="prev" title="Learners" href="index.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            GBRL
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">User Guide:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../quickstart.html">Quickstart</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../quickstart.html#source-compilation">Source Compilation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../examples.html">Examples</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Documentation:</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../models/index.html">Models</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="index.html">Learners</a><ul class="current">
+<li class="toctree-l2 current"><a class="current reference internal" href="#">BaseLearner</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#gbrl.learners.base.BaseLearner"><code class="docutils literal notranslate"><span class="pre">BaseLearner</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.base.BaseLearner.input_dim"><code class="docutils literal notranslate"><span class="pre">BaseLearner.input_dim</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.base.BaseLearner.output_dim"><code class="docutils literal notranslate"><span class="pre">BaseLearner.output_dim</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.base.BaseLearner.tree_struct"><code class="docutils literal notranslate"><span class="pre">BaseLearner.tree_struct</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.base.BaseLearner.params"><code class="docutils literal notranslate"><span class="pre">BaseLearner.params</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.base.BaseLearner.verbose"><code class="docutils literal notranslate"><span class="pre">BaseLearner.verbose</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.base.BaseLearner.device"><code class="docutils literal notranslate"><span class="pre">BaseLearner.device</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.base.BaseLearner.iteration"><code class="docutils literal notranslate"><span class="pre">BaseLearner.iteration</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.base.BaseLearner.total_iterations"><code class="docutils literal notranslate"><span class="pre">BaseLearner.total_iterations</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.base.BaseLearner.feature_weights"><code class="docutils literal notranslate"><span class="pre">BaseLearner.feature_weights</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.base.BaseLearner.copy"><code class="docutils literal notranslate"><span class="pre">BaseLearner.copy()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.base.BaseLearner.distil"><code class="docutils literal notranslate"><span class="pre">BaseLearner.distil()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.base.BaseLearner.export"><code class="docutils literal notranslate"><span class="pre">BaseLearner.export()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.base.BaseLearner.fit"><code class="docutils literal notranslate"><span class="pre">BaseLearner.fit()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.base.BaseLearner.get_bias"><code class="docutils literal notranslate"><span class="pre">BaseLearner.get_bias()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.base.BaseLearner.get_device"><code class="docutils literal notranslate"><span class="pre">BaseLearner.get_device()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.base.BaseLearner.get_feature_weights"><code class="docutils literal notranslate"><span class="pre">BaseLearner.get_feature_weights()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.base.BaseLearner.get_iteration"><code class="docutils literal notranslate"><span class="pre">BaseLearner.get_iteration()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.base.BaseLearner.get_num_trees"><code class="docutils literal notranslate"><span class="pre">BaseLearner.get_num_trees()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.base.BaseLearner.get_schedule_learning_rates"><code class="docutils literal notranslate"><span class="pre">BaseLearner.get_schedule_learning_rates()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.base.BaseLearner.get_total_iterations"><code class="docutils literal notranslate"><span class="pre">BaseLearner.get_total_iterations()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.base.BaseLearner.load"><code class="docutils literal notranslate"><span class="pre">BaseLearner.load()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.base.BaseLearner.plot_tree"><code class="docutils literal notranslate"><span class="pre">BaseLearner.plot_tree()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.base.BaseLearner.predict"><code class="docutils literal notranslate"><span class="pre">BaseLearner.predict()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.base.BaseLearner.print_ensemble_metadata"><code class="docutils literal notranslate"><span class="pre">BaseLearner.print_ensemble_metadata()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.base.BaseLearner.print_tree"><code class="docutils literal notranslate"><span class="pre">BaseLearner.print_tree()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.base.BaseLearner.reset"><code class="docutils literal notranslate"><span class="pre">BaseLearner.reset()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.base.BaseLearner.save"><code class="docutils literal notranslate"><span class="pre">BaseLearner.save()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.base.BaseLearner.set_bias"><code class="docutils literal notranslate"><span class="pre">BaseLearner.set_bias()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.base.BaseLearner.set_device"><code class="docutils literal notranslate"><span class="pre">BaseLearner.set_device()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.base.BaseLearner.set_feature_weights"><code class="docutils literal notranslate"><span class="pre">BaseLearner.set_feature_weights()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.base.BaseLearner.shap"><code class="docutils literal notranslate"><span class="pre">BaseLearner.shap()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.base.BaseLearner.step"><code class="docutils literal notranslate"><span class="pre">BaseLearner.step()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.base.BaseLearner.transform_data"><code class="docutils literal notranslate"><span class="pre">BaseLearner.transform_data()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.learners.base.BaseLearner.tree_shap"><code class="docutils literal notranslate"><span class="pre">BaseLearner.tree_shap()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="gbt_learner.html">GBTLearner</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multi_gbt_learner.html">MultiGBTLearner</a></li>
+<li class="toctree-l2"><a class="reference internal" href="shared_actor_critic_learner.html">SharedActorCriticLearner</a></li>
+<li class="toctree-l2"><a class="reference internal" href="separate_actor_critic_learner.html">SeparateActorCriticLearner</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">GBRL</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="index.html">Learners</a></li>
+      <li class="breadcrumb-item active">BaseLearner</li>
+      <li class="wy-breadcrumbs-aside">
+              <a href="https://github.com///blob/learners/base_learner.rst" class="fa fa-github"> Edit on GitHub</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="baselearner">
+<h1>BaseLearner<a class="headerlink" href="#baselearner" title="Link to this heading"></a></h1>
+<p>Abstract base class for all GBRL learners. Defines the common interface for gradient boosting learners, including methods for fitting, stepping, SHAP value computation, saving/loading, and device management.</p>
+<dl class="py class">
+<dt class="sig sig-object py" id="gbrl.learners.base.BaseLearner">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">gbrl.learners.base.</span></span><span class="sig-name descname"><span class="pre">BaseLearner</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">input_dim</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">output_dim</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">List</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">tree_struct</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Dict</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">params</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Dict</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">policy_dim</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">List</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">verbose</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">device</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'cpu'</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/gbrl/learners/base.html#BaseLearner"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.learners.base.BaseLearner" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">ABC</span></code></p>
+<p>Abstract base class for gradient boosting tree learners.</p>
+<p>This class defines the fundamental interface for gradient boosting
+learners and serves as a wrapper for the C++ backend.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="gbrl.learners.base.BaseLearner.input_dim">
+<span class="sig-name descname"><span class="pre">input_dim</span></span><a class="headerlink" href="#gbrl.learners.base.BaseLearner.input_dim" title="Link to this definition"></a></dt>
+<dd><p>The number of input features.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="gbrl.learners.base.BaseLearner.output_dim">
+<span class="sig-name descname"><span class="pre">output_dim</span></span><a class="headerlink" href="#gbrl.learners.base.BaseLearner.output_dim" title="Link to this definition"></a></dt>
+<dd><p>The number of output dimensions.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="gbrl.learners.base.BaseLearner.tree_struct">
+<span class="sig-name descname"><span class="pre">tree_struct</span></span><a class="headerlink" href="#gbrl.learners.base.BaseLearner.tree_struct" title="Link to this definition"></a></dt>
+<dd><p>Dictionary containing tree structure parameters.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Dict</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="gbrl.learners.base.BaseLearner.params">
+<span class="sig-name descname"><span class="pre">params</span></span><a class="headerlink" href="#gbrl.learners.base.BaseLearner.params" title="Link to this definition"></a></dt>
+<dd><p>Dictionary containing model parameters.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Union[Dict, List[Dict]]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="gbrl.learners.base.BaseLearner.verbose">
+<span class="sig-name descname"><span class="pre">verbose</span></span><a class="headerlink" href="#gbrl.learners.base.BaseLearner.verbose" title="Link to this definition"></a></dt>
+<dd><p>Verbosity level (0 = silent, 1 = debug).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="gbrl.learners.base.BaseLearner.device">
+<span class="sig-name descname"><span class="pre">device</span></span><a class="headerlink" href="#gbrl.learners.base.BaseLearner.device" title="Link to this definition"></a></dt>
+<dd><p>The device the model runs on (e.g., ‘cpu’ or ‘cuda’).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="gbrl.learners.base.BaseLearner.iteration">
+<span class="sig-name descname"><span class="pre">iteration</span></span><a class="headerlink" href="#gbrl.learners.base.BaseLearner.iteration" title="Link to this definition"></a></dt>
+<dd><p>The current training iteration.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="gbrl.learners.base.BaseLearner.total_iterations">
+<span class="sig-name descname"><span class="pre">total_iterations</span></span><a class="headerlink" href="#gbrl.learners.base.BaseLearner.total_iterations" title="Link to this definition"></a></dt>
+<dd><p>Total number of training iterations.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="gbrl.learners.base.BaseLearner.feature_weights">
+<span class="sig-name descname"><span class="pre">feature_weights</span></span><a class="headerlink" href="#gbrl.learners.base.BaseLearner.feature_weights" title="Link to this definition"></a></dt>
+<dd><p>Feature importance weights.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Union[float, NumericalData]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.learners.base.BaseLearner.copy">
+<span class="sig-name descname"><span class="pre">copy</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/gbrl/learners/base.html#BaseLearner.copy"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.learners.base.BaseLearner.copy" title="Link to this definition"></a></dt>
+<dd><p>Creates a copy of the model instance.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>A copy of the model.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="#gbrl.learners.base.BaseLearner" title="gbrl.learners.base.BaseLearner">BaseLearner</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.learners.base.BaseLearner.distil">
+<em class="property"><span class="k"><span class="pre">abstractmethod</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">distil</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">float</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Dict</span><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="../_modules/gbrl/learners/base.html#BaseLearner.distil"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.learners.base.BaseLearner.distil" title="Link to this definition"></a></dt>
+<dd><p>Distills the model into a smaller, simplified version.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Final loss and updated parameters.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>Tuple[float, Dict]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.learners.base.BaseLearner.export">
+<span class="sig-name descname"><span class="pre">export</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">filename</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">modelname</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="reference internal" href="../_modules/gbrl/learners/base.html#BaseLearner.export"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.learners.base.BaseLearner.export" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.learners.base.BaseLearner.fit">
+<em class="property"><span class="k"><span class="pre">abstractmethod</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">fit</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">float</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">List</span><span class="p"><span class="pre">[</span></span><span class="pre">float</span><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="../_modules/gbrl/learners/base.html#BaseLearner.fit"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.learners.base.BaseLearner.fit" title="Link to this definition"></a></dt>
+<dd><p>Trains the model on provided data.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>The final loss after training per model.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>Union[float, List[float]]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.learners.base.BaseLearner.get_bias">
+<em class="property"><span class="k"><span class="pre">abstractmethod</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">get_bias</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">numpy.ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">numpy.ndarray</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="p"><span class="pre">...</span></span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">float</span></span></span><a class="reference internal" href="../_modules/gbrl/learners/base.html#BaseLearner.get_bias"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.learners.base.BaseLearner.get_bias" title="Link to this definition"></a></dt>
+<dd><p>Retrieves the model bias.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Bias values.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>Union[np.ndarray, Tuple[np.ndarray, …]]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.learners.base.BaseLearner.get_device">
+<em class="property"><span class="k"><span class="pre">abstractmethod</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">get_device</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="p"><span class="pre">...</span></span><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="../_modules/gbrl/learners/base.html#BaseLearner.get_device"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.learners.base.BaseLearner.get_device" title="Link to this definition"></a></dt>
+<dd><p>Retrieves the current device the model is running on.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Device (e.g., ‘cpu’, ‘cuda’).</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>Union[str, Tuple[str, …]]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.learners.base.BaseLearner.get_feature_weights">
+<em class="property"><span class="k"><span class="pre">abstractmethod</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">get_feature_weights</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">numpy.ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">numpy.ndarray</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="p"><span class="pre">...</span></span><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="../_modules/gbrl/learners/base.html#BaseLearner.get_feature_weights"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.learners.base.BaseLearner.get_feature_weights" title="Link to this definition"></a></dt>
+<dd><p>Retrieves the feature importance weights.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Feature weights.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>Union[np.ndarray, Tuple[np.ndarray, …]]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.learners.base.BaseLearner.get_iteration">
+<em class="property"><span class="k"><span class="pre">abstractmethod</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">get_iteration</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">int</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="p"><span class="pre">...</span></span><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="../_modules/gbrl/learners/base.html#BaseLearner.get_iteration"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.learners.base.BaseLearner.get_iteration" title="Link to this definition"></a></dt>
+<dd><p>Retrieves the current iteration count.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>The current iteration number.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>Union[int, Tuple[int, …]]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.learners.base.BaseLearner.get_num_trees">
+<em class="property"><span class="k"><span class="pre">abstractmethod</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">get_num_trees</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">int</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="p"><span class="pre">...</span></span><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="../_modules/gbrl/learners/base.html#BaseLearner.get_num_trees"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.learners.base.BaseLearner.get_num_trees" title="Link to this definition"></a></dt>
+<dd><p>Retrieves the number of trees in the model.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Number of trees.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>Union[int, Tuple[int, …]]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.learners.base.BaseLearner.get_schedule_learning_rates">
+<em class="property"><span class="k"><span class="pre">abstractmethod</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">get_schedule_learning_rates</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">numpy.ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">numpy.ndarray</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="p"><span class="pre">...</span></span><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="../_modules/gbrl/learners/base.html#BaseLearner.get_schedule_learning_rates"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.learners.base.BaseLearner.get_schedule_learning_rates" title="Link to this definition"></a></dt>
+<dd><p>Retrieves the scheduled learning rates.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Learning rate(s).</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>Union[int, Tuple[int, …]]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.learners.base.BaseLearner.get_total_iterations">
+<span class="sig-name descname"><span class="pre">get_total_iterations</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">int</span></span></span><a class="reference internal" href="../_modules/gbrl/learners/base.html#BaseLearner.get_total_iterations"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.learners.base.BaseLearner.get_total_iterations" title="Link to this definition"></a></dt>
+<dd><p>Returns the total number of iterations performed.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>The total number of iterations.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.learners.base.BaseLearner.load">
+<em class="property"><span class="k"><span class="pre">abstractmethod</span></span><span class="w"> </span><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">load</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">filename</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">device</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#gbrl.learners.base.BaseLearner" title="gbrl.learners.base.BaseLearner"><span class="pre">BaseLearner</span></a></span></span><a class="reference internal" href="../_modules/gbrl/learners/base.html#BaseLearner.load"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.learners.base.BaseLearner.load" title="Link to this definition"></a></dt>
+<dd><p>Loads a model from a file.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>filename</strong> (<em>str</em>) – Path to the model file.</p></li>
+<li><p><strong>device</strong> (<em>str</em>) – Device to load the model onto.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Loaded model instance.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="#gbrl.learners.base.BaseLearner" title="gbrl.learners.base.BaseLearner">BaseLearner</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.learners.base.BaseLearner.plot_tree">
+<em class="property"><span class="k"><span class="pre">abstractmethod</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">plot_tree</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tree_idx</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">filename</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="reference internal" href="../_modules/gbrl/learners/base.html#BaseLearner.plot_tree"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.learners.base.BaseLearner.plot_tree" title="Link to this definition"></a></dt>
+<dd><p>Plots a decision tree and saves it to a file.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>tree_idx</strong> (<em>int</em>) – Index of the tree.</p></li>
+<li><p><strong>filename</strong> (<em>str</em>) – Path to save the tree visualization.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.learners.base.BaseLearner.predict">
+<em class="property"><span class="k"><span class="pre">abstractmethod</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">predict</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">numpy.ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">torch.Tensor</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">numpy.ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">torch.Tensor</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="p"><span class="pre">...</span></span><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="../_modules/gbrl/learners/base.html#BaseLearner.predict"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.learners.base.BaseLearner.predict" title="Link to this definition"></a></dt>
+<dd><p>Generates predictions using the trained model.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Model predictions.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>NumericalData</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.learners.base.BaseLearner.print_ensemble_metadata">
+<em class="property"><span class="k"><span class="pre">abstractmethod</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">print_ensemble_metadata</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="reference internal" href="../_modules/gbrl/learners/base.html#BaseLearner.print_ensemble_metadata"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.learners.base.BaseLearner.print_ensemble_metadata" title="Link to this definition"></a></dt>
+<dd><p>Prints metadata information about the entire ensemble.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.learners.base.BaseLearner.print_tree">
+<em class="property"><span class="k"><span class="pre">abstractmethod</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">print_tree</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tree_idx</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="reference internal" href="../_modules/gbrl/learners/base.html#BaseLearner.print_tree"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.learners.base.BaseLearner.print_tree" title="Link to this definition"></a></dt>
+<dd><p>Prints the structure of a specific decision tree.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>tree_idx</strong> (<em>int</em>) – Index of the tree.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.learners.base.BaseLearner.reset">
+<em class="property"><span class="k"><span class="pre">abstractmethod</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">reset</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="reference internal" href="../_modules/gbrl/learners/base.html#BaseLearner.reset"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.learners.base.BaseLearner.reset" title="Link to this definition"></a></dt>
+<dd><p>Resets the model, reinitializing internal states and parameters.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.learners.base.BaseLearner.save">
+<em class="property"><span class="k"><span class="pre">abstractmethod</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">save</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">filename</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="reference internal" href="../_modules/gbrl/learners/base.html#BaseLearner.save"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.learners.base.BaseLearner.save" title="Link to this definition"></a></dt>
+<dd><p>Saves the model to a file.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>filename</strong> (<em>str</em>) – The filename to save the model to.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.learners.base.BaseLearner.set_bias">
+<em class="property"><span class="k"><span class="pre">abstractmethod</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">set_bias</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">bias</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">numpy.ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">torch.Tensor</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">float</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="reference internal" href="../_modules/gbrl/learners/base.html#BaseLearner.set_bias"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.learners.base.BaseLearner.set_bias" title="Link to this definition"></a></dt>
+<dd><p>Sets the bias term for the model.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>bias</strong> (<em>Union</em><em>[</em><em>NumericalData</em><em>, </em><em>float</em><em>]</em>) – Bias value(s).</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.learners.base.BaseLearner.set_device">
+<em class="property"><span class="k"><span class="pre">abstractmethod</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">set_device</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">device</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">torch.device</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="reference internal" href="../_modules/gbrl/learners/base.html#BaseLearner.set_device"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.learners.base.BaseLearner.set_device" title="Link to this definition"></a></dt>
+<dd><p>Sets the device the model should run on.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>device</strong> (<em>Union</em><em>[</em><em>str</em><em>, </em><em>th.device</em><em>]</em>) – Target device.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.learners.base.BaseLearner.set_feature_weights">
+<em class="property"><span class="k"><span class="pre">abstractmethod</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">set_feature_weights</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">feature_weights</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">numpy.ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">torch.Tensor</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">float</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="reference internal" href="../_modules/gbrl/learners/base.html#BaseLearner.set_feature_weights"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.learners.base.BaseLearner.set_feature_weights" title="Link to this definition"></a></dt>
+<dd><p>Sets the feature importance weights.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>feature_weights</strong> (<em>Union</em><em>[</em><em>NumericalData</em><em>, </em><em>float</em><em>]</em>) – Feature weights.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.learners.base.BaseLearner.shap">
+<em class="property"><span class="k"><span class="pre">abstractmethod</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">shap</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">features</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">numpy.ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">torch.Tensor</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">numpy.ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">numpy.ndarray</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="p"><span class="pre">...</span></span><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="../_modules/gbrl/learners/base.html#BaseLearner.shap"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.learners.base.BaseLearner.shap" title="Link to this definition"></a></dt>
+<dd><p>Computes SHAP values for the entire model.</p>
+<p>Uses Linear tree shap for each tree in the ensemble (sequentially)
+Implementation based on - <a class="reference external" href="https://github.com/yupbank/linear_tree_shap">https://github.com/yupbank/linear_tree_shap</a>
+See Linear TreeShap, Yu et al, 2023, <a class="reference external" href="https://arxiv.org/pdf/2209.08192">https://arxiv.org/pdf/2209.08192</a>
+:param features:
+:type features: NumericalData</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>shap values</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>Union[np.ndarray, Tuple[np.ndarray, …]]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.learners.base.BaseLearner.step">
+<span class="sig-name descname"><span class="pre">step</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">inputs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">numpy.ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">torch.Tensor</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="reference internal" href="../_modules/gbrl/learners/base.html#BaseLearner.step"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.learners.base.BaseLearner.step" title="Link to this definition"></a></dt>
+<dd><p>Performs a single update step using provided gradients.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.learners.base.BaseLearner.transform_data">
+<span class="sig-name descname"><span class="pre">transform_data</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">data</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">numpy.ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">torch.Tensor</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">numpy.ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="p"><span class="pre">...</span></span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></span><a class="reference internal" href="../_modules/gbrl/learners/base.html#BaseLearner.transform_data"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.learners.base.BaseLearner.transform_data" title="Link to this definition"></a></dt>
+<dd><p>Transforms input data to match the model’s expected format.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>data</strong> (<em>NumericalData</em>) – Input data to be transformed.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.learners.base.BaseLearner.tree_shap">
+<em class="property"><span class="k"><span class="pre">abstractmethod</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">tree_shap</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tree_idx</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">features</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">numpy.ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">torch.Tensor</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">numpy.ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">numpy.ndarray</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="p"><span class="pre">...</span></span><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="../_modules/gbrl/learners/base.html#BaseLearner.tree_shap"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.learners.base.BaseLearner.tree_shap" title="Link to this definition"></a></dt>
+<dd><p>Computes SHAP values for a specific tree.</p>
+<p>Implementation based on - <a class="reference external" href="https://github.com/yupbank/linear_tree_shap">https://github.com/yupbank/linear_tree_shap</a>
+See Linear TreeShap, Yu et al, 2023, <a class="reference external" href="https://arxiv.org/pdf/2209.08192">https://arxiv.org/pdf/2209.08192</a>
+:param tree_idx: tree index
+:type tree_idx: int
+:param features:
+:type features: NumericalData</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>shap values</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>Union[np.ndarray, Tuple[np.ndarray, …]]</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="index.html" class="btn btn-neutral float-left" title="Learners" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="gbt_learner.html" class="btn btn-neutral float-right" title="GBTLearner" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024-2025, NVIDIA Corporation.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

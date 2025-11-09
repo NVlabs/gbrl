@@ -1,0 +1,454 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Examples &mdash; GBRL 1.1.6 documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=937269b5"></script>
+      <script src="_static/doctools.js?v=9bcbadda"></script>
+      <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Models" href="models/index.html" />
+    <link rel="prev" title="Quickstart" href="quickstart.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            GBRL
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">User Guide:</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="quickstart.html">Quickstart</a></li>
+<li class="toctree-l1"><a class="reference internal" href="quickstart.html#source-compilation">Source Compilation</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Examples</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#basic-usage-training-saving-loading-copying">Basic Usage: Training, Saving, Loading, Copying</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#basic-imports-and-preprocessing">Basic imports and preprocessing</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#pre-process-data">Pre-process data</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#setting-up-a-gbrl-model">Setting up a GBRL model</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#incremental-learning">Incremental learning</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#saving-loading-and-copying-a-gbrl-model">Saving, loading, and copying a GBRL Model</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#manually-calculated-gradients">Manually Calculated Gradients</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#multiple-boosting-iterations">Multiple boosting iterations</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#rl-using-gbrl">RL using GBRL</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#explainability">Explainability</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Documentation:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="models/index.html">Models</a></li>
+<li class="toctree-l1"><a class="reference internal" href="learners/index.html">Learners</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">GBRL</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">Examples</li>
+      <li class="wy-breadcrumbs-aside">
+              <a href="https://github.com///blob/examples.rst" class="fa fa-github"> Edit on GitHub</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="examples">
+<h1>Examples<a class="headerlink" href="#examples" title="Link to this heading"></a></h1>
+<div class="admonition important">
+<p class="admonition-title">Important</p>
+<p>These examples are only to demonstrate the use of the GBRL library and its functions. Specific algorithm implementations can be found for stable_baselines3 in <a class="reference external" href="https://github.com/NVlabs/gbrl_sb3">the GBRL_SB3 repository</a>.</p>
+</div>
+<p>The full tutorial is also available as a <a class="reference external" href="https://github.com/NVlabs/gbrl/blob/master/tutorial.ipynb">jupyter notebook</a></p>
+<section id="basic-usage-training-saving-loading-copying">
+<h2>Basic Usage: Training, Saving, Loading, Copying<a class="headerlink" href="#basic-usage-training-saving-loading-copying" title="Link to this heading"></a></h2>
+<p>In the following example, we will train, save, and load a GBRL model incrementally.
+We will use the base <cite>GradientBoostingTrees</cite> class and get familiarized with the basic usage of the GBRL library.
+We will train a GBRL model as in supervised learning on the <a class="reference external" href="https://scikit-learn.org/stable/modules/generated/sklearn.datasets.load_diabetes.html#sklearn.datasets.load_diabetes">Diabetes dataset from sklearn</a>.</p>
+<section id="basic-imports-and-preprocessing">
+<h3>Basic imports and preprocessing<a class="headerlink" href="#basic-imports-and-preprocessing" title="Link to this heading"></a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">torch</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">th</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">gymnasium</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">gym</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">sklearn</span><span class="w"> </span><span class="kn">import</span> <span class="n">datasets</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">torch.nn.functional</span><span class="w"> </span><span class="kn">import</span> <span class="n">mse_loss</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">torch.distributions</span><span class="w"> </span><span class="kn">import</span> <span class="n">Categorical</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">gbrl</span><span class="w"> </span><span class="kn">import</span> <span class="n">cuda_available</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">gbrl.models</span><span class="w"> </span><span class="kn">import</span> <span class="n">GBTModel</span><span class="p">,</span> <span class="n">ParametricActor</span>
+</pre></div>
+</div>
+</section>
+<section id="pre-process-data">
+<h3>Pre-process data<a class="headerlink" href="#pre-process-data" title="Link to this heading"></a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># CUDA is not deterministic</span>
+<span class="n">device</span> <span class="o">=</span> <span class="s1">&#39;cuda&#39;</span> <span class="k">if</span> <span class="n">cuda_available</span><span class="p">()</span> <span class="k">else</span> <span class="s1">&#39;cpu&#39;</span>
+<span class="c1"># incremental learning dataset</span>
+<span class="n">X_numpy</span><span class="p">,</span> <span class="n">y_numpy</span> <span class="o">=</span> <span class="n">datasets</span><span class="o">.</span><span class="n">load_diabetes</span><span class="p">(</span><span class="n">return_X_y</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">as_frame</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">scaled</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+<span class="c1"># Reshape target as GBRL works with 2D arrays</span>
+<span class="n">out_dim</span> <span class="o">=</span> <span class="mi">1</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">y_numpy</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span> <span class="k">else</span> <span class="n">y_numpy</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+<span class="n">input_dim</span> <span class="o">=</span> <span class="n">X_numpy</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+
+<span class="n">X</span><span class="p">,</span> <span class="n">y</span> <span class="o">=</span> <span class="n">th</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span><span class="n">X_numpy</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">th</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">),</span> <span class="n">th</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span><span class="n">y_numpy</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">th</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="setting-up-a-gbrl-model">
+<h3>Setting up a GBRL model<a class="headerlink" href="#setting-up-a-gbrl-model" title="Link to this heading"></a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># initializing model parameters</span>
+<span class="n">tree_struct</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;max_depth&#39;</span><span class="p">:</span> <span class="mi">4</span><span class="p">,</span>
+               <span class="s1">&#39;n_bins&#39;</span><span class="p">:</span> <span class="mi">256</span><span class="p">,</span>
+               <span class="s1">&#39;min_data_in_leaf&#39;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
+               <span class="s1">&#39;par_th&#39;</span><span class="p">:</span> <span class="mi">2</span><span class="p">,</span>
+               <span class="s1">&#39;grow_policy&#39;</span><span class="p">:</span> <span class="s1">&#39;oblivious&#39;</span><span class="p">}</span>
+
+<span class="n">optimizer</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;algo&#39;</span><span class="p">:</span> <span class="s1">&#39;SGD&#39;</span><span class="p">,</span>
+             <span class="s1">&#39;lr&#39;</span><span class="p">:</span> <span class="mf">1.0</span><span class="p">,</span>
+             <span class="s1">&#39;start_idx&#39;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
+             <span class="s1">&#39;stop_idx&#39;</span><span class="p">:</span> <span class="n">out_dim</span><span class="p">}</span>
+
+<span class="n">gbrl_params</span> <span class="o">=</span> <span class="p">{</span>
+               <span class="s2">&quot;split_score_func&quot;</span><span class="p">:</span> <span class="s2">&quot;Cosine&quot;</span><span class="p">,</span>
+               <span class="s2">&quot;generator_type&quot;</span><span class="p">:</span> <span class="s2">&quot;Quantile&quot;</span>
+              <span class="p">}</span>
+
+<span class="c1"># setting up model</span>
+<span class="n">gbt_model</span> <span class="o">=</span> <span class="n">GBTModel</span><span class="p">(</span>
+                    <span class="n">input_dim</span><span class="o">=</span><span class="n">input_dim</span><span class="p">,</span>
+                    <span class="n">output_dim</span><span class="o">=</span><span class="n">out_dim</span><span class="p">,</span>
+                    <span class="n">tree_struct</span><span class="o">=</span><span class="n">tree_struct</span><span class="p">,</span>
+                    <span class="n">optimizers</span><span class="o">=</span><span class="n">optimizer</span><span class="p">,</span>
+                    <span class="n">params</span><span class="o">=</span><span class="n">gbrl_params</span><span class="p">,</span>
+                    <span class="n">verbose</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
+                    <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span>
+<span class="n">gbt_model</span><span class="o">.</span><span class="n">set_bias_from_targets</span><span class="p">(</span><span class="n">y</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="incremental-learning">
+<h3>Incremental learning<a class="headerlink" href="#incremental-learning" title="Link to this heading"></a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># training for 10 epochs</span>
+<span class="n">n_epochs</span> <span class="o">=</span> <span class="mi">10</span>
+<span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_epochs</span><span class="p">):</span>
+    <span class="c1"># forward pass - setting requires_grad=True is mandatory for training</span>
+    <span class="c1"># y_pred is a torch tensor by default</span>
+    <span class="n">y_pred</span> <span class="o">=</span> <span class="n">gbt_model</span><span class="p">(</span><span class="n">X</span><span class="p">,</span> <span class="n">requires_grad</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="c1"># calculate loss - we must scale pytorch&#39;s mse loss function by 0.5 to get the correct MSE gradient</span>
+    <span class="n">loss</span> <span class="o">=</span> <span class="mf">0.5</span> <span class="o">*</span> <span class="n">mse_loss</span><span class="p">(</span><span class="n">y_pred</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
+    <span class="n">loss</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
+    <span class="c1"># perform a boosting step</span>
+    <span class="n">gbt_model</span><span class="o">.</span><span class="n">step</span><span class="p">(</span><span class="n">X</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Boosting iteration: </span><span class="si">{</span><span class="n">gbt_model</span><span class="o">.</span><span class="n">get_iteration</span><span class="p">()</span><span class="si">}</span><span class="s2"> RMSE loss: </span><span class="si">{</span><span class="n">loss</span><span class="o">.</span><span class="n">sqrt</span><span class="p">()</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>GBT work with per-sample gradients but pytorch typically calculates the expected loss. GBRL internally multiplies the gradients with the number of samples when calling the step function. Therefore, when working with pytorch losses and multi-output targets one should take this into consideration.
+For example: when using a summation reduction</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">gbt_model</span> <span class="o">=</span> <span class="n">GBTModel</span><span class="p">(</span>
+                    <span class="n">input_dim</span><span class="o">=</span><span class="n">input_dim</span><span class="p">,</span>
+                    <span class="n">output_dim</span><span class="o">=</span><span class="n">out_dim</span><span class="p">,</span>
+                    <span class="n">tree_struct</span><span class="o">=</span><span class="n">tree_struct</span><span class="p">,</span>
+                    <span class="n">optimizers</span><span class="o">=</span><span class="n">optimizer</span><span class="p">,</span>
+                    <span class="n">params</span><span class="o">=</span><span class="n">gbrl_params</span><span class="p">,</span>
+                    <span class="n">verbose</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
+                    <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span>
+<span class="n">gbt_model</span><span class="o">.</span><span class="n">set_bias_from_targets</span><span class="p">(</span><span class="n">y</span><span class="p">)</span>
+<span class="c1"># continuing training 10 epochs using a sum reduction</span>
+<span class="n">n_epochs</span> <span class="o">=</span> <span class="mi">10</span>
+<span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_epochs</span><span class="p">):</span>
+    <span class="n">y_pred</span> <span class="o">=</span> <span class="n">gbt_model</span><span class="p">(</span><span class="n">X</span><span class="p">,</span> <span class="n">requires_grad</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="c1"># we divide the loss by the number of samples to compensate for GBRL&#39;s built-in multiplication by the same value</span>
+    <span class="n">loss</span> <span class="o">=</span> <span class="mf">0.5</span> <span class="o">*</span> <span class="n">mse_loss</span><span class="p">(</span><span class="n">y_pred</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">reduction</span><span class="o">=</span><span class="s1">&#39;sum&#39;</span><span class="p">)</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">y_pred</span><span class="p">)</span>
+    <span class="n">loss</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
+    <span class="c1"># perform a boosting step</span>
+    <span class="n">gbt_model</span><span class="o">.</span><span class="n">step</span><span class="p">(</span><span class="n">X</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Boosting iteration: </span><span class="si">{</span><span class="n">gbt_model</span><span class="o">.</span><span class="n">get_iteration</span><span class="p">()</span><span class="si">}</span><span class="s2"> RMSE loss: </span><span class="si">{</span><span class="n">loss</span><span class="o">.</span><span class="n">sqrt</span><span class="p">()</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>or when working with multi-dimensional outputs</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">y_multi</span> <span class="o">=</span> <span class="n">th</span><span class="o">.</span><span class="n">concat</span><span class="p">([</span><span class="n">y</span><span class="p">,</span> <span class="n">y</span><span class="p">],</span> <span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+<span class="n">out_dim</span> <span class="o">=</span> <span class="n">y_multi</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+<span class="n">gbt_model</span> <span class="o">=</span> <span class="n">GBTModel</span><span class="p">(</span>
+                    <span class="n">input_dim</span><span class="o">=</span><span class="n">input_dim</span><span class="p">,</span>
+                    <span class="n">output_dim</span><span class="o">=</span><span class="n">out_dim</span><span class="p">,</span>
+                    <span class="n">tree_struct</span><span class="o">=</span><span class="n">tree_struct</span><span class="p">,</span>
+                    <span class="n">optimizers</span><span class="o">=</span><span class="n">optimizer</span><span class="p">,</span>
+                    <span class="n">params</span><span class="o">=</span><span class="n">gbrl_params</span><span class="p">,</span>
+                    <span class="n">verbose</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
+                    <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span>
+<span class="n">gbt_model</span><span class="o">.</span><span class="n">set_bias_from_targets</span><span class="p">(</span><span class="n">y_multi</span><span class="p">)</span>
+<span class="c1"># continuing training 10 epochs using a sum reduction</span>
+<span class="n">n_epochs</span> <span class="o">=</span> <span class="mi">10</span>
+<span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_epochs</span><span class="p">):</span>
+    <span class="n">y_pred</span> <span class="o">=</span> <span class="n">gbt_model</span><span class="p">(</span><span class="n">X</span><span class="p">,</span> <span class="n">requires_grad</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="c1"># we multiply the loss by the output dimension to compensate for pytorch&#39;s mean reduction for MSE loss that averages across all dimensions.</span>
+    <span class="c1"># this step is necessary to get the correct loss gradient - however the loss value itself is correct</span>
+    <span class="n">loss</span> <span class="o">=</span> <span class="mf">0.5</span> <span class="o">*</span> <span class="n">mse_loss</span><span class="p">(</span><span class="n">y_pred</span><span class="p">,</span> <span class="n">y_multi</span><span class="p">)</span> <span class="o">*</span> <span class="n">out_dim</span>
+    <span class="n">loss</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
+    <span class="c1"># perform a boosting step</span>
+    <span class="n">gbt_model</span><span class="o">.</span><span class="n">step</span><span class="p">(</span><span class="n">X</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Boosting iteration: </span><span class="si">{</span><span class="n">gbt_model</span><span class="o">.</span><span class="n">get_iteration</span><span class="p">()</span><span class="si">}</span><span class="s2"> RMSE loss: </span><span class="si">{</span><span class="p">(</span><span class="n">loss</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">out_dim</span><span class="p">)</span><span class="o">.</span><span class="n">sqrt</span><span class="p">()</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="saving-loading-and-copying-a-gbrl-model">
+<h3>Saving, loading, and copying a GBRL Model<a class="headerlink" href="#saving-loading-and-copying-a-gbrl-model" title="Link to this heading"></a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Call the save_learner method of a GBRL class</span>
+<span class="c1"># GBRL will automatically save the file with the .gbrl_model ending</span>
+<span class="c1"># The file will be saved in the current working directory</span>
+<span class="c1"># Provide the absolute path to save the file in a different directory.</span>
+<span class="n">gbt_model</span><span class="o">.</span><span class="n">save_learner</span><span class="p">(</span><span class="s1">&#39;gbt_model_tutorial&#39;</span><span class="p">)</span>
+<span class="c1"># Loading a saved model is similar and is done by calling the specific class instance.</span>
+<span class="n">loaded_gbt_model</span> <span class="o">=</span> <span class="n">GBTModel</span><span class="o">.</span><span class="n">load_learner</span><span class="p">(</span><span class="s1">&#39;gbt_model_tutorial&#39;</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span>
+<span class="c1"># Copying a model is straighforward</span>
+<span class="n">copied_model</span> <span class="o">=</span> <span class="n">gbt_model</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+</pre></div>
+</div>
+</section>
+<section id="manually-calculated-gradients">
+<h3>Manually Calculated Gradients<a class="headerlink" href="#manually-calculated-gradients" title="Link to this heading"></a></h3>
+<p>Alternatively, GBRL can use manually calculated gradients. Calling the <cite>predict</cite> method instead of the <cite>__call__</cite> method, returns a numpy array instead of a PyTorch tensor. Autograd libraries or manual calculations can be used to calculate gradients.
+Fitting manually calculated gradients is done using the <cite>_model.step</cite> method that receives numpy arrays.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># initializing model parameters</span>
+<span class="n">tree_struct</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;max_depth&#39;</span><span class="p">:</span> <span class="mi">4</span><span class="p">,</span>
+            <span class="s1">&#39;n_bins&#39;</span><span class="p">:</span> <span class="mi">256</span><span class="p">,</span>
+            <span class="s1">&#39;min_data_in_leaf&#39;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
+            <span class="s1">&#39;par_th&#39;</span><span class="p">:</span> <span class="mi">2</span><span class="p">,</span>
+            <span class="s1">&#39;grow_policy&#39;</span><span class="p">:</span> <span class="s1">&#39;oblivious&#39;</span><span class="p">}</span>
+
+<span class="n">optimizer</span> <span class="o">=</span> <span class="p">{</span> <span class="s1">&#39;algo&#39;</span><span class="p">:</span> <span class="s1">&#39;SGD&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;lr&#39;</span><span class="p">:</span> <span class="mf">1.0</span><span class="p">,</span>
+            <span class="s1">&#39;start_idx&#39;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
+            <span class="s1">&#39;stop_idx&#39;</span><span class="p">:</span> <span class="mi">1</span><span class="p">}</span>
+
+<span class="n">gbrl_params</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s2">&quot;split_score_func&quot;</span><span class="p">:</span> <span class="s2">&quot;Cosine&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;generator_type&quot;</span><span class="p">:</span> <span class="s2">&quot;Quantile&quot;</span><span class="p">}</span>
+
+<span class="c1"># setting up model</span>
+<span class="n">gbt_model</span> <span class="o">=</span> <span class="n">GBTModel</span><span class="p">(</span>
+                    <span class="n">input_dim</span><span class="o">=</span><span class="n">input_dim</span><span class="p">,</span>
+                    <span class="n">output_dim</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
+                    <span class="n">tree_struct</span><span class="o">=</span><span class="n">tree_struct</span><span class="p">,</span>
+                    <span class="n">optimizers</span><span class="o">=</span><span class="n">optimizer</span><span class="p">,</span>
+                    <span class="n">params</span><span class="o">=</span><span class="n">gbrl_params</span><span class="p">,</span>
+                    <span class="n">verbose</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
+                    <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span>
+<span class="c1"># works with numpy arrays as well as PyTorch tensors</span>
+<span class="n">gbt_model</span><span class="o">.</span><span class="n">set_bias_from_targets</span><span class="p">(</span><span class="n">y_numpy</span><span class="p">)</span>
+<span class="c1"># training for 10 epochs</span>
+<span class="n">n_epochs</span> <span class="o">=</span> <span class="mi">10</span>
+<span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_epochs</span><span class="p">):</span>
+    <span class="c1"># y_pred is a numpy array</span>
+    <span class="c1"># set tensor = False to output a numpy array instead of a tensor</span>
+    <span class="n">y_pred</span> <span class="o">=</span> <span class="n">gbt_model</span><span class="p">(</span><span class="n">X_numpy</span><span class="p">,</span> <span class="n">tensor</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="n">loss</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="mf">0.5</span> <span class="o">*</span> <span class="p">((</span><span class="n">y_pred</span> <span class="o">-</span> <span class="n">y_numpy</span><span class="p">)</span><span class="o">**</span><span class="mi">2</span><span class="p">)</span><span class="o">.</span><span class="n">mean</span><span class="p">())</span>
+    <span class="n">grads</span> <span class="o">=</span> <span class="n">y_pred</span> <span class="o">-</span> <span class="n">y_numpy</span>
+    <span class="c1"># perform a boosting step with manual gradients</span>
+    <span class="n">gbt_model</span><span class="o">.</span><span class="n">step</span><span class="p">(</span><span class="n">X_numpy</span><span class="p">,</span> <span class="n">grads</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Boosting iteration: </span><span class="si">{</span><span class="n">gbt_model</span><span class="o">.</span><span class="n">get_iteration</span><span class="p">()</span><span class="si">}</span><span class="s2"> RMSE loss: </span><span class="si">{</span><span class="n">loss</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="multiple-boosting-iterations">
+<h3>Multiple boosting iterations<a class="headerlink" href="#multiple-boosting-iterations" title="Link to this heading"></a></h3>
+<p>GBRL supports training multiple boosting iterations with targets similar to other GBT libraries. This is done using the <cite>fit</cite> method.</p>
+<div class="admonition important">
+<p class="admonition-title">Important</p>
+<p>Only the RMSE loss function is supported for the <cite>fit</cite> method</p>
+</div>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">gbt_model</span> <span class="o">=</span> <span class="n">GBTModel</span><span class="p">(</span>
+                    <span class="n">input_dim</span><span class="o">=</span><span class="n">input_dim</span><span class="p">,</span>
+                    <span class="n">output_dim</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
+                    <span class="n">tree_struct</span><span class="o">=</span><span class="n">tree_struct</span><span class="p">,</span>
+                    <span class="n">optimizers</span><span class="o">=</span><span class="n">optimizer</span><span class="p">,</span>
+                    <span class="n">params</span><span class="o">=</span><span class="n">gbrl_params</span><span class="p">,</span>
+                    <span class="n">verbose</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
+                    <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span>
+<span class="n">final_loss</span> <span class="o">=</span> <span class="n">gbt_model</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">X_numpy</span><span class="p">,</span> <span class="n">y_numpy</span><span class="p">,</span> <span class="n">iterations</span><span class="o">=</span><span class="mi">10</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="rl-using-gbrl">
+<h2>RL using GBRL<a class="headerlink" href="#rl-using-gbrl" title="Link to this heading"></a></h2>
+<p>Now that we have seen how GBRL is trained using incremental learning and PyTorch, we can use it within an RL training loop.</p>
+<div class="admonition important">
+<p class="admonition-title">Important</p>
+<p>When collecting a rollout, often the observations are flattened. As GBRL works with 2D arrays, GBRL automatically assumes that the flattened inputs are a single sample and reshapes accordingly. In case of a flattened array that represents multiple samples and a single input dimension, the user must reshape the array manually.</p>
+</div>
+<p>Let’s start by training a simple Reinforce algorithm.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">calculate_returns</span><span class="p">(</span><span class="n">rewards</span><span class="p">,</span> <span class="n">gamma</span><span class="p">):</span>
+    <span class="n">returns</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">running_g</span> <span class="o">=</span> <span class="mf">0.0</span>
+    <span class="k">for</span> <span class="n">reward</span> <span class="ow">in</span> <span class="n">rewards</span><span class="p">[::</span><span class="o">-</span><span class="mi">1</span><span class="p">]:</span>
+        <span class="n">running_g</span> <span class="o">=</span> <span class="n">reward</span> <span class="o">+</span> <span class="n">gamma</span> <span class="o">*</span> <span class="n">running_g</span>
+        <span class="n">returns</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">running_g</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">returns</span>
+
+<span class="n">env</span> <span class="o">=</span> <span class="n">gym</span><span class="o">.</span><span class="n">make</span><span class="p">(</span><span class="s2">&quot;CartPole-v1&quot;</span><span class="p">)</span>
+<span class="n">wrapped_env</span> <span class="o">=</span> <span class="n">gym</span><span class="o">.</span><span class="n">wrappers</span><span class="o">.</span><span class="n">RecordEpisodeStatistics</span><span class="p">(</span><span class="n">env</span><span class="p">,</span> <span class="mi">50</span><span class="p">)</span>  <span class="c1"># Records episode-reward</span>
+<span class="n">num_episodes</span> <span class="o">=</span> <span class="mi">1000</span>
+<span class="n">gamma</span> <span class="o">=</span> <span class="mf">0.99</span>
+<span class="n">optimizer</span> <span class="o">=</span> <span class="p">{</span> <span class="s1">&#39;algo&#39;</span><span class="p">:</span> <span class="s1">&#39;SGD&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;lr&#39;</span><span class="p">:</span> <span class="mf">0.05</span><span class="p">,</span>
+            <span class="s1">&#39;start_idx&#39;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
+            <span class="s1">&#39;stop_idx&#39;</span><span class="p">:</span> <span class="n">env</span><span class="o">.</span><span class="n">action_space</span><span class="o">.</span><span class="n">n</span><span class="p">}</span>
+
+<span class="n">bias</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">env</span><span class="o">.</span><span class="n">action_space</span><span class="o">.</span><span class="n">n</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">single</span><span class="p">)</span>
+<span class="n">agent</span> <span class="o">=</span> <span class="n">ParametricActor</span><span class="p">(</span>
+                    <span class="n">input_dim</span><span class="o">=</span><span class="n">env</span><span class="o">.</span><span class="n">observation_space</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span>
+                    <span class="n">output_dim</span><span class="o">=</span><span class="n">env</span><span class="o">.</span><span class="n">action_space</span><span class="o">.</span><span class="n">n</span><span class="p">,</span>
+                    <span class="n">tree_struct</span><span class="o">=</span><span class="n">tree_struct</span><span class="p">,</span>
+                    <span class="n">policy_optimizer</span><span class="o">=</span><span class="n">optimizer</span><span class="p">,</span>
+                    <span class="n">params</span><span class="o">=</span><span class="n">gbrl_params</span><span class="p">,</span>
+                    <span class="n">verbose</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
+                    <span class="n">bias</span><span class="o">=</span><span class="n">bias</span><span class="p">,</span>
+                    <span class="n">device</span><span class="o">=</span><span class="s1">&#39;cpu&#39;</span><span class="p">)</span>
+
+<span class="n">update_every</span> <span class="o">=</span> <span class="mi">20</span>
+
+<span class="n">rollout_buffer</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;actions&#39;</span><span class="p">:</span> <span class="p">[],</span> <span class="s1">&#39;obs&#39;</span><span class="p">:</span> <span class="p">[],</span> <span class="s1">&#39;returns&#39;</span><span class="p">:</span> <span class="p">[]}</span>
+<span class="k">for</span> <span class="n">episode</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_episodes</span><span class="p">):</span>
+    <span class="c1"># gymnasium v26 requires users to set seed while resetting the environment</span>
+    <span class="n">obs</span><span class="p">,</span> <span class="n">info</span> <span class="o">=</span> <span class="n">wrapped_env</span><span class="o">.</span><span class="n">reset</span><span class="p">(</span><span class="n">seed</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+    <span class="n">rollout_buffer</span><span class="p">[</span><span class="s1">&#39;rewards&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+
+    <span class="n">done</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="k">while</span> <span class="ow">not</span> <span class="n">done</span><span class="p">:</span>
+        <span class="c1"># obs is a flattened array representing a single sample and multiple input dimensions</span>
+        <span class="c1"># hence GBRL reshapes obs automatically to a 2D-array.</span>
+        <span class="n">action_logits</span> <span class="o">=</span> <span class="n">agent</span><span class="p">(</span><span class="n">obs</span><span class="p">)</span>
+        <span class="n">action</span> <span class="o">=</span> <span class="n">Categorical</span><span class="p">(</span><span class="n">logits</span><span class="o">=</span><span class="n">action_logits</span><span class="p">)</span><span class="o">.</span><span class="n">sample</span><span class="p">()</span>
+        <span class="n">action_numpy</span> <span class="o">=</span> <span class="n">action</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span><span class="o">.</span><span class="n">numpy</span><span class="p">()</span>
+        <span class="n">rollout_buffer</span><span class="p">[</span><span class="s1">&#39;obs&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">obs</span><span class="p">)</span>
+
+        <span class="n">obs</span><span class="p">,</span> <span class="n">reward</span><span class="p">,</span> <span class="n">terminated</span><span class="p">,</span> <span class="n">truncated</span><span class="p">,</span> <span class="n">info</span> <span class="o">=</span> <span class="n">wrapped_env</span><span class="o">.</span><span class="n">step</span><span class="p">(</span><span class="n">action_numpy</span><span class="o">.</span><span class="n">squeeze</span><span class="p">())</span>
+        <span class="n">rollout_buffer</span><span class="p">[</span><span class="s1">&#39;rewards&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">reward</span><span class="p">)</span>
+        <span class="n">rollout_buffer</span><span class="p">[</span><span class="s1">&#39;actions&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">action</span><span class="p">)</span>
+
+        <span class="n">done</span> <span class="o">=</span> <span class="n">terminated</span> <span class="ow">or</span> <span class="n">truncated</span>
+
+    <span class="n">rollout_buffer</span><span class="p">[</span><span class="s1">&#39;returns&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">calculate_returns</span><span class="p">(</span><span class="n">rollout_buffer</span><span class="p">[</span><span class="s1">&#39;rewards&#39;</span><span class="p">],</span> <span class="n">gamma</span><span class="p">))</span>
+
+    <span class="k">if</span> <span class="n">episode</span> <span class="o">%</span> <span class="n">update_every</span> <span class="o">==</span> <span class="mi">0</span> <span class="ow">and</span> <span class="n">episode</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="n">returns</span> <span class="o">=</span> <span class="n">th</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span><span class="n">rollout_buffer</span><span class="p">[</span><span class="s1">&#39;returns&#39;</span><span class="p">],</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span>
+        <span class="n">actions</span> <span class="o">=</span> <span class="n">th</span><span class="o">.</span><span class="n">cat</span><span class="p">(</span><span class="n">rollout_buffer</span><span class="p">[</span><span class="s1">&#39;actions&#39;</span><span class="p">])</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
+        <span class="c1"># input to model can be either a torch tensor or a numpy ndarray</span>
+        <span class="n">observations</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span><span class="n">rollout_buffer</span><span class="p">[</span><span class="s1">&#39;obs&#39;</span><span class="p">])</span>
+        <span class="c1"># model update</span>
+        <span class="n">action_logits</span> <span class="o">=</span> <span class="n">agent</span><span class="p">(</span><span class="n">observations</span><span class="p">,</span> <span class="n">requires_grad</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">dist</span> <span class="o">=</span> <span class="n">Categorical</span><span class="p">(</span><span class="n">logits</span><span class="o">=</span><span class="n">action_logits</span><span class="p">)</span>
+        <span class="n">log_probs</span> <span class="o">=</span> <span class="n">dist</span><span class="o">.</span><span class="n">log_prob</span><span class="p">(</span><span class="n">actions</span><span class="p">)</span>
+        <span class="c1"># calculate reinforce loss with subtracted baseline</span>
+        <span class="n">loss</span> <span class="o">=</span> <span class="o">-</span><span class="p">(</span><span class="n">log_probs</span> <span class="o">*</span> <span class="p">(</span><span class="n">returns</span> <span class="o">-</span> <span class="n">returns</span><span class="o">.</span><span class="n">mean</span><span class="p">()))</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span>
+        <span class="n">loss</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
+        <span class="n">grads</span> <span class="o">=</span> <span class="n">agent</span><span class="o">.</span><span class="n">step</span><span class="p">(</span><span class="n">observations</span><span class="p">)</span>
+        <span class="n">rollout_buffer</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;actions&#39;</span><span class="p">:</span> <span class="p">[],</span> <span class="s1">&#39;obs&#39;</span><span class="p">:</span> <span class="p">[],</span> <span class="s1">&#39;returns&#39;</span><span class="p">:</span> <span class="p">[]}</span>
+
+    <span class="k">if</span> <span class="n">episode</span> <span class="o">%</span> <span class="mi">100</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Episode </span><span class="si">{</span><span class="n">episode</span><span class="si">}</span><span class="s2"> - boosting iteration: </span><span class="si">{</span><span class="n">agent</span><span class="o">.</span><span class="n">get_iteration</span><span class="p">()</span><span class="si">}</span><span class="s2"> episodic return: </span><span class="si">{</span><span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">wrapped_env</span><span class="o">.</span><span class="n">return_queue</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="explainability">
+<h2>Explainability<a class="headerlink" href="#explainability" title="Link to this heading"></a></h2>
+<p>GBRL implements SHAP value calculation. SHAP values can be calculated over the entire ensemble as well as for individual trees.
+GBRL returns SHAP values with shap: [n_samples, n_features, n_actions].</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># per tree shap values</span>
+<span class="n">tree_shap</span> <span class="o">=</span> <span class="n">agent</span><span class="o">.</span><span class="n">tree_shap</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">obs</span><span class="p">)</span>
+<span class="c1"># for the entire ensemble</span>
+<span class="n">shap_values</span> <span class="o">=</span> <span class="n">agent</span><span class="o">.</span><span class="n">shap</span><span class="p">(</span><span class="n">obs</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>SHAP values are calculated internally and can be plotted using the <a class="reference external" href="https://github.com/shap/shap">SHAP library</a>.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">shap</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">matplotlib.pyplot</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">plt</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">close</span><span class="p">(</span><span class="s1">&#39;all&#39;</span><span class="p">)</span>
+<span class="n">explainable_values_action_1</span> <span class="o">=</span> <span class="n">shap</span><span class="o">.</span><span class="n">Explanation</span><span class="p">(</span><span class="n">tree_shap</span><span class="o">.</span><span class="n">squeeze</span><span class="p">()[:</span> <span class="p">,</span> <span class="mi">0</span><span class="p">])</span>
+<span class="n">explainable_values_action_2</span> <span class="o">=</span> <span class="n">shap</span><span class="o">.</span><span class="n">Explanation</span><span class="p">(</span><span class="n">tree_shap</span><span class="o">.</span><span class="n">squeeze</span><span class="p">()[:</span> <span class="p">,</span> <span class="mi">1</span><span class="p">])</span>
+
+<span class="n">fig</span><span class="p">,</span> <span class="n">ax</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">()</span>
+<span class="n">shap</span><span class="o">.</span><span class="n">plots</span><span class="o">.</span><span class="n">bar</span><span class="p">(</span><span class="n">explainable_values_action_1</span><span class="p">,</span> <span class="n">ax</span><span class="o">=</span><span class="n">ax</span><span class="p">)</span>
+<span class="n">ax</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="s2">&quot;SHAP values Action 1&quot;</span><span class="p">)</span>
+<span class="n">fig</span><span class="p">,</span> <span class="n">ax</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">()</span>
+<span class="n">shap</span><span class="o">.</span><span class="n">plots</span><span class="o">.</span><span class="n">bar</span><span class="p">(</span><span class="n">explainable_values_action_2</span><span class="p">,</span> <span class="n">ax</span><span class="o">=</span><span class="n">ax</span><span class="p">)</span>
+<span class="n">ax</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="s2">&quot;SHAP values Action 2&quot;</span><span class="p">)</span>
+
+<span class="n">plt</span><span class="o">.</span><span class="n">show</span><span class="p">()</span>
+</pre></div>
+</div>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="quickstart.html" class="btn btn-neutral float-left" title="Quickstart" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="models/index.html" class="btn btn-neutral float-right" title="Models" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024-2025, NVIDIA Corporation.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

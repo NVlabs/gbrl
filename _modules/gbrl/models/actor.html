@@ -1,0 +1,511 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>gbrl.models.actor &mdash; GBRL 1.1.6 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=937269b5"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            GBRL
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">User Guide:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../quickstart.html">Quickstart</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../quickstart.html#source-compilation">Source Compilation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../examples.html">Examples</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Documentation:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../models/index.html">Models</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../learners/index.html">Learners</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">GBRL</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">gbrl.models.actor</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for gbrl.models.actor</h1><div class="highlight"><pre>
+<span></span><span class="c1">##############################################################################</span>
+<span class="c1"># Copyright (c) 2024-2025, NVIDIA Corporation. All rights reserved.</span>
+<span class="c1">#</span>
+<span class="c1"># Permission is hereby granted, free of charge, to any person obtaining a</span>
+<span class="c1"># copy of this software and associated documentation files (the &quot;Software&quot;),</span>
+<span class="c1"># to deal in the Software without restriction, including without limitation</span>
+<span class="c1"># the rights to use, copy, modify, merge, publish, distribute, sublicense,</span>
+<span class="c1"># and/or sell copies of the Software, and to permit persons to whom the</span>
+<span class="c1"># Software is furnished to do so, subject to the following conditions:</span>
+<span class="c1">#</span>
+<span class="c1"># The above copyright notice and this permission notice shall be included in</span>
+<span class="c1"># all copies or substantial portions of the Software.</span>
+<span class="c1">#</span>
+<span class="c1"># THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR</span>
+<span class="c1"># IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,</span>
+<span class="c1"># FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL</span>
+<span class="c1"># THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER</span>
+<span class="c1"># LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING</span>
+<span class="c1"># FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER</span>
+<span class="c1"># DEALINGS IN THE SOFTWARE.</span>
+<span class="c1">##############################################################################</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">Actor Model Module</span>
+
+<span class="sd">This module provides actor models for reinforcement learning, including</span>
+<span class="sd">ParametricActor for deterministic/discrete policies and GaussianActor</span>
+<span class="sd">for continuous stochastic policies with Gaussian distributions.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Dict</span><span class="p">,</span> <span class="n">Optional</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">,</span> <span class="n">Union</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">torch</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">th</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">gbrl.common.utils</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span><span class="n">NumericalData</span><span class="p">,</span> <span class="n">clip_grad_norm</span><span class="p">,</span>
+                               <span class="n">concatenate_arrays</span><span class="p">,</span> <span class="n">constant_like</span><span class="p">,</span>
+                               <span class="n">ensure_leaf_tensor_or_array</span><span class="p">,</span> <span class="n">numerical_dtype</span><span class="p">,</span>
+                               <span class="n">setup_optimizer</span><span class="p">,</span> <span class="n">validate_array</span><span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">gbrl.learners.gbt_learner</span><span class="w"> </span><span class="kn">import</span> <span class="n">GBTLearner</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">gbrl.models.base</span><span class="w"> </span><span class="kn">import</span> <span class="n">BaseGBT</span>
+
+
+<div class="viewcode-block" id="ParametricActor">
+<a class="viewcode-back" href="../../../models/parametric_actor.html#gbrl.models.actor.ParametricActor">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">ParametricActor</span><span class="p">(</span><span class="n">BaseGBT</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    GBRL model for a ParametricActor ensemble. ParametricActor outputs</span>
+<span class="sd">    a single parameter per action dimension, allowing deterministic or</span>
+<span class="sd">    stochastic behavior</span>
+<span class="sd">    (e.g., for discrete action spaces).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span>
+                 <span class="n">tree_struct</span><span class="p">:</span> <span class="n">Dict</span><span class="p">,</span>
+                 <span class="n">input_dim</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+                 <span class="n">output_dim</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+                 <span class="n">policy_optimizer</span><span class="p">:</span> <span class="n">Dict</span><span class="p">,</span>
+                 <span class="n">params</span><span class="p">:</span> <span class="n">Dict</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(),</span>
+                 <span class="n">bias</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Union</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+                 <span class="n">verbose</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span>
+                 <span class="n">device</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;cpu&#39;</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Initializes the ParametricActor model.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            tree_struct (Dict): Dictionary containing tree structure</span>
+<span class="sd">            information:</span>
+<span class="sd">                - max_depth (int): Maximum tree depth.</span>
+<span class="sd">                - grow_policy (str): &#39;greedy&#39; or &#39;oblivious&#39;.</span>
+<span class="sd">                - n_bins (int): Number of bins per feature for candidate</span>
+<span class="sd">                generation.</span>
+<span class="sd">                - min_data_in_leaf (int): Minimum number of samples in a leaf.</span>
+<span class="sd">                - par_th (int): Minimum number of samples for parallelizing on</span>
+<span class="sd">                CPU.</span>
+<span class="sd">            input_dim (int): Input feature dimension.</span>
+<span class="sd">            output_dim (int): Output feature dimension.</span>
+<span class="sd">            policy_optimizer (Dict): Dictionary containing policy optimizer</span>
+<span class="sd">            parameters.</span>
+<span class="sd">            params (Dict, optional): Additional GBRL parameters.</span>
+<span class="sd">            bias (np.ndarray, optional): Bias initialization, defaults to zero.</span>
+<span class="sd">            verbose (int, optional): Verbosity level. Defaults to 0.</span>
+<span class="sd">            device (str, optional): Compute device (&#39;cpu&#39; or &#39;cuda&#39;). Defaults</span>
+<span class="sd">            to &#39;cpu&#39;.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">policy_optimizer</span> <span class="o">=</span> <span class="n">setup_optimizer</span><span class="p">(</span><span class="n">policy_optimizer</span><span class="p">,</span> <span class="n">prefix</span><span class="o">=</span><span class="s1">&#39;policy_&#39;</span><span class="p">)</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
+        <span class="n">bias</span> <span class="o">=</span> <span class="n">bias</span> <span class="k">if</span> <span class="n">bias</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">output_dim</span><span class="p">,</span>
+                                                      <span class="n">dtype</span><span class="o">=</span><span class="n">numerical_dtype</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">bias</span><span class="p">,</span> <span class="nb">float</span><span class="p">):</span>
+            <span class="n">bias</span> <span class="o">=</span> <span class="n">bias</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="n">output_dim</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">numerical_dtype</span><span class="p">)</span>
+        <span class="c1"># init model</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">learner</span> <span class="o">=</span> <span class="n">GBTLearner</span><span class="p">(</span><span class="n">input_dim</span><span class="o">=</span><span class="n">input_dim</span><span class="p">,</span>
+                                  <span class="n">output_dim</span><span class="o">=</span><span class="n">output_dim</span><span class="p">,</span>
+                                  <span class="n">tree_struct</span><span class="o">=</span><span class="n">tree_struct</span><span class="p">,</span>
+                                  <span class="n">optimizers</span><span class="o">=</span><span class="n">policy_optimizer</span><span class="p">,</span>
+                                  <span class="n">params</span><span class="o">=</span><span class="n">params</span><span class="p">,</span>
+                                  <span class="n">verbose</span><span class="o">=</span><span class="n">verbose</span><span class="p">,</span>
+                                  <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">learner</span><span class="o">.</span><span class="n">reset</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">learner</span><span class="o">.</span><span class="n">set_bias</span><span class="p">(</span><span class="n">bias</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">params</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">input</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">grads</span> <span class="o">=</span> <span class="kc">None</span>
+
+<div class="viewcode-block" id="ParametricActor.step">
+<a class="viewcode-back" href="../../../models/parametric_actor.html#gbrl.models.actor.ParametricActor.step">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">step</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">observations</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">NumericalData</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+             <span class="n">policy_grads</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">NumericalData</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+             <span class="n">policy_grad_clip</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+             <span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Performs a single boosting iteration.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            observations (NumericalData):</span>
+<span class="sd">            policy_grad_clip (float, optional): . Defaults to None.</span>
+<span class="sd">            policy_grads (Optional[NumericalData], optional): manually</span>
+<span class="sd">                calculated gradients. Defaults to None.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">observations</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">input</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;Cannot update trees without input.&quot;</span>
+            <span class="s2">&quot;Make sure model is called with requires_grad=True&quot;</span>
+            <span class="n">observations</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">input</span>
+
+        <span class="c1"># Handle 1D observations</span>
+        <span class="k">if</span> <span class="n">observations</span><span class="o">.</span><span class="n">ndim</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="n">n_samples</span> <span class="o">=</span> <span class="mi">1</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">learner</span><span class="o">.</span><span class="n">input_dim</span> <span class="o">&gt;</span> <span class="mi">1</span> <span class="k">else</span> <span class="nb">len</span><span class="p">(</span><span class="n">observations</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">n_samples</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">observations</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">policy_grads</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">params</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;params must be set to compute gradients.&quot;</span>
+            <span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="p">,</span> <span class="n">th</span><span class="o">.</span><span class="n">Tensor</span><span class="p">),</span> <span class="s2">&quot;params must be a Tensor to compute gradients.&quot;</span>
+            <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="o">.</span><span class="n">grad</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;params.grad must be set to compute gradients.&quot;</span>
+            <span class="n">policy_grads</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="o">.</span><span class="n">grad</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span> <span class="o">*</span> <span class="n">n_samples</span>
+
+        <span class="n">policy_grads</span> <span class="o">=</span> <span class="n">clip_grad_norm</span><span class="p">(</span><span class="n">policy_grads</span><span class="p">,</span> <span class="n">policy_grad_clip</span><span class="p">)</span>
+        <span class="n">validate_array</span><span class="p">(</span><span class="n">policy_grads</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">learner</span><span class="o">.</span><span class="n">step</span><span class="p">(</span><span class="n">inputs</span><span class="o">=</span><span class="n">observations</span><span class="p">,</span> <span class="n">grads</span><span class="o">=</span><span class="n">policy_grads</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">grads</span> <span class="o">=</span> <span class="n">policy_grads</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">input</span> <span class="o">=</span> <span class="kc">None</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">observations</span><span class="p">:</span> <span class="n">NumericalData</span><span class="p">,</span>
+                 <span class="n">requires_grad</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span> <span class="n">start_idx</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+                 <span class="n">stop_idx</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">tensor</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NumericalData</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Returns actor output as Tensor. If `requires_grad=True`, stores</span>
+<span class="sd">        differentiable parameters in `self.params`.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            observations (NumericalData): Input observations.</span>
+<span class="sd">            requires_grad (bool, optional): Whether to compute gradients.</span>
+<span class="sd">            Defaults to True.</span>
+<span class="sd">            start_idx (int, optional): Start tree index for prediction.</span>
+<span class="sd">            Defaults to 0.</span>
+<span class="sd">            stop_idx (int, optional): Stop tree index for prediction.</span>
+<span class="sd">            Defaults to None.</span>
+<span class="sd">            tensor (bool, optional): Whether to return a PyTorch Tensor.</span>
+<span class="sd">            Defaults to True.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            NumericalData: GBRL outputs - a single parameter per action</span>
+<span class="sd">            dimension.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">params</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">learner</span><span class="o">.</span><span class="n">predict</span><span class="p">(</span><span class="n">observations</span><span class="p">,</span> <span class="n">requires_grad</span><span class="p">,</span> <span class="n">start_idx</span><span class="p">,</span>
+                                      <span class="n">stop_idx</span><span class="p">,</span> <span class="n">tensor</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">requires_grad</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">grads</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">params</span> <span class="o">=</span> <span class="n">params</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">input</span> <span class="o">=</span> <span class="n">observations</span>
+        <span class="k">return</span> <span class="n">params</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">__copy__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;ParametricActor&quot;</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Creates a copy of the ParametricActor instance.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            ParametricActor: A copy of the current model.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">learner</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;learner must be initialized first.&quot;</span>
+
+        <span class="n">learner</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">learner</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+        <span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">learner</span><span class="o">.</span><span class="n">input_dim</span><span class="p">,</span> <span class="nb">int</span><span class="p">),</span> <span class="s2">&quot;learner.input_dim must be int&quot;</span>
+        <span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">learner</span><span class="o">.</span><span class="n">output_dim</span><span class="p">,</span> <span class="nb">int</span><span class="p">),</span> <span class="s2">&quot;learner.output_dim must be int&quot;</span>
+        <span class="k">assert</span> <span class="n">learner</span><span class="o">.</span><span class="n">optimizers</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;learner.optimizers must be initialized&quot;</span>
+        <span class="n">copy_</span> <span class="o">=</span> <span class="n">ParametricActor</span><span class="p">(</span><span class="n">learner</span><span class="o">.</span><span class="n">tree_struct</span><span class="p">,</span>
+                                <span class="n">learner</span><span class="o">.</span><span class="n">input_dim</span><span class="p">,</span>
+                                <span class="n">learner</span><span class="o">.</span><span class="n">output_dim</span><span class="p">,</span>
+                                <span class="n">learner</span><span class="o">.</span><span class="n">optimizers</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span>
+                                <span class="n">learner</span><span class="o">.</span><span class="n">params</span><span class="p">,</span>
+                                <span class="n">learner</span><span class="o">.</span><span class="n">get_bias</span><span class="p">(),</span>  <span class="c1"># type: ignore</span>
+                                <span class="n">learner</span><span class="o">.</span><span class="n">verbose</span><span class="p">,</span>
+                                <span class="n">learner</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+        <span class="n">copy_</span><span class="o">.</span><span class="n">learner</span> <span class="o">=</span> <span class="n">learner</span>
+        <span class="k">return</span> <span class="n">copy_</span></div>
+
+
+
+<div class="viewcode-block" id="GaussianActor">
+<a class="viewcode-back" href="../../../models/gaussian_actor.html#gbrl.models.actor.GaussianActor">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">GaussianActor</span><span class="p">(</span><span class="n">BaseGBT</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    GBRL model for an actor ensemble used in algorithms such as SAC.</span>
+<span class="sd">    This model outputs the mean (`mu`) and log standard deviation (`log_std`)</span>
+<span class="sd">    of a Gaussian distribution, allowing stochastic action selection.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span>
+                 <span class="n">tree_struct</span><span class="p">:</span> <span class="n">Dict</span><span class="p">,</span>
+                 <span class="n">input_dim</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+                 <span class="n">output_dim</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+                 <span class="n">mu_optimizer</span><span class="p">:</span> <span class="n">Dict</span><span class="p">,</span>
+                 <span class="n">std_optimizer</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Dict</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+                 <span class="n">log_std_init</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="o">-</span><span class="mi">2</span><span class="p">,</span>
+                 <span class="n">params</span><span class="p">:</span> <span class="n">Dict</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(),</span>
+                 <span class="n">bias</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Union</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="nb">float</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+                 <span class="n">verbose</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span>
+                 <span class="n">device</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;cpu&#39;</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Initializes the GaussianActor model.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">         tree_struct (Dict): Dictionary containing tree structure information:</span>
+<span class="sd">                max_depth (int): maximum tree depth.</span>
+<span class="sd">                grow_policy (str): &#39;greedy&#39; or &#39;oblivious&#39;.</span>
+<span class="sd">                n_bins (int): number of bins per feature for candidate</span>
+<span class="sd">                generation.</span>
+<span class="sd">                min_data_in_leaf (int): minimum number of samples in a leaf.</span>
+<span class="sd">                par_th (int): minimum number of samples for parallelizing on</span>
+<span class="sd">                CPU.</span>
+<span class="sd">        output_dim (int): output dimension.</span>
+<span class="sd">        mu_optimizer Dict: dictionary containing Gaussian mean optimizer</span>
+<span class="sd">        parameters. (see GradientBoostingTrees for optimizer details)</span>
+<span class="sd">        std_optimizer Dict: dictionary containing Gaussian sigma optimizer</span>
+<span class="sd">        parameters. (see GradientBoostingTrees for optimizer details)</span>
+<span class="sd">        log_std_init (float): initial value of log_std</span>
+<span class="sd">        params (Dict, optional): GBRL parameters such as:</span>
+<span class="sd">            control_variates (bool): use control variates (variance reduction</span>
+<span class="sd">            technique CPU only).</span>
+<span class="sd">            split_score_func (str): &quot;cosine&quot; or &quot;l2&quot;</span>
+<span class="sd">            generator_type- (str): candidate generation method &quot;Quantile&quot; or</span>
+<span class="sd">            &quot;Uniform&quot;.</span>
+<span class="sd">            feature_weights - (list[float]): Per-feature multiplication</span>
+<span class="sd">            weights used when choosing the best split. Weights should be &gt;= 0</span>
+<span class="sd">        bias (np.ndarray, optional): manually set a bias. Defaults to None =</span>
+<span class="sd">        np.zeros.</span>
+<span class="sd">        verbose (int, optional): verbosity level. Defaults to 0.</span>
+<span class="sd">        device (str, optional): GBRL device &#39;cpu&#39; or &#39;cuda/gpu&#39;. Defaults to</span>
+<span class="sd">        &#39;cpu&#39;.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
+        <span class="n">mu_optimizer</span> <span class="o">=</span> <span class="n">setup_optimizer</span><span class="p">(</span><span class="n">mu_optimizer</span><span class="p">,</span> <span class="n">prefix</span><span class="o">=</span><span class="s1">&#39;mu_&#39;</span><span class="p">)</span>
+
+        <span class="n">bias</span> <span class="o">=</span> <span class="n">bias</span> <span class="k">if</span> <span class="n">bias</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">output_dim</span><span class="p">,</span>
+                                                      <span class="n">dtype</span><span class="o">=</span><span class="n">numerical_dtype</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">bias</span><span class="p">,</span> <span class="nb">float</span><span class="p">):</span>
+            <span class="n">bias</span> <span class="o">=</span> <span class="n">bias</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="n">output_dim</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">numerical_dtype</span><span class="p">)</span>
+
+        <span class="n">policy_dim</span> <span class="o">=</span> <span class="n">output_dim</span>
+        <span class="k">if</span> <span class="n">std_optimizer</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">std_optimizer</span> <span class="o">=</span> <span class="n">setup_optimizer</span><span class="p">(</span><span class="n">std_optimizer</span><span class="p">,</span> <span class="n">prefix</span><span class="o">=</span><span class="s1">&#39;std_&#39;</span><span class="p">)</span>
+            <span class="n">policy_dim</span> <span class="o">=</span> <span class="n">output_dim</span> <span class="o">//</span> <span class="mi">2</span>
+            <span class="n">bias</span><span class="p">[</span><span class="n">policy_dim</span><span class="p">:]</span> <span class="o">=</span> <span class="n">log_std_init</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="n">policy_dim</span><span class="p">,</span>  <span class="c1"># type: ignore</span>
+                                                     <span class="n">dtype</span><span class="o">=</span><span class="n">numerical_dtype</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">log_std_init</span> <span class="o">=</span> <span class="n">log_std_init</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">fixed_std</span> <span class="o">=</span> <span class="n">std_optimizer</span> <span class="ow">is</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">policy_dim</span> <span class="o">=</span> <span class="n">policy_dim</span>
+
+        <span class="c1"># init model</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">learner</span> <span class="o">=</span> <span class="n">GBTLearner</span><span class="p">(</span><span class="n">input_dim</span><span class="o">=</span><span class="n">input_dim</span><span class="p">,</span>
+                                  <span class="n">output_dim</span><span class="o">=</span><span class="n">output_dim</span><span class="p">,</span>
+                                  <span class="n">tree_struct</span><span class="o">=</span><span class="n">tree_struct</span><span class="p">,</span>
+                                  <span class="n">optimizers</span><span class="o">=</span><span class="p">[</span><span class="n">mu_optimizer</span><span class="p">,</span> <span class="n">std_optimizer</span><span class="p">],</span>
+                                  <span class="n">params</span><span class="o">=</span><span class="n">params</span><span class="p">,</span>
+                                  <span class="n">verbose</span><span class="o">=</span><span class="n">verbose</span><span class="p">,</span>
+                                  <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">learner</span><span class="o">.</span><span class="n">reset</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">learner</span><span class="o">.</span><span class="n">set_bias</span><span class="p">(</span><span class="n">bias</span><span class="p">)</span>
+
+<div class="viewcode-block" id="GaussianActor.step">
+<a class="viewcode-back" href="../../../models/gaussian_actor.html#gbrl.models.actor.GaussianActor.step">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">step</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">observations</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">NumericalData</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+             <span class="n">mu_grads</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">NumericalData</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+             <span class="n">log_std_grads</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">NumericalData</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+             <span class="n">mu_grad_clip</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+             <span class="n">log_std_grad_clip</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+             <span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Performs a single boosting iteration.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            observations (NumericalData): Input observations.</span>
+<span class="sd">            mu_grads (Optional[NumericalData], optional):</span>
+<span class="sd">                Manually computed mean gradients.</span>
+<span class="sd">            log_std_grads (Optional[NumericalData], optional):</span>
+<span class="sd">                Manually computed log standard deviation gradients.</span>
+<span class="sd">            mu_grad_clip (Optional[float], optional): Gradient clipping for</span>
+<span class="sd">                mean. Defaults to None.</span>
+<span class="sd">            log_std_grad_clip (Optional[float], optional): Gradient clipping</span>
+<span class="sd">                for log standard deviation. Defaults to None.</span>
+
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">observations</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">input</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;Cannot update trees without input.&quot;</span>
+            <span class="s2">&quot;Make sure model is called with requires_grad=True&quot;</span>
+            <span class="n">observations</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">input</span>
+        
+        <span class="c1"># Handle 1D observations</span>
+        <span class="k">if</span> <span class="n">observations</span><span class="o">.</span><span class="n">ndim</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="n">n_samples</span> <span class="o">=</span> <span class="mi">1</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">learner</span><span class="o">.</span><span class="n">input_dim</span> <span class="o">&gt;</span> <span class="mi">1</span> <span class="k">else</span> <span class="nb">len</span><span class="p">(</span><span class="n">observations</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">n_samples</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">observations</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">mu_grads</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">params</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;params must be set to compute gradients.&quot;</span>
+            <span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">),</span> <span class="s2">&quot;params must be a tuple to compute gradients.&quot;</span>
+            <span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">th</span><span class="o">.</span><span class="n">Tensor</span><span class="p">),</span> <span class="s2">&quot;params[0] must be a Tensor to compute gradients.&quot;</span>
+            <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">grad</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;params[0].grad must be set to compute gradients.&quot;</span>  <span class="c1"># type: ignore</span>
+            <span class="n">mu_grads</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">grad</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span> <span class="o">*</span> <span class="n">n_samples</span>  <span class="c1"># type: ignore</span>
+        <span class="n">mu_grads</span> <span class="o">=</span> <span class="n">clip_grad_norm</span><span class="p">(</span><span class="n">mu_grads</span><span class="p">,</span> <span class="n">mu_grad_clip</span><span class="p">)</span>  <span class="c1"># type: ignore</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">fixed_std</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">log_std_grads</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">params</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;params must be set to compute gradients.&quot;</span>
+                <span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="p">,</span> <span class="p">(</span><span class="nb">list</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">)),</span> <span class="s2">&quot;params must be a (list or tuple) to compute gradients.&quot;</span>
+                <span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">th</span><span class="o">.</span><span class="n">Tensor</span><span class="p">),</span> <span class="s2">&quot;params[1] must be a Tensor to compute gradients.&quot;</span>
+                <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">grad</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;params[1].grad must be set to compute gradients.&quot;</span>  <span class="c1"># type: ignore</span>
+                <span class="n">log_std_grads</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">grad</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span> <span class="o">*</span> <span class="n">n_samples</span>  <span class="c1"># type: ignore</span>
+            <span class="n">log_std_grads</span> <span class="o">=</span> <span class="n">clip_grad_norm</span><span class="p">(</span><span class="n">log_std_grads</span><span class="p">,</span> <span class="n">log_std_grad_clip</span><span class="p">)</span>  <span class="c1"># type: ignore</span>
+            <span class="n">theta_grad</span> <span class="o">=</span> <span class="n">concatenate_arrays</span><span class="p">((</span><span class="n">mu_grads</span><span class="p">,</span> <span class="n">log_std_grads</span><span class="p">))</span>  <span class="c1"># type: ignore</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">theta_grad</span> <span class="o">=</span> <span class="n">mu_grads</span>
+
+        <span class="n">validate_array</span><span class="p">(</span><span class="n">theta_grad</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">learner</span><span class="o">.</span><span class="n">step</span><span class="p">(</span><span class="n">observations</span><span class="p">,</span> <span class="n">theta_grad</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">grads</span> <span class="o">=</span> <span class="n">mu_grads</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">fixed_std</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">grads</span> <span class="o">=</span> <span class="p">(</span><span class="n">mu_grads</span><span class="p">,</span> <span class="n">log_std_grads</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">input</span> <span class="o">=</span> <span class="kc">None</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">observations</span><span class="p">:</span> <span class="n">NumericalData</span><span class="p">,</span>
+                 <span class="n">requires_grad</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+                 <span class="n">start_idx</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+                 <span class="n">stop_idx</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+                 <span class="n">tensor</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">NumericalData</span><span class="p">,</span> <span class="n">NumericalData</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Returns actor&#39;s outputs as tensor. If `requires_grad=True` then stores</span>
+<span class="sd">           differentiable parameters in self.params. Return type/device is</span>
+<span class="sd">           identical to the input type/device.</span>
+<span class="sd">           Requires_grad is ignored if input is a numpy array.</span>
+<span class="sd">        Args:</span>
+<span class="sd">            observations (NumericalData)</span>
+<span class="sd">            requires_grad bool: Defaults to None.</span>
+<span class="sd">            start_idx (int, optional): start tree index for prediction.</span>
+<span class="sd">            Defaults to 0.</span>
+<span class="sd">            stop_idx (_type_, optional): stop tree index for prediction (uses</span>
+<span class="sd">            all trees in the ensemble if set to 0). Defaults to None.</span>
+<span class="sd">            tensor (bool, optional): Return PyTorch Tensor, False returns a</span>
+<span class="sd">            numpy array. Defaults to True.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            NumericalData: Gaussian parameters</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">theta</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">learner</span><span class="o">.</span><span class="n">predict</span><span class="p">(</span><span class="n">observations</span><span class="p">,</span> <span class="n">requires_grad</span><span class="p">,</span> <span class="n">start_idx</span><span class="p">,</span>
+                                     <span class="n">stop_idx</span><span class="p">,</span> <span class="n">tensor</span><span class="p">)</span>
+        <span class="n">mean_actions</span> <span class="o">=</span> <span class="n">theta</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">fixed_std</span> <span class="k">else</span> <span class="n">theta</span><span class="p">[:,</span> <span class="p">:</span><span class="bp">self</span><span class="o">.</span><span class="n">policy_dim</span><span class="p">]</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">fixed_std</span><span class="p">:</span>
+            <span class="n">mean_actions</span> <span class="o">=</span> <span class="n">ensure_leaf_tensor_or_array</span><span class="p">(</span><span class="n">mean_actions</span><span class="p">,</span> <span class="n">tensor</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">requires_grad</span><span class="o">=</span><span class="n">requires_grad</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">learner</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+        <span class="n">log_std</span> <span class="o">=</span> <span class="n">constant_like</span><span class="p">(</span><span class="n">theta</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">log_std_init</span><span class="p">)</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">fixed_std</span> <span class="k">else</span> <span class="n">theta</span><span class="p">[:,</span> <span class="bp">self</span><span class="o">.</span><span class="n">policy_dim</span><span class="p">:]</span>
+        <span class="n">log_std</span> <span class="o">=</span> <span class="n">ensure_leaf_tensor_or_array</span><span class="p">(</span><span class="n">log_std</span><span class="p">,</span> <span class="n">tensor</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">requires_grad</span><span class="o">=</span><span class="kc">False</span> <span class="k">if</span>
+                                              <span class="bp">self</span><span class="o">.</span><span class="n">fixed_std</span> <span class="k">else</span>
+                                              <span class="n">requires_grad</span><span class="p">,</span>
+                                              <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">learner</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">requires_grad</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">grads</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">params</span> <span class="o">=</span> <span class="n">mean_actions</span><span class="p">,</span> <span class="n">log_std</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">input</span> <span class="o">=</span> <span class="n">observations</span>
+        <span class="k">return</span> <span class="n">mean_actions</span><span class="p">,</span> <span class="n">log_std</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">__copy__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;GaussianActor&quot;</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Creates a copy of the GaussianActor instance.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            GaussianActor: A copy of the current model.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">learner</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;learner must be initialized first.&quot;</span>
+        <span class="n">learner</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">learner</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+        <span class="k">assert</span> <span class="n">learner</span><span class="o">.</span><span class="n">optimizers</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;learner.optimizers must be initialized&quot;</span>
+        <span class="n">std_optimizer</span> <span class="o">=</span> <span class="kc">None</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">learner</span><span class="o">.</span><span class="n">optimizers</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mi">2</span> <span class="k">else</span> <span class="n">learner</span><span class="o">.</span><span class="n">optimizers</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+        <span class="n">copy_</span> <span class="o">=</span> <span class="n">GaussianActor</span><span class="p">(</span><span class="n">tree_struct</span><span class="o">=</span><span class="n">learner</span><span class="o">.</span><span class="n">tree_struct</span><span class="p">,</span>
+                              <span class="n">input_dim</span><span class="o">=</span><span class="n">learner</span><span class="o">.</span><span class="n">input_dim</span><span class="p">,</span>  <span class="c1"># type: ignore</span>
+                              <span class="n">output_dim</span><span class="o">=</span><span class="n">learner</span><span class="o">.</span><span class="n">output_dim</span><span class="p">,</span>  <span class="c1"># type: ignore</span>
+                              <span class="n">mu_optimizer</span><span class="o">=</span><span class="n">learner</span><span class="o">.</span><span class="n">optimizers</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span>  <span class="c1"># type: ignore</span>
+                              <span class="n">std_optimizer</span><span class="o">=</span><span class="n">std_optimizer</span><span class="p">,</span>
+                              <span class="n">params</span><span class="o">=</span><span class="n">learner</span><span class="o">.</span><span class="n">params</span><span class="p">,</span>
+                              <span class="n">bias</span><span class="o">=</span><span class="n">learner</span><span class="o">.</span><span class="n">get_bias</span><span class="p">(),</span>  <span class="c1"># type: ignore</span>
+                              <span class="n">verbose</span><span class="o">=</span><span class="n">learner</span><span class="o">.</span><span class="n">verbose</span><span class="p">,</span>
+                              <span class="n">device</span><span class="o">=</span><span class="n">learner</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+        <span class="n">copy_</span><span class="o">.</span><span class="n">learner</span> <span class="o">=</span> <span class="n">learner</span>
+        <span class="k">return</span> <span class="n">copy_</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024-2025, NVIDIA Corporation.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

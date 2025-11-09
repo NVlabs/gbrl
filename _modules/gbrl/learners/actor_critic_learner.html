@@ -1,0 +1,529 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>gbrl.learners.actor_critic_learner &mdash; GBRL 1.1.6 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=937269b5"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            GBRL
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">User Guide:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../quickstart.html">Quickstart</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../quickstart.html#source-compilation">Source Compilation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../examples.html">Examples</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Documentation:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../models/index.html">Models</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../learners/index.html">Learners</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">GBRL</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">gbrl.learners.actor_critic_learner</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for gbrl.learners.actor_critic_learner</h1><div class="highlight"><pre>
+<span></span><span class="c1">##############################################################################</span>
+<span class="c1"># Copyright (c) 2024-2025, NVIDIA Corporation. All rights reserved.</span>
+<span class="c1">#</span>
+<span class="c1"># Permission is hereby granted, free of charge, to any person obtaining a</span>
+<span class="c1"># copy of this software and associated documentation files (the &quot;Software&quot;),</span>
+<span class="c1"># to deal in the Software without restriction, including without limitation</span>
+<span class="c1"># the rights to use, copy, modify, merge, publish, distribute, sublicense,</span>
+<span class="c1"># and/or sell copies of the Software, and to permit persons to whom the</span>
+<span class="c1"># Software is furnished to do so, subject to the following conditions:</span>
+<span class="c1">#</span>
+<span class="c1"># The above copyright notice and this permission notice shall be included in</span>
+<span class="c1"># all copies or substantial portions of the Software.</span>
+<span class="c1">#</span>
+<span class="c1"># THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR</span>
+<span class="c1"># IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,</span>
+<span class="c1"># FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL</span>
+<span class="c1"># THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER</span>
+<span class="c1"># LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING</span>
+<span class="c1"># FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER</span>
+<span class="c1"># DEALINGS IN THE SOFTWARE.</span>
+<span class="c1">##############################################################################</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">Actor-Critic Learner Module</span>
+
+<span class="sd">This module provides learner classes for actor-critic architectures,</span>
+<span class="sd">supporting both shared and separate tree structures for policy and value</span>
+<span class="sd">function learning.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Dict</span><span class="p">,</span> <span class="n">List</span><span class="p">,</span> <span class="n">Optional</span><span class="p">,</span> <span class="n">Tuple</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">gbrl</span><span class="w"> </span><span class="kn">import</span> <span class="n">GBRL_CPP</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">gbrl.common.utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">NumericalData</span><span class="p">,</span> <span class="n">ensure_leaf_tensor_or_array</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">gbrl.learners.gbt_learner</span><span class="w"> </span><span class="kn">import</span> <span class="n">GBTLearner</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">gbrl.learners.multi_gbt_learner</span><span class="w"> </span><span class="kn">import</span> <span class="n">MultiGBTLearner</span>
+
+
+<div class="viewcode-block" id="SharedActorCriticLearner">
+<a class="viewcode-back" href="../../../learners/shared_actor_critic_learner.html#gbrl.learners.actor_critic_learner.SharedActorCriticLearner">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">SharedActorCriticLearner</span><span class="p">(</span><span class="n">GBTLearner</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    SharedActorCriticLearner is a variant of GBTLearner where a single tree is</span>
+<span class="sd">    used for both</span>
+<span class="sd">    actor (policy) and critic (value) learning. It utilizes gradient boosting</span>
+<span class="sd">    trees (GBTs)</span>
+<span class="sd">    to estimate both policy and value function parameters efficiently.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span>
+                 <span class="n">input_dim</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+                 <span class="n">output_dim</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+                 <span class="n">tree_struct</span><span class="p">:</span> <span class="n">Dict</span><span class="p">,</span>
+                 <span class="n">policy_optimizer</span><span class="p">:</span> <span class="n">Dict</span><span class="p">,</span>
+                 <span class="n">value_optimizer</span><span class="p">:</span> <span class="n">Dict</span><span class="p">,</span>
+                 <span class="n">params</span><span class="p">:</span> <span class="n">Dict</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(),</span>
+                 <span class="n">verbose</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span>
+                 <span class="n">device</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;cpu&#39;</span><span class="p">,</span>
+                 <span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;SharedActorCritic&#39;</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Initializes the SharedActorCriticLearner.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            input_dim (int): Number of input features.</span>
+<span class="sd">            output_dim (int): Number of output dimensions.</span>
+<span class="sd">            tree_struct (Dict): Dictionary containing tree structure</span>
+<span class="sd">            parameters.</span>
+<span class="sd">            policy_optimizer (Dict): Dictionary with optimization parameters</span>
+<span class="sd">            for the policy.</span>
+<span class="sd">            value_optimizer (Dict): Dictionary with optimization parameters</span>
+<span class="sd">            for the critic.</span>
+<span class="sd">            params (Dict, optional): Additional model parameters. Defaults to</span>
+<span class="sd">            an empty dictionary.</span>
+<span class="sd">            verbose (int, optional): Verbosity level. Defaults to 0.</span>
+<span class="sd">            device (str, optional): Device to run the model on. Defaults to</span>
+<span class="sd">            &#39;cpu&#39;.</span>
+<span class="sd">            name (str, optional): Name identifier for this learner. Defaults to</span>
+<span class="sd">            &#39;SharedActorCritic&#39;.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">verbose</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;****************************************&#39;</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Shared GBRL Tree with input dim: </span><span class="si">{</span><span class="n">input_dim</span><span class="si">}</span><span class="s1">, &#39;</span>
+                  <span class="sa">f</span><span class="s1">&#39;output dim: </span><span class="si">{</span><span class="n">output_dim</span><span class="si">}</span><span class="s1">, tree_struct: </span><span class="si">{</span><span class="n">tree_struct</span><span class="si">}</span><span class="s1">, &#39;</span>
+                  <span class="sa">f</span><span class="s1">&#39;policy_optimizer: </span><span class="si">{</span><span class="n">policy_optimizer</span><span class="si">}</span><span class="s1">, &#39;</span>
+                  <span class="sa">f</span><span class="s1">&#39;value_optimizer: </span><span class="si">{</span><span class="n">value_optimizer</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;****************************************&#39;</span><span class="p">)</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">input_dim</span><span class="p">,</span> <span class="n">output_dim</span><span class="p">,</span>
+                         <span class="n">tree_struct</span><span class="o">=</span><span class="n">tree_struct</span><span class="p">,</span>
+                         <span class="n">optimizers</span><span class="o">=</span><span class="p">[</span><span class="n">policy_optimizer</span><span class="p">,</span> <span class="n">value_optimizer</span><span class="p">],</span>
+                         <span class="n">params</span><span class="o">=</span><span class="n">params</span><span class="p">,</span>
+                         <span class="n">policy_dim</span><span class="o">=</span><span class="n">output_dim</span> <span class="o">-</span> <span class="mi">1</span><span class="p">,</span>
+                         <span class="n">verbose</span><span class="o">=</span><span class="n">verbose</span><span class="p">,</span>
+                         <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">,</span>
+                         <span class="n">name</span><span class="o">=</span><span class="n">name</span><span class="p">)</span>
+
+<div class="viewcode-block" id="SharedActorCriticLearner.distil">
+<a class="viewcode-back" href="../../../learners/shared_actor_critic_learner.html#gbrl.learners.actor_critic_learner.SharedActorCriticLearner.distil">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">distil</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">obs</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>  <span class="c1"># type: ignore</span>
+               <span class="n">policy_targets</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
+               <span class="n">value_targets</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
+               <span class="n">params</span><span class="p">:</span> <span class="n">Dict</span><span class="p">,</span>
+               <span class="n">verbose</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="n">Dict</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Distills the trained model into a student model.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            obs (np.ndarray): Input observations.</span>
+<span class="sd">            policy_targets (np.ndarray): Target values for the policy (actor).</span>
+<span class="sd">            value_targets (np.ndarray): Target values for the value function</span>
+<span class="sd">            (critic).</span>
+<span class="sd">            params (Dict): Distillation parameters.</span>
+<span class="sd">            verbose (int): Verbosity level.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            Tuple[float, Dict]: The final loss value and updated parameters</span>
+<span class="sd">            for distillation</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">targets</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">concatenate</span><span class="p">([</span><span class="n">policy_targets</span><span class="p">,</span>
+                                  <span class="n">value_targets</span><span class="p">[:,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">]],</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+        <span class="k">return</span> <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">distil</span><span class="p">(</span><span class="n">obs</span><span class="p">,</span> <span class="n">targets</span><span class="p">,</span> <span class="n">params</span><span class="p">,</span> <span class="n">verbose</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="SharedActorCriticLearner.predict">
+<a class="viewcode-back" href="../../../learners/shared_actor_critic_learner.html#gbrl.learners.actor_critic_learner.SharedActorCriticLearner.predict">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">predict</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span>  <span class="c1"># type: ignore</span>
+                <span class="n">inputs</span><span class="p">:</span> <span class="n">NumericalData</span><span class="p">,</span>
+                <span class="n">requires_grad</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span> <span class="n">start_idx</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+                <span class="n">stop_idx</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">tensor</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">)</span> <span class="o">-&gt;</span> \
+            <span class="n">Tuple</span><span class="p">[</span><span class="n">NumericalData</span><span class="p">,</span> <span class="n">NumericalData</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Predicts both policy and value function outputs.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            inputs (NumericalData): Input observations.</span>
+<span class="sd">            requires_grad (bool, optional): Whether to compute gradients.</span>
+<span class="sd">            Defaults to True.</span>
+<span class="sd">            start_idx (int, optional): Start index for prediction. Defaults to</span>
+<span class="sd">            0.</span>
+<span class="sd">            stop_idx (int, optional): Stop index for prediction. Defaults to</span>
+<span class="sd">            None.</span>
+<span class="sd">            tensor (bool, optional): Whether to return a tensor. Defaults to</span>
+<span class="sd">            True.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            Tuple[NumericalData, NumericalData]: Predicted policy and value outputs.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">preds</span> <span class="o">=</span> <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">predict</span><span class="p">(</span><span class="n">inputs</span><span class="p">,</span> <span class="n">requires_grad</span><span class="p">,</span> <span class="n">start_idx</span><span class="p">,</span> <span class="n">stop_idx</span><span class="p">,</span>
+                                <span class="n">tensor</span><span class="p">)</span>
+        <span class="n">pred_values</span> <span class="o">=</span> <span class="n">preds</span><span class="p">[:,</span> <span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+        <span class="n">preds</span> <span class="o">=</span> <span class="n">preds</span><span class="p">[:,</span> <span class="p">:</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+        <span class="n">preds</span> <span class="o">=</span> <span class="n">ensure_leaf_tensor_or_array</span><span class="p">(</span><span class="n">preds</span><span class="p">,</span> <span class="n">tensor</span><span class="p">,</span> <span class="n">requires_grad</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+        <span class="n">pred_values</span> <span class="o">=</span> <span class="n">ensure_leaf_tensor_or_array</span><span class="p">(</span><span class="n">pred_values</span><span class="p">,</span> <span class="n">tensor</span><span class="p">,</span> <span class="n">requires_grad</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">preds</span><span class="p">,</span> <span class="n">pred_values</span>  <span class="c1"># type: ignore</span></div>
+
+
+<div class="viewcode-block" id="SharedActorCriticLearner.predict_policy">
+<a class="viewcode-back" href="../../../learners/shared_actor_critic_learner.html#gbrl.learners.actor_critic_learner.SharedActorCriticLearner.predict_policy">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">predict_policy</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">obs</span><span class="p">:</span> <span class="n">NumericalData</span><span class="p">,</span>
+                       <span class="n">requires_grad</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span> <span class="n">start_idx</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+                       <span class="n">stop_idx</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">tensor</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NumericalData</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Predicts the policy (actor) output for the given observations.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            obs (NumericalData): Input observations.</span>
+<span class="sd">            requires_grad (bool, optional): Whether to compute gradients.</span>
+<span class="sd">            Defaults to True.</span>
+<span class="sd">            start_idx (int, optional): Start index for prediction. Defaults to</span>
+<span class="sd">            0.</span>
+<span class="sd">            stop_idx (int, optional): Stop index for prediction. Defaults to</span>
+<span class="sd">            None.</span>
+<span class="sd">            tensor (bool, optional): Whether to return a tensor. Defaults to</span>
+<span class="sd">            True.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            NumericalData: Predicted policy outputs.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">preds</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">predict</span><span class="p">(</span><span class="n">obs</span><span class="p">,</span> <span class="n">requires_grad</span><span class="p">,</span> <span class="n">start_idx</span><span class="p">,</span> <span class="n">stop_idx</span><span class="p">,</span>
+                                <span class="n">tensor</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">preds</span></div>
+
+
+<div class="viewcode-block" id="SharedActorCriticLearner.predict_critic">
+<a class="viewcode-back" href="../../../learners/shared_actor_critic_learner.html#gbrl.learners.actor_critic_learner.SharedActorCriticLearner.predict_critic">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">predict_critic</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">obs</span><span class="p">:</span> <span class="n">NumericalData</span><span class="p">,</span>
+                       <span class="n">requires_grad</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span> <span class="n">start_idx</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+                       <span class="n">stop_idx</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">tensor</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NumericalData</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Predicts the value function (critic) output for the given observations.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            obs (NumericalData): Input observations.</span>
+<span class="sd">            requires_grad (bool, optional): Whether to compute gradients. Defaults to True.</span>
+<span class="sd">            start_idx (int, optional): Start index for prediction. Defaults to 0.</span>
+<span class="sd">            stop_idx (int, optional): Stop index for prediction. Defaults to None.</span>
+<span class="sd">            tensor (bool, optional): Whether to return a tensor. Defaults to True.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            NumericalData: Predicted value function outputs.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">_</span><span class="p">,</span> <span class="n">pred_values</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">predict</span><span class="p">(</span><span class="n">obs</span><span class="p">,</span> <span class="n">requires_grad</span><span class="p">,</span> <span class="n">start_idx</span><span class="p">,</span> <span class="n">stop_idx</span><span class="p">,</span>
+                                      <span class="n">tensor</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">pred_values</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">__copy__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;SharedActorCriticLearner&quot;</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Creates a copy of the SharedActorCriticLearner instance.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            SharedActorCriticLearner: A copy of the current instance.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">input_dim</span><span class="p">,</span> <span class="nb">int</span><span class="p">),</span> <span class="s2">&quot;input_dim should be an integer&quot;</span>
+        <span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">output_dim</span><span class="p">,</span> <span class="nb">int</span><span class="p">),</span> <span class="s2">&quot;output_dim should be an integer&quot;</span>
+        <span class="n">copy_</span> <span class="o">=</span> <span class="n">SharedActorCriticLearner</span><span class="p">(</span><span class="n">input_dim</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">input_dim</span><span class="p">,</span>
+                                         <span class="n">output_dim</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">output_dim</span><span class="p">,</span>
+                                         <span class="n">tree_struct</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">tree_struct</span><span class="o">.</span><span class="n">copy</span><span class="p">(),</span>
+                                         <span class="n">policy_optimizer</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">optimizers</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">copy</span><span class="p">(),</span>
+                                         <span class="n">value_optimizer</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">optimizers</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">copy</span><span class="p">(),</span>
+                                         <span class="n">params</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="p">,</span>
+                                         <span class="n">verbose</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">verbose</span><span class="p">,</span>
+                                         <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">,</span>
+                                         <span class="n">name</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">learner_name</span><span class="p">)</span>
+        <span class="n">copy_</span><span class="o">.</span><span class="n">iteration</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">iteration</span>
+        <span class="n">copy_</span><span class="o">.</span><span class="n">total_iterations</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">total_iterations</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cpp_model</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">copy_</span><span class="o">.</span><span class="n">_cpp_model</span> <span class="o">=</span> <span class="n">GBRL_CPP</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_cpp_model</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">student_model</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">copy_</span><span class="o">.</span><span class="n">student_model</span> <span class="o">=</span> <span class="n">GBRL_CPP</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">student_model</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">copy_</span></div>
+
+
+
+<div class="viewcode-block" id="SeparateActorCriticLearner">
+<a class="viewcode-back" href="../../../learners/separate_actor_critic_learner.html#gbrl.learners.actor_critic_learner.SeparateActorCriticLearner">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">SeparateActorCriticLearner</span><span class="p">(</span><span class="n">MultiGBTLearner</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Implements a separate actor-critic learner using two independent gradient</span>
+<span class="sd">    boosted trees.</span>
+
+<span class="sd">    This class extends MultiGBTLearner by maintaining two separate models:</span>
+<span class="sd">    - One for policy learning (Actor).</span>
+<span class="sd">    - One for value estimation (Critic).</span>
+
+<span class="sd">    It provides separate `step_actor` and `step_critic` methods for updating</span>
+<span class="sd">    the respective models.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">input_dim</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+                 <span class="n">output_dim</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+                 <span class="n">tree_struct</span><span class="p">:</span> <span class="n">Dict</span><span class="p">,</span>
+                 <span class="n">policy_optimizer</span><span class="p">:</span> <span class="n">Dict</span><span class="p">,</span>
+                 <span class="n">value_optimizer</span><span class="p">:</span> <span class="n">Dict</span><span class="p">,</span>
+                 <span class="n">params</span><span class="p">:</span> <span class="n">Dict</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(),</span>
+                 <span class="n">verbose</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span>
+                 <span class="n">device</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;cpu&#39;</span><span class="p">,</span>
+                 <span class="n">actor_name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;Actor&#39;</span><span class="p">,</span>
+                 <span class="n">critic_name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;Critic&#39;</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Initializes the SeparateActorCriticLearner with two independent GBT</span>
+<span class="sd">        models.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            input_dim (int): Number of input features.</span>
+<span class="sd">            output_dim (int): Number of output dimensions.</span>
+<span class="sd">            tree_struct (Dict): Dictionary containing tree structure parameters.</span>
+<span class="sd">            policy_optimizer (Dict): Optimizer configuration for the policy (actor).</span>
+<span class="sd">            value_optimizer (Dict): Optimizer configuration for the value function (critic).</span>
+<span class="sd">            params (Dict, optional): Additional model parameters. Defaults to an empty dictionary.</span>
+<span class="sd">            verbose (int, optional): Verbosity level for debugging. Defaults to 0.</span>
+<span class="sd">            device (str, optional): Device to run the model on (&#39;cpu&#39; or &#39;cuda&#39;). Defaults to &#39;cpu&#39;.</span>
+<span class="sd">            actor_name (str, optional): Name for the actor learner. Defaults to &#39;Actor&#39;.</span>
+<span class="sd">            critic_name (str, optional): Name for the critic learner. Defaults to &#39;Critic&#39;.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">verbose</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;****************************************&#39;</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Separate GBRL Tree with input dim: </span><span class="si">{</span><span class="n">input_dim</span><span class="si">}</span><span class="s1">, &#39;</span>
+                  <span class="sa">f</span><span class="s1">&#39;output dim: </span><span class="si">{</span><span class="n">output_dim</span><span class="si">}</span><span class="s1">, tree_struct: </span><span class="si">{</span><span class="n">tree_struct</span><span class="si">}</span><span class="s1">, &#39;</span>
+                  <span class="sa">f</span><span class="s1">&#39;policy_optimizer: </span><span class="si">{</span><span class="n">policy_optimizer</span><span class="si">}</span><span class="s1">, &#39;</span>
+                  <span class="sa">f</span><span class="s1">&#39;value_optimizer: </span><span class="si">{</span><span class="n">value_optimizer</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;****************************************&#39;</span><span class="p">)</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">input_dim</span><span class="p">,</span>
+                         <span class="n">output_dim</span><span class="o">=</span><span class="p">[</span><span class="n">output_dim</span> <span class="o">-</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">],</span>
+                         <span class="n">tree_struct</span><span class="o">=</span><span class="n">tree_struct</span><span class="p">,</span>
+                         <span class="n">optimizers</span><span class="o">=</span><span class="p">[</span><span class="n">policy_optimizer</span><span class="p">,</span> <span class="n">value_optimizer</span><span class="p">],</span>
+                         <span class="n">params</span><span class="o">=</span><span class="n">params</span><span class="p">,</span>
+                         <span class="n">n_learners</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span>
+                         <span class="n">policy_dim</span><span class="o">=</span><span class="p">[</span><span class="n">output_dim</span> <span class="o">-</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span>
+                         <span class="n">verbose</span><span class="o">=</span><span class="n">verbose</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">,</span>
+                         <span class="n">names</span><span class="o">=</span><span class="p">[</span><span class="n">actor_name</span><span class="p">,</span> <span class="n">critic_name</span><span class="p">])</span>
+
+<div class="viewcode-block" id="SeparateActorCriticLearner.step_actor">
+<a class="viewcode-back" href="../../../learners/separate_actor_critic_learner.html#gbrl.learners.actor_critic_learner.SeparateActorCriticLearner.step_actor">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">step_actor</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span>
+                   <span class="n">inputs</span><span class="p">:</span> <span class="n">NumericalData</span><span class="p">,</span>
+                   <span class="n">grads</span><span class="p">:</span> <span class="n">NumericalData</span><span class="p">,</span>
+                   <span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Performs a gradient update step for the policy (actor) model.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            obs (NumericalData): Input observations.</span>
+<span class="sd">            theta_grad (NumericalData): Gradient update for the policy (actor).</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">step</span><span class="p">(</span><span class="n">inputs</span><span class="o">=</span><span class="n">inputs</span><span class="p">,</span> <span class="n">grads</span><span class="o">=</span><span class="n">grads</span><span class="p">,</span> <span class="n">model_idx</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="SeparateActorCriticLearner.step_critic">
+<a class="viewcode-back" href="../../../learners/separate_actor_critic_learner.html#gbrl.learners.actor_critic_learner.SeparateActorCriticLearner.step_critic">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">step_critic</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">inputs</span><span class="p">:</span> <span class="n">NumericalData</span><span class="p">,</span>
+                    <span class="n">grads</span><span class="p">:</span> <span class="n">NumericalData</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Performs a gradient update step for the value function (critic) model.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            obs (NumericalData): Input observations.</span>
+<span class="sd">            value_grad (NumericalData): Gradient update for the value function (critic).</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">step</span><span class="p">(</span><span class="n">inputs</span><span class="o">=</span><span class="n">inputs</span><span class="p">,</span> <span class="n">grads</span><span class="o">=</span><span class="n">grads</span><span class="p">,</span> <span class="n">model_idx</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="SeparateActorCriticLearner.distil">
+<a class="viewcode-back" href="../../../learners/separate_actor_critic_learner.html#gbrl.learners.actor_critic_learner.SeparateActorCriticLearner.distil">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">distil</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">obs</span><span class="p">:</span> <span class="n">NumericalData</span><span class="p">,</span>  <span class="c1"># type: ignore</span>
+               <span class="n">policy_targets</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
+               <span class="n">value_targets</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
+               <span class="n">params</span><span class="p">:</span> <span class="n">Dict</span><span class="p">,</span>
+               <span class="n">verbose</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="nb">float</span><span class="p">],</span> <span class="n">List</span><span class="p">[</span><span class="n">Dict</span><span class="p">]]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Distills the trained model into a student model.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            obs (NumericalData): Input observations.</span>
+<span class="sd">            policy_targets (np.ndarray): Target values for the policy (actor).</span>
+<span class="sd">            value_targets (np.ndarray): Target values for the value function (critic).</span>
+<span class="sd">            params (Dict): Distillation parameters.</span>
+<span class="sd">            verbose (int): Verbosity level.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            Tuple[List[float], List[Dict]]: The final loss values and updated parameters for distillation.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">distil</span><span class="p">(</span><span class="n">obs</span><span class="p">,</span> <span class="p">[</span><span class="n">policy_targets</span><span class="p">,</span> <span class="n">value_targets</span><span class="p">],</span> <span class="n">params</span><span class="p">,</span> <span class="n">verbose</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="SeparateActorCriticLearner.predict_policy">
+<a class="viewcode-back" href="../../../learners/separate_actor_critic_learner.html#gbrl.learners.actor_critic_learner.SeparateActorCriticLearner.predict_policy">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">predict_policy</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">obs</span><span class="p">:</span> <span class="n">NumericalData</span><span class="p">,</span>
+                       <span class="n">requires_grad</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span> <span class="n">start_idx</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+                       <span class="n">stop_idx</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">tensor</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NumericalData</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Predicts the policy (actor) output for the given observations.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            obs (NumericalData): Input observations.</span>
+<span class="sd">            requires_grad (bool, optional): Whether to compute gradients. Defaults to True.</span>
+<span class="sd">            start_idx (int, optional): Start index for prediction. Defaults to 0.</span>
+<span class="sd">            stop_idx (int, optional): Stop index for prediction. Defaults to None.</span>
+<span class="sd">            tensor (bool, optional): Whether to return a tensor. Defaults to True.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            NumericalData: Predicted policy outputs.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">predict</span><span class="p">(</span><span class="n">obs</span><span class="p">,</span> <span class="n">requires_grad</span><span class="p">,</span> <span class="n">start_idx</span><span class="p">,</span> <span class="n">stop_idx</span><span class="p">,</span> <span class="n">tensor</span><span class="p">,</span> <span class="n">model_idx</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>  <span class="c1"># type: ignore</span></div>
+
+
+<div class="viewcode-block" id="SeparateActorCriticLearner.predict_critic">
+<a class="viewcode-back" href="../../../learners/separate_actor_critic_learner.html#gbrl.learners.actor_critic_learner.SeparateActorCriticLearner.predict_critic">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">predict_critic</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">obs</span><span class="p">:</span> <span class="n">NumericalData</span><span class="p">,</span>
+                       <span class="n">requires_grad</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span> <span class="n">start_idx</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+                       <span class="n">stop_idx</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">tensor</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NumericalData</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Predicts the value function (critic) output for the given observations.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            obs (NumericalData): Input observations.</span>
+<span class="sd">            requires_grad (bool, optional): Whether to compute gradients. Defaults to True.</span>
+<span class="sd">            start_idx (int, optional): Start index for prediction. Defaults to 0.</span>
+<span class="sd">            stop_idx (int, optional): Stop index for prediction. Defaults to None.</span>
+<span class="sd">            tensor (bool, optional): Whether to return a tensor. Defaults to True.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            NumericalData: Predicted value function outputs.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">predict</span><span class="p">(</span><span class="n">obs</span><span class="p">,</span> <span class="n">requires_grad</span><span class="p">,</span> <span class="n">start_idx</span><span class="p">,</span> <span class="n">stop_idx</span><span class="p">,</span> <span class="n">tensor</span><span class="p">,</span> <span class="n">model_idx</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>  <span class="c1"># type: ignore</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">__copy__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;SeparateActorCriticLearner&quot;</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Creates a copy of the SeparateActorCriticLearner instance.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            SeparateActorCriticLearner: A new instance with the same parameters and structure.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">opts</span> <span class="o">=</span> <span class="p">[</span><span class="n">opt</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span> <span class="k">if</span> <span class="n">opt</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">opt</span>
+                <span class="k">for</span> <span class="n">opt</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">optimizers</span>
+                <span class="p">]</span>
+        <span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">input_dim</span><span class="p">,</span> <span class="nb">int</span><span class="p">),</span> <span class="s2">&quot;input_dim should be an integer&quot;</span>
+        <span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">output_dim</span><span class="p">,</span> <span class="nb">int</span><span class="p">),</span> <span class="s2">&quot;output_dim should be an integer&quot;</span>
+
+        <span class="n">copy_</span> <span class="o">=</span> <span class="n">SeparateActorCriticLearner</span><span class="p">(</span><span class="n">input_dim</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">input_dim</span><span class="p">,</span>
+                                           <span class="n">output_dim</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">output_dim</span><span class="p">,</span>
+                                           <span class="n">tree_struct</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">tree_struct</span><span class="o">.</span><span class="n">copy</span><span class="p">(),</span>
+                                           <span class="n">policy_optimizer</span><span class="o">=</span><span class="n">opts</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span>
+                                           <span class="n">value_optimizer</span><span class="o">=</span><span class="n">opts</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span>
+                                           <span class="n">params</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="p">,</span>
+                                           <span class="n">verbose</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">verbose</span><span class="p">,</span>
+                                           <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">,</span>
+                                           <span class="n">actor_name</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">learner_names</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span>
+                                           <span class="n">critic_name</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">learner_names</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+        <span class="n">copy_</span><span class="o">.</span><span class="n">iteration</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">iteration</span>
+        <span class="n">copy_</span><span class="o">.</span><span class="n">total_iterations</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">total_iterations</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">student_models</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">copy_</span><span class="o">.</span><span class="n">student_models</span> <span class="o">=</span> <span class="p">[</span><span class="kc">None</span><span class="p">]</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">n_learners</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cpp_models</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">copy_</span><span class="o">.</span><span class="n">_cpp_models</span> <span class="o">=</span> <span class="p">[</span><span class="kc">None</span><span class="p">]</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">n_learners</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cpp_models</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">n_learners</span><span class="p">):</span>
+                <span class="n">copy_</span><span class="o">.</span><span class="n">_cpp_models</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">GBRL_CPP</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_cpp_models</span><span class="p">[</span><span class="n">i</span><span class="p">])</span>  <span class="c1"># type: ignore</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">student_models</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="n">copy_</span><span class="o">.</span><span class="n">student_models</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">GBRL_CPP</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">student_models</span><span class="p">[</span><span class="n">i</span><span class="p">])</span>  <span class="c1"># type: ignore</span>
+        <span class="k">return</span> <span class="n">copy_</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024-2025, NVIDIA Corporation.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

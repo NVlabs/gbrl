@@ -1,0 +1,420 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>gbrl.models.gbt &mdash; GBRL 1.1.6 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=937269b5"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            GBRL
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">User Guide:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../quickstart.html">Quickstart</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../quickstart.html#source-compilation">Source Compilation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../examples.html">Examples</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Documentation:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../models/index.html">Models</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../learners/index.html">Learners</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">GBRL</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">gbrl.models.gbt</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for gbrl.models.gbt</h1><div class="highlight"><pre>
+<span></span><span class="c1">##############################################################################</span>
+<span class="c1"># Copyright (c) 2024-2025, NVIDIA Corporation. All rights reserved.</span>
+<span class="c1">#</span>
+<span class="c1"># Permission is hereby granted, free of charge, to any person obtaining a</span>
+<span class="c1"># copy of this software and associated documentation files (the &quot;Software&quot;),</span>
+<span class="c1"># to deal in the Software without restriction, including without limitation</span>
+<span class="c1"># the rights to use, copy, modify, merge, publish, distribute, sublicense,</span>
+<span class="c1"># and/or sell copies of the Software, and to permit persons to whom the</span>
+<span class="c1"># Software is furnished to do so, subject to the following conditions:</span>
+<span class="c1">#</span>
+<span class="c1"># The above copyright notice and this permission notice shall be included in</span>
+<span class="c1"># all copies or substantial portions of the Software.</span>
+<span class="c1">#</span>
+<span class="c1"># THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR</span>
+<span class="c1"># IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,</span>
+<span class="c1"># FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL</span>
+<span class="c1"># THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER</span>
+<span class="c1"># LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING</span>
+<span class="c1"># FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER</span>
+<span class="c1"># DEALINGS IN THE SOFTWARE.</span>
+<span class="c1">##############################################################################</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">Gradient Boosted Tree Model Module</span>
+
+<span class="sd">This module provides the GBTModel class, a general-purpose gradient boosting</span>
+<span class="sd">model for supervised learning and reinforcement learning tasks.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Dict</span><span class="p">,</span> <span class="n">List</span><span class="p">,</span> <span class="n">Optional</span><span class="p">,</span> <span class="n">Union</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">torch</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">th</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">gbrl.common.utils</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span><span class="n">NumericalData</span><span class="p">,</span> <span class="n">clip_grad_norm</span><span class="p">,</span> <span class="n">setup_optimizer</span><span class="p">,</span>
+                               <span class="n">validate_array</span><span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">gbrl.learners.gbt_learner</span><span class="w"> </span><span class="kn">import</span> <span class="n">GBTLearner</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">gbrl.models.base</span><span class="w"> </span><span class="kn">import</span> <span class="n">BaseGBT</span>
+
+
+<div class="viewcode-block" id="GBTModel">
+<a class="viewcode-back" href="../../../models/gbt.html#gbrl.models.gbt.GBTModel">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">GBTModel</span><span class="p">(</span><span class="n">BaseGBT</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    General class for gradient boosting trees</span>
+
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span>
+                 <span class="n">tree_struct</span><span class="p">:</span> <span class="n">Dict</span><span class="p">,</span>
+                 <span class="n">input_dim</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+                 <span class="n">output_dim</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+                 <span class="n">optimizers</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="n">Dict</span><span class="p">,</span> <span class="n">List</span><span class="p">[</span><span class="n">Dict</span><span class="p">]],</span>
+                 <span class="n">params</span><span class="p">:</span> <span class="n">Dict</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(),</span>
+                 <span class="n">verbose</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span>
+                 <span class="n">device</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;cpu&#39;</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Initializes the GBT model.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            tree_struct (Dict): Dictionary containing</span>
+<span class="sd">            tree structure information:</span>
+<span class="sd">                max_depth (int): maximum tree depth.</span>
+<span class="sd">                grow_policy (str): &#39;greedy&#39; or &#39;oblivious&#39;.</span>
+<span class="sd">                n_bins (int): number of bins per feature for candidate generation.</span>
+<span class="sd">                min_data_in_leaf (int): minimum number of samples in a leaf.</span>
+<span class="sd">                par_th (int): minimum number of samples for parallelizing on CPU.</span>
+<span class="sd">            output_dim (int): output dimension.</span>
+<span class="sd">            optimizers (Union[Dict, List[Dict]]): dictionary containing</span>
+<span class="sd">            optimizer parameters or a list of dictionaries containing</span>
+<span class="sd">            optimizer parameters.</span>
+<span class="sd">                SGD optimizer must contain as:</span>
+<span class="sd">                    &#39;algo&#39;: &#39;SGD&#39;</span>
+<span class="sd">                    &#39;lr&#39; Union[float, str]: learning rate value. Constant learning rate is used by default</span>
+<span class="sd">                Adam optimizer must contain (CPU only):</span>
+<span class="sd">                    &#39;algo&#39; (str): &#39;Adam&#39;</span>
+<span class="sd">                    &#39;lr&#39; Union[float, str]: learning rate value. Constant learning rate is used by default</span>
+<span class="sd">                    &#39;beta_1&#39; (float): 0.99</span>
+<span class="sd">                    &#39;beta_2&#39; (float): 0.999</span>
+<span class="sd">                    &#39;eps&#39; (float): 1.0e-8</span>
+<span class="sd">                All optimizers must contain:</span>
+<span class="sd">                    &#39;start_idx&#39;</span>
+<span class="sd">                    &#39;stop_idx&#39;</span>
+<span class="sd">                Setting scheduler type:</span>
+<span class="sd">                Available schedulers are Constant and Linear. Constant is default, Linear is CPU only.</span>
+<span class="sd">                To specify a linear scheduler, 3 additional arguments must be</span>
+<span class="sd">                added to an optimizer dict.</span>
+<span class="sd">                    &#39;init_lr&#39; (str): &quot;lin_&lt;value&gt;&quot;</span>
+<span class="sd">                    &#39;stop_lr&#39; (float): minimum lr value</span>
+<span class="sd">                    &#39;T&#39; (int): number of total expected boosting trees,</span>
+<span class="sd">                               used to calculate the linear scheduling internally.</span>
+<span class="sd">                               Can be manually calculated per algorithm</span>
+<span class="sd">                               according to the total number of training steps.</span>
+<span class="sd">             params (Dict, optional): GBRL parameters such as:</span>
+<span class="sd">                control_variates (bool): use control variates (variance</span>
+<span class="sd">                reduction technique CPU only).</span>
+<span class="sd">                split_score_func (str): &quot;cosine&quot; or &quot;l2&quot;</span>
+<span class="sd">                generator_type - (str): candidate generation method &quot;Quantile&quot; or &quot;Uniform&quot;.</span>
+<span class="sd">                feature_weights - (list[float]): Per-feature multiplication</span>
+<span class="sd">                weights used when choosing the best split. Weights should be &gt;= 0</span>
+<span class="sd">            verbose (int, optional): verbosity level. Defaults to 0.</span>
+<span class="sd">            device (str, optional): GBRL device &#39;cpu&#39; or &#39;cuda/gpu&#39;. Defaults to &#39;cpu&#39;.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">optimizers</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">optimizers</span><span class="p">,</span> <span class="nb">dict</span><span class="p">):</span>
+                <span class="n">optimizers</span> <span class="o">=</span> <span class="p">[</span><span class="n">optimizers</span><span class="p">]</span>
+            <span class="n">optimizers</span> <span class="o">=</span> <span class="p">[</span><span class="n">setup_optimizer</span><span class="p">(</span><span class="n">opt</span><span class="p">)</span> <span class="k">for</span> <span class="n">opt</span> <span class="ow">in</span> <span class="n">optimizers</span><span class="p">]</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">learner</span> <span class="o">=</span> <span class="n">GBTLearner</span><span class="p">(</span><span class="n">input_dim</span><span class="o">=</span><span class="n">input_dim</span><span class="p">,</span>
+                                  <span class="n">output_dim</span><span class="o">=</span><span class="n">output_dim</span><span class="p">,</span>
+                                  <span class="n">tree_struct</span><span class="o">=</span><span class="n">tree_struct</span><span class="p">,</span>
+                                  <span class="n">optimizers</span><span class="o">=</span><span class="n">optimizers</span><span class="p">,</span>
+                                  <span class="n">params</span><span class="o">=</span><span class="n">params</span><span class="p">,</span>
+                                  <span class="n">verbose</span><span class="o">=</span><span class="n">verbose</span><span class="p">,</span>
+                                  <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">learner</span><span class="o">.</span><span class="n">reset</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">grads</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">input</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">params</span> <span class="o">=</span> <span class="kc">None</span>
+
+<div class="viewcode-block" id="GBTModel.set_bias">
+<a class="viewcode-back" href="../../../models/gbt.html#gbrl.models.gbt.GBTModel.set_bias">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">set_bias</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">bias</span><span class="p">:</span> <span class="n">NumericalData</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Sets GBRL bias</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            bias (NumericalData)</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">bias</span><span class="p">,</span> <span class="n">th</span><span class="o">.</span><span class="n">Tensor</span><span class="p">):</span>
+            <span class="n">bias</span> <span class="o">=</span> <span class="n">bias</span><span class="o">.</span><span class="n">clone</span><span class="p">()</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span><span class="o">.</span><span class="n">numpy</span><span class="p">()</span>
+        <span class="c1"># GBRL works with 2D numpy arrays.</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">bias</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="n">bias</span> <span class="o">=</span> <span class="n">bias</span><span class="p">[:,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">learner</span><span class="o">.</span><span class="n">set_bias</span><span class="p">(</span><span class="n">bias</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">single</span><span class="p">))</span></div>
+
+
+<div class="viewcode-block" id="GBTModel.set_bias_from_targets">
+<a class="viewcode-back" href="../../../models/gbt.html#gbrl.models.gbt.GBTModel.set_bias_from_targets">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">set_bias_from_targets</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">targets</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
+                                                   <span class="n">th</span><span class="o">.</span><span class="n">Tensor</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Sets bias as mean of targets</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            targets (NumericalData): Targets</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">targets</span><span class="p">,</span> <span class="n">th</span><span class="o">.</span><span class="n">Tensor</span><span class="p">):</span>
+            <span class="n">arr</span> <span class="o">=</span> <span class="n">targets</span><span class="o">.</span><span class="n">clone</span><span class="p">()</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span><span class="o">.</span><span class="n">numpy</span><span class="p">()</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">arr</span> <span class="o">=</span> <span class="n">targets</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+        <span class="c1"># GBRL works with 2D numpy arrays.</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">arr</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="n">arr</span> <span class="o">=</span> <span class="n">arr</span><span class="p">[:,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">]</span>
+        <span class="n">mean_arr</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">arr</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">mean_arr</span><span class="p">,</span> <span class="nb">float</span><span class="p">):</span>
+            <span class="n">mean_arr</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">mean_arr</span><span class="p">])</span>
+        <span class="c1"># GBRL only works with float32</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">learner</span><span class="o">.</span><span class="n">set_bias</span><span class="p">(</span><span class="n">mean_arr</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="GBTModel.step">
+<a class="viewcode-back" href="../../../models/gbt.html#gbrl.models.gbt.GBTModel.step">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">step</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span>
+             <span class="n">X</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">NumericalData</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+             <span class="n">grads</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">NumericalData</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+             <span class="n">max_grad_norm</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+             <span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Perform a boosting step (fits a single tree on the gradients)</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            X (NumericalData): inputs</span>
+<span class="sd">            max_grad_norm (float, optional): perform gradient clipping by norm. Defaults to None.</span>
+<span class="sd">            grads (Optional[NumericalData], optional): manually calculated gradients. Defaults to None.</span>
+
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">X</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">input</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">,</span> <span class="p">(</span><span class="s2">&quot;Cannot update trees without input.&quot;</span>
+                                            <span class="s2">&quot;Make sure model is called with requires_grad=True&quot;</span><span class="p">)</span>
+            <span class="n">X</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">input</span>
+        <span class="n">n_samples</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">X</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">grads</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">params</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;params must be set to compute gradients.&quot;</span>
+            <span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="p">,</span> <span class="n">th</span><span class="o">.</span><span class="n">Tensor</span><span class="p">),</span> <span class="s2">&quot;params must be a Tensor to compute gradients.&quot;</span>
+            <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="o">.</span><span class="n">grad</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;params.grad must be set to compute gradients.&quot;</span>
+            <span class="n">grads</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="o">.</span><span class="n">grad</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span> <span class="o">*</span> <span class="n">n_samples</span>
+
+        <span class="n">grads</span> <span class="o">=</span> <span class="n">clip_grad_norm</span><span class="p">(</span><span class="n">grads</span><span class="p">,</span> <span class="n">max_grad_norm</span><span class="p">)</span>
+        <span class="n">validate_array</span><span class="p">(</span><span class="n">grads</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">learner</span><span class="o">.</span><span class="n">step</span><span class="p">(</span><span class="n">inputs</span><span class="o">=</span><span class="n">X</span><span class="p">,</span> <span class="n">grads</span><span class="o">=</span><span class="n">grads</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">grads</span> <span class="o">=</span> <span class="n">grads</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">input</span> <span class="o">=</span> <span class="kc">None</span></div>
+
+
+<div class="viewcode-block" id="GBTModel.fit">
+<a class="viewcode-back" href="../../../models/gbt.html#gbrl.models.gbt.GBTModel.fit">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">fit</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">X</span><span class="p">:</span> <span class="n">NumericalData</span><span class="p">,</span>
+            <span class="n">targets</span><span class="p">:</span> <span class="n">NumericalData</span><span class="p">,</span>
+            <span class="n">iterations</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+            <span class="n">shuffle</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="n">loss_type</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;MultiRMSE&#39;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Fit multiple iterations (as in supervised learning)</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            X (NumericalData): inputs</span>
+<span class="sd">            targets (NumericalData): targets</span>
+<span class="sd">            iterations (int): number of boosting iterations</span>
+<span class="sd">            shuffle (bool, optional): Shuffle dataset. Defaults to True.</span>
+<span class="sd">            loss_type (str, optional): Loss to use (only MultiRMSE is currently implemented ). Defaults to &#39;MultiRMSE&#39;.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            float: final loss over all examples.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">learner</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">X</span><span class="p">,</span> <span class="n">targets</span><span class="p">,</span> <span class="n">iterations</span><span class="p">,</span> <span class="n">shuffle</span><span class="p">,</span> <span class="n">loss_type</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="GBTModel.load_learner">
+<a class="viewcode-back" href="../../../models/gbt.html#gbrl.models.gbt.GBTModel.load_learner">[docs]</a>
+    <span class="nd">@classmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">load_learner</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">load_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">device</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;GBTModel&quot;</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Loads GBRL model from a file</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            load_name (str): full path to file name</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            GBRL instance</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">instance</span> <span class="o">=</span> <span class="bp">cls</span><span class="o">.</span><span class="fm">__new__</span><span class="p">(</span><span class="bp">cls</span><span class="p">)</span>
+        <span class="n">instance</span><span class="o">.</span><span class="n">learner</span> <span class="o">=</span> <span class="n">GBTLearner</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">load_name</span><span class="p">,</span> <span class="n">device</span><span class="p">)</span>
+        <span class="n">instance</span><span class="o">.</span><span class="n">params</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">return</span> <span class="n">instance</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">X</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="n">th</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">],</span>
+                 <span class="n">requires_grad</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span> <span class="n">start_idx</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+                 <span class="n">stop_idx</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">tensor</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Union</span><span class="p">[</span><span class="n">th</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Returns GBRL&#39;s output as either a Tensor or a numpy array. if</span>
+<span class="sd">        `requires_grad=True` then stores differentiable parameters</span>
+<span class="sd">        in self.params. Return type/device is identical to the input type/device.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            X (Union[th.Tensor, np.ndarray]): Input</span>
+<span class="sd">            requires_grad (bool, optional). Defaults to True.</span>
+<span class="sd">            start_idx (int, optional): start tree index for prediction. Defaults to 0.</span>
+<span class="sd">            stop_idx (_type_, optional): stop tree index for prediction</span>
+<span class="sd">            (uses all trees in the ensemble if set to 0). Defaults to None.</span>
+<span class="sd">            tensor (bool, optional): Return PyTorch Tensor, False returns a numpy array. Defaults to True.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            Union[th.Tensor, np.ndarray]: Returns model predictions</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">y_pred</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">learner</span><span class="o">.</span><span class="n">predict</span><span class="p">(</span><span class="n">X</span><span class="p">,</span> <span class="n">requires_grad</span><span class="p">,</span> <span class="n">start_idx</span><span class="p">,</span> <span class="n">stop_idx</span><span class="p">,</span> <span class="n">tensor</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">requires_grad</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">grads</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">params</span> <span class="o">=</span> <span class="n">y_pred</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">input</span> <span class="o">=</span> <span class="n">X</span>
+        <span class="k">return</span> <span class="n">y_pred</span>
+
+<div class="viewcode-block" id="GBTModel.print_tree">
+<a class="viewcode-back" href="../../../models/gbt.html#gbrl.models.gbt.GBTModel.print_tree">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">print_tree</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tree_idx</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Prints tree information</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            tree_idx (int): tree index to print</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">learner</span><span class="o">.</span><span class="n">print_tree</span><span class="p">(</span><span class="n">tree_idx</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="GBTModel.plot_tree">
+<a class="viewcode-back" href="../../../models/gbt.html#gbrl.models.gbt.GBTModel.plot_tree">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">plot_tree</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tree_idx</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">filename</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Plots tree using (only works if GBRL was compiled with graphviz)</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            tree_idx (int): tree index to plot</span>
+<span class="sd">            filename (str): .png filename to save</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">learner</span><span class="o">.</span><span class="n">plot_tree</span><span class="p">(</span><span class="n">tree_idx</span><span class="p">,</span> <span class="n">filename</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="GBTModel.copy">
+<a class="viewcode-back" href="../../../models/gbt.html#gbrl.models.gbt.GBTModel.copy">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">copy</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;GBTModel&quot;</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Copy class instance</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            GradientBoostingTrees: copy of current instance. The actual type</span>
+<span class="sd">            will be the type of the subclass that calls this method.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">__copy__</span><span class="p">()</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">__copy__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;GBTModel&quot;</span><span class="p">:</span>
+        <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">learner</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;learner must be initialized first.&quot;</span>
+
+        <span class="n">learner</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">learner</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+        <span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">learner</span><span class="o">.</span><span class="n">input_dim</span><span class="p">,</span> <span class="nb">int</span><span class="p">),</span> <span class="s2">&quot;learner.input_dim must be int&quot;</span>
+        <span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">learner</span><span class="o">.</span><span class="n">output_dim</span><span class="p">,</span> <span class="nb">int</span><span class="p">),</span> <span class="s2">&quot;learner.output_dim must be int&quot;</span>
+        <span class="k">assert</span> <span class="n">learner</span><span class="o">.</span><span class="n">optimizers</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;learner.optimizers must be initialized&quot;</span>
+        <span class="n">copy_</span> <span class="o">=</span> <span class="n">GBTModel</span><span class="p">(</span><span class="n">tree_struct</span><span class="o">=</span><span class="n">learner</span><span class="o">.</span><span class="n">tree_struct</span><span class="p">,</span>
+                         <span class="n">input_dim</span><span class="o">=</span><span class="n">learner</span><span class="o">.</span><span class="n">input_dim</span><span class="p">,</span>
+                         <span class="n">output_dim</span><span class="o">=</span><span class="n">learner</span><span class="o">.</span><span class="n">output_dim</span><span class="p">,</span>
+                         <span class="n">optimizers</span><span class="o">=</span><span class="n">learner</span><span class="o">.</span><span class="n">optimizers</span><span class="p">,</span>
+                         <span class="n">params</span><span class="o">=</span><span class="n">learner</span><span class="o">.</span><span class="n">params</span><span class="p">,</span>
+                         <span class="n">verbose</span><span class="o">=</span><span class="n">learner</span><span class="o">.</span><span class="n">verbose</span><span class="p">,</span>
+                         <span class="n">device</span><span class="o">=</span><span class="n">learner</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+        <span class="n">copy_</span><span class="o">.</span><span class="n">learner</span> <span class="o">=</span> <span class="n">learner</span>
+        <span class="k">return</span> <span class="n">copy_</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024-2025, NVIDIA Corporation.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

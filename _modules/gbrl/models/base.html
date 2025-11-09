@@ -1,0 +1,615 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>gbrl.models.base &mdash; GBRL 1.1.6 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=937269b5"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            GBRL
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">User Guide:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../quickstart.html">Quickstart</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../quickstart.html#source-compilation">Source Compilation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../examples.html">Examples</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Documentation:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../models/index.html">Models</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../learners/index.html">Learners</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">GBRL</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">gbrl.models.base</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for gbrl.models.base</h1><div class="highlight"><pre>
+<span></span><span class="c1">##############################################################################</span>
+<span class="c1"># Copyright (c) 2024-2025, NVIDIA Corporation. All rights reserved.</span>
+<span class="c1">#</span>
+<span class="c1"># Permission is hereby granted, free of charge, to any person obtaining a</span>
+<span class="c1"># copy of this software and associated documentation files (the &quot;Software&quot;),</span>
+<span class="c1"># to deal in the Software without restriction, including without limitation</span>
+<span class="c1"># the rights to use, copy, modify, merge, publish, distribute, sublicense,</span>
+<span class="c1"># and/or sell copies of the Software, and to permit persons to whom the</span>
+<span class="c1"># Software is furnished to do so, subject to the following conditions:</span>
+<span class="c1">#</span>
+<span class="c1"># The above copyright notice and this permission notice shall be included in</span>
+<span class="c1"># all copies or substantial portions of the Software.</span>
+<span class="c1">#</span>
+<span class="c1"># THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR</span>
+<span class="c1"># IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,</span>
+<span class="c1"># FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL</span>
+<span class="c1"># THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER</span>
+<span class="c1"># LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING</span>
+<span class="c1"># FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER</span>
+<span class="c1"># DEALINGS IN THE SOFTWARE.</span>
+<span class="c1">##############################################################################</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">Base Model Module</span>
+
+<span class="sd">This module provides the abstract base class for all GBRL models,</span>
+<span class="sd">defining the common interface for gradient boosting tree models.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">abc</span><span class="w"> </span><span class="kn">import</span> <span class="n">ABC</span><span class="p">,</span> <span class="n">abstractmethod</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Optional</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">,</span> <span class="n">Union</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">torch</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">th</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">gbrl.common.utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">NumericalData</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">gbrl.learners.gbt_learner</span><span class="w"> </span><span class="kn">import</span> <span class="n">GBTLearner</span>
+
+
+<div class="viewcode-block" id="BaseGBT">
+<a class="viewcode-back" href="../../../models/base_gbt.html#gbrl.models.base.BaseGBT">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">BaseGBT</span><span class="p">(</span><span class="n">ABC</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Abstract base class for gradient boosting tree models.</span>
+
+<span class="sd">    This class defines the fundamental interface for all GBRL models and manages</span>
+<span class="sd">    common functionality such as parameter storage, gradient tracking, and</span>
+<span class="sd">    model serialization.</span>
+
+<span class="sd">    Attributes:</span>
+<span class="sd">        learner: The underlying GBTLearner instance.</span>
+<span class="sd">        grads: Stored gradients from the last backward pass.</span>
+<span class="sd">        params: Stored parameters (predictions) from the last forward pass.</span>
+<span class="sd">        input: Stored input from the last forward pass (when requires_grad=True).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Initializes the BaseGBT model.</span>
+
+<span class="sd">        Sets up internal state for gradient tracking and parameter storage.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">learner</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">grads</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Union</span><span class="p">[</span><span class="n">NumericalData</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">Optional</span><span class="p">[</span><span class="n">NumericalData</span><span class="p">],</span> <span class="o">...</span><span class="p">]]]</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Union</span><span class="p">[</span><span class="n">NumericalData</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">Optional</span><span class="p">[</span><span class="n">NumericalData</span><span class="p">],</span> <span class="o">...</span><span class="p">]]]</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">input</span> <span class="o">=</span> <span class="kc">None</span>
+
+<div class="viewcode-block" id="BaseGBT.set_bias">
+<a class="viewcode-back" href="../../../models/base_gbt.html#gbrl.models.base.BaseGBT.set_bias">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">set_bias</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Sets the bias term for the GBRL model.</span>
+
+<span class="sd">        This method should be implemented by subclasses to set the initial</span>
+<span class="sd">        bias value for predictions.</span>
+
+<span class="sd">        Raises:</span>
+<span class="sd">            NotImplementedError: This is an abstract method that must be</span>
+<span class="sd">                implemented by subclasses.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">learner</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;learner must be initialized first&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">learner</span><span class="o">.</span><span class="n">set_bias</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="BaseGBT.set_feature_weights">
+<a class="viewcode-back" href="../../../models/base_gbt.html#gbrl.models.base.BaseGBT.set_feature_weights">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">set_feature_weights</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">feature_weights</span><span class="p">:</span> <span class="n">NumericalData</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Sets per-feature importance weights for split selection.</span>
+
+<span class="sd">        Feature weights are used to scale the contribution of each feature</span>
+<span class="sd">        when selecting the best split during tree construction. Higher weights</span>
+<span class="sd">        give features more importance in the splitting process.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            feature_weights (NumericalData): Array of weights (one per feature).</span>
+<span class="sd">                All weights must be &gt;= 0.</span>
+
+<span class="sd">        Raises:</span>
+<span class="sd">            AssertionError: If learner is not initialized or weights are invalid.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">learner</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;learner must be initialized first&quot;</span>
+
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">feature_weights</span><span class="p">,</span> <span class="n">th</span><span class="o">.</span><span class="n">Tensor</span><span class="p">):</span>
+            <span class="n">feature_weights</span> <span class="o">=</span> <span class="n">feature_weights</span><span class="o">.</span><span class="n">clone</span><span class="p">()</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span><span class="o">.</span><span class="n">numpy</span><span class="p">()</span>
+        <span class="c1"># GBRL works with 2D numpy arrays.</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">feature_weights</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="n">feature_weights</span> <span class="o">=</span> <span class="n">feature_weights</span><span class="p">[:,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">learner</span><span class="o">.</span><span class="n">set_feature_weights</span><span class="p">(</span><span class="n">feature_weights</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">single</span><span class="p">))</span></div>
+
+
+<div class="viewcode-block" id="BaseGBT.get_iteration">
+<a class="viewcode-back" href="../../../models/base_gbt.html#gbrl.models.base.BaseGBT.get_iteration">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_iteration</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Union</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="o">...</span><span class="p">]]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Gets the current number of boosting iterations completed.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            Union[int, Tuple[int, ...]]: Number of boosting iterations per learner.</span>
+<span class="sd">                Returns a single int for single models or a tuple for multi-models.</span>
+
+<span class="sd">        Raises:</span>
+<span class="sd">            AssertionError: If learner is not initialized.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">learner</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;learner must be initialized first&quot;</span>
+
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">learner</span><span class="o">.</span><span class="n">get_iteration</span><span class="p">()</span></div>
+
+
+<div class="viewcode-block" id="BaseGBT.get_total_iterations">
+<a class="viewcode-back" href="../../../models/base_gbt.html#gbrl.models.base.BaseGBT.get_total_iterations">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_total_iterations</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Gets the total cumulative number of boosting iterations.</span>
+
+<span class="sd">        For actor-critic models with separate learners, this returns the sum</span>
+<span class="sd">        of iterations across both actor and critic. For single models or shared</span>
+<span class="sd">        architectures, this equals get_iteration().</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            int: Total number of boosting iterations across all learners.</span>
+
+<span class="sd">        Raises:</span>
+<span class="sd">            AssertionError: If learner is not initialized.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">learner</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;learner must be initialized first&quot;</span>
+
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">learner</span><span class="o">.</span><span class="n">get_total_iterations</span><span class="p">()</span></div>
+
+
+<div class="viewcode-block" id="BaseGBT.get_schedule_learning_rates">
+<a class="viewcode-back" href="../../../models/base_gbt.html#gbrl.models.base.BaseGBT.get_schedule_learning_rates">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_schedule_learning_rates</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Union</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="o">...</span><span class="p">]]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Gets current scheduled learning rate values for all optimizers.</span>
+
+<span class="sd">        For constant schedules, returns the initial learning rate unchanged.</span>
+<span class="sd">        For linear schedules, returns the learning rate adjusted based on the</span>
+<span class="sd">        number of trees in the ensemble relative to the total expected iterations.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            Union[float, Tuple[float, ...]]: Current learning rate(s) per optimizer.</span>
+
+<span class="sd">        Raises:</span>
+<span class="sd">            AssertionError: If learner is not initialized.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">learner</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;learner must be initialized first&quot;</span>
+
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">learner</span><span class="o">.</span><span class="n">get_schedule_learning_rates</span><span class="p">()</span></div>
+
+
+<div class="viewcode-block" id="BaseGBT.step">
+<a class="viewcode-back" href="../../../models/base_gbt.html#gbrl.models.base.BaseGBT.step">[docs]</a>
+    <span class="nd">@abstractmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">step</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Performs a single boosting step by fitting one tree to gradients.</span>
+
+<span class="sd">        This method should be implemented by subclasses to add a new tree to</span>
+<span class="sd">        the ensemble based on the computed gradients.</span>
+
+<span class="sd">        Raises:</span>
+<span class="sd">            NotImplementedError: This is an abstract method that must be</span>
+<span class="sd">                implemented by subclasses.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">pass</span></div>
+
+
+<div class="viewcode-block" id="BaseGBT.fit">
+<a class="viewcode-back" href="../../../models/base_gbt.html#gbrl.models.base.BaseGBT.fit">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">fit</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Union</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="o">...</span><span class="p">]]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Fits the model for multiple iterations (supervised learning mode).</span>
+
+<span class="sd">        This method performs batch training by fitting multiple trees</span>
+<span class="sd">        sequentially on the provided data.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            Union[float, Tuple[float, ...]]: Final loss value(s) per learner</span>
+<span class="sd">                averaged over all examples.</span>
+
+<span class="sd">        Raises:</span>
+<span class="sd">            NotImplementedError: This method must be implemented by subclasses</span>
+<span class="sd">                that support supervised learning.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span></div>
+
+
+<div class="viewcode-block" id="BaseGBT.get_num_trees">
+<a class="viewcode-back" href="../../../models/base_gbt.html#gbrl.models.base.BaseGBT.get_num_trees">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_num_trees</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Union</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="o">...</span><span class="p">]]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Gets the total number of trees in the ensemble.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            Union[int, Tuple[int, ...]]: Number of trees in the ensemble per learner.</span>
+<span class="sd">                Returns a single int for single models or a tuple for multi-models.</span>
+
+<span class="sd">        Raises:</span>
+<span class="sd">            AssertionError: If learner is not initialized.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">learner</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;learner must be initialized first&quot;</span>
+
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">learner</span><span class="o">.</span><span class="n">get_num_trees</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="BaseGBT.tree_shap">
+<a class="viewcode-back" href="../../../models/base_gbt.html#gbrl.models.base.BaseGBT.tree_shap">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">tree_shap</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tree_idx</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">features</span><span class="p">:</span> <span class="n">NumericalData</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span> <span class="o">-&gt;</span> \
+            <span class="n">Union</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Calculates SHAP values for a single tree in the ensemble.</span>
+
+<span class="sd">        Implementation based on Linear TreeShap algorithm by Yu et al., 2023.</span>
+<span class="sd">        See: https://arxiv.org/pdf/2209.08192 and</span>
+<span class="sd">        https://github.com/yupbank/linear_tree_shap</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            tree_idx (int): Index of the tree to compute SHAP values for.</span>
+<span class="sd">            features (NumericalData): Input features for SHAP computation.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]: SHAP values with</span>
+<span class="sd">                shape [n_samples, n_features, n_outputs]. Returns a tuple of SHAP</span>
+<span class="sd">                values for separate actor-critic models.</span>
+
+<span class="sd">        Raises:</span>
+<span class="sd">            AssertionError: If learner is not initialized.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">learner</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;learner must be initialized first&quot;</span>
+
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">learner</span><span class="o">.</span><span class="n">tree_shap</span><span class="p">(</span><span class="n">tree_idx</span><span class="p">,</span> <span class="n">features</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="BaseGBT.shap">
+<a class="viewcode-back" href="../../../models/base_gbt.html#gbrl.models.base.BaseGBT.shap">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">shap</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">features</span><span class="p">:</span> <span class="n">NumericalData</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span> <span class="o">-&gt;</span> \
+            <span class="n">Union</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Calculates SHAP values for the entire ensemble.</span>
+
+<span class="sd">        Implementation based on Linear TreeShap algorithm by Yu et al., 2023.</span>
+<span class="sd">        Computes SHAP values sequentially for each tree and aggregates them.</span>
+<span class="sd">        See: https://arxiv.org/pdf/2209.08192 and</span>
+<span class="sd">        https://github.com/yupbank/linear_tree_shap</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            features (NumericalData): Input features for SHAP computation.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]: SHAP values with</span>
+<span class="sd">                shape [n_samples, n_features, n_outputs]. Returns a tuple of SHAP</span>
+<span class="sd">                values for separate actor-critic models.</span>
+
+<span class="sd">        Raises:</span>
+<span class="sd">            AssertionError: If learner is not initialized.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">learner</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;learner must be initialized first&quot;</span>
+
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">learner</span><span class="o">.</span><span class="n">shap</span><span class="p">(</span><span class="n">features</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="BaseGBT.save_learner">
+<a class="viewcode-back" href="../../../models/base_gbt.html#gbrl.models.base.BaseGBT.save_learner">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">save_learner</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">save_path</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Saves the model to disk.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            save_path (str): Absolute path and filename for saving the model.</span>
+<span class="sd">                The .gbrl_model extension will be added automatically.</span>
+
+<span class="sd">        Raises:</span>
+<span class="sd">            AssertionError: If learner is not initialized.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">learner</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;learner must be initialized first&quot;</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">learner</span><span class="o">.</span><span class="n">save</span><span class="p">(</span><span class="n">save_path</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="BaseGBT.export_learner">
+<a class="viewcode-back" href="../../../models/base_gbt.html#gbrl.models.base.BaseGBT.export_learner">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">export_learner</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">filename</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">modelname</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Exports the model as a C header file for embedded deployment.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            filename (str): Absolute path and filename for the exported header.</span>
+<span class="sd">                The .h extension will be added automatically.</span>
+<span class="sd">            modelname (Optional[str], optional): Name to use for the model in</span>
+<span class="sd">                the C code. Defaults to None (empty string).</span>
+
+<span class="sd">        Raises:</span>
+<span class="sd">            AssertionError: If learner is not initialized.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">learner</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;learner must be initialized first&quot;</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">learner</span><span class="o">.</span><span class="n">export</span><span class="p">(</span><span class="n">filename</span><span class="p">,</span> <span class="n">modelname</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="BaseGBT.load_learner">
+<a class="viewcode-back" href="../../../models/base_gbt.html#gbrl.models.base.BaseGBT.load_learner">[docs]</a>
+    <span class="nd">@classmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">load_learner</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">load_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">device</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;BaseGBT&quot;</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Loads a model from disk.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            load_name (str): Full path to the saved model file.</span>
+<span class="sd">            device (str): Device to load the model onto (&#39;cpu&#39; or &#39;cuda&#39;).</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            BaseGBT: Loaded model instance of the appropriate subclass.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">instance</span> <span class="o">=</span> <span class="bp">cls</span><span class="o">.</span><span class="fm">__new__</span><span class="p">(</span><span class="bp">cls</span><span class="p">)</span>
+        <span class="n">instance</span><span class="o">.</span><span class="n">learner</span> <span class="o">=</span> <span class="n">GBTLearner</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">load_name</span><span class="p">,</span> <span class="n">device</span><span class="p">)</span>
+        <span class="n">instance</span><span class="o">.</span><span class="n">grads</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="n">instance</span><span class="o">.</span><span class="n">params</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="n">instance</span><span class="o">.</span><span class="n">input</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">return</span> <span class="n">instance</span></div>
+
+
+<div class="viewcode-block" id="BaseGBT.get_params">
+<a class="viewcode-back" href="../../../models/base_gbt.html#gbrl.models.base.BaseGBT.get_params">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_params</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Union</span><span class="p">[</span><span class="n">Optional</span><span class="p">[</span><span class="n">NumericalData</span><span class="p">],</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">Optional</span><span class="p">[</span><span class="n">NumericalData</span><span class="p">],</span> <span class="o">...</span><span class="p">]]]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Gets a copy of the model&#39;s predicted parameters from the last forward pass.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            Optional[Union[Optional[NumericalData], Tuple[Optional[NumericalData], ...]]]: Cloned/copied</span>
+<span class="sd">                parameters or None if no forward pass has been performed.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">params</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">None</span>
+
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">):</span>
+            <span class="k">return</span> <span class="nb">tuple</span><span class="p">(</span>
+                <span class="n">p</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span><span class="o">.</span><span class="n">clone</span><span class="p">()</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="n">th</span><span class="o">.</span><span class="n">Tensor</span><span class="p">)</span> <span class="k">else</span> <span class="p">(</span><span class="n">p</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span> <span class="k">if</span> <span class="n">p</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="kc">None</span><span class="p">)</span>
+                <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">params</span>
+            <span class="p">)</span>
+
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span><span class="o">.</span><span class="n">clone</span><span class="p">()</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="p">,</span> <span class="n">th</span><span class="o">.</span><span class="n">Tensor</span><span class="p">)</span> <span class="k">else</span> <span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span></div>
+
+
+<div class="viewcode-block" id="BaseGBT.get_grads">
+<a class="viewcode-back" href="../../../models/base_gbt.html#gbrl.models.base.BaseGBT.get_grads">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_grads</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Union</span><span class="p">[</span><span class="n">NumericalData</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">NumericalData</span><span class="p">,</span> <span class="o">...</span><span class="p">]]]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Gets a copy of the gradients from the last backward pass.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            Optional[Union[NumericalData, Tuple[NumericalData, ...]]]: Cloned/copied</span>
+<span class="sd">                gradients or None if no backward pass has been performed.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">grads</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">None</span>
+
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">grads</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">):</span>
+            <span class="n">grads</span> <span class="o">=</span> <span class="p">[]</span>
+            <span class="k">for</span> <span class="n">g</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">grads</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">g</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="n">grads</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">g</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span><span class="o">.</span><span class="n">clone</span><span class="p">()</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">g</span><span class="p">,</span> <span class="n">th</span><span class="o">.</span><span class="n">Tensor</span><span class="p">)</span> <span class="k">else</span> <span class="n">g</span><span class="o">.</span><span class="n">copy</span><span class="p">())</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">grads</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="kc">None</span><span class="p">)</span>
+            <span class="k">return</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">grads</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">grads</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span><span class="o">.</span><span class="n">clone</span><span class="p">()</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">grads</span><span class="p">,</span> <span class="n">th</span><span class="o">.</span><span class="n">Tensor</span><span class="p">)</span> <span class="k">else</span> <span class="bp">self</span><span class="o">.</span><span class="n">grads</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span></div>
+
+
+<div class="viewcode-block" id="BaseGBT.set_device">
+<a class="viewcode-back" href="../../../models/base_gbt.html#gbrl.models.base.BaseGBT.set_device">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">set_device</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">device</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Sets the computation device for the GBRL model.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            device (str): Target device, must be either &#39;cpu&#39; or &#39;cuda&#39;.</span>
+
+<span class="sd">        Raises:</span>
+<span class="sd">            AssertionError: If device is not &#39;cpu&#39; or &#39;cuda&#39;, or if learner</span>
+<span class="sd">                is not initialized.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">assert</span> <span class="n">device</span> <span class="ow">in</span> <span class="p">[</span><span class="s1">&#39;cpu&#39;</span><span class="p">,</span> <span class="s1">&#39;cuda&#39;</span><span class="p">],</span> <span class="s2">&quot;device must be in [&#39;cpu&#39;, &#39;cuda&#39;]&quot;</span>
+        <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">learner</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;learner must be initialized first&quot;</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">learner</span><span class="o">.</span><span class="n">set_device</span><span class="p">(</span><span class="n">device</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="BaseGBT.get_device">
+<a class="viewcode-back" href="../../../models/base_gbt.html#gbrl.models.base.BaseGBT.get_device">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_device</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Union</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="o">...</span><span class="p">]]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Gets the current computation device(s) for the model.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            Union[str, Tuple[str, ...]]: Device string (&#39;cpu&#39; or &#39;cuda&#39;) per learner.</span>
+<span class="sd">                Returns a single string for single models or a tuple for multi-models.</span>
+
+<span class="sd">        Raises:</span>
+<span class="sd">            AssertionError: If learner is not initialized.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">learner</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;learner must be initialized first&quot;</span>
+
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">learner</span><span class="o">.</span><span class="n">get_device</span><span class="p">()</span></div>
+
+
+    <span class="nd">@abstractmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Union</span><span class="p">[</span><span class="n">NumericalData</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">NumericalData</span><span class="p">,</span> <span class="o">...</span><span class="p">]]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Performs forward pass through the model.</span>
+
+<span class="sd">        This method should be implemented by subclasses to compute predictions</span>
+<span class="sd">        and optionally store parameters for gradient computation.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            Union[NumericalData, Tuple[NumericalData, ...]]: Model predictions</span>
+<span class="sd">                (Tensor or numpy array) per learner.</span>
+
+<span class="sd">        Raises:</span>
+<span class="sd">            NotImplementedError: This is an abstract method that must be</span>
+<span class="sd">                implemented by subclasses.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">pass</span>
+
+<div class="viewcode-block" id="BaseGBT.print_tree">
+<a class="viewcode-back" href="../../../models/base_gbt.html#gbrl.models.base.BaseGBT.print_tree">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">print_tree</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tree_idx</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Prints detailed information about a specific tree to stdout.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            tree_idx (int): Index of the tree to print.</span>
+
+<span class="sd">        Raises:</span>
+<span class="sd">            AssertionError: If learner is not initialized.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">learner</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;learner must be initialized first&quot;</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">learner</span><span class="o">.</span><span class="n">print_tree</span><span class="p">(</span><span class="n">tree_idx</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="BaseGBT.plot_tree">
+<a class="viewcode-back" href="../../../models/base_gbt.html#gbrl.models.base.BaseGBT.plot_tree">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">plot_tree</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tree_idx</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">filename</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Visualizes a tree and saves it as a PNG image.</span>
+
+<span class="sd">        Note: Only works if GBRL was compiled with Graphviz support.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            tree_idx (int): Index of the tree to visualize.</span>
+<span class="sd">            filename (str): Output filename for the PNG image (extension optional).</span>
+
+<span class="sd">        Raises:</span>
+<span class="sd">            AssertionError: If learner is not initialized.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">learner</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;learner must be initialized first&quot;</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">learner</span><span class="o">.</span><span class="n">plot_tree</span><span class="p">(</span><span class="n">tree_idx</span><span class="p">,</span> <span class="n">filename</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="BaseGBT.copy">
+<a class="viewcode-back" href="../../../models/base_gbt.html#gbrl.models.base.BaseGBT.copy">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">copy</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;BaseGBT&quot;</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Creates a deep copy of the model instance.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            BaseGBT: A new instance with copied parameters and state.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">__copy__</span><span class="p">()</span></div>
+
+
+    <span class="nd">@abstractmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">__copy__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;BaseGBT&quot;</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Copy constructor implementation.</span>
+
+<span class="sd">        This method should be implemented by subclasses to create a proper</span>
+<span class="sd">        deep copy of the model.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            BaseGBT: A new instance with copied parameters and state.</span>
+
+<span class="sd">        Raises:</span>
+<span class="sd">            NotImplementedError: This is an abstract method that must be</span>
+<span class="sd">                implemented by subclasses.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">pass</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024-2025, NVIDIA Corporation.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

@@ -1,0 +1,261 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GBTModel &mdash; GBRL 1.1.6 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=937269b5"></script>
+      <script src="../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="ActorCritic" href="actor_critic.html" />
+    <link rel="prev" title="BaseGBT" href="base_gbt.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            GBRL
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">User Guide:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../quickstart.html">Quickstart</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../quickstart.html#source-compilation">Source Compilation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../examples.html">Examples</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Documentation:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="index.html">Models</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="base_gbt.html">BaseGBT</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">GBTModel</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#gbrl.models.gbt.GBTModel"><code class="docutils literal notranslate"><span class="pre">GBTModel</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.models.gbt.GBTModel.copy"><code class="docutils literal notranslate"><span class="pre">GBTModel.copy()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.models.gbt.GBTModel.fit"><code class="docutils literal notranslate"><span class="pre">GBTModel.fit()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.models.gbt.GBTModel.load_learner"><code class="docutils literal notranslate"><span class="pre">GBTModel.load_learner()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.models.gbt.GBTModel.plot_tree"><code class="docutils literal notranslate"><span class="pre">GBTModel.plot_tree()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.models.gbt.GBTModel.print_tree"><code class="docutils literal notranslate"><span class="pre">GBTModel.print_tree()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.models.gbt.GBTModel.set_bias"><code class="docutils literal notranslate"><span class="pre">GBTModel.set_bias()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.models.gbt.GBTModel.set_bias_from_targets"><code class="docutils literal notranslate"><span class="pre">GBTModel.set_bias_from_targets()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#gbrl.models.gbt.GBTModel.step"><code class="docutils literal notranslate"><span class="pre">GBTModel.step()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="actor_critic.html">ActorCritic</a></li>
+<li class="toctree-l2"><a class="reference internal" href="continuous_critic.html">ContinuousCritic</a></li>
+<li class="toctree-l2"><a class="reference internal" href="discrete_critic.html">DiscreteCritic</a></li>
+<li class="toctree-l2"><a class="reference internal" href="gaussian_actor.html">GaussianActor</a></li>
+<li class="toctree-l2"><a class="reference internal" href="parametric_actor.html">ParametricActor</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../learners/index.html">Learners</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">GBRL</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="index.html">Models</a></li>
+      <li class="breadcrumb-item active">GBTModel</li>
+      <li class="wy-breadcrumbs-aside">
+              <a href="https://github.com///blob/models/gbt.rst" class="fa fa-github"> Edit on GitHub</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="gbtmodel">
+<h1>GBTModel<a class="headerlink" href="#gbtmodel" title="Link to this heading"></a></h1>
+<p>Generic GBT Model for supervised learning. Can be used independently of reinforcement learning pipelines to perform standard regression or classification with gradient-boosted trees using custom optimizers and loss functions.</p>
+<dl class="py class">
+<dt class="sig sig-object py" id="gbrl.models.gbt.GBTModel">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">gbrl.models.gbt.</span></span><span class="sig-name descname"><span class="pre">GBTModel</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tree_struct</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Dict</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">input_dim</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">output_dim</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">optimizers</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Dict</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">List</span><span class="p"><span class="pre">[</span></span><span class="pre">Dict</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">params</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Dict</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">{}</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">verbose</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">device</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'cpu'</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/gbrl/models/gbt.html#GBTModel"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.models.gbt.GBTModel" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="base_gbt.html#gbrl.models.base.BaseGBT" title="gbrl.models.base.BaseGBT"><code class="xref py py-class docutils literal notranslate"><span class="pre">BaseGBT</span></code></a></p>
+<p>General class for gradient boosting trees</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.models.gbt.GBTModel.copy">
+<span class="sig-name descname"><span class="pre">copy</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#gbrl.models.gbt.GBTModel" title="gbrl.models.gbt.GBTModel"><span class="pre">GBTModel</span></a></span></span><a class="reference internal" href="../_modules/gbrl/models/gbt.html#GBTModel.copy"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.models.gbt.GBTModel.copy" title="Link to this definition"></a></dt>
+<dd><p>Copy class instance</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>copy of current instance. The actual type
+will be the type of the subclass that calls this method.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>GradientBoostingTrees</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.models.gbt.GBTModel.fit">
+<span class="sig-name descname"><span class="pre">fit</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">X</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">numpy.ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">torch.Tensor</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">targets</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">numpy.ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">torch.Tensor</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">iterations</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">shuffle</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">loss_type</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'MultiRMSE'</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">float</span></span></span><a class="reference internal" href="../_modules/gbrl/models/gbt.html#GBTModel.fit"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.models.gbt.GBTModel.fit" title="Link to this definition"></a></dt>
+<dd><p>Fit multiple iterations (as in supervised learning)</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>X</strong> (<em>NumericalData</em>) – inputs</p></li>
+<li><p><strong>targets</strong> (<em>NumericalData</em>) – targets</p></li>
+<li><p><strong>iterations</strong> (<em>int</em>) – number of boosting iterations</p></li>
+<li><p><strong>shuffle</strong> (<em>bool</em><em>, </em><em>optional</em>) – Shuffle dataset. Defaults to True.</p></li>
+<li><p><strong>loss_type</strong> (<em>str</em><em>, </em><em>optional</em>) – Loss to use (only MultiRMSE is currently implemented ). Defaults to ‘MultiRMSE’.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>final loss over all examples.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.models.gbt.GBTModel.load_learner">
+<em class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">load_learner</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">load_name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">device</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#gbrl.models.gbt.GBTModel" title="gbrl.models.gbt.GBTModel"><span class="pre">GBTModel</span></a></span></span><a class="reference internal" href="../_modules/gbrl/models/gbt.html#GBTModel.load_learner"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.models.gbt.GBTModel.load_learner" title="Link to this definition"></a></dt>
+<dd><p>Loads GBRL model from a file</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>load_name</strong> (<em>str</em>) – full path to file name</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>GBRL instance</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.models.gbt.GBTModel.plot_tree">
+<span class="sig-name descname"><span class="pre">plot_tree</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tree_idx</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">filename</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="reference internal" href="../_modules/gbrl/models/gbt.html#GBTModel.plot_tree"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.models.gbt.GBTModel.plot_tree" title="Link to this definition"></a></dt>
+<dd><p>Plots tree using (only works if GBRL was compiled with graphviz)</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>tree_idx</strong> (<em>int</em>) – tree index to plot</p></li>
+<li><p><strong>filename</strong> (<em>str</em>) – .png filename to save</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.models.gbt.GBTModel.print_tree">
+<span class="sig-name descname"><span class="pre">print_tree</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tree_idx</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="reference internal" href="../_modules/gbrl/models/gbt.html#GBTModel.print_tree"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.models.gbt.GBTModel.print_tree" title="Link to this definition"></a></dt>
+<dd><p>Prints tree information</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>tree_idx</strong> (<em>int</em>) – tree index to print</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.models.gbt.GBTModel.set_bias">
+<span class="sig-name descname"><span class="pre">set_bias</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">bias</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">numpy.ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">torch.Tensor</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="reference internal" href="../_modules/gbrl/models/gbt.html#GBTModel.set_bias"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.models.gbt.GBTModel.set_bias" title="Link to this definition"></a></dt>
+<dd><p>Sets GBRL bias</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>bias</strong> (<em>NumericalData</em>)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.models.gbt.GBTModel.set_bias_from_targets">
+<span class="sig-name descname"><span class="pre">set_bias_from_targets</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">targets</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">numpy.ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">torch.Tensor</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="reference internal" href="../_modules/gbrl/models/gbt.html#GBTModel.set_bias_from_targets"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.models.gbt.GBTModel.set_bias_from_targets" title="Link to this definition"></a></dt>
+<dd><p>Sets bias as mean of targets</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>targets</strong> (<em>NumericalData</em>) – Targets</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbrl.models.gbt.GBTModel.step">
+<span class="sig-name descname"><span class="pre">step</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">X</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">numpy.ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">torch.Tensor</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">grads</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">numpy.ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">torch.Tensor</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">max_grad_norm</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="reference internal" href="../_modules/gbrl/models/gbt.html#GBTModel.step"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbrl.models.gbt.GBTModel.step" title="Link to this definition"></a></dt>
+<dd><p>Perform a boosting step (fits a single tree on the gradients)</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>X</strong> (<em>NumericalData</em>) – inputs</p></li>
+<li><p><strong>max_grad_norm</strong> (<em>float</em><em>, </em><em>optional</em>) – perform gradient clipping by norm. Defaults to None.</p></li>
+<li><p><strong>grads</strong> (<em>Optional</em><em>[</em><em>NumericalData</em><em>]</em><em>, </em><em>optional</em>) – manually calculated gradients. Defaults to None.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="base_gbt.html" class="btn btn-neutral float-left" title="BaseGBT" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="actor_critic.html" class="btn btn-neutral float-right" title="ActorCritic" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024-2025, NVIDIA Corporation.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
