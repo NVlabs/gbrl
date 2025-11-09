@@ -73,6 +73,7 @@ class GBRL {
          * @param grow_policy Tree growing strategy (Greedy/Oblivious)
          * @param verbose Verbosity level
          * @param _device Device for computation (CPU/GPU)
+         * @param _learner_name Name identifier for this learner (default: "GBRL")
          */
         GBRL(
             int input_dim, int output_dim, int policy_dim,
@@ -84,7 +85,8 @@ class GBRL {
             int batch_size,
             growPolicy grow_policy,
             int verbose,
-            deviceType _device
+            deviceType _device,
+            std::string _learner_name = "GBRL"
         );
         
         /**
@@ -105,6 +107,7 @@ class GBRL {
          * @param grow_policy Tree growing strategy ("Greedy"/"Oblivious")
          * @param verbose Verbosity level
          * @param _device Device for computation ("cpu"/"gpu")
+         * @param _learner_name Name identifier for this learner (default: "GBRL")
          */
         GBRL(
             int input_dim, int output_dim, int policy_dim,
@@ -116,7 +119,8 @@ class GBRL {
             int batch_size,
             std::string grow_policy,
             int verbose,
-            std::string _device
+            std::string _device,
+            std::string _learner_name = "GBRL"
         );
         
         /**
@@ -200,6 +204,13 @@ class GBRL {
          * @return Device name ("cpu" or "gpu")
          */
         std::string get_device();
+        
+        /**
+         * @brief Get learner name
+         * 
+         * @return Learner name identifier
+         */
+        std::string get_learner_name();
         
         /**
          * @brief Save model to binary file
@@ -498,6 +509,7 @@ class GBRL {
         std::vector<Optimizer*> opts;       /**< Optimizers for leaf updates */
         deviceType device = unspecified;    /**< Current compute device */
         bool parallel_predict = true;       /**< Enable parallel prediction */
+        std::string learner_name = "GBRL";  /**< Name identifier for this learner */
         
 #ifdef USE_CUDA
         SGDOptimizerGPU** cuda_opt = nullptr;  /**< GPU optimizers */

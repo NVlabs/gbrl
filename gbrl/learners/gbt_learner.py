@@ -55,7 +55,8 @@ class GBTLearner(BaseLearner):
                  params: Dict,
                  policy_dim: Optional[int] = None,
                  verbose: int = 0,
-                 device: str = 'cpu'):
+                 device: str = 'cpu',
+                 name: str = 'GBRL'):
         """
         Initializes the GBTLearner.
 
@@ -69,12 +70,14 @@ class GBTLearner(BaseLearner):
                 assumes to equal output dim.
             verbose (int, optional): Verbosity level. Defaults to 0.
             device (str, optional): The device to run the model on. Defaults to 'cpu'.
+            name (str, optional): Name identifier for this learner. Defaults to 'GBRL'.
         """
         super().__init__(input_dim, output_dim, tree_struct, params, policy_dim, verbose, device)
         if not isinstance(optimizers, list):
             optimizers = [optimizers]
         self.optimizers = optimizers
         self.student_model = None
+        self.learner_name = name
 
     def reset(self) -> None:
         """
@@ -86,7 +89,7 @@ class GBTLearner(BaseLearner):
             for i in range(len(self.optimizers)):
                 self.optimizers[i]['init_lr'] = lrs[i]
 
-        self._cpp_model = GBRL_CPP(**self.params)
+        self._cpp_model = GBRL_CPP(**self.params, learner_name=self.learner_name)
         self._cpp_model.set_feature_weights(self.feature_weights)
         if self.student_model is not None:
             for i in range(len(self.optimizers)):
@@ -263,6 +266,7 @@ class GBTLearner(BaseLearner):
             instance.device = instance.params['device']
             instance.feature_mapping = instance._cpp_model.get_feature_mapping()
             instance._memory = []
+            instance.learner_name = instance._cpp_model.get_learner_name()
             return instance
         except RuntimeError as e:
             print(f"Caught an exception in GBRL: {e}")
@@ -448,7 +452,8 @@ class GBTLearner(BaseLearner):
         except RuntimeError as e:
             print(f"Caught an exception in GBRL: {e}")
 
-    def predict(self, inputs: NumericalData,
+    def predict(self,
+                inputs: NumericalData,
                 requires_grad: bool = True,
                 start_idx: Optional[int] = None,
                 stop_idx: Optional[int] = None,
@@ -565,7 +570,8 @@ class GBTLearner(BaseLearner):
                            params=self.params,
                            policy_dim=self.policy_dim,  # type: ignore
                            verbose=self.verbose,
-                           device=self.device)
+                           device=self.device,
+                           name=self.learner_name)
         copy_.iteration = self.iteration
         copy_.total_iterations = self.total_iterations
         if self._cpp_model is not None:

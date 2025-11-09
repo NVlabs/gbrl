@@ -177,7 +177,8 @@ class ActorCritic(BaseGBT):
                                              start_idx, stop_idx, tensor)
         if requires_grad:
             self.policy_grads = None
-            self.params = policy
+            self.params = (policy, None)
+            self.inputs = observations
         return policy
 
     def predict_values(self, observations: NumericalData,
@@ -203,7 +204,8 @@ class ActorCritic(BaseGBT):
                                              start_idx, stop_idx, tensor)
         if requires_grad:
             self.value_grads = None
-            self.params = values
+            self.params = (None, values)
+            self.inputs = observations
         return values
 
     def __call__(self, observations: NumericalData,
@@ -234,7 +236,8 @@ class ActorCritic(BaseGBT):
             self.inputs = observations
         return params  # type: ignore
 
-    def step(self, observations: Optional[NumericalData] = None,
+    def step(self,
+             observations: Optional[NumericalData] = None,
              policy_grads: Optional[NumericalData] = None,
              value_grads: Optional[NumericalData] = None,
              policy_grad_clip: Optional[float] = None,
@@ -256,7 +259,7 @@ class ActorCritic(BaseGBT):
             assert self.inputs is not None, ("Cannot update trees without input."
                                              "Make sure model is called with requires_grad=True")
             observations = self.inputs
-        
+
         # Handle 1D observations
         if observations.ndim == 1:
             n_samples = 1 if self.learner.input_dim > 1 else len(observations)
@@ -287,6 +290,7 @@ class ActorCritic(BaseGBT):
                           grads=(policy_grads, value_grads))
         self.policy_grads = policy_grads
         self.value_grads = value_grads
+
         self.inputs = None
 
     def actor_step(self, observations: Optional[NumericalData] = None,
@@ -311,7 +315,7 @@ class ActorCritic(BaseGBT):
             assert self.inputs is not None, ("Cannot update trees without input."
                                              "Make sure model is called with requires_grad=True")
             observations = self.inputs
-        
+
         # Handle 1D observations
         if observations.ndim == 1:
             n_samples = 1 if self.learner.input_dim > 1 else len(observations)
@@ -386,6 +390,17 @@ class ActorCritic(BaseGBT):
             self.learner.save(save_path)
         else:
             self.learner.save(save_path, custom_names=['policy', 'value'])  # type: ignore
+
+    def get_grads(self) -> Optional[Union[NumericalData, Tuple[NumericalData, ...]]]:
+        """
+        Gets a copy of the gradients from the last backward pass.
+
+        Returns:
+            Optional[Union[NumericalData, Tuple[NumericalData, ...]]]: Cloned/copied
+                gradients or None if no backward pass has been performed.
+        """
+        self.grads = (self.policy_grads, self.value_grads)
+        return super().get_grads()
 
     def copy(self) -> "ActorCritic":
         """
