@@ -37,7 +37,6 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: Scientific/Engineering :: Artificial Intelligence"
 ]
@@ -60,7 +59,7 @@ readme = "README.md"
 packages = [{include = "gbrl"}]
 
 [tool.poetry.dependencies]
-python = ">=3.9,<3.14"
+python = ">=3.10,<3.13"
 pybind11 = {version = "2.13.1", extras = ["global"]}
 numpy = ">=1.21.0"
 cmake = ">=3.18"
@@ -71,7 +70,7 @@ shap = ">=0.40.0"
 matplotlib = ">=3.5.0"
 jinja2 = ">=3.1.6"
 setuptools = ">=78.1.1"
-pillow = ">=11.3.0"
+Pillow = ">=11.3.0"
 
 [tool.poetry.group.dev]
 [tool.poetry.group.dev.dependencies]
