@@ -294,7 +294,7 @@ class ActorCritic(BaseGBT):
         validate_array(policy_grads)
         validate_array(value_grads)
 
-        if guidance_grads is not None:
+        if guidance_grads is not None and self.shared_tree_struct:
             guidance_grads = pad_array(guidance_grads, n_dims=1, pad_value=0.0, axis=-1)
 
         self.learner.step(inputs=observations,

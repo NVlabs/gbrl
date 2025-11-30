@@ -309,12 +309,13 @@ struct ensembleData {
     int *reverse_num_feature_mapping;  /**< Maps internal numerical feature indices back to original feature indices (used in computation) */
     int *reverse_cat_feature_mapping;  /**< Maps internal categorical feature indices back to original feature indices (used in computation) */
     // Leaf split condition data
-    int* feature_indices;           /**< Feature used at each internal node */
-    float* feature_values;          /**< Threshold values for numerical splits */
+    int *feature_indices;           /**< Feature used at each internal node */
+    float *feature_values;          /**< Threshold values for numerical splits */
     float *edge_weights;            /**< Weights for split edges */
-    bool* is_numerics;              /**< Whether split is numerical (vs categorical) */
-    bool* inequality_directions;    /**< Direction of inequality tests */
-    char* categorical_values;       /**< Values for categorical splits */
+    float *guidance_percent;        /**< guidance percentage of leaf node */
+    bool *is_numerics;              /**< Whether split is numerical (vs categorical) */
+    bool *inequality_directions;    /**< Direction of inequality tests */
+    char *categorical_values;       /**< Values for categorical splits */
 
     bool *mapping_numerics;         /**< Indicates if each original feature is numerical (true) or categorical (false) (stored for documentation/export) */
 };

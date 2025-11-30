@@ -99,7 +99,7 @@ int count_distinct(T *arr, int n);
  * @throws std::runtime_error if index is out of range
  */
 inline void valid_tree_idx(const int tree_idx, const ensembleMetaData* metadata) {
-    if (tree_idx < 0 || tree_idx > metadata->n_trees) {
+    if (tree_idx < 0 || tree_idx >= metadata->n_trees) {
         std::cerr << "ERROR: invalid tree_idx " << tree_idx 
                   << " in ensemble with n_trees = " << metadata->n_trees
                   << std::endl;

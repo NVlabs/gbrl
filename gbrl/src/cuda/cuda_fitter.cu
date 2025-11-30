@@ -1449,7 +1449,7 @@ void add_leaf_node(
     if (depth > 0){
         int n_threads = WARP_SIZE*((MAX_CHAR_SIZE + WARP_SIZE - 1) / WARP_SIZE);
         int global_idx = (metadata->grow_policy == GREEDY) ? leaf_idx : tree_idx;
-        copy_node_to_data<<<depth, n_threads>>>(node, edata->depths, edata->feature_indices, edata->feature_values, edata->edge_weights, edata->inequality_directions, edata->is_numerics, edata->categorical_values, global_idx, leaf_idx, metadata->max_depth);
+        copy_node_to_data<<<depth, n_threads>>>(node, edata->depths, edata->feature_indices, edata->feature_values, edata->edge_weights, edata->inequality_directions, edata->is_numerics, edata->categorical_values, edata->guidance_percent, global_idx, leaf_idx, metadata->max_depth);
         cudaDeviceSynchronize();
     }
 
@@ -1475,11 +1475,13 @@ __global__ void copy_node_to_data(
     bool* __restrict__ inequality_directions,
     bool* __restrict__ is_numerics,
     char * __restrict__  categorical_values,
+    float * __restrict__  guidance_percent,
     const int global_idx,
     const int leaf_idx,
     const int max_depth){
     if (blockIdx.x == 0 && threadIdx.x == 0){
         depths[global_idx] = node->depth;
+        guidance_percent[leaf_idx] = node->guidance_percent;
     }
     if (blockIdx.x < node->depth){
         if (threadIdx.x == 0){

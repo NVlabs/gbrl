@@ -616,6 +616,8 @@ void print_leaf(const int global_leaf_idx, const int leaf_idx, const int tree_id
             std::cout << ", ";
     }
     std::cout << "]" << std::endl;
+
+    std::cout << " guidance_percent: " << edata->guidance_percent[global_leaf_idx] << std::endl;
     return;
 }
 

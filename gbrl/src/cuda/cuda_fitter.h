@@ -510,6 +510,7 @@ __global__ void node_column_mean_reduce(
  * @param inequality_directions Output direction array
  * @param is_numerics Output feature type array
  * @param categorical_values Output categorical value array
+ * @param guidance_percent Output guidance percentage array
  * @param global_idx Global tree index
  * @param leaf_idx Leaf index
  * @param max_depth Maximum tree depth
@@ -523,6 +524,7 @@ __global__ void copy_node_to_data(
     bool* __restrict__ inequality_directions,
     bool* __restrict__ is_numerics,
     char * __restrict__  categorical_values,
+    float * __restrict__  guidance_percent,
     const int global_idx,
     const int leaf_idx,
     const int max_depth

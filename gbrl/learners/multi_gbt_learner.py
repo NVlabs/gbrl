@@ -84,6 +84,11 @@ class MultiGBTLearner(BaseLearner):
 
         if policy_dim is None:
             policy_dim = output_dim
+        else:
+            if isinstance(policy_dim, int):
+                policy_dim = [policy_dim] * n_learners
+            if isinstance(policy_dim, list):
+                assert len(policy_dim) == n_learners
 
         super().__init__(input_dim=input_dim,
                          output_dim=output_dim,
