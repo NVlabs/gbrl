@@ -315,6 +315,40 @@ class BaseGBT(ABC):
 
         return self.params.detach().clone() if isinstance(self.params, th.Tensor) else self.params.copy()
 
+    def extract_grads(self) -> Optional[Union[Optional[th.Tensor],
+                                                Tuple[Optional[th.Tensor], ...]]]:
+        """
+        Return a copy of the gradients of the model's parameters from the last forward pass.
+
+        This method returns a cloned and detached copy of the gradients for each parameter tensor in
+        `self.params`. The returned gradients are not attached to the autograd graph, so further operations
+        on them will not affect the computation graph or optimizer steps. The original gradients remain
+        unchanged and tracked by autograd.
+
+        Returns:
+            Optional[Union[th.Tensor, Tuple[Optional[th.Tensor], ...]]]:
+                Cloned and detached gradients, or None if no parameters exist or gradients are missing.
+
+        Raises:
+            AssertionError: If `self.params` is not a torch.Tensor or a tuple of torch.Tensors.
+        """
+        if self.params is None:
+            return None
+
+        if isinstance(self.params, tuple):
+            assert all((isinstance(p, th.Tensor)) for p in self.params), \
+                "All elements of params tuple must be torch.Tensor or None."
+            return tuple(
+                p.grad.clone().detach() if (p is not None and p.grad is not None) else None  # type: ignore
+                for p in self.params
+            )
+
+        assert isinstance(self.params, th.Tensor), "params must be a torch.Tensor or tuple of torch.Tensors."
+        if self.params.grad is None:
+            return None
+
+        return self.params.grad.clone().detach()
+
     def get_grads(self) -> Optional[Union[NumericalData, Tuple[NumericalData, ...]]]:
         """
         Gets a copy of the gradients from the last backward pass.

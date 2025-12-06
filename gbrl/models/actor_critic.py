@@ -693,6 +693,8 @@ class CostActorCritic(ActorCritic):
 
         if guidance_grads is not None:
             guidance_grads = pad_array(guidance_grads, n_dims=2, pad_value=0.0, axis=-1)
+            guidance_grads = clip_grad_norm(guidance_grads, policy_grad_clip)  # type: ignore
+            validate_array(guidance_grads)
 
         self.learner.step(inputs=observations,
                           grads=(policy_grads, value_grads, cost_grads),
