@@ -41,17 +41,15 @@ int* sort_indices_cuda(
 /**
  * @brief Preprocess gradient matrices on GPU
  * 
- * Centers and normalizes gradients based on scoring function.
+ * Centers gradients.
  * 
  * @param grads Gradient values (modified in place)
- * @param grads_norm Gradient norms
  * @param n_rows Number of rows
  * @param n_cols Number of columns
  * @param split_score_func Split scoring function
  */
 void preprocess_matrices(
     float* __restrict__ grads,
-    float* __restrict__ grads_norm,
     const int n_rows,
     const int n_cols,
     const scoreFunc split_score_func
@@ -106,7 +104,6 @@ int uniform_candidates_cuda(
  * 
  * @param gpu_obs Numerical observations
  * @param categorical_obs Categorical observations
- * @param grad_norms Gradient norms for feature weighting
  * @param candidate_indices Output candidate feature indices
  * @param candidate_values Output candidate threshold values
  * @param candidate_categories Output categorical values
@@ -121,7 +118,6 @@ int uniform_candidates_cuda(
 int process_candidates_cuda(
     const float* gpu_obs,
     const char* categorical_obs,
-    const float *grad_norms,
     int* candidate_indices,
     float *candidate_values,
     char* candidate_categories,
@@ -206,6 +202,15 @@ void column_mean_reduce(
 __global__ void iota_kernel(int *arr, int size);
 
 /**
+ * 
+ * @brief CUDA kernel to initialize array with sequential values
+ * 
+ * @param arr Output array
+ * @param size Array size
+ */
+__global__ void ones_kernel(float *arr, int size);
+
+/**
  * @brief CUDA kernel for bitonic sort of indices
  * 
  * @param input Values to sort by
@@ -230,21 +235,6 @@ __global__ void bitonic_sort_kernel(
 __global__ void center_matrix(
     float* __restrict__ input,
     const int n_cols,
-    const int n_rows
-);
-
-/**
- * @brief CUDA kernel for row-wise squared norm
- * 
- * @param input Input matrix
- * @param n_cols Number of columns
- * @param per_row_results Output row norms
- * @param n_rows Number of rows
- */
-__global__ void rowwise_squared_norm(
-    const float* __restrict__ input,
-    const int n_cols,
-    float* __restrict__ per_row_results,
     const int n_rows
 );
 

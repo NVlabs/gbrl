@@ -89,7 +89,6 @@ class TreeNode {
         int splitNode(
             const float *obs,
             const char *categorical_obs,
-            const float *guidance_labels,
             const int _node_idx,
             const splitCandidate &split_candidate
         );
@@ -159,28 +158,6 @@ class TreeNode {
         );
 
         /**
-         * @brief Compute guidance-based split score
-         * 
-         * Evaluates a split candidate based on how well it separates samples
-         * according to guidance labels (compliance vs. non-compliance).
-         * 
-         * @param dataset Training dataset containing guidance labels
-         * @param split_candidate Split candidate to evaluate
-         * @param min_data_in_leaf Minimum samples required in each leaf
-         * @return Guidance-based split quality score
-         */
-        float getSplitGuidanceScore(dataSet *dataset, const splitCandidate &split_candidate, const int min_data_in_leaf);
-        
-        /**
-         * @brief Calculate guidance percentage for this node
-         * 
-         * Computes the fraction of samples at this node that require guidance
-         * (have non-zero guidance labels) and stores it in node metadata.
-         * 
-         * @param guidance_labels Array of guidance labels for all samples
-         */
-        void getGuidancePercent(const float *guidance_labels);
-        /**
          * @brief Score categorical split using L2 norm
          * 
          * @param obs Categorical observations
@@ -224,11 +201,10 @@ class TreeNode {
         int depth;                          /**< Depth in tree (root = 0) */
         int node_idx;                       /**< Node index in traversal order */
 
-        float feature_value;
-        int feature_idx;
+        float feature_value;                /**< Split threshold value */
+        int feature_idx;                    /**< Index of split feature */
 
-        float guidance_percent;   
-        splitCondition *split_conditions = nullptr;
+        splitCondition *split_conditions = nullptr;  /**< Split condition data */
         
         TreeNode *left_child = nullptr;     /**< Pointer to left child node */
         TreeNode *right_child = nullptr;    /**< Pointer to right child node */

@@ -87,13 +87,15 @@ struct TreeNodeGPU {
     int n_cat_features;
     int output_dim;
     int node_idx;
-    float score;
-    float guidance_percent;
+    int n_objs;
+    float conflict_rho;
     // Pointers last (proper GPU memory alignment)
     int *sample_indices;
     int* feature_indices;
     float* feature_values;
     float* edge_weights;
+    float* scores;
+    float *densities;
     bool* inequality_directions;
     bool* is_numerics;
     char* categorical_values;

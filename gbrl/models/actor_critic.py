@@ -246,8 +246,7 @@ class ActorCritic(BaseGBT):
              value_grads: Optional[NumericalData] = None,
              policy_grad_clip: Optional[float] = None,
              value_grad_clip: Optional[float] = None,
-             guidance_labels: Optional[NumericalData] = None,
-             guidance_grads: Optional[NumericalData] = None,
+             obj_labels: Optional[NumericalData] = None,
              ) -> None:
         """
         Performs a boosting step for both the actor and critic.
@@ -260,8 +259,7 @@ class ActorCritic(BaseGBT):
             value_grads (Optional[NumericalData], optional): Manually computed gradients for the value function.
             policy_grad_clip (Optional[float], optional):Gradient clipping value for policy updates.
             value_grad_clip (Optional[float], optional): Gradient clipping value for value updates.
-            guidance_labels (Optional[NumericalData]): guidance label vector.
-            guidance_grads (Optional[NumericalData]): guidelines user suggested action vector.
+            obj_labels (Optional[NumericalData]): objective label vector.
         """
         if observations is None:
             assert self.inputs is not None, ("Cannot update trees without input."
@@ -294,13 +292,9 @@ class ActorCritic(BaseGBT):
         validate_array(policy_grads)
         validate_array(value_grads)
 
-        if guidance_grads is not None and self.shared_tree_struct:
-            guidance_grads = pad_array(guidance_grads, n_dims=1, pad_value=0.0, axis=-1)
-
         self.learner.step(inputs=observations,
                           grads=(policy_grads, value_grads),
-                          guidance_labels=guidance_labels,
-                          guidance_grads=guidance_grads)
+                          obj_labels=obj_labels)
         self.policy_grads = policy_grads
         self.value_grads = value_grads
 
@@ -309,8 +303,7 @@ class ActorCritic(BaseGBT):
     def actor_step(self, observations: Optional[NumericalData] = None,
                    policy_grads: Optional[NumericalData] = None,
                    policy_grad_clip: Optional[float] = None,
-                   guidance_labels: Optional[NumericalData] = None,
-                   guidance_grads: Optional[NumericalData] = None,
+                   obj_labels: Optional[NumericalData] = None,
                    ) -> None:
         """
         Performs a single boosting step for the actor (should only be used
@@ -320,8 +313,7 @@ class ActorCritic(BaseGBT):
             observations (NumericalData):
             policy_grad_clip (float, optional): Defaults to None.
             policy_grads (Optional[NumericalData], optional): manually calculated gradients. Defaults to None.
-            guidance_labels (Optional[NumericalData]): guidance label vector.
-            guidance_grads (Optional[NumericalData]): guidelines user suggested action vector.
+            obj_labels (Optional[NumericalData]): objective labels vector.
 
         Returns:
             np.ndarray: policy gradient
@@ -351,8 +343,7 @@ class ActorCritic(BaseGBT):
 
         self.learner.step_actor(inputs=observations,  # type: ignore
                                 grads=policy_grads,
-                                guidance_labels=guidance_labels,
-                                guidance_grads=guidance_grads)
+                                obj_labels=obj_labels)
         self.policy_grads = policy_grads
 
     def critic_step(self, observations: Optional[NumericalData] = None,
@@ -637,8 +628,7 @@ class CostActorCritic(ActorCritic):
              policy_grad_clip: Optional[float] = None,
              value_grad_clip: Optional[float] = None,
              cost_grad_clip: Optional[float] = None,
-             guidance_labels: Optional[NumericalData] = None,
-             guidance_grads: Optional[NumericalData] = None,
+             obj_labels: Optional[NumericalData] = None,
              ) -> None:
         """
         Performs a boosting step for both the actor and critic.
@@ -653,8 +643,7 @@ class CostActorCritic(ActorCritic):
             policy_grad_clip (Optional[float], optional):Gradient clipping value for policy updates.
             value_grad_clip (Optional[float], optional): Gradient clipping value for value updates.
             cost_grad_clip (Optional[float], optional): Gradient clipping value for cost updates.
-            guidance_labels (Optional[NumericalData]): guidance label vector.
-            guidance_grads (Optional[NumericalData]): guidelines user suggested action vector.
+            obj_labels (Optional[NumericalData]): objective label vector.
         """
         if observations is None:
             assert self.inputs is not None, ("Cannot update trees without input."
@@ -691,15 +680,9 @@ class CostActorCritic(ActorCritic):
         validate_array(value_grads)
         validate_array(cost_grads)
 
-        if guidance_grads is not None:
-            guidance_grads = pad_array(guidance_grads, n_dims=2, pad_value=0.0, axis=-1)
-            guidance_grads = clip_grad_norm(guidance_grads, policy_grad_clip)  # type: ignore
-            validate_array(guidance_grads)
-
         self.learner.step(inputs=observations,
                           grads=(policy_grads, value_grads, cost_grads),
-                          guidance_labels=guidance_labels,
-                          guidance_grads=guidance_grads)
+                          obj_labels=obj_labels)
         self.grads = (policy_grads, value_grads, cost_grads)
         self.inputs = None
 

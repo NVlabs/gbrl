@@ -428,9 +428,8 @@ def ensure_same_type(arr_a: NumericalData,
                                      dtype=numerical_dtype)
     return arr_a, arr_b
 
-
 def concatenate_arrays(arrays: Sequence[NumericalData],
-                       axis: int = 1) -> \
+                       axis: int = -1) -> \
                         NumericalData:
     """
     Concatenates multiple arrays along a specified axis. All arrays must be of the same type
@@ -439,7 +438,7 @@ def concatenate_arrays(arrays: Sequence[NumericalData],
 
     Args:
         arrays (Sequence[NumericalData]): Sequence of arrays (NumPy or PyTorch) to concatenate.
-        axis (int, optional): Axis along which to concatenate. Defaults to 1.
+        axis (int, optional): Axis along which to concatenate. Defaults to -1.
 
     Returns:
         NumericalData: Concatenated array with the type and device of the first array.
@@ -452,23 +451,31 @@ def concatenate_arrays(arrays: Sequence[NumericalData],
     for arr in arrays[1:]:
         assert isinstance(arr, sequence_type), "All arrays must be of the same type"
 
-    # Check if we need to add an axis to match dimensionality
-    def add_axis_if_needed(array, target_ndim, axis):
-        if array.ndim < target_ndim or array.ndim == 1:
-            if isinstance(array, th.Tensor):
-                array = array.unsqueeze(axis)
-            else:  # For NumPy array
-                array = np.expand_dims(array, axis=axis)
-        return array
-
-    # Ensure all arrays have at least the right number of dimensions for
-    # concatenation
+    # Determine the maximum number of dimensions
     max_ndim = max([arr.ndim for arr in arrays])
-    arrays = [add_axis_if_needed(arr, max_ndim, axis) for arr in arrays]
+    
+    # Normalize axis to positive index
+    normalized_axis = axis if axis >= 0 else max_ndim + axis
+    
+    # Expand dimensions for arrays with fewer dimensions
+    expanded_arrays = []
+    for arr in arrays:
+        if arr.ndim < max_ndim:
+            # Add dimensions at the beginning to match max_ndim
+            dims_to_add = max_ndim - arr.ndim
+            if isinstance(arr, th.Tensor):
+                # Add dimensions at the start
+                for _ in range(dims_to_add):
+                    arr = arr.unsqueeze(0)
+            else:  # NumPy array
+                new_shape = (1,) * dims_to_add + arr.shape
+                arr = arr.reshape(new_shape)
+        expanded_arrays.append(arr)
 
-    if isinstance(arrays[0], th.Tensor):
-        return th.cat(arrays, dim=axis)  # type: ignore
-    return np.concatenate(arrays, axis=axis)
+    if isinstance(expanded_arrays[0], th.Tensor):
+        return th.cat(expanded_arrays, dim=normalized_axis)  # type: ignore
+    return np.concatenate(expanded_arrays, axis=normalized_axis)
+
 
 
 def pad_array(array: NumericalData, n_dims: int, pad_value: float = 0.0, axis: int = -1) -> NumericalData:

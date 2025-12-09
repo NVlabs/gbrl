@@ -239,6 +239,7 @@ struct ensembleMetaData {
     int min_data_in_leaf;
     int n_bins;
     int par_th;
+    int n_objs;
     int verbose;
     int batch_size;
     int n_num_features;
@@ -246,8 +247,7 @@ struct ensembleMetaData {
     int iteration;
     // Float types
     float cv_beta;
-    float guidance_weight;
-    float guidance_scale;
+    float lambda_penalty;
     // Smaller types last (bool, enums)
     bool use_cv;
     scoreFunc split_score_func;
@@ -280,8 +280,7 @@ struct dataSet {
     dataHolder<const char> *categorical_obs;
     dataHolder<float> *grads;
     dataHolder<float> *build_grads;
-    dataHolder<const float> *guidance_labels;
-    dataHolder<const float> *guidance_grads;
+    dataHolder<const float> *obj_labels;
     int n_samples;
 };
 
@@ -312,7 +311,7 @@ struct ensembleData {
     int *feature_indices;           /**< Feature used at each internal node */
     float *feature_values;          /**< Threshold values for numerical splits */
     float *edge_weights;            /**< Weights for split edges */
-    float *guidance_percent;        /**< guidance percentage of leaf node */
+    float *densities;               /**< Density values for leaf nodes */
     bool *is_numerics;              /**< Whether split is numerical (vs categorical) */
     bool *inequality_directions;    /**< Direction of inequality tests */
     char *categorical_values;       /**< Values for categorical splits */
@@ -440,9 +439,9 @@ std::string schedulerTypeToString(schedulerFunc func);
 ensembleMetaData* ensemble_metadata_alloc(
     int max_trees, int max_leaves, int max_trees_batch, int max_leaves_batch,
     int input_dim, int output_dim, int policy_dim, int max_depth,
-    int min_data_in_leaf, int n_bins, int par_th, float cv_beta,
-    int verbose, int batch_size, bool use_cv, scoreFunc split_score_func,
-    generatorType generator_type, growPolicy grow_policy, float guidance_weight, float guidance_scale
+    int min_data_in_leaf, int n_bins, int par_th, float cv_beta, float lambda_penalty,
+    int verbose, int n_objs, int batch_size, bool use_cv, scoreFunc split_score_func,
+    generatorType generator_type, growPolicy grow_policy
 );
 
 /**

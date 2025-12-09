@@ -273,8 +273,7 @@ class SeparateActorCriticLearner(MultiGBTLearner):
     def step_actor(self,
                    inputs: NumericalData,
                    grads: NumericalData,
-                   guidance_labels: Optional[NumericalData] = None,
-                   guidance_grads: Optional[NumericalData] = None,
+                   obj_labels: Optional[NumericalData] = None,
                    ) -> None:
         """
         Performs a gradient update step for the policy (actor) model.
@@ -282,13 +281,10 @@ class SeparateActorCriticLearner(MultiGBTLearner):
         Args:
             obs (NumericalData): Input observations.
             theta_grad (NumericalData): Gradient update for the policy (actor).
-            guidance_labels (Optional[NumericalData]): guidance label vector.
-            guidance_grads (Optional[NumericalData]): guidelines user suggested actions vector.
+            obj_labels (Optional[NumericalData]): objective label vector.
         """
         super().step(inputs=inputs, grads=grads, model_idx=0,
-                     guidance_labels=guidance_labels,
-                     guidance_grads=guidance_grads)
-
+                     obj_labels=obj_labels)
     def step_critic(self, inputs: NumericalData,
                     grads: NumericalData) -> None:
         """

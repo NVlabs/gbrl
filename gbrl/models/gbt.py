@@ -151,8 +151,7 @@ class GBTModel(BaseGBT):
              X: Optional[NumericalData] = None,
              grads: Optional[NumericalData] = None,
              max_grad_norm: Optional[float] = None,
-             guidance_labels: Optional[NumericalData] = None,
-             guidance_grads: Optional[NumericalData] = None,
+             obj_labels: Optional[NumericalData] = None,
              ) -> None:
         """
         Perform a boosting step (fits a single tree on the gradients)
@@ -161,8 +160,7 @@ class GBTModel(BaseGBT):
             X (NumericalData): inputs
             max_grad_norm (float, optional): perform gradient clipping by norm. Defaults to None.
             grads (Optional[NumericalData], optional): manually calculated gradients. Defaults to None.
-            guidance_labels (Optional[NumericalData]): guidance labels vector.
-            guidance_grads (Optional[NumericalData]): guidance gradient vector.
+            obj_labels (Optional[NumericalData]): objective labels vector.
 
         """
         if X is None:
@@ -181,8 +179,8 @@ class GBTModel(BaseGBT):
         validate_array(grads)
         self.learner.step(inputs=X,
                           grads=grads,
-                          guidance_labels=guidance_labels,
-                          guidance_grads=guidance_grads)
+                          obj_labels=obj_labels
+                          )
 
         self.grads = grads
         self.input = None

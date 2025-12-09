@@ -65,7 +65,7 @@ class SharedCostActorCriticLearner(SharedActorCriticLearner):
                             tree_struct=tree_struct,
                             optimizers=[policy_optimizer, value_optimizer, cost_optimizer],
                             params=params,
-                            policy_dim=output_dim - 1,
+                            policy_dim=output_dim - 2,
                             verbose=verbose,
                             device=device)
 

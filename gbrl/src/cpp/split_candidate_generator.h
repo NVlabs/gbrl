@@ -24,6 +24,20 @@
 
 #include "types.h"
 
+struct CategoryStats {
+    int count = 0;
+    int feature_idx = -1;
+    std::string value; // Keep the raw string value
+};
+
+// Custom Hash for Pair<int, string> to avoid string concatenation
+struct PairHash {
+    std::size_t operator()(const std::pair<int, std::string>& k) const {
+        return std::hash<int>()(k.first) ^ (std::hash<std::string>()(k.second) << 1);
+    }
+};
+
+
 /**
  * @brief Generates candidate split points for tree building
  * 
@@ -90,12 +104,8 @@ class SplitCandidateGenerator {
          * @brief Process categorical features to generate candidates
          * 
          * @param categorical_obs Categorical observation matrix
-         * @param grad_norms Gradient norms for prioritizing categories
          */
-        void processCategoricalCandidates(
-            const char *categorical_obs,
-            const float *grad_norms
-        );
+        void processCategoricalCandidates(const char *categorical_obs);
         
         /**
          * @brief Compute quantile split points for a feature
@@ -144,7 +154,6 @@ std::ostream& operator<<(std::ostream& os, const splitCandidate& obj);
  * gradient norms.
  * 
  * @param categorical_obs Categorical observations
- * @param grad_norms Gradient norms
  * @param n_samples Number of samples
  * @param n_cat_features Number of categorical features
  * @param n_bins Number of bins
@@ -156,7 +165,6 @@ std::ostream& operator<<(std::ostream& os, const splitCandidate& obj);
  */
 int processCategoricalCandidates_func(
     const char *categorical_obs,
-    const float *grad_norms,
     const int n_samples,
     const int n_cat_features,
     const int n_bins,

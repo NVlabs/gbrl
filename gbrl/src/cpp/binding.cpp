@@ -323,8 +323,8 @@ py::dict metadataToDict(const ensembleMetaData* metadata){
         d["par_th"] = metadata->par_th;
         d["batch_size"] = metadata->batch_size;
         d["grow_policy"] = growPolicyToString(metadata->grow_policy);
-        d["guidance_weight"] = metadata->guidance_weight;
-        d["guidance_scale"] = metadata->guidance_scale;
+        d["n_objs"] = metadata->n_objs;
+        d["lambda_penalty"] = metadata->lambda_penalty;
         d["iteration"] = metadata->iteration;
     }
     return d;
@@ -423,7 +423,7 @@ py::list getOptimizerConfigs(const std::vector<Optimizer*>& opts) {
 
 PYBIND11_MODULE(gbrl_cpp, m) {
     py::class_<GBRL> gbrl(m, "GBRL");
-    gbrl.def(py::init<int, int, int, int, int, int, int, float, std::string, std::string, bool, int, std::string, float, float, int, std::string, std::string>(),
+    gbrl.def(py::init<int, int, int, int, int, int, int, float, std::string, std::string, bool, int, std::string, int, int, float, std::string, std::string>(),
          py::arg("input_dim")=1, 
          py::arg("output_dim")=1, 
          py::arg("policy_dim")=1, 
@@ -431,15 +431,15 @@ PYBIND11_MODULE(gbrl_cpp, m) {
          py::arg("min_data_in_leaf")=0, 
          py::arg("n_bins")=256, 
          py::arg("par_th")=10, 
-         py::arg("cv_beta")=0.9, 
+         py::arg("cv_beta")=0.9,  
          py::arg("split_score_func")="cosine", 
          py::arg("generator_type")="quantile", 
          py::arg("use_control_variates")=false, 
          py::arg("batch_size")=5000, 
          py::arg("grow_policy")="greedy", 
-         py::arg("guidance_weight")=1.0,
-         py::arg("guidance_scale")=1.0,
+         py::arg("n_objs")=1, 
          py::arg("verbose")=0,
+         py::arg("lambda_penalty")=1.0,
          py::arg("device")="cpu",
          py::arg("learner_name")="GBRL",
          "Constructor of the GBRL class");
@@ -454,16 +454,15 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         self.to_device(stringTodeviceType(str_device)); 
     },  py::arg("device"),
     "Set GBRL device ['cpu', 'cuda']");
-    gbrl.def("step", [](GBRL &self, py::object &obs, py::object &categorical_obs, py::object &grads, py::object &guidance_labels, py::object &guidance_grads) {
+    gbrl.def("step", [](GBRL &self, py::object &obs, py::object &categorical_obs, py::object &grads, py::object &obj_labels) {
         const float* obs_ptr = nullptr;
         const char* cat_obs_ptr= nullptr;
         float* grads_ptr = nullptr;
-        const float* guidance_labels_ptr = nullptr;
-        const float* guidance_grads_ptr = nullptr;
-        std::vector<size_t> obs_shape, cat_obs_shape, grads_shape, guidance_labels_shape, guidance_grads_shape;
-        std::string obs_device, cat_obs_device, grads_device, guidance_labels_device, guidance_grads_device;
-        int n_samples, n_num_features = 0, n_cat_features = 0, grad_output_dim;
-        int n_obs_samples, n_cat_samples, n_guidance_samples, guidance_grad_output_dim, n_guidance_dim;
+        const float* obj_labels_ptr = nullptr;
+        std::vector<size_t> obs_shape, cat_obs_shape, grads_shape, obj_labels_shape;
+        std::string obs_device, cat_obs_device, grads_device, obj_labels_device;
+        int n_samples, n_num_features = 0, n_cat_features = 0, grad_output_dim, obj_labels_dim;
+        int n_obs_samples, n_cat_samples, n_obj_labels_samples, n_objs;
         
         handle_input_info<float>(grads, grads_ptr, grads_shape, grads_device, "grads", false, "step");
         if (grads_shape.size() == 1){
@@ -474,14 +473,26 @@ PYBIND11_MODULE(gbrl_cpp, m) {
                 n_samples = static_cast<int>(grads_shape[0]);
                 grad_output_dim = 1;
             }
-        } else {
+            n_objs = 1;
+        } else if (grads_shape.size() == 2){
             n_samples = static_cast<int>(grads_shape[0]);
             grad_output_dim = static_cast<int>(grads_shape[1]);
+            n_objs = 1;
+        } else {
+            n_objs = static_cast<int>(grads_shape[0]);
+            n_samples = static_cast<int>(grads_shape[1]);
+            grad_output_dim = static_cast<int>(grads_shape[2]);
         }
 
         if (grad_output_dim != self.metadata->output_dim){
             std::stringstream ss;
             ss << "Gradient output dim " << grad_output_dim << " != correct output dim " << self.metadata->output_dim;
+            throw std::runtime_error(ss.str());
+        }
+
+        if (n_objs != self.metadata->n_objs){
+            std::stringstream ss;
+            ss << "Number of objectives " << n_objs << " != correct number of objectives " << self.metadata->n_objs;
             throw std::runtime_error(ss.str());
         }
 
@@ -502,7 +513,6 @@ PYBIND11_MODULE(gbrl_cpp, m) {
                 throw std::runtime_error(ss.str());
             }
         }
-
 
         dataHolder<const float> obs_handler{obs_ptr, stringTodeviceType(obs_device)};
 
@@ -531,69 +541,44 @@ PYBIND11_MODULE(gbrl_cpp, m) {
 
         dataHolder<const char> cat_obs_handler{cat_obs_ptr, stringTodeviceType(cat_obs_device)};
 
-        handle_input_info<const float>(guidance_labels, guidance_labels_ptr, guidance_labels_shape, guidance_labels_device, "guidance_labels", true, "step");
-        if (guidance_labels_ptr != nullptr){
-            if (guidance_labels_shape.size() == 1){
-                n_guidance_samples = static_cast<int>(guidance_labels_shape[0]);
-                if (n_guidance_samples != n_samples){
+        handle_input_info<const float>(obj_labels, obj_labels_ptr, obj_labels_shape, obj_labels_device, "obj_labels", true, "step");
+        if (obj_labels_ptr != nullptr){
+            if (obj_labels_shape.size() == 1){
+                n_obj_labels_samples = static_cast<int>(obj_labels_shape[0]);
+                if (n_obj_labels_samples != n_samples){
                     std::stringstream ss;
-                    ss << "Number of guidance samples " << n_guidance_samples << " != number of gradient samples " << n_samples;
+                    ss << "Number of obj_labels samples " << n_obj_labels_samples << " != number of gradient samples " << n_samples;
                     throw std::runtime_error(ss.str());
                 }
             } else{
-                if (guidance_labels_shape.size() > 2){
+                if (obj_labels_shape.size() > 2){
                     std::stringstream ss;
-                    ss << "guidance_labels has invalid shape. Should be a vector";
+                    ss << "obj_labels has invalid shape. Should be a vector";
                     throw std::runtime_error(ss.str());
                 }
-                n_guidance_samples = static_cast<int>(guidance_labels_shape[0]);
-                n_guidance_dim = static_cast<int>(guidance_labels_shape[1]);
+                n_obj_labels_samples = static_cast<int>(obj_labels_shape[0]);
+                obj_labels_dim = static_cast<int>(obj_labels_shape[1]);
 
-                if (n_guidance_samples != n_samples || n_guidance_dim != n_samples){
+                if (n_obj_labels_samples == 1){
+                    n_obj_labels_samples = obj_labels_dim;
+                }
+
+                if (n_obj_labels_samples != n_samples){
                     std::stringstream ss;
-                    ss << "Number of guidance samples " << n_guidance_samples << " != number of gradient samples " << n_samples;
+                    ss << "Number of obj_labels samples " << n_obj_labels_samples << " != number of gradient samples " << n_samples;
                     throw std::runtime_error(ss.str());
                 }
             }
         }
 
-        dataHolder<const float> guidance_labels_handler{guidance_labels_ptr, stringTodeviceType(guidance_labels_device)};
-
-        handle_input_info<const float>(guidance_grads, guidance_grads_ptr, guidance_grads_shape, guidance_grads_device, "guidance_grads", true, "step");
-        if (guidance_grads_ptr != nullptr){
-            if (guidance_grads_shape.size() == 1){
-                if (self.metadata->output_dim > 1){
-                    n_guidance_samples = 1;
-                    guidance_grad_output_dim = static_cast<int>(guidance_grads_shape[0]);
-                } else{
-                    n_guidance_samples = static_cast<int>(guidance_grads_shape[0]);
-                    guidance_grad_output_dim = 1;
-                }
-            } else {
-                n_guidance_samples = static_cast<int>(guidance_grads_shape[0]);
-                guidance_grad_output_dim = static_cast<int>(guidance_grads_shape[1]);
-            }
-            if (guidance_grad_output_dim != self.metadata->output_dim){
-                    std::stringstream ss;
-                    ss << "Gradient output dim " << guidance_grad_output_dim << " != correct output dim " << self.metadata->output_dim;
-                    throw std::runtime_error(ss.str());
-                }
-            if (n_guidance_samples != n_samples){
-                    std::stringstream ss;
-                    ss << "Number of guidance samples " << n_guidance_samples << " != number of gradient samples " << n_samples;
-                    throw std::runtime_error(ss.str());
-                }
-        }
-
-        dataHolder<const float> guidance_grads_handler{guidance_grads_ptr, stringTodeviceType(guidance_grads_device)};
+        dataHolder<const float> obj_labels_handler{obj_labels_ptr, stringTodeviceType(obj_labels_device)};
 
         py::gil_scoped_release release;
-        self.step(&obs_handler, &cat_obs_handler, &grads_handler, &guidance_labels_handler, &guidance_grads_handler, n_samples, n_num_features, n_cat_features);
+        self.step(&obs_handler, &cat_obs_handler, &grads_handler, &obj_labels_handler, n_samples, n_num_features, n_cat_features);
     },  py::arg("obs"),
         py::arg("categorical_obs"),
         py::arg("grads"),
-        py::arg("guidance_labels")=py::none(),
-        py::arg("guidance_grads")=py::none(),
+        py::arg("obj_labels")=py::none(),
     "Fit a decision tree with the given observations and gradients");
     gbrl.def("fit", [](GBRL &self, py::object &obs, py::object &categorical_obs, py::object &targets, int iterations, bool shuffle, std::string loss_type) -> float {
         float* obs_ptr = nullptr;

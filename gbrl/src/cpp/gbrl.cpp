@@ -75,10 +75,10 @@ extern "C" {
 GBRL::GBRL(int input_dim, int output_dim, int policy_dim, int max_depth, int min_data_in_leaf, 
            int n_bins, int par_th, float cv_beta, scoreFunc split_score_func,
            generatorType generator_type, bool use_cv, int batch_size, growPolicy grow_policy, 
-           float guidance_weight, float guidance_scale, int verbose, 
+           int n_objs, int verbose,  float lambda_penalty,
            deviceType _device, std::string _learner_name){
     this->learner_name = _learner_name;
-    this->metadata = ensemble_metadata_alloc(INITAL_MAX_TREES, INITAL_MAX_TREES * (1 << max_depth), TREES_BATCH, TREES_BATCH * (1 << max_depth), input_dim, output_dim, policy_dim, max_depth, min_data_in_leaf, n_bins, par_th, cv_beta, verbose, batch_size, use_cv, split_score_func, generator_type, grow_policy, guidance_weight, guidance_scale);
+    this->metadata = ensemble_metadata_alloc(INITAL_MAX_TREES, INITAL_MAX_TREES * (1 << max_depth), TREES_BATCH, TREES_BATCH * (1 << max_depth), input_dim, output_dim, policy_dim, max_depth, min_data_in_leaf, n_bins, par_th, cv_beta, lambda_penalty, verbose, n_objs, batch_size, use_cv, split_score_func, generator_type, grow_policy);
     this->sheader = create_header();
 #ifdef USE_CUDA
     if (_device == gpu){
@@ -94,10 +94,10 @@ GBRL::GBRL(int input_dim, int output_dim, int policy_dim, int max_depth, int min
 GBRL::GBRL(int input_dim, int output_dim, int policy_dim, int max_depth, int min_data_in_leaf, 
            int n_bins, int par_th, float cv_beta, std::string split_score_func,
            std::string generator_type, bool use_cv, int batch_size, 
-           std::string grow_policy, float guidance_weight,
-           float guidance_scale, int verbose, std::string _device, std::string _learner_name){
+           std::string grow_policy, int n_objs,
+           int verbose, float lambda_penalty, std::string _device, std::string _learner_name){
     this->learner_name = _learner_name;
-    this->metadata = ensemble_metadata_alloc(INITAL_MAX_TREES, INITAL_MAX_TREES * (1 << max_depth), TREES_BATCH, TREES_BATCH * (1 << max_depth), input_dim, output_dim, policy_dim, max_depth, min_data_in_leaf, n_bins, par_th, cv_beta, verbose, batch_size, use_cv, stringToScoreFunc(split_score_func), stringTogeneratorType(generator_type), stringTogrowPolicy(grow_policy), guidance_weight, guidance_scale);
+    this->metadata = ensemble_metadata_alloc(INITAL_MAX_TREES, INITAL_MAX_TREES * (1 << max_depth), TREES_BATCH, TREES_BATCH * (1 << max_depth), input_dim, output_dim, policy_dim, max_depth, min_data_in_leaf, n_bins, par_th, cv_beta, lambda_penalty, verbose, n_objs, batch_size, use_cv, stringToScoreFunc(split_score_func), stringTogeneratorType(generator_type), stringTogrowPolicy(grow_policy));
     this->sheader = create_header();
 #ifdef USE_CUDA
     if (stringTodeviceType(_device) == gpu){
@@ -195,7 +195,6 @@ void GBRL::to_device(deviceType _device){
         this->edata = edata_gpu;
         this->device = gpu;
     } else {
-         printf("else\n");
         ensembleData* edata_cpu = ensemble_data_copy_gpu_cpu(this->metadata, this->edata, nullptr);
         this->edata = edata_cpu;
         this->device = cpu;
@@ -399,8 +398,7 @@ float* GBRL::predict(dataHolder<const float> *obs,
         categorical_obs,    // categorical observations  
         nullptr,           // grads (not used in predict)
         nullptr,           // build_grads (not used in predict)
-        nullptr,           // guidance_label (not used in predict)
-        nullptr,           // guidance_grads (not used in predict)
+        nullptr,           // obj_label (not used in predict)
         n_samples,         // number of samples
     };
     float *preds = nullptr;
@@ -558,17 +556,14 @@ void GBRL::_step_gpu(dataSet *dataset){
     size_t obs_size = sizeof(float)*n_num_features*n_samples;
     size_t cat_obs_size = sizeof(char)*n_cat_features*n_samples*MAX_CHAR_SIZE;
     size_t grads_size = sizeof(float)*output_dim*n_samples;
-    size_t grads_norm_size = sizeof(float)*n_samples;
 
     size_t cand_indices_size =  sizeof(int)*n_bins*this->metadata->input_dim;
     size_t cand_float_size =  sizeof(float)*n_bins*this->metadata->input_dim;
     size_t cand_cat_size =  sizeof(char)*n_bins*this->metadata->input_dim*MAX_CHAR_SIZE;
     size_t cand_numerical_size =  sizeof(bool)*n_bins*this->metadata->input_dim;
-    size_t guidance_label_size = sizeof(float)*n_samples;
-    size_t guidance_grads_size = sizeof(float)*n_samples * metadata->output_dim;
+    size_t obj_label_size = sizeof(float)*n_samples;
 
     size_t alloc_size = grads_size +
-                        grads_norm_size +
                         cand_indices_size +
                         cand_float_size +
                         cand_cat_size +
@@ -587,10 +582,8 @@ void GBRL::_step_gpu(dataSet *dataset){
         alloc_size += grads_size;
     }
 
-    if (dataset->guidance_labels->data != nullptr && dataset->guidance_labels->device == cpu){
-        alloc_size += guidance_label_size;
-    if (dataset->guidance_grads->data != nullptr && dataset->guidance_grads->device == cpu)
-        alloc_size += guidance_grads_size;
+    if (dataset->obj_labels->data != nullptr && dataset->obj_labels->device == cpu){
+        alloc_size += obj_label_size;
     }
 
     char *device_memory_block; 
@@ -627,30 +620,17 @@ void GBRL::_step_gpu(dataSet *dataset){
     }
     cudaMemcpy(gpu_build_grads, gpu_grads, grads_size, cudaMemcpyDeviceToDevice);
 
-    float *gpu_guidance_labels = nullptr;
-    if (dataset->guidance_labels->data != nullptr){
-        if(dataset->guidance_labels->device == cpu){
-            gpu_guidance_labels = (float*)(device_memory_block + trace);
-            trace += guidance_label_size;
-            cudaMemcpy(gpu_guidance_labels, dataset->guidance_labels->data, guidance_label_size, cudaMemcpyHostToDevice);
+    float *gpu_obj_labels = nullptr;
+    if (dataset->obj_labels->data != nullptr){
+        if(dataset->obj_labels->device == cpu){
+            gpu_obj_labels = (float*)(device_memory_block + trace);
+            trace += obj_label_size;
+            cudaMemcpy(gpu_obj_labels, dataset->obj_labels->data, obj_label_size, cudaMemcpyHostToDevice);
         } else {
-            gpu_guidance_labels = const_cast<float*>(dataset->guidance_labels->data);
+            gpu_obj_labels = const_cast<float*>(dataset->obj_labels->data);
         }
     } 
 
-    float *gpu_guidance_grads = nullptr;
-    if (dataset->guidance_grads->data != nullptr){
-        if (dataset->guidance_grads->device == cpu){
-            gpu_guidance_grads = (float*)(device_memory_block + trace);
-            trace += guidance_grads_size;
-            cudaMemcpy(gpu_guidance_grads, dataset->guidance_grads->data, guidance_grads_size, cudaMemcpyHostToDevice);
-        } else {
-            gpu_guidance_grads = const_cast<float*>(dataset->guidance_grads->data);
-        }
-    }
-
-    float *gpu_grads_norm = (float*)(device_memory_block + trace);
-    trace += grads_norm_size;
     float *candidate_values = (float*)(device_memory_block + trace);
     trace += cand_float_size;
     int *candidate_indices = (int*)(device_memory_block + trace);
@@ -673,24 +653,22 @@ void GBRL::_step_gpu(dataSet *dataset){
     if (gpu_obs != nullptr)
         transpose_matrix(gpu_obs, trans_obs, n_num_features, n_samples);
 
-    preprocess_matrices(gpu_build_grads, gpu_grads_norm, n_samples, output_dim, this->metadata->split_score_func);
+    preprocess_matrices(gpu_build_grads, n_samples, output_dim, this->metadata->split_score_func);
 
-    int n_candidates = process_candidates_cuda(gpu_obs, dataset->categorical_obs->data, gpu_grads_norm, candidate_indices, candidate_values, candidate_categories, candidate_numerical, n_samples, n_num_features, n_cat_features, n_bins, this->metadata->generator_type);
+    int n_candidates = process_candidates_cuda(gpu_obs, gpu_categorical_obs, candidate_indices, candidate_values, candidate_categories, candidate_numerical, n_samples, n_num_features, n_cat_features, n_bins, this->metadata->generator_type);
     
     dataHolder<const float> obs_holder{trans_obs, device};
     dataHolder<const char> cat_obs_holder{gpu_categorical_obs, device};
     dataHolder<float> grads_holder{gpu_grads, device};
     dataHolder<float> build_grads_holder{gpu_build_grads, device};
-    dataHolder<const float> guidance_labels_holder{gpu_guidance_labels, device};
-    dataHolder<const float> guidance_grads_holder{gpu_guidance_grads, device};
+    dataHolder<const float> obj_labels_holder{gpu_obj_labels, device};
 
     dataSet cuda_dataset{
         &obs_holder,           // observations (transposed)
         &cat_obs_holder, // categorical observations on GPU
         &grads_holder,         // gradients on GPU
         &build_grads_holder,     // build gradients on GPU
-        &guidance_labels_holder,  // guidance labels
-        &guidance_grads_holder,  // guidance gradients
+        &obj_labels_holder,  // objective labels
         n_samples,           // number of samples
     };
     candidatesData candidata{n_candidates, candidate_indices, candidate_values, candidate_numerical, candidate_categories};
@@ -726,7 +704,6 @@ float GBRL::_fit_gpu(dataHolder<float> *obs,
     size_t obs_size = sizeof(float)*n_num_features*n_samples;
     size_t cat_obs_size = sizeof(char)*n_cat_features*n_samples*MAX_CHAR_SIZE;
     size_t grads_size = sizeof(float)*output_dim*n_samples;
-    size_t grads_norm_size = sizeof(float)*n_samples;
     size_t indices_size = sizeof(int)*n_samples;
     size_t bias_size = sizeof(float)*output_dim;
 
@@ -737,7 +714,6 @@ float GBRL::_fit_gpu(dataHolder<float> *obs,
     size_t result_tmp_size = sizeof(float)*n_blocks;
 
     size_t alloc_size = grads_size*3 +
-                        grads_norm_size +
                         cand_indices_size +
                         cand_float_size +
                         cand_cat_size +
@@ -845,8 +821,6 @@ float GBRL::_fit_gpu(dataHolder<float> *obs,
     trace += grads_size;
     float *gpu_preds = (float*)(device_memory_block + trace);
     trace += grads_size;
-    float *gpu_grads_norm = (float*)(device_memory_block + trace);
-    trace += grads_norm_size;
     float *result_tmp = (float*)(device_memory_block + trace);
     trace += result_tmp_size;
     int *candidate_indices = (int*)(device_memory_block + trace);
@@ -914,26 +888,24 @@ float GBRL::_fit_gpu(dataHolder<float> *obs,
     dataHolder<const char> cat_obs_holder{gpu_categorical_obs, device};
     dataHolder<float> grads_holder{gpu_grads, device};
     dataHolder<float> build_grads_holder{gpu_build_grads, device};
-    dataHolder<const float> guidance_labels_holder{nullptr, device};
-    dataHolder<const float> guidance_grads_holder{nullptr, device};
+    dataHolder<const float> obj_labels_holder{nullptr, device};
 
     dataSet cuda_dataset{
         &obs_holder,            // observations on GPU
-        &cat_obs_holder, // categorical observations on GPU
+        &cat_obs_holder,        // categorical observations on GPU
         &grads_holder,          // gradients on GPU
         &build_grads_holder,    // build gradients on GPU
-        &guidance_labels_holder,           // guidance labels (not used in fit_gpu)
-        &guidance_grads_holder,           // guidance grads (not used in fit_gpu)
-        n_samples,         // number of samples
+        &obj_labels_holder,     // obj labels (not used in fit_gpu)
+        n_samples,              // number of samples
     };
     predict_cuda_no_host(&cuda_dataset, gpu_preds, this->metadata, this->edata, this->cuda_opt, this->n_cuda_opts, 0, 0, true);
 
     MultiRMSEGrad(gpu_preds, gpu_targets, gpu_grads,  output_dim, n_samples, n_blocks, threads_per_block);
     cudaMemcpy(gpu_build_grads, gpu_grads, sizeof(float)*output_dim*n_samples, cudaMemcpyDeviceToDevice);
 
-    preprocess_matrices(gpu_build_grads, gpu_grads_norm, n_samples, output_dim, this->metadata->split_score_func);
+    preprocess_matrices(gpu_build_grads, n_samples, output_dim, this->metadata->split_score_func);
 
-    int n_candidates = process_candidates_cuda(gpu_obs, gpu_categorical_obs, gpu_grads_norm, candidate_indices, candidate_values, candidate_categories, candidate_numerical, n_samples, n_num_features, n_cat_features, n_bins, this->metadata->generator_type);
+    int n_candidates = process_candidates_cuda(gpu_obs, gpu_categorical_obs, candidate_indices, candidate_values, candidate_categories, candidate_numerical, n_samples, n_num_features, n_cat_features, n_bins, this->metadata->generator_type);
 
     candidatesData candidata{n_candidates, candidate_indices, candidate_values, candidate_numerical, candidate_categories};
     splitDataGPU *split_data = allocate_split_data(this->metadata, candidata.n_candidates);  
@@ -960,7 +932,7 @@ float GBRL::_fit_gpu(dataHolder<float> *obs,
         }
         cudaMemcpy(gpu_build_grads, gpu_grads, grads_size, cudaMemcpyDeviceToDevice);
         
-        preprocess_matrices(gpu_build_grads, gpu_grads_norm, n_samples, output_dim, this->metadata->split_score_func);
+        preprocess_matrices(gpu_build_grads, n_samples, output_dim, this->metadata->split_score_func);
         
     }
     cudaFree(split_data->split_scores);
@@ -980,8 +952,7 @@ float GBRL::_fit_gpu(dataHolder<float> *obs,
 void GBRL::step(dataHolder<const float> *obs,
                 dataHolder<const char> *categorical_obs,
                 dataHolder<float> *grads,
-                dataHolder<const float> *guidance_labels,
-                dataHolder<const float> *guidance_grads,
+                dataHolder<const float> *obj_labels,
                 const int n_samples,
                 const int n_num_features,
                 const int n_cat_features){
@@ -1003,8 +974,7 @@ void GBRL::step(dataHolder<const float> *obs,
     if (obs->device == deviceType::gpu ||
         categorical_obs->device == deviceType::gpu ||
         grads->device == deviceType::gpu ||
-        guidance_labels->device == deviceType::gpu ||
-        guidance_grads->device == deviceType::gpu
+        obj_labels->device == deviceType::gpu
     ){
         std::cerr << "GPU data detected! GBRL was compiled for CPU only!" << std::endl;
         throw std::runtime_error("GPU data detected! GBRL was compiled for CPU only!");
@@ -1012,12 +982,11 @@ void GBRL::step(dataHolder<const float> *obs,
     }
 #endif
     dataSet dataset{
-        obs,                // observations
-        categorical_obs,    // categorical observations  
+        obs,               // observations
+        categorical_obs,   // categorical observations  
         grads,             // gradients
         nullptr,           // build_grads (not used in step)
-        guidance_labels,          // guidance labels
-        guidance_grads,          // guidance gradients
+        obj_labels,        // objective labels
         n_samples,         // number of samples
     };
 #ifdef USE_CUDA
@@ -1133,8 +1102,7 @@ float GBRL::fit(dataHolder<float> *obs,
             &tr_cat_obs_holder,   // categorical observations
             nullptr,             // grads (not used initially)
             nullptr,             // build_grads (not used initially)
-            nullptr,             // guidance_labels (not used in fit)
-            nullptr,             // guidance_grads (not used in fit)
+            nullptr,             // obj_labels (not used in fit)
             n_samples,           // number of samples
         };
 
@@ -1294,7 +1262,7 @@ int GBRL::loadFromFile(const std::string& filename){
     std::cout << " cv_beta: " << this->metadata->cv_beta << " split_score_func: " << scoreFuncToString(this->metadata->split_score_func) << std::endl;
     std::cout << "grow_policy: " << growPolicyToString(this->metadata->grow_policy);
     std::cout << " verbose: " << this->metadata->verbose << " device: "<< deviceTypeToString(this->device);
-    std::cout << " guidance weight: " << this->metadata->guidance_weight << " guidance scale: " << this->metadata->guidance_scale << std::endl;
+    std::cout << " n_objs: " << this->metadata->n_objs << " lambda_penalty: " << this->metadata->lambda_penalty << std::endl;
     std::cout << " use_cv: " << this->metadata->use_cv << " batch_size: " << this->metadata->batch_size << std::endl;
     std::cout << "Loaded: " << this->metadata->n_leaves << " leaves from " << this->metadata->n_trees << " trees" <<  std::endl;
     std::cout << "Model has: " << num_opts << " optimizers " <<  std::endl;
@@ -1312,7 +1280,7 @@ void GBRL::print_ensemble_metadata(){
     std::cout << " cv beta: " << this->metadata->cv_beta << " split score func: " << scoreFuncToString(this->metadata->split_score_func) << std::endl;
     std::cout << "grow policy: " << growPolicyToString(this->metadata->grow_policy);
     std::cout << " verbose: " << this->metadata->verbose << " device: "<< deviceTypeToString(this->device);
-    std::cout << " guidance weight: " << this->metadata->guidance_weight << " guidance scale: " << this->metadata->guidance_scale << std::endl;
+    std::cout << " n_objs: " << this->metadata->n_objs << " lambda_penalty: " << this->metadata->lambda_penalty << std::endl;
     std::cout << "use cv: " << this->metadata->use_cv << " batch size: " << this->metadata->batch_size << std::endl;
     std::cout << "Ensemble with: " << this->metadata->n_leaves << " leaves from " << this->metadata->n_trees << " trees" <<  std::endl;
     std::cout << "Model has: " << this->opts.size() << " optimizers " <<  std::endl;
@@ -1341,8 +1309,7 @@ ensembleData *edata_cpu = nullptr;
         &cat_obs_holder,            // categorical observations
         nullptr,                   // grads (not used in tree_shap)
         nullptr,                   // build_grads (not used in tree_shap)
-        nullptr,                   // guidance_labels (not used in tree_shap)
-        nullptr,                   // guidance_grads (not used in tree_shap)
+        nullptr,                   // obj_labels (not used in tree_shap)
         n_samples,                 // number of samples
     };
     // print_shap_data(shap_data, this->metadata);
@@ -1363,13 +1330,12 @@ float* GBRL::ensemble_shap(const float *obs, const char *categorical_obs, const 
     dataHolder<const float> obs_holder{obs, this->device};
     dataHolder<const char> cat_obs_holder{categorical_obs, this->device};
     dataSet dataset{
-        &obs_holder,                // observations
-        &cat_obs_holder,            // categorical observations
-        nullptr,                   // grads (not used in ensemble_shap)
-        nullptr,           // build_grads (not used in ensemble_shap)
-        nullptr,           // guidance_labels (not used in ensemble_shap)
-        nullptr,           // guidance_grads (not used in ensemble_shap)
-        n_samples,         // number of samples
+        &obs_holder,           // observations
+        &cat_obs_holder,       // categorical observations
+        nullptr,               // grads (not used in ensemble_shap)
+        nullptr,               // build_grads (not used in ensemble_shap)
+        nullptr,               // obj_grads (not used in ensemble_shap)
+        n_samples,             // number of samples
     };
     ensembleData *edata_cpu = nullptr;
 #ifdef USE_CUDA

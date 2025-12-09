@@ -53,7 +53,8 @@ class BaseLearner(ABC):
         total_iterations (int): Total number of training iterations.
         feature_weights (Union[float, NumericalData]): Feature importance weights.
     """
-    def __init__(self, input_dim: int,
+    def __init__(self,
+                 input_dim: int,
                  output_dim: Union[int, List[int]],
                  tree_struct: Dict,
                  params: Dict,
@@ -83,6 +84,7 @@ class BaseLearner(ABC):
         self.input_dim = input_dim
         self.output_dim = output_dim
         self.policy_dim = policy_dim if policy_dim is not None else output_dim
+
         self.device = device
         self.params = {'input_dim': input_dim,
                        'output_dim': output_dim,
@@ -93,11 +95,12 @@ class BaseLearner(ABC):
                                                     'Quantile'),
                        'use_control_variates': params.get('control_variates',
                                                           False),
-                       'guidance_weight': params.get('guidance_weight',
-                                                     0.0),
-                       'guidance_scale': params.get('guidance_scale',
-                                                    1.0),
+                       'lambda_penalty': params.get('lambda_penalty',
+                                                     1.0),
+                       'n_objs': params.get('n_objs',
+                                                    1),
                        'verbose': verbose, 'device': device, **tree_struct}
+        self.n_objs = self.params['n_objs']
 
         self.iteration = 0
         self.total_iterations = 0

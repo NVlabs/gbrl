@@ -45,7 +45,8 @@ TreeNodeGPU* allocate_root_tree_node(
  */
 void allocate_child_tree_node(
     TreeNodeGPU* host_parent,
-    TreeNodeGPU** device_child
+    TreeNodeGPU** device_child,
+    const int n_objs
 );
 
 /**
@@ -93,7 +94,7 @@ void free_tree_node(TreeNodeGPU* node);
 void evaluate_greedy_splits(
     dataSet *dataset,
     ensembleData *edata,
-    const TreeNodeGPU *node,
+    TreeNodeGPU *node,
     candidatesData *candidata,
     ensembleMetaData *metadata,
     splitDataGPU* split_data,
@@ -151,7 +152,9 @@ void calc_oblivious_parallelism(
     const int output_dim,
     int &threads_per_block,
     const scoreFunc split_score_func,
-    const int depth
+    size_t &shared_mem,
+    const int depth,
+    const int n_objs
 );
 
 /**
@@ -230,8 +233,8 @@ __global__ void split_score_cosine_cuda(
     const float* __restrict__ obs,
     const char* __restrict__ categorical_obs,
     const float* __restrict__ grads,
-    const float* __restrict__ guidance_grads,
     const float* __restrict__ feature_weights,
+    const float* __restrict__ obj_labels,
     const TreeNodeGPU* __restrict__ node,
     const int* __restrict__ candidate_indices,
     const float* __restrict__ candidate_values,
@@ -243,7 +246,8 @@ __global__ void split_score_cosine_cuda(
     float* __restrict__ split_scores,
     const int global_n_samples,
     const int n_num_features,
-    const float guidance_scale
+    const int n_objs,
+    const float lambda_penalty
 );
 
 /**
@@ -269,8 +273,8 @@ __global__ void split_score_l2_cuda(
     const float* __restrict__ obs,
     const char* __restrict__ categorical_obs,
     const float* __restrict__ grads,
-    const float* __restrict__ guidance_grads,
     const float* __restrict__ feature_weights,
+    const float* __restrict__ obj_labels,
     const TreeNodeGPU* __restrict__ node,
     const int* __restrict__ candidate_indices,
     const float* __restrict__ candidate_values,
@@ -282,7 +286,8 @@ __global__ void split_score_l2_cuda(
     float* __restrict__ split_scores,
     const int global_n_samples,
     const int n_num_features,
-    const float guidance_scale
+    const int n_objs,
+    const float lambda_penalty
 );
 
 /**
@@ -292,14 +297,12 @@ __global__ void split_score_l2_cuda(
  * @param n_candidates Number of candidates
  * @param best_idx Output best candidate index
  * @param best_score Output best score
- * @param node Current tree node
  */
 __global__ void update_best_candidate_cuda(
     float* __restrict__ split_scores,
     int n_candidates,
     int* __restrict__ best_idx,
-    float* __restrict__ best_score,
-    const TreeNodeGPU* __restrict__ node
+    float* __restrict__ best_score
 );
 
 /**
@@ -317,15 +320,12 @@ __global__ void update_best_candidate_cuda(
 __global__ void reduce_leaf_sum(
     const float* __restrict__ obs,
     const char* __restrict__ categorical_obs,
-    const float* __restrict__ grads,
-    const float* __restrict__ guidance_labels,
-    const float* __restrict__ guidance_grads,
+    const float* __restrict__ grads,       // Stacked: [Obj0][Obj1]...
     float* __restrict__ values,
     const TreeNodeGPU* __restrict__ node,
-    const int n_samples,
-    const int global_idx,
-    const float guidance_scale,
-    const int policy_dim
+    const int n_samples,                   // Global sample count (loop limit)
+    const int global_idx,                  // Offset into 'values' array
+    const int n_objs
 );
 
 /**
@@ -370,7 +370,8 @@ __global__ void partition_samples_kernel(
  */
 __global__ void node_l2_kernel(
     TreeNodeGPU* __restrict__ node,
-    const float* __restrict__ mean
+    const float* __restrict__ mean,
+    const int n_objs
 );
 
 /**
@@ -416,12 +417,12 @@ __global__ void lexicographic_guidance_impurity(
  * 
  * @param node Child node to update (guidance_percent written here)
  * @param parent_node Parent node containing sample indices
- * @param guidance_labels Guidance label array for all samples
+ * @param obj_labels Guidance label array for all samples
  */
-__global__ void get_node_guidance_percentage_kernel(
+__global__ void calc_node_densities_kernel(
     TreeNodeGPU* __restrict__ node,
     const TreeNodeGPU* __restrict__ parent_node,
-    const float* __restrict__ guidance_labels);
+    const float* __restrict__ obj_labels);
 /**
  * @brief CUDA kernel to compute cosine-based node score
  * 
@@ -437,9 +438,9 @@ __global__ void get_node_guidance_percentage_kernel(
 __global__ void node_cosine_kernel(
     TreeNodeGPU* __restrict__ node,
     const float* __restrict__ grads,
-    const float* __restrict__ guidance_grads,   
     float* __restrict__ mean,
-    const float guidance_scale
+    const int n_objs,
+    const int global_n_samples
 );
 
 /**
@@ -496,7 +497,9 @@ __global__ void node_column_mean_reduce(
     const float * __restrict__ in,
     float * __restrict__ out,
     size_t n_cols,
-    const TreeNodeGPU* __restrict__ node
+    size_t global_n_rows,
+    const TreeNodeGPU* __restrict__ node,
+    const int n_objs
 );
 
 /**
@@ -524,10 +527,14 @@ __global__ void copy_node_to_data(
     bool* __restrict__ inequality_directions,
     bool* __restrict__ is_numerics,
     char * __restrict__  categorical_values,
-    float * __restrict__  guidance_percent,
+    float * __restrict__  densities,
+#ifdef DEBUG
+    int* __restrict__ n_samples,
+#endif
     const int global_idx,
     const int leaf_idx,
-    const int max_depth
+    const int max_depth,
+    const int n_objs
 );
 
 /**
@@ -616,7 +623,6 @@ __global__ void split_conditional_sum_kernel(
     const float* __restrict__ obs,
     const char* __restrict__ categorical_obs,
     const float* __restrict__ grads,
-    const float* __restrict__ guidance_grads,
     const TreeNodeGPU* __restrict__ node,
     const int* __restrict__ candidate_indices,
     const float* __restrict__ candidate_values,
@@ -624,11 +630,11 @@ __global__ void split_conditional_sum_kernel(
     const bool* __restrict__ candidate_numeric,
     const int n_candidates,
     const int global_n_samples,
+    const int n_objs,
     float* __restrict__ left_sum,
     float* __restrict__ right_sum,
     float* __restrict__ left_count,
-    float* __restrict__ right_count,
-    const float guidance_scale
+    float* __restrict__ right_count
 );
 
 /**
@@ -657,21 +663,20 @@ __global__ void split_conditional_dot_kernel(
     const float* __restrict__ obs,
     const char* __restrict__ categorical_obs,
     const float* __restrict__ grads,
-    const float* __restrict__ guidance_grads,
     const TreeNodeGPU* __restrict__ node,
     const int* __restrict__ candidate_indices,
-    const float* __restrict__ candidate_values, 
+    const float* __restrict__ candidate_values,
     const char* __restrict__ candidate_categories,
     const bool* __restrict__ candidate_numeric,
     const int n_candidates,
     const int global_n_samples,
-    float* __restrict__ left_sum,
-    float* __restrict__ right_sum,
-    float* __restrict__ left_count,
-    float* __restrict__ right_count,
+    const int n_objs,
+    const float* __restrict__ left_sum,
+    const float* __restrict__ right_sum,
+    const float* __restrict__ left_count,
+    const float* __restrict__ right_count,
     float* __restrict__ ldot,
-    float* __restrict__ rdot,
-    const float guidance_scale
+    float* __restrict__ rdot
 );
 
 /**
@@ -705,13 +710,14 @@ __global__ void split_cosine_score_kernel(
     const int* __restrict__ r_num_mapping,
     const int* __restrict__ r_cat_mapping,
     const int n_candidates,
-    float* __restrict__ lsum,
-    float* __restrict__ rsum,
-    float* __restrict__ lcount,
-    float* __restrict__ rcount,
-    float* __restrict__ ldot,
-    float* __restrict__ rdot,
-    const int min_data_in_leaf,
+    const int n_objs,
+    const float* __restrict__ lsum,
+    const float* __restrict__ rsum,
+    const float* __restrict__ lcount,
+    const float* __restrict__ rcount,
+    const float* __restrict__ ldot,
+    const float* __restrict__ rdot,
+    const int min_data_in_leaf, 
     const int n_num_features
 );
 
@@ -744,12 +750,42 @@ __global__ void split_l2_score_kernel(
     const int* __restrict__ r_num_mapping,
     const int* __restrict__ r_cat_mapping,
     const int n_candidates,
-    float* __restrict__ lsum,
-    float* __restrict__ rsum,
-    float* __restrict__ lcount,
-    float* __restrict__ rcount,
+    const int n_objs,
+    const float* __restrict__ lsum,
+    const float* __restrict__ rsum,
+    const float* __restrict__ lcount,
+    const float* __restrict__ rcount,
     const int min_data_in_leaf,
     const int n_num_features
+);
+
+__global__ void reduce_split_scores_kernel(
+    float* __restrict__ split_scores,      // In/Out: [Obj0][Obj1]... -> [Total][Garbage]...
+    const float* __restrict__ densities,   // Size: n_objs
+    const int n_candidates,
+    const int n_objs
+);
+
+__global__ void calc_node_conflict_kernel(
+    const float* __restrict__ node_means, // Stacked: [Obj0][Obj1]...
+    TreeNodeGPU* __restrict__ node,       // Output: node->conflict_rho
+    const int n_objs,
+    const int n_cols
+);
+
+__global__ void split_impurity_penalty_kernel(
+    const float* __restrict__ obj_labels,        // Renamed from 'labels'
+    const float* __restrict__ obs,
+    const char* __restrict__ categorical_obs,
+    const TreeNodeGPU* __restrict__ node,
+    float* __restrict__ split_scores,            // In/Out: Gain -> Penalized Gain
+    const int* __restrict__ candidate_indices,
+    const float* __restrict__ candidate_values,
+    const char* __restrict__ candidate_categories,
+    const bool* __restrict__ candidate_numeric,
+    const int n_candidates,
+    const int global_n_samples,
+    const float lambda_penalty
 );
 
 #endif

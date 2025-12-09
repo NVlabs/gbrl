@@ -144,10 +144,9 @@ class MultiGBTLearner(BaseLearner):
     def step(self,
              inputs: NumericalData,
              grads: Union[Sequence[NumericalData], NumericalData],
-             guidance_labels: Optional[NumericalData] = None,
-             guidance_grads: Optional[NumericalData] = None,
+             obj_labels: Optional[NumericalData] = None,
              model_idx: Optional[int] = None,
-             guidance_idx: Optional[int] = None
+             obj_idx: Optional[int] = None
              ) -> None:
         """
         Performs a single gradient update step (e.g, adding a single decision tree).
@@ -155,10 +154,9 @@ class MultiGBTLearner(BaseLearner):
         Args:
             inputs (Union[np.ndarray, th.Tensor, Tuple]): Input features.
             grads (Union[Sequence[NumericalData], NumericalData]): Gradients.
-            guidance_labels (Optional[NumericalData]): guidance_label vector.
-            guidance_grads (Optional[NumericalData]): guidance gradient vector.
+            obj_labels (Optional[NumericalData]): objective label vector.
             model_idx (int, optional): The index of the model.
-            guidance_idx (int, optional): The index of the model that requires guidance.
+            obj_idx (int, optional): The index of the objective label.
         """
         assert model_idx is not None or ((isinstance(grads, list) or isinstance(grads, tuple)) and
                                          len(grads) == self.n_learners), "Invalid model index or gradients"
@@ -172,47 +170,41 @@ class MultiGBTLearner(BaseLearner):
                 self._cpp_models[i].set_feature_mapping(np.ascontiguousarray(feature_mapping),
                                                         np.ascontiguousarray(numerical_mask))
                 
-        if guidance_labels is not None and (guidance_labels == 0).all():
-            guidance_labels = None
-            guidance_grads = None
-
-        if guidance_labels is None:
-            guidance_grads = None
-
+        if obj_labels is not None and (obj_labels == 0).all():
+            obj_labels = None
         num_inputs, cat_inputs = preprocess_features(inputs)
 
         if model_idx is not None:
             assert not isinstance(grads, list), "When model_idx is specified, grads should not be a list"
-            if guidance_grads is not None:
-                guidance_grads = guidance_grads.reshape(grads.shape)  # type: ignore
+            grads = grads.reshape((n_objs, len(inputs), self.output_dim[model_idx]))  # type: ignore
 
             self._memory = []
             self._cpp_models[model_idx].step(obs=self.transform_data(num_inputs),
                                              categorical_obs=cat_inputs,
                                              grads=self.transform_data(grads),  # type: ignore
-                                             guidance_labels=self.transform_data(guidance_labels),
-                                             guidance_grads=self.transform_data(guidance_grads))
+                                             obj_labels=self.transform_data(obj_labels))
 
             self._memory = []
             self.iteration[model_idx] = self._cpp_models[model_idx].get_iteration()
         else:
-            if guidance_grads is not None and guidance_idx is None:
-                guidance_idx = 0
 
-            model_guidance_grads = None
-
+            assert isinstance(grads, list) and len(grads) == self.n_learners, \
+                    "When model_idx is not specified, grads must be a list with length equal to n_learners"
+            assert obj_labels is None or (obj_idx is not None and obj_labels is not None), \
+                "When obj_labels is provided, obj_idx must also be provided"
             self._memory = []
             for i in range(self.n_learners):
-                if guidance_grads is not None and guidance_idx == i:
-                    model_guidance_grads = guidance_grads.reshape(grads[i].shape)
+                if i == obj_idx:
+                    model_labels = obj_labels
+                    model_grads = grads[i].reshape((self.n_objs, len(inputs), self.output_dim[i]))  # type: ignore
                 else:
-                    model_guidance_grads = None
+                    model_labels = None
+                    model_grads = grads[i]
 
                 self._cpp_models[i].step(obs=self.transform_data(num_inputs),
                                          categorical_obs=cat_inputs,
-                                         grads=self.transform_data(grads[i]),  # type: ignore
-                                         guidance_labels=self.transform_data(guidance_labels),
-                                         guidance_grads=self.transform_data(model_guidance_grads))
+                                         grads=self.transform_data(model_grads),  # type: ignore
+                                         obj_labels=self.transform_data(model_labels))
 
                 self._memory = []
 
@@ -392,8 +384,8 @@ class MultiGBTLearner(BaseLearner):
             instance.params = {'input_dim': metadata['input_dim'],
                                'output_dim': instance.output_dim,
                                'policy_dim': instance.policy_dim,
-                               'guidance_weight': metadata['guidance_weight'],
-                               'guidance_scale': metadata['guidance_scale'],
+                               'lambda_penalty': metadata['lambda_penalty'],
+                               'n_objs': metadata['n_objs'],
                                'split_score_func':
                                metadata['split_score_func'],
                                'generator_type': metadata['generator_type'],
@@ -405,6 +397,7 @@ class MultiGBTLearner(BaseLearner):
                                }
             # Keep the lists from the loop above, don't overwrite with single values
             instance.input_dim = metadata['input_dim']
+            instance.n_objs = metadata['n_objs']
             instance.verbose = metadata['verbose']
             instance.params = {'split_score_func':
                                metadata['split_score_func'],

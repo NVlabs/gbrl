@@ -84,9 +84,9 @@ class GBRL {
             bool use_control_variates,
             int batch_size,
             growPolicy grow_policy,
-            float guidance_weight,
-            float guidance_scale,
+            int n_objs,
             int verbose,
+            float lambda_penalty,
             deviceType _device,
             std::string _learner_name = "GBRL"
         );
@@ -99,6 +99,7 @@ class GBRL {
          * @param policy_dim Dimensionality of policy (for RL applications)
          * @param max_depth Maximum depth of individual trees
          * @param min_data_in_leaf Minimum samples required in each leaf
+         * @param n_objs Number of objectives for multi-objective tasks
          * @param n_bins Number of candidate bins for splits
          * @param par_th Parallelization threshold
          * @param cv_beta Control variates beta parameter
@@ -120,9 +121,9 @@ class GBRL {
             bool use_control_variates,
             int batch_size,
             std::string grow_policy,
-            float guidance_weight,
-            float guidance_scale,   
+            int n_objs,
             int verbose,
+            float lambda_penalty,
             std::string _device,
             std::string _learner_name = "GBRL"
         );
@@ -272,8 +273,7 @@ class GBRL {
             dataHolder<const float> *obs,
             dataHolder<const char> *categorical_obs,
             dataHolder<float> *grads,
-            dataHolder<const float> *guidance_labels,
-            dataHolder<const float> *guidance_grads,
+            dataHolder<const float> *obj_labels,
             const int n_samples,
             const int n_num_features,
             const int n_cat_features

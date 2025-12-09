@@ -29,7 +29,7 @@
 TreeNode::TreeNode(int *sample_indices, const int n_samples, const int n_num_features, const int n_cat_features, const int output_dim, const int depth, const int node_idx): 
             sample_indices(sample_indices), n_samples(n_samples), n_num_features(n_num_features), n_cat_features(n_cat_features),
             output_dim(output_dim), depth(depth), node_idx(node_idx), feature_value(0.0),
-            feature_idx(0), guidance_percent(1.0f){
+            feature_idx(0){
     if (depth > 0){
         this->split_conditions = new splitCondition[depth];
         for (int d = 0; d < depth; d++){
@@ -61,8 +61,7 @@ TreeNode::~TreeNode(){
 }
 
 
-
-int TreeNode::splitNode(const float *obs, const char *categorical_obs, const float *guidance_labels, const int _node_idx, const splitCandidate &split_candidate){
+int TreeNode::splitNode(const float *obs, const char *categorical_obs, const int _node_idx, const splitCandidate &split_candidate){
     std::vector<int> pre_left_indices(this->n_samples), pre_right_indices(this->n_samples);
     int left_count = 0, right_count = 0;
     bool is_categorical = split_candidate.categorical_value != nullptr;
@@ -146,22 +145,7 @@ int TreeNode::splitNode(const float *obs, const char *categorical_obs, const flo
     }
     this->right_child->split_conditions[this->depth].inequality_direction = true;
 
-    if (guidance_labels != nullptr){
-        this->right_child->getGuidancePercent(guidance_labels);
-        this->left_child->getGuidancePercent(guidance_labels);
-    }
     return 0;
-}
-
-void TreeNode::getGuidancePercent(const float *guidance_labels){
-    float guidance_percent = 0.0f;
-    for (int i = 0; i < this->n_samples; ++i){
-        int sample_idx = this->sample_indices[i];
-        if (guidance_labels[sample_idx] == 1)
-            guidance_percent += 1.0f;
-    }
-    guidance_percent /= static_cast<float>(this->n_samples);
-    this->guidance_percent = guidance_percent;
 }
 
 float TreeNode::getSplitScore(dataSet *dataset, scoreFunc split_score_func, const splitCandidate &split_candidate, const int min_data_in_leaf){
@@ -199,58 +183,6 @@ float TreeNode::getSplitScore(dataSet *dataset, scoreFunc split_score_func, cons
         }
     }
 }
-
-
-float TreeNode::getSplitGuidanceScore(dataSet *dataset, const splitCandidate &split_candidate, const int min_data_in_leaf){
-    // make sure that we do not re-use the same split candidate along a path
-    int left_count = 0, right_count = 0;
-    int n_features = this->n_num_features + this->n_cat_features;
-    const int *_sample_indices = this->sample_indices;
-    bool is_numeric = split_candidate.categorical_value == nullptr;
-
-    float left_mean = 0.0f; 
-    float right_mean = 0.0f; 
-    float left_sq_mean = 0.0f;
-    float right_sq_mean = 0.0f;
-
-    int sample_idx;
-
-    for (int n = 0; n < this->n_samples; ++n){
-        sample_idx = _sample_indices[n];
-        float val = dataset->guidance_labels->data[sample_idx];
-        bool split_right = is_numeric && dataset->obs->data[sample_idx*n_features + split_candidate.feature_idx] > split_candidate.feature_value;
-        split_right |= (!is_numeric && strcmp(&dataset->categorical_obs->data[(sample_idx*n_features + split_candidate.feature_idx) * MAX_CHAR_SIZE], split_candidate.categorical_value) == 0); 
-        if (split_right){
-            right_mean += val;
-            right_sq_mean += val * val;
-            ++right_count;
-        } else {
-            left_mean += val;
-            left_sq_mean += val * val;
-            ++left_count;
-        }
-    }
-
-    if (left_count < min_data_in_leaf || right_count < min_data_in_leaf){
-        return 0.0f; // Not enough data in either side
-    } 
-
-    float left_count_f = static_cast<float>(left_count), right_count_f = static_cast<float>(right_count);
-    float left_count_recip = (left_count > 0 ) ? 1.0f / left_count : 0.0f;
-    float right_count_recip = (right_count > 0) ? 1.0f / right_count_f : 0.0f;
-
-    left_mean *= left_count_recip;
-    right_mean *= right_count_recip;
-    left_sq_mean *= left_count_recip;
-    right_sq_mean *= right_count_recip;
-
-    float l_var = left_sq_mean - left_mean * left_mean;
-    float r_var = right_sq_mean - right_sq_mean * right_mean;
-
-    float split_guidance_score = (left_count_f * l_var + right_count_f * r_var) / (left_count_f + right_count_f);
-    return split_guidance_score; // act as penalty
-}
-
 
 float TreeNode::splitScoreCosine(const float *obs, const float *grads, const splitCandidate &split_candidate, const int min_data_in_leaf){
     int left_count = 0, right_count = 0;
@@ -616,8 +548,6 @@ void print_leaf(const int global_leaf_idx, const int leaf_idx, const int tree_id
             std::cout << ", ";
     }
     std::cout << "]" << std::endl;
-
-    std::cout << " guidance_percent: " << edata->guidance_percent[global_leaf_idx] << std::endl;
     return;
 }
 

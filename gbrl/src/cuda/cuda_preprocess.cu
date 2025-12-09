@@ -31,15 +31,16 @@ __global__ void iota_kernel(int *arr, int size) {
     }
 }
 
-void preprocess_matrices(float* __restrict__ grads, float* __restrict__ grads_norm, const int n_rows, const int n_cols, const scoreFunc split_score_func){
+__global__ void ones_kernel(float *arr, int size) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < size) {
+        arr[idx] = 1;
+    }
+}
+
+void preprocess_matrices(float* __restrict__ grads, const int n_rows, const int n_cols, const scoreFunc split_score_func){
     size_t shared_mem;
-    if (split_score_func == Cosine){
-        int n_threads = ((WARP_SIZE + n_cols - 1) / WARP_SIZE)*WARP_SIZE;
-        if (n_threads > THREADS_PER_BLOCK)
-            n_threads = THREADS_PER_BLOCK;
-        shared_mem = sizeof(float)*n_threads;
-        rowwise_squared_norm<<<n_rows, n_threads, shared_mem>>>(grads, n_cols, grads_norm, n_rows);
-    } else if (split_score_func == L2){
+    if (split_score_func == L2){
         shared_mem = sizeof(float)*THREADS_PER_BLOCK*2;
         center_matrix<<<n_cols, THREADS_PER_BLOCK, shared_mem>>>(grads, n_cols, n_rows);
     }   
@@ -108,37 +109,6 @@ __global__ void center_matrix(float* __restrict__ input, const int n_cols, const
 
      for(int i=threadIdx.x; i < n_rows; i += blockDim.x) {
         input[i * n_cols + blockIdx.x] =  (input[i * n_cols + blockIdx.x] - mean[0]) / (sqrtf(var[0]) + 1.0e-8);
-    }
-}
-
-
-__global__ void rowwise_squared_norm(const float* __restrict__ input, const int n_cols, float* __restrict__ per_row_results, const int n_rows)
-{
-    /*
-    Calculate the row-wise squared norm of an input matrix, where each block works on a different row.
-    */
-    extern __shared__ float sdata[];
-
-    float x = 0.0f;
-    // Accumulate per thread partial sum of squares
-    for (int j = threadIdx.x; j < n_cols; j += blockDim.x) {
-        float val = input[blockIdx.x * n_cols + j];
-        x += val * val;
-    }
-    // load thread partial sum into shared memory
-    sdata[threadIdx.x] = x;
-    __syncthreads();
-    // tree reduction
-    for (int offset = blockDim.x / 2; offset > 0; offset >>= 1) {
-        if (threadIdx.x < offset) {
-            sdata[threadIdx.x] += sdata[threadIdx.x + offset];
-        }
-        __syncthreads();
-    }
-
-    // thread 0 writes the final result
-    if (threadIdx.x == 0) {
-        per_row_results[blockIdx.x] = sdata[0];
     }
 }
 
@@ -386,7 +356,7 @@ __global__ void linspaceKernel(const float* min_vec, const float* max_vec, int n
 }
 
 
-  int process_candidates_cuda(const float* gpu_obs, const char* categorical_obs, const float *gpu_grad_norms, int* candidate_indices, float *candidate_values, char* candidate_categories, bool* candidate_numerics, const int n_samples, const int n_num_features, const int n_cat_features, const int n_bins, const generatorType generator_type ){
+  int process_candidates_cuda(const float* gpu_obs, const char* categorical_obs, int* candidate_indices, float *candidate_values, char* candidate_categories, bool* candidate_numerics, const int n_samples, const int n_num_features, const int n_cat_features, const int n_bins, const generatorType generator_type ){
     int n_candidates = 0;
     if (n_num_features > 0){
         if (generator_type == Uniform){
@@ -406,9 +376,7 @@ __global__ void linspaceKernel(const float* min_vec, const float* max_vec, int n
         int* cpu_feature_inds = new int[n_bins*n_cat_features];
         char* cpu_feature_categories = new char[n_bins*n_cat_features*MAX_CHAR_SIZE];
         bool *cpu_numerics = new bool[n_bins*n_cat_features];
-        float *grad_norms = new float[n_samples];
-        cudaMemcpy(grad_norms, gpu_grad_norms, sizeof(float)*n_samples, cudaMemcpyDeviceToHost);
-        int n_cat_candidates = processCategoricalCandidates_func(categorical_obs, grad_norms, n_samples, n_cat_features, n_bins, cpu_feature_inds, cpu_feature_values, cpu_feature_categories, cpu_numerics);
+        int n_cat_candidates = processCategoricalCandidates_func(categorical_obs, n_samples, n_cat_features, n_bins, cpu_feature_inds, cpu_feature_values, cpu_feature_categories, cpu_numerics);
         
         cudaMemcpy(candidate_indices + n_candidates, cpu_feature_inds, sizeof(int)*n_cat_candidates, cudaMemcpyHostToDevice);
         cudaMemcpy(candidate_values + n_candidates, cpu_feature_values, sizeof(float)*n_cat_candidates, cudaMemcpyHostToDevice);
@@ -417,7 +385,6 @@ __global__ void linspaceKernel(const float* min_vec, const float* max_vec, int n
 
         n_candidates += n_cat_candidates;
 
-        delete[] grad_norms;
         delete[] cpu_feature_values;
         delete[] cpu_feature_inds;
         delete[] cpu_feature_categories;

@@ -102,8 +102,7 @@ class Fitter {
             dataSet *dataset,
             ensembleData *edata,
             ensembleMetaData *metadata,
-            const SplitCandidateGenerator &generator,
-            float *guidance_percent
+            const SplitCandidateGenerator &generator
         );
         
         /**
@@ -122,8 +121,7 @@ class Fitter {
             dataSet *dataset,
             ensembleData *edata,
             ensembleMetaData *metadata,
-            const SplitCandidateGenerator &generator,
-            float *guidance_percent
+            const SplitCandidateGenerator &generator
         );
         
         /**
@@ -141,8 +139,7 @@ class Fitter {
             dataSet *dataset,
             ensembleData *edata,
             ensembleMetaData *metadata,
-            const int added_leaves,
-            const float* guidance_percent
+            const int added_leaves
         );
         
         /**
@@ -196,9 +193,7 @@ class Fitter {
             ensembleData *edata,
             ensembleMetaData *metadata,
             const int leaf_idx,
-            const int tree_idx,
-            const float* guidance_percent,
-            const int rel_leaf_idx
+            const int tree_idx
         );
         
         /**

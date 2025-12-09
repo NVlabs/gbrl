@@ -105,8 +105,7 @@ class GBTLearner(BaseLearner):
     def step(self,
              inputs: NumericalData,
              grads: Union[NumericalData, Tuple[NumericalData, ...]],
-             guidance_labels: Optional[NumericalData] = None,
-             guidance_grads: Optional[NumericalData] = None,
+             obj_labels: Optional[NumericalData] = None,
              ) -> None:
         """
         Performs a single gradient update step by adding a decision tree to the ensemble.
@@ -114,8 +113,7 @@ class GBTLearner(BaseLearner):
         Args:
             inputs (NumericalData): Input features (NumPy array or PyTorch tensor).
             grads (NumericalData or Tuple[NumericalData, ...]): Gradients for the update step.
-            guidance_labels (Optional[NumericalData]): Optional guidance label vector.
-            guidance_grads (Optional[NumericalData]): Optional guidance gradient vector.
+            obj_labels (Optional[NumericalData]): Optional objective label vector.
 
         Returns:
             None
@@ -130,15 +128,8 @@ class GBTLearner(BaseLearner):
             self._cpp_model.set_feature_mapping(np.ascontiguousarray(feature_mapping),
                                                 np.ascontiguousarray(numerical_mask))
 
-        if guidance_labels is not None and (guidance_labels == 0).all():
-            guidance_labels = None
-            guidance_grads = None
-
-        if guidance_labels is None:
-            guidance_grads = None
-
-        if guidance_grads is not None:
-            guidance_grads = guidance_grads.reshape((len(inputs), self.output_dim))  # type: ignore
+        if obj_labels is not None and (obj_labels == 0).all():
+            obj_labels = None
 
         if isinstance(grads, tuple):
             grads = concatenate_arrays(grads)
@@ -146,15 +137,14 @@ class GBTLearner(BaseLearner):
         if inputs.ndim == 1:
             inputs = inputs.reshape((1, self.input_dim)) if self.input_dim > 1 else inputs.reshape((len(inputs), 1))   # type: ignore
 
-        grads = grads.reshape((len(inputs), self.output_dim))  # type: ignore
+        grads = grads.reshape((self.n_objs, len(inputs), self.output_dim))  # type: ignore
         num_inputs, cat_inputs = preprocess_features(inputs)
 
         self._memory = []
         self._cpp_model.step(obs=self.transform_data(num_inputs),
                              categorical_obs=cat_inputs,
                              grads=self.transform_data(grads),  # type: ignore
-                             guidance_labels=self.transform_data(guidance_labels),
-                             guidance_grads=self.transform_data(guidance_grads))
+                             obj_labels=self.transform_data(obj_labels))
 
         self._memory = []
 
@@ -265,13 +255,14 @@ class GBTLearner(BaseLearner):
                                'use_control_variates':
                                metadata['use_control_variates'],
                                'verbose': metadata['verbose'],
-                               'guidance_weight': metadata['guidance_weight'],
-                               'guidance_scale': metadata['guidance_scale'],
+                               'lambda_penalty': metadata['lambda_penalty'],
+                               'n_objs': metadata['n_objs'],
                                'device': instance._cpp_model.get_device(),
                                **instance.tree_struct
                                }
             instance.output_dim = metadata['output_dim']
             instance.input_dim = metadata['input_dim']
+            instance.n_objs = metadata['n_objs']
             instance.policy_dim = metadata['policy_dim']
             instance.verbose = metadata['verbose']
             instance.optimizers = instance._cpp_model.get_optimizers()

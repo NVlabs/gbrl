@@ -101,8 +101,7 @@ class ParametricActor(BaseGBT):
     def step(self, observations: Optional[NumericalData] = None,
              policy_grads: Optional[NumericalData] = None,
              policy_grad_clip: Optional[float] = None,
-             guidance_labels: Optional[NumericalData] = None,
-             guidance_grads: Optional[NumericalData] = None,
+             obj_labels: Optional[NumericalData] = None,
              ) -> None:
         """
         Performs a single boosting iteration.
@@ -112,8 +111,7 @@ class ParametricActor(BaseGBT):
             policy_grad_clip (float, optional): . Defaults to None.
             policy_grads (Optional[NumericalData], optional): manually
                 calculated gradients. Defaults to None.
-            guidance_labels (Optional[NumericalData]): guidance label vector.
-            guidance_grads (Optional[NumericalData]): guidelines user suggested action vector.
+            obj_labels (Optional[NumericalData]): objective label vector.
 
         """
         if observations is None:
@@ -136,7 +134,7 @@ class ParametricActor(BaseGBT):
         policy_grads = clip_grad_norm(policy_grads, policy_grad_clip)
         validate_array(policy_grads)
 
-        self.learner.step(observations, policy_grads, guidance_labels, guidance_grads)
+        self.learner.step(observations, policy_grads, obj_labels)
         self.grads = policy_grads
         self.input = None
 
@@ -278,8 +276,7 @@ class GaussianActor(BaseGBT):
              log_std_grads: Optional[NumericalData] = None,
              mu_grad_clip: Optional[float] = None,
              log_std_grad_clip: Optional[float] = None,
-             guidance_labels: Optional[NumericalData] = None,
-             guidance_grads: Optional[NumericalData] = None,
+             obj_labels: Optional[NumericalData] = None,
              ) -> None:
         """
         Performs a single boosting iteration.
@@ -294,8 +291,7 @@ class GaussianActor(BaseGBT):
                 mean. Defaults to None.
             log_std_grad_clip (Optional[float], optional): Gradient clipping
                 for log standard deviation. Defaults to None.
-            guidance_labels (Optional[NumericalData]): guidance label vector.
-            guidance_grads (Optional[NumericalData]): guidelines user suggested action vector.
+            obj_labels (Optional[NumericalData]): objective label vector.
 
         """
         if observations is None:
@@ -331,7 +327,7 @@ class GaussianActor(BaseGBT):
 
         validate_array(theta_grad)
 
-        self.learner.step(observations, theta_grad, guidance_labels, guidance_grads)
+        self.learner.step(observations, theta_grad, obj_labels)
         self.grads = mu_grads
         if not self.fixed_std:
             self.grads = (mu_grads, log_std_grads)
