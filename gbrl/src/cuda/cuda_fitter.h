@@ -99,7 +99,8 @@ void evaluate_greedy_splits(
     ensembleMetaData *metadata,
     splitDataGPU* split_data,
     const int threads_per_block,
-    const int parent_n_samples
+    const int parent_n_samples,
+    cudaStream_t stream = 0
 );
 
 /**
@@ -120,7 +121,8 @@ void evaluate_oblivious_splits_cuda(
     const int depth,
     candidatesData *candidata,
     ensembleMetaData *metadata,
-    splitDataGPU *split_data
+    splitDataGPU *split_data,
+    const std::vector<cudaStream_t>& streams
 );
 
 /**

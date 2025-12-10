@@ -122,6 +122,7 @@ class GBTLearner(BaseLearner):
         assert isinstance(grads, (list, tuple, np.ndarray, th.Tensor)), \
             "Invalid gradients type"
         super().step(inputs)
+
         if self.total_iterations == 0:
             assert self.feature_mapping is not None, "Feature mapping not set"
             feature_mapping, numerical_mask = self.feature_mapping
@@ -132,7 +133,7 @@ class GBTLearner(BaseLearner):
             obj_labels = None
 
         if isinstance(grads, tuple):
-            grads = concatenate_arrays(grads)
+            grads = concatenate_arrays(grads, axis=-1)
 
         if inputs.ndim == 1:
             inputs = inputs.reshape((1, self.input_dim)) if self.input_dim > 1 else inputs.reshape((len(inputs), 1))   # type: ignore

@@ -31,6 +31,7 @@
 #define FULL_MASK 0xffffffff          /**< Full warp mask for warp operations */
 #define MAX_BLOCKS_PER_GRID 65535     /**< CUDA maximum blocks per grid */
 #define MAX_THREADS_PER_BLOCK 1024    /**< CUDA maximum threads per block */
+#define DEFAULT_N_STREAMS 8           /**< Default number of CUDA streams */
 
 // Matrix operation tile sizes
 #define BLOCK_COLS 32                 /**< Block column size for matrix ops */

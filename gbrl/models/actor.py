@@ -131,6 +131,11 @@ class ParametricActor(BaseGBT):
             assert self.params.grad is not None, "params.grad must be set to compute gradients."
             policy_grads = self.params.grad.detach() * n_samples
 
+        if isinstance(policy_grads, tuple):
+            assert len(policy_grads) == self.learner.n_objs, \
+                "Length of policy_grads tuple must match number of objectives."
+            policy_grads = concatenate_arrays(tuple(g.unsqueeze(0) for g in policy_grads), axis=0)
+
         policy_grads = clip_grad_norm(policy_grads, policy_grad_clip)
         validate_array(policy_grads)
 
@@ -298,7 +303,7 @@ class GaussianActor(BaseGBT):
             assert self.input is not None, "Cannot update trees without input."
             "Make sure model is called with requires_grad=True"
             observations = self.input
-        
+
         # Handle 1D observations
         if observations.ndim == 1:
             n_samples = 1 if self.learner.input_dim > 1 else len(observations)
@@ -313,14 +318,26 @@ class GaussianActor(BaseGBT):
             mu_grads = self.params[0].grad.detach() * n_samples  # type: ignore
         mu_grads = clip_grad_norm(mu_grads, mu_grad_clip)  # type: ignore
 
+        if isinstance(mu_grads, tuple):
+            assert len(mu_grads) == self.learner.n_objs, \
+                "Length of mu_grads tuple must match number of objectives."
+            mu_grads = concatenate_arrays(tuple(g.unsqueeze(0) for g in mu_grads), axis=0)
+
         if not self.fixed_std:
             if log_std_grads is None:
                 assert self.params is not None, "params must be set to compute gradients."
                 assert isinstance(self.params, (list, tuple)), "params must be a (list or tuple) to compute gradients."
                 assert isinstance(self.params[1], th.Tensor), "params[1] must be a Tensor to compute gradients."
-                assert self.params[1].grad is not None, "params[1].grad must be set to compute gradients."  # type: ignore
+                assert self.params[1].grad is not None, \
+                    "params[1].grad must be set to compute gradients."
                 log_std_grads = self.params[1].grad.detach() * n_samples  # type: ignore
             log_std_grads = clip_grad_norm(log_std_grads, log_std_grad_clip)  # type: ignore
+
+            if isinstance(log_std_grads, tuple):
+                assert len(log_std_grads) == self.learner.n_objs, \
+                    "Length of log_std_grads tuple must match number of objectives."
+                log_std_grads = concatenate_arrays(tuple(g.unsqueeze(0) for g in log_std_grads), axis=0)
+
             theta_grad = concatenate_arrays((mu_grads, log_std_grads))  # type: ignore
         else:
             theta_grad = mu_grads
@@ -360,7 +377,10 @@ class GaussianActor(BaseGBT):
                                      stop_idx, tensor)
         mean_actions = theta if self.fixed_std else theta[:, :self.policy_dim]
         if not self.fixed_std:
-            mean_actions = ensure_leaf_tensor_or_array(mean_actions, tensor=True, requires_grad=requires_grad, device=self.learner.device)
+            mean_actions = ensure_leaf_tensor_or_array(mean_actions,
+                                                       tensor=True,
+                                                       requires_grad=requires_grad,
+                                                       device=self.learner.device)
         log_std = constant_like(theta, self.log_std_init) if self.fixed_std else theta[:, self.policy_dim:]
         log_std = ensure_leaf_tensor_or_array(log_std, tensor=True, requires_grad=False if
                                               self.fixed_std else

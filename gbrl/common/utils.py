@@ -164,41 +164,6 @@ def get_index_mapping(arr: NumericalData) -> Tuple[np.ndarray, np.ndarray]:
         return np.arange(arr.shape[-1]), np.ones(arr.shape[-1], dtype=bool)
 
 
-def get_index_mapping(arr: NumericalData) -> Tuple[np.ndarray, np.ndarray]:
-    """Returns a mapping from original column indices to their new \
-        indices after separating numerical and categorical features."""
-    if not isinstance(arr, th.Tensor):
-        if arr.ndim == 1:
-            # For 1D array, use the array itself as first_row
-            first_row = arr
-        else:
-            # For 2D array, get the first row
-            first_row = arr[0]
-        # Vectorized function to check if a type is numerical
-        is_numerical_type = np.vectorize(
-            lambda x: isinstance(x, (int, float, np.integer, np.floating))
-        )(first_row)
-
-        # Create masks for numerical and categorical columns
-        numerical_mask = is_numerical_type
-        categorical_mask = ~is_numerical_type
-
-        numerical_indices = np.where(numerical_mask)[0]
-        categorical_indices = np.where(categorical_mask)[0]
-        # Create the index mapping array
-        index_mapping = np.empty_like(np.arange(arr.shape[-1]), dtype=int)
-        index_mapping[numerical_indices] = np.arange(len(numerical_indices))
-        index_mapping[categorical_indices] = np.arange(len(categorical_indices))
-
-        # Boolean mask: True for categorical, False for numerical
-        numerical_mask = np.zeros(arr.shape[-1], dtype=bool)
-        numerical_mask[numerical_indices] = True
-
-        return index_mapping, numerical_mask
-    else:
-        return np.arange(arr.shape[-1]), np.ones(arr.shape[-1], dtype=bool)
-
-
 def to_numpy(arr: NumericalData) -> np.ndarray:
     if isinstance(arr, th.Tensor):
         arr = arr.detach().cpu().numpy()
@@ -428,13 +393,14 @@ def ensure_same_type(arr_a: NumericalData,
                                      dtype=numerical_dtype)
     return arr_a, arr_b
 
+
 def concatenate_arrays(arrays: Sequence[NumericalData],
                        axis: int = -1) -> \
                         NumericalData:
     """
     Concatenates multiple arrays along a specified axis. All arrays must be of the same type
     (either all NumPy arrays or all PyTorch tensors). If an array has fewer dimensions than
-    required for concatenation, an axis is added to match the dimensionality.
+    required for concatenation, a singleton dimension is added at the concatenation axis.
 
     Args:
         arrays (Sequence[NumericalData]): Sequence of arrays (NumPy or PyTorch) to concatenate.
@@ -453,29 +419,24 @@ def concatenate_arrays(arrays: Sequence[NumericalData],
 
     # Determine the maximum number of dimensions
     max_ndim = max([arr.ndim for arr in arrays])
-    
+
     # Normalize axis to positive index
     normalized_axis = axis if axis >= 0 else max_ndim + axis
-    
+
     # Expand dimensions for arrays with fewer dimensions
     expanded_arrays = []
     for arr in arrays:
         if arr.ndim < max_ndim:
-            # Add dimensions at the beginning to match max_ndim
-            dims_to_add = max_ndim - arr.ndim
+            # Add singleton dimension at the concatenation axis
             if isinstance(arr, th.Tensor):
-                # Add dimensions at the start
-                for _ in range(dims_to_add):
-                    arr = arr.unsqueeze(0)
+                arr = arr.unsqueeze(normalized_axis)
             else:  # NumPy array
-                new_shape = (1,) * dims_to_add + arr.shape
-                arr = arr.reshape(new_shape)
+                arr = np.expand_dims(arr, axis=normalized_axis)
         expanded_arrays.append(arr)
 
     if isinstance(expanded_arrays[0], th.Tensor):
         return th.cat(expanded_arrays, dim=normalized_axis)  # type: ignore
     return np.concatenate(expanded_arrays, axis=normalized_axis)
-
 
 
 def pad_array(array: NumericalData, n_dims: int, pad_value: float = 0.0, axis: int = -1) -> NumericalData:
@@ -493,9 +454,10 @@ def pad_array(array: NumericalData, n_dims: int, pad_value: float = 0.0, axis: i
         NumericalData: Padded array with the same type as the input.
     """
     if isinstance(array, th.Tensor):
-        return concatenate_arrays([array, pad_value*th.ones((len(array), n_dims), dtype=array.dtype, device=array.device)],
-                                  axis=axis)
-    return concatenate_arrays([array, pad_value*np.ones((len(array), n_dims), dtype=array.dtype)], axis=axis)
+        padded_array = [pad_value*th.ones_like(array, dtype=array.dtype, device=array.device) for _ in range(n_dims)]
+        return concatenate_arrays([array] + padded_array, axis=axis)
+    padded_array = [pad_value*np.ones_like(array, dtype=array.dtype) for _ in range(n_dims)]
+    return concatenate_arrays([array] + padded_array, axis=axis)
 
 
 def validate_array(arr: NumericalData) -> None:

@@ -188,8 +188,8 @@ class MultiGBTLearner(BaseLearner):
             self.iteration[model_idx] = self._cpp_models[model_idx].get_iteration()
         else:
 
-            assert isinstance(grads, list) and len(grads) == self.n_learners, \
-                    "When model_idx is not specified, grads must be a list with length equal to n_learners"
+            assert isinstance(grads, (list, tuple)) and len(grads) == self.n_learners, \
+                    "When model_idx is not specified, grads must be a list or tuple with length equal to n_learners"
             assert obj_labels is None or (obj_idx is not None and obj_labels is not None), \
                 "When obj_labels is provided, obj_idx must also be provided"
             self._memory = []
@@ -231,7 +231,7 @@ class MultiGBTLearner(BaseLearner):
             Union[float, List[float]]: The final loss value.
         """
 
-        assert model_idx is not None or (isinstance(targets, list) and
+        assert model_idx is not None or (isinstance(targets, (list, tuple)) and
                                          len(targets) == self.n_learners)
         assert self._cpp_models is not None, "Model not initialized."
         if isinstance(inputs, th.Tensor):
@@ -241,10 +241,10 @@ class MultiGBTLearner(BaseLearner):
         self.total_iterations += iterations
 
         if model_idx is not None:
-            assert not isinstance(targets, list), \
-                "when model_idx is specified, targets should not be a list"
+            assert not isinstance(targets, (list, tuple)), \
+                "when model_idx is specified, targets should not be a list or tuple"
             targets = to_numpy(targets)
-            if isinstance(self.output_dim, list):
+            if isinstance(self.output_dim, (list, tuple)):
                 output_dim_idx = self.output_dim[model_idx]
             else:
                 output_dim_idx = self.output_dim
@@ -257,12 +257,12 @@ class MultiGBTLearner(BaseLearner):
             self.iteration[model_idx] = self._cpp_models[model_idx].get_iteration()
             return loss
 
-        assert isinstance(targets, list) and len(targets) == self.n_learners, \
+        assert isinstance(targets, (list, tuple)) and len(targets) == self.n_learners, \
             "when model_idx is not specified, targets should be a list with length equal to n_learners"
         losses = []
         for i in range(self.n_learners):
             targets[i] = to_numpy(targets[i])
-            if isinstance(self.output_dim, list):
+            if isinstance(self.output_dim, (list, tuple)):
                 output_dim_i = self.output_dim[i]
             else:
                 output_dim_i = self.output_dim
@@ -429,7 +429,7 @@ class MultiGBTLearner(BaseLearner):
         Returns:
             Union[int, Tuple[int, int]]: The learning rates.
         """
-        assert self._cpp_models is not None and isinstance(self._cpp_models, list), \
+        assert self._cpp_models is not None and isinstance(self._cpp_models, (list, tuple)), \
             "Model not initialized."
 
         if model_idx is not None:
@@ -446,7 +446,7 @@ class MultiGBTLearner(BaseLearner):
         Returns:
             Union[int, Tuple[int, int]]: The current iteration number.
         """
-        assert self._cpp_models is not None and isinstance(self._cpp_models, list), \
+        assert self._cpp_models is not None and isinstance(self._cpp_models, (list, tuple)), \
             "Model not initialized."
         if model_idx is not None:
             return self._cpp_models[model_idx].get_iteration()
@@ -462,7 +462,7 @@ class MultiGBTLearner(BaseLearner):
         Returns:
             Union[int, Tuple[int, int]]: The total number of trees.
         """
-        assert self._cpp_models is not None and isinstance(self._cpp_models, list), \
+        assert self._cpp_models is not None and isinstance(self._cpp_models, (list, tuple)), \
             "Model not initialized."
 
         if model_idx is not None:
@@ -492,13 +492,13 @@ class MultiGBTLearner(BaseLearner):
         assert self._cpp_models is not None, "Model not initialized."
         try:
             if model_idx is None:
-                assert isinstance(bias, list) and len(bias) == self.n_learners, \
+                assert isinstance(bias, (list, tuple)) and len(bias) == self.n_learners, \
                     "When model_idx is None, bias must be a list with length equal to n_learners"
                 for i in range(self.n_learners):
                     self._cpp_models[i].set_bias(normalize_vector_input(bias[i]))
             else:
-                assert not isinstance(bias, list), \
-                    "When model_idx is specified, bias should not be a list"
+                assert not isinstance(bias, (list, tuple)), \
+                    "When model_idx is specified, bias should not be a list or tuple"
                 self._cpp_models[model_idx].set_bias(normalize_vector_input(bias))
         except RuntimeError as e:
             print(f"Caught an exception in GBRL: {e}")
@@ -586,7 +586,7 @@ class MultiGBTLearner(BaseLearner):
             tree_idx (int): The index of the tree to print.
             model_idx (int, optional): The index of the model to print.
         """
-        assert self._cpp_models is not None and isinstance(self._cpp_models, list), \
+        assert self._cpp_models is not None and isinstance(self._cpp_models, (list, tuple)), \
             "Model not initialized."
         if model_idx is None:
             for i in range(self.n_learners):
@@ -603,7 +603,7 @@ class MultiGBTLearner(BaseLearner):
             filename (str): The filename to save the plot to.
             model_idx (int, optional): The index of the model to print.
         """
-        assert self._cpp_models is not None and isinstance(self._cpp_models, list), \
+        assert self._cpp_models is not None and isinstance(self._cpp_models, (list, tuple)), \
             "Model not initialized."
 
         filename = filename.rstrip('.')
@@ -632,7 +632,7 @@ class MultiGBTLearner(BaseLearner):
         Returns:
             Union[np.ndarray, Tuple[np.ndarray, ...]: shap values
         """
-        assert self._cpp_models is not None and isinstance(self._cpp_models, list), \
+        assert self._cpp_models is not None and isinstance(self._cpp_models, (list, tuple)), \
             "Model not initialized."
 
         if isinstance(features, th.Tensor):
@@ -675,7 +675,7 @@ class MultiGBTLearner(BaseLearner):
         Returns:
             Union[np.ndarray, Tuple[np.ndarray, ...]: shap values
         """
-        assert self._cpp_models is not None and isinstance(self._cpp_models, list), \
+        assert self._cpp_models is not None and isinstance(self._cpp_models, (list, tuple)), \
             "Model not initialized."
 
         if isinstance(features, th.Tensor):
@@ -710,7 +710,7 @@ class MultiGBTLearner(BaseLearner):
             device (Union[str, th.device]): The device to set.
             model_idx (int, optional): The index of the model to print.
         """
-        assert self._cpp_models is not None and isinstance(self._cpp_models, list), \
+        assert self._cpp_models is not None and isinstance(self._cpp_models, (list, tuple)), \
             "Model not initialized."
 
         if isinstance(device, th.device):
@@ -743,7 +743,7 @@ class MultiGBTLearner(BaseLearner):
         Returns:
             Union[NumericalData, List[NumericalData]]: The predicted output.
         """
-        assert self._cpp_models is not None and isinstance(self._cpp_models, list), \
+        assert self._cpp_models is not None and isinstance(self._cpp_models, (list, tuple)), \
             "Model not initialized."
         assert self.n_learners > 0, "No learners in the model."
 

@@ -655,7 +655,7 @@ void GBRL::_step_gpu(dataSet *dataset){
 
     preprocess_matrices(gpu_build_grads, n_samples, output_dim, this->metadata->split_score_func);
 
-    int n_candidates = process_candidates_cuda(gpu_obs, gpu_categorical_obs, candidate_indices, candidate_values, candidate_categories, candidate_numerical, n_samples, n_num_features, n_cat_features, n_bins, this->metadata->generator_type);
+    int n_candidates = process_candidates_cuda(gpu_obs, dataset->categorical_obs->data, candidate_indices, candidate_values, candidate_categories, candidate_numerical, n_samples, n_num_features, n_cat_features, n_bins, this->metadata->generator_type);
     
     dataHolder<const float> obs_holder{trans_obs, device};
     dataHolder<const char> cat_obs_holder{gpu_categorical_obs, device};

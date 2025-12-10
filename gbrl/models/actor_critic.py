@@ -31,14 +31,13 @@ from typing import Dict, List, Optional, Tuple, Union
 import numpy as np
 import torch as th
 
-from gbrl.common.utils import (NumericalData, clip_grad_norm, numerical_dtype,
-                               setup_optimizer, validate_array)
 from gbrl.learners.actor_critic_learner import (SeparateActorCriticLearner,
                                                 SharedActorCriticLearner)
 from gbrl.learners.cost_actor_critic_learner import SharedCostActorCriticLearner, SeparateCostActorCriticLearner
 from gbrl.models.base import BaseGBT
-from gbrl.common.utils import (clip_grad_norm, numerical_dtype, setup_optimizer,
-                               pad_array,
+from gbrl.common.utils import (clip_grad_norm, numerical_dtype,
+                               setup_optimizer, NumericalData,
+                               pad_array, concatenate_arrays,
                                validate_array)
 
 
@@ -286,6 +285,10 @@ class ActorCritic(BaseGBT):
             assert self.params[1].grad is not None, "params[1].grad must be set to compute gradients."  # type: ignore
             value_grads = self.params[1].grad.detach() * n_samples  # type: ignore
 
+        if isinstance(policy_grads, tuple):
+            policy_grads = concatenate_arrays(tuple(g.unsqueeze(0) for g in policy_grads), axis=0)
+            value_grads = pad_array(value_grads.unsqueeze(0), n_dims=policy_grads.shape[0] - 1, axis=0)  # type: ignore
+
         policy_grads = clip_grad_norm(policy_grads, policy_grad_clip)  # type: ignore
         value_grads = clip_grad_norm(value_grads, value_grad_clip)  # type: ignore
 
@@ -337,6 +340,9 @@ class ActorCritic(BaseGBT):
             assert isinstance(self.params[0], th.Tensor), "params[0] must be a Tensor to compute gradients."
             assert self.params[0].grad is not None, "params[0].grad must be set to compute gradients."  # type: ignore
             policy_grads = self.params[0].grad.detach() * n_samples  # type: ignore
+
+        if isinstance(policy_grads, tuple):
+            policy_grads = concatenate_arrays(tuple(g.unsqueeze(0) for g in policy_grads), axis=0)
 
         policy_grads = clip_grad_norm(policy_grads, policy_grad_clip)
         validate_array(policy_grads)
@@ -671,6 +677,11 @@ class CostActorCritic(ActorCritic):
             assert isinstance(self.params[2], th.Tensor), "params[2] must be a Tensor to compute gradients."
             assert self.params[2].grad is not None, "params[2].grad must be set to compute gradients."  # type: ignore
             cost_grads = self.params[2].grad.detach() * n_samples  # type: ignore
+
+        if isinstance(policy_grads, tuple):
+            policy_grads = concatenate_arrays(tuple(g.unsqueeze(0) for g in policy_grads), axis=0)
+            value_grads = pad_array(value_grads.unsqueeze(0), n_dims=policy_grads.shape[0] - 1, axis=0)  # type: ignore
+            cost_grads = pad_array(cost_grads.unsqueeze(0), n_dims=policy_grads.shape[0] - 1, axis=0)  # type: ignore
 
         policy_grads = clip_grad_norm(policy_grads, policy_grad_clip)  # type: ignore
         value_grads = clip_grad_norm(value_grads, value_grad_clip)  # type: ignore

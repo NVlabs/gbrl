@@ -125,9 +125,10 @@ void SplitCandidateGenerator::processCategoricalCandidates(const char *categoric
         for (int sample_idx = 0; sample_idx < this->n_samples; ++sample_idx) {
             
             // Efficiently grab the string
-            // (If you have C++17, change std::string to std::string_view for zero-copy!)
-            const char* str_ptr = categorical_obs + (sample_idx * this->n_cat_features + feature_idx) * MAX_CHAR_SIZE;
-            std::pair<int, std::string> key = {feature_idx, std::string(str_ptr)};
+
+            const char* start_ptr = categorical_obs + (sample_idx * n_cat_features + feature_idx) * MAX_CHAR_SIZE;
+            size_t safe_len = strnlen(start_ptr, MAX_CHAR_SIZE);
+            std::pair<int, std::string> key = {feature_idx, std::string(start_ptr, safe_len)};
 
             categoryInfo& info = unique_cats[key];
             
@@ -184,6 +185,7 @@ void SplitCandidateGenerator::processCategoricalCandidates(const char *categoric
     this->n_candidates = _n_candidates;
 }
 
+
 int processCategoricalCandidates_func(
     const char *categorical_obs, 
     // const float *grad_norms,   <-- REMOVED
@@ -205,11 +207,10 @@ int processCategoricalCandidates_func(
         for (int sample_idx = 0; sample_idx < n_samples; ++sample_idx) {
             
             // Construct string from fixed-width char buffer
-            // For C++14, we must construct a std::string to use as map key
             const char* start_ptr = categorical_obs + (sample_idx * n_cat_features + feature_idx) * MAX_CHAR_SIZE;
-            
+            size_t safe_len = strnlen(start_ptr, MAX_CHAR_SIZE);
             // Key construction
-            std::pair<int, std::string> key = {feature_idx, std::string(start_ptr)};
+            std::pair<int, std::string> key = {feature_idx, std::string(start_ptr, safe_len)};
             
             // Update Stats
             CategoryStats& stats = unique_cats[key];
@@ -264,6 +265,7 @@ int processCategoricalCandidates_func(
     
     return n_candidates;
 }
+
 
 int SplitCandidateGenerator::computeQuantiles(const float *obs, FloatVector &quantiles, const int *sorted_feature_indices, const int feature_idx, splitCandidate *_split_candidates, int _n_candidates){
     
