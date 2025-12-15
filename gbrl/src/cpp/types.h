@@ -317,6 +317,7 @@ struct ensembleData {
     char *categorical_values;       /**< Values for categorical splits */
 
     bool *mapping_numerics;         /**< Indicates if each original feature is numerical (true) or categorical (false) (stored for documentation/export) */
+    float *lambda_objs;             /**< Lambda values for each objective (for multi-objective optimization) */
 };
 
 /**

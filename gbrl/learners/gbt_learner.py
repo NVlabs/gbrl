@@ -91,6 +91,7 @@ class GBTLearner(BaseLearner):
 
         self._cpp_model = GBRL_CPP(**self.params, learner_name=self.learner_name)
         self._cpp_model.set_feature_weights(self.feature_weights)
+        self._cpp_model.set_lambda_objs(self.lambda_objs)
         if self.student_model is not None:
             for i in range(len(self.optimizers)):
                 self.optimizers[i]['T'] -= self.total_iterations

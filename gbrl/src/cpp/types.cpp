@@ -236,6 +236,10 @@ ensembleData* ensemble_data_alloc(ensembleMetaData *metadata){
     data_size += sizeof(float) * metadata->max_leaves * metadata->n_objs;
     memset(edata->densities, 0, metadata->max_leaves * metadata->n_objs * sizeof(float));
 
+    edata->lambda_objs = new float[metadata->n_objs];
+    data_size += sizeof(float) * metadata->n_objs;
+    memset(edata->lambda_objs, 0, metadata->n_objs * sizeof(float));
+
     edata->reverse_num_feature_mapping = new int[metadata->input_dim];
     data_size += sizeof(int) * metadata->input_dim;
     memset(edata->reverse_num_feature_mapping, 0, metadata->input_dim * sizeof(int));
@@ -304,6 +308,9 @@ ensembleData* ensemble_copy_data_alloc(ensembleMetaData *metadata){
     edata->densities = new float[metadata->n_leaves * metadata->n_objs];
     data_size += sizeof(float) * metadata->n_leaves * metadata->n_objs;
     memset(edata->densities, 0, metadata->n_leaves * metadata->n_objs * sizeof(float));
+    edata->lambda_objs = new float[metadata->n_objs];
+    data_size += sizeof(float) * metadata->n_objs;
+    memset(edata->lambda_objs, 0, metadata->n_objs * sizeof(float));
 
     edata->reverse_num_feature_mapping = new int[metadata->input_dim];
     data_size += sizeof(int) * metadata->input_dim;
@@ -371,6 +378,9 @@ ensembleData* copy_ensemble_data(ensembleData *other_edata, ensembleMetaData *me
     edata->densities = new float[metadata->n_leaves * metadata->n_objs];
     data_size += sizeof(float) * metadata->n_leaves * metadata->n_objs;
     memcpy(edata->densities, other_edata->densities, metadata->n_leaves * metadata->n_objs * sizeof(float));
+    edata->lambda_objs = new float[metadata->n_objs];
+    data_size += sizeof(float) * metadata->n_objs;
+    memcpy(edata->lambda_objs, other_edata->lambda_objs, metadata->n_objs * sizeof(float));
     edata->reverse_num_feature_mapping = new int[metadata->input_dim];
     data_size += sizeof(int) * metadata->input_dim;
     memcpy(edata->reverse_num_feature_mapping, other_edata->reverse_num_feature_mapping, metadata->input_dim * sizeof(int));
@@ -418,6 +428,7 @@ void ensemble_data_dealloc(ensembleData *edata){
     delete[] edata->is_numerics;
     delete[] edata->categorical_values;
     delete[] edata->inequality_directions; 
+    delete[] edata->lambda_objs;
     delete edata;
 }
 
@@ -496,6 +507,13 @@ void export_ensemble_data(std::ofstream& header_file, const std::string& model_n
     header_file << "cv_beta: " << metadata->cv_beta << ", ";
     header_file << "verbose: " << metadata->verbose << ", ";
     header_file << "batch_size: " << metadata->batch_size << ", ";
+    header_file << "lambda_objs: [";
+    for (int i  = 0; i < metadata->n_objs; ++i){
+        header_file << edata_cpu->lambda_objs[i];;
+        if (i < metadata->n_objs - 1)
+            header_file << ", ";
+    }
+    header_file << "], n_objs: " << metadata->n_objs << ", ";
     header_file << "use_cv: " << metadata->use_cv;
     header_file << "\nsplit_score_func: " << scoreFuncToString(metadata->split_score_func) << ", ";
     header_file << "generator_type: " << generatorTypeToString(metadata->generator_type) << ", ";
@@ -777,6 +795,10 @@ void save_ensemble_data(std::ofstream& file, ensembleData *edata, ensembleMetaDa
     file.write(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
     if (edata_cpu->categorical_values != nullptr)
         file.write(reinterpret_cast<char*>(edata_cpu->categorical_values), metadata->max_depth * sizes * sizeof(char) * MAX_CHAR_SIZE);
+    check = edata_cpu->lambda_objs != nullptr ? VALID : NULL_OPT;
+    file.write(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
+    if (edata_cpu->lambda_objs != nullptr)
+        file.write(reinterpret_cast<char*>(edata_cpu->lambda_objs), metadata->n_objs * sizeof(float));
 
 #ifdef USE_CUDA
     if (device == gpu){
@@ -863,6 +885,10 @@ ensembleData* load_ensemble_data(std::ifstream& file, ensembleMetaData *metadata
     if (check == VALID) {
         file.read(reinterpret_cast<char*>(edata_cpu->categorical_values), metadata->max_depth * sizes * sizeof(char) * MAX_CHAR_SIZE);
     } 
+    file.read(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
+    if (check == VALID) {
+        file.read(reinterpret_cast<char*>(edata_cpu->lambda_objs), metadata->n_objs * sizeof(float));
+    } 
     return edata_cpu;
 }
 
@@ -889,6 +915,7 @@ void allocate_ensemble_memory(ensembleMetaData *metadata, ensembleData *edata){
         memcpy(new_data->reverse_num_feature_mapping, edata->reverse_num_feature_mapping, metadata->input_dim * sizeof(int));
         memcpy(new_data->feature_mapping, edata->feature_mapping, metadata->input_dim * sizeof(int));
         memcpy(new_data->mapping_numerics, edata->mapping_numerics, metadata->input_dim * sizeof(bool));
+        memcpy(new_data->lambda_objs, edata->lambda_objs, metadata->n_objs * sizeof(float));
         if (metadata->grow_policy == GREEDY){
             memcpy(new_data->depths, edata->depths, leaf_idx * sizeof(int));
             memcpy(new_data->feature_indices, edata->feature_indices, leaf_idx * metadata->max_depth * sizeof(int));
@@ -922,6 +949,7 @@ void allocate_ensemble_memory(ensembleMetaData *metadata, ensembleData *edata){
         delete[] edata->feature_mapping;
         delete[] edata->reverse_num_feature_mapping;
         delete[] edata->mapping_numerics;
+        delete[] edata->lambda_objs;
 
         edata->bias = new_data->bias;
         edata->feature_weights = new_data->feature_weights;
@@ -936,8 +964,13 @@ void allocate_ensemble_memory(ensembleMetaData *metadata, ensembleData *edata){
         edata->feature_values = new_data->feature_values;
         edata->edge_weights = new_data->edge_weights;
         edata->densities = new_data->densities;
+        edata->mapping_numerics = new_data->mapping_numerics;
+        edata->reverse_cat_feature_mapping = new_data->reverse_cat_feature_mapping;
+        edata->reverse_num_feature_mapping = new_data->reverse_num_feature_mapping;
+        edata->feature_mapping = new_data->feature_mapping;
         edata->is_numerics = new_data->is_numerics;
         edata->categorical_values = new_data->categorical_values;
+        edata->lambda_objs = new_data->lambda_objs;
         delete new_data;
     }
 }

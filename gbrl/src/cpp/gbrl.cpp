@@ -237,6 +237,33 @@ void GBRL::set_bias(dataHolder<const float> *bias, const int output_dim){
         std::cout << "Setting " << this->learner_name << " bias " << std::endl;
 }
 
+void GBRL::set_lambda_objs(dataHolder<const float> *lambdas, const int n_objs){
+    if (n_objs != this->metadata->n_objs)
+    {
+        std::cerr << "Given lambdas vector has different dimensions than expected. Given: " << n_objs << " expected: " << this->metadata->n_objs << std::endl; 
+        throw std::runtime_error("Incompatible dimensions");
+    }
+#ifdef USE_CUDA
+    if (this->device == gpu){
+        if (lambdas->device == cpu){
+            cudaMemcpy(this->edata->lambda_objs, lambdas->data, sizeof(float)*this->metadata->n_objs, cudaMemcpyHostToDevice);
+        } else {
+            cudaMemcpy(this->edata->lambda_objs, lambdas->data, sizeof(float)*this->metadata->n_objs, cudaMemcpyDeviceToDevice);
+        }
+    }
+#endif
+    if (this->device == cpu){
+        if (lambdas->device == gpu){
+#ifdef USE_CUDA
+            cudaMemcpy(this->edata->lambda_objs, lambdas->data, sizeof(float)*this->metadata->n_objs, cudaMemcpyDeviceToHost);
+#else
+            throw std::runtime_error("GBRL was not compiled for GPU but GPU data detected!");
+#endif
+        } else
+            memcpy(this->edata->lambda_objs, lambdas->data, sizeof(float)*this->metadata->n_objs);
+    }
+}
+
 void GBRL::set_feature_weights(dataHolder<float> *feature_weights, const int input_dim){
     if (input_dim != this->metadata->input_dim)
     {
@@ -1399,6 +1426,14 @@ void GBRL::print_tree(int tree_idx = -1){
     std::cout <<  " output_dim: " << this->metadata->output_dim << " n_bins: " << this->metadata->n_bins;
     std::cout <<  " min_data_in_leaf: " << this->metadata->min_data_in_leaf << " par_th: " << this->metadata->par_th << " max_depth: " << this->metadata->max_depth << std::endl;
     std::cout << " input_dim: " << this->metadata->input_dim << " with " << this->metadata->n_num_features << " numerical features and " << this->metadata->n_cat_features << " categorical features" << std::endl;
+    std::cout << " n_objs: " << this->metadata->n_objs << " lambda_penalty: " << this->metadata->lambda_penalty << std::endl;
+    std::cout << "lambda objectives: [";
+    for (int obj_idx = 0; obj_idx < this->metadata->n_objs; ++obj_idx){
+        std::cout << edata_cpu->lambda_objs[obj_idx];
+        if (obj_idx < this->metadata->n_objs - 1)
+            std::cout << ", ";
+    }
+    std::cout << "]" << std::endl;
     std::cout << "Leaf Nodes: " << n_leaves << std::endl;
     int ctr = 0;
     for (int leaf_idx = edata_cpu->tree_indices[tree_idx]; leaf_idx < stop_leaf_idx; ++leaf_idx){

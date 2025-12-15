@@ -34,7 +34,8 @@ extern "C" {
  */
 TreeNodeGPU* allocate_root_tree_node(
     dataSet *dataset,
-    ensembleMetaData *metadata
+    ensembleMetaData *metadata,
+    cudaStream_t stream
 );
 
 /**
@@ -46,7 +47,8 @@ TreeNodeGPU* allocate_root_tree_node(
 void allocate_child_tree_node(
     TreeNodeGPU* host_parent,
     TreeNodeGPU** device_child,
-    const int n_objs
+    const int n_objs,
+    cudaStream_t stream
 );
 
 /**
@@ -69,7 +71,8 @@ void allocate_child_tree_nodes(
     TreeNodeGPU** right_child,
     candidatesData *candidata,
     splitDataGPU *split_data,
-    ensembleMetaData *metadata
+    ensembleMetaData *metadata,
+    cudaStream_t stream
 );
 
 /**
@@ -237,6 +240,7 @@ __global__ void split_score_cosine_cuda(
     const float* __restrict__ grads,
     const float* __restrict__ feature_weights,
     const float* __restrict__ obj_labels,
+    const float* __restrict__ lambda_objs,
     const TreeNodeGPU* __restrict__ node,
     const int* __restrict__ candidate_indices,
     const float* __restrict__ candidate_values,
@@ -277,6 +281,7 @@ __global__ void split_score_l2_cuda(
     const float* __restrict__ grads,
     const float* __restrict__ feature_weights,
     const float* __restrict__ obj_labels,
+    const float* __restrict__ lambda_objs,
     const TreeNodeGPU* __restrict__ node,
     const int* __restrict__ candidate_indices,
     const float* __restrict__ candidate_values,
@@ -324,6 +329,7 @@ __global__ void reduce_leaf_sum(
     const char* __restrict__ categorical_obs,
     const float* __restrict__ grads,       // Stacked: [Obj0][Obj1]...
     float* __restrict__ values,
+    const float* __restrict__ lambda_objs,
     const TreeNodeGPU* __restrict__ node,
     const int n_samples,                   // Global sample count (loop limit)
     const int global_idx,                  // Offset into 'values' array
@@ -372,7 +378,6 @@ __global__ void partition_samples_kernel(
  */
 __global__ void node_l2_kernel(
     TreeNodeGPU* __restrict__ node,
-    const float* __restrict__ mean,
     const int n_objs
 );
 
@@ -440,7 +445,6 @@ __global__ void calc_node_densities_kernel(
 __global__ void node_cosine_kernel(
     TreeNodeGPU* __restrict__ node,
     const float* __restrict__ grads,
-    float* __restrict__ mean,
     const int n_objs,
     const int global_n_samples
 );
@@ -491,13 +495,11 @@ __global__ void column_sums_reduce(
  * @brief CUDA kernel for node-specific column mean reduction
  * 
  * @param in Input matrix
- * @param out Output column means
  * @param n_cols Number of columns
  * @param node Tree node defining sample subset
  */
 __global__ void node_column_mean_reduce(
     const float * __restrict__ in,
-    float * __restrict__ out,
     size_t n_cols,
     size_t global_n_rows,
     const TreeNodeGPU* __restrict__ node,
@@ -764,12 +766,12 @@ __global__ void split_l2_score_kernel(
 __global__ void reduce_split_scores_kernel(
     float* __restrict__ split_scores,      // In/Out: [Obj0][Obj1]... -> [Total][Garbage]...
     const float* __restrict__ densities,   // Size: n_objs
+    const float* __restrict__ lambda_objs,
     const int n_candidates,
     const int n_objs
 );
 
 __global__ void calc_node_conflict_kernel(
-    const float* __restrict__ node_means, // Stacked: [Obj0][Obj1]...
     TreeNodeGPU* __restrict__ node,       // Output: node->conflict_rho
     const int n_objs,
     const int n_cols

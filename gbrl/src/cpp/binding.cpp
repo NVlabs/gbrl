@@ -712,6 +712,55 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         py::gil_scoped_release release; 
         self.set_bias(&bias_holder, output_dim); 
     }, "Set GBRL model bias");
+    gbrl.def("set_lambda_objs", [](GBRL &self, py::object &lambdas) {
+        const float *lambdas_ptr = nullptr;
+        std::vector<size_t> lambda_shape;
+        std::string lambda_device;
+        int n_samples, lambda_dim;
+
+        handle_input_info<const float>(lambdas, lambdas_ptr, lambda_shape, lambda_device, "lambdas", false, "set_lambda_objs");
+
+        if (lambda_shape.size() == 1){
+            if (self.metadata->n_objs > 1){
+                n_samples = 1;
+                lambda_dim = static_cast<int>(lambda_shape[0]);
+            } else{
+                n_samples = static_cast<int>(lambda_shape[0]);
+                lambda_dim = 1;
+            }
+
+            if (n_samples > 1){
+                std::stringstream ss;
+                ss << "Set lambdas with multiple samples is not supported!";
+                throw std::runtime_error(ss.str());
+            }
+        } else {
+            n_samples = static_cast<int>(lambda_shape[0]);
+            lambda_dim = static_cast<int>(lambda_shape[1]);
+
+            if (n_samples == self.metadata->n_objs && lambda_dim == 1){
+                // Transpose case
+                n_samples = 1;
+                lambda_dim = static_cast<int>(lambda_shape[0]);
+            }
+        }
+        if (lambda_dim != self.metadata->n_objs){
+            std::stringstream ss;
+            ss << "Targets dimension " << lambda_dim << " != correct number of objectives " << self.metadata->n_objs;
+            throw std::runtime_error(ss.str());
+        }
+        if (n_samples > 1){
+            std::stringstream ss;
+            ss << "Set lambdas with multiple samples is not supported!";
+            throw std::runtime_error(ss.str());
+        }
+    
+
+        dataHolder<const float> lambda_holder{lambdas_ptr, stringTodeviceType(lambda_device)};
+        int n_objs = static_cast<int>(len(lambdas));
+        py::gil_scoped_release release; 
+        self.set_lambda_objs(&lambda_holder, n_objs); 
+    }, "Set GBRL model bias");
     
     // Set per-feature importance weights
     // Supports both NumPy arrays and PyTorch tensors on CPU or GPU

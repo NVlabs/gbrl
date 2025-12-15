@@ -96,11 +96,20 @@ class BaseLearner(ABC):
                        'use_control_variates': params.get('control_variates',
                                                           False),
                        'lambda_penalty': params.get('lambda_penalty',
-                                                     1.0),
-                       'n_objs': params.get('n_objs',
-                                                    1),
+                                                    1.0),
+                       'n_objs': params.get('n_objs', 1),
                        'verbose': verbose, 'device': device, **tree_struct}
+
         self.n_objs = self.params['n_objs']
+
+        if 'lamba_objs' in params:
+            lambda_objs = params['lamba_objs']
+            assert len(lambda_objs) == self.n_objs, \
+                "Length of lambda_objs must match number of objectives"
+            self.lambda_objs = np.ascontiguousarray(np.array(lambda_objs,
+                                                             dtype=numerical_dtype))
+        else:
+            self.lambda_objs = np.ones(self.n_objs, dtype=numerical_dtype)
 
         self.iteration = 0
         self.total_iterations = 0

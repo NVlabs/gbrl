@@ -374,6 +374,19 @@ class GBRL {
         void set_bias(dataHolder<const float> *bias, const int output_dim);
         
         /**
+         * @brief Set global bias term
+         * 
+         * Sets the global bias/intercept term for the ensemble output. Supports both CPU
+         * and GPU data through the dataHolder interface, with automatic device-to-device
+         * transfers.
+         * 
+         * @param lambdas lambda objective values wrapped in dataHolder with device info
+         * @param n_objs Number of objects (must match metadata->n_objs)
+         * @throws std::runtime_error if n_objs doesn't match metadata->n_objs
+         */
+        void set_lambda_objs(dataHolder<const float> *lambdas, const int n_objs);
+        
+        /**
          * @brief Set per-feature importance weights
          * 
          * Sets the importance weight for each input feature. These weights are used during

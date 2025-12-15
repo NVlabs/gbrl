@@ -129,6 +129,7 @@ class MultiGBTLearner(BaseLearner):
                 params['policy_dim'] = self.policy_dim[i]   # type: ignore
             cpp_model = GBRL_CPP(**params, learner_name=self.learner_names[i])
             cpp_model.set_feature_weights(self.feature_weights)
+            cpp_model.set_lambda_objs(self.lambda_objs)
             if self.student_models is not None:
                 self.optimizers[i]['T'] -= self.total_iterations
             try:
