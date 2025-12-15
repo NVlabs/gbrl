@@ -311,9 +311,6 @@ void evaluate_greedy_splits(
     );
 
     if (dataset->obj_labels->data != nullptr){
-#ifdef DEBUG
-        printf("Calculating conflict and impurity penalty...\n");
-#endif
         int threads = metadata->output_dim;
         // Need shared memory for 2 float arrays of size 'threads'
         size_t smem = 2 * threads * sizeof(float);
@@ -1009,11 +1006,6 @@ __global__ void split_impurity_penalty_kernel(
         // --- APPLY PENALTY ---
         // Score *= (1 - lambda * rho * H)
         float penalty_factor = lambda_penalty * rho * H_impurity;
-
-#ifdef DEBUG
-        printf("Cand %d: lc=%.1f ls=%.2f lsq=%.2f | rc=%.1f rs=%.2f rsq=%.2f | H=%.4f lambda_penalty=%.4f, rho=%.4f penalty=%.4f\n", 
-            cand_idx, lc, ls, lsq, rc, rs, rsq, H_impurity, lambda_penalty, rho, penalty_factor);
-#endif
         
         if (penalty_factor > 1.0f) penalty_factor = 1.0f;
         if (penalty_factor < 0.0f) penalty_factor = 0.0f;
@@ -1030,6 +1022,12 @@ __global__ void calc_node_conflict_kernel(
     // 1. One Block per Node (Launched with threads = n_cols)
     int d = threadIdx.x;
     if (d >= n_cols) return;
+    
+    // Early exit if node has no samples (avoid NaN from mean_values)
+    if (node->n_samples == 0) {
+        if (d == 0) node->conflict_rho = 0.0f;
+        return;
+    }
 
     // Shared memory for 2 reductions (Numerator and Denominator)
     extern __shared__ float sdata[];
@@ -1040,19 +1038,6 @@ __global__ void calc_node_conflict_kernel(
     // We iterate K (objectives) locally in registers.
     float sum_of_components = 0.0f; // (\sum \mu)^2
     float sum_of_squares = 0.0f;    // \sum (\mu^2)
-
-#ifdef DEBUG
-    if (d == 0) {
-        printf("READING node_means: ");
-        for (int k = 0; k < n_objs; ++k) {
-            for (int dim = 0; dim < n_cols; ++dim) {
-                printf("[%d,%d]=%.6f ", k, dim, node->mean_values[k * n_cols + dim]);
-            }
-        }
-
-        printf("\n");
-    }
-#endif
 
     for (int k = 0; k < n_objs; ++k) {
         float val = node->mean_values[k * n_cols + d];
@@ -1093,20 +1078,20 @@ __global__ void calc_node_conflict_kernel(
         }
 
 #ifdef DEBUG
-        printf("RHO CALCULATION: numerator=%.6f, denominator=%.6f, ratio=%.6f, rho=%.6f\n", 
+        printf("\n=== Node %d RHO CALCULATION ===\n", node->node_idx);
+        printf("  numerator=%.6f, denominator=%.6f, ratio=%.6f, rho=%.6f\n", 
                numerator, denominator, (denominator > 1e-12f ? numerator / denominator : 0.0f), rho);
         
         // Print individual objective means for debugging
-        printf("Objective means: ");
         for (int k = 0; k < n_objs; ++k) {
-            printf("obj%d=(", k);
+            printf("  Obj[%d] mean=(", k);
             for (int dim = 0; dim < n_cols; ++dim) {
                 printf("%.3f", node->mean_values[k * n_cols + dim]);
                 if (dim < n_cols - 1) printf(",");
             }
-            printf(") ");
+            printf(")\n");
         }
-        printf("\n");
+        printf("==============================\n\n");
 #endif
 
         // Store result in the node struct
@@ -1626,7 +1611,6 @@ __global__ void node_column_mean_reduce(
         // Gradient layout: (n_objs, n_samples, output_dim)
         size_t grad_offset = obj_idx * global_n_rows * n_cols + sample_idx * n_cols + col;
         float val = (global_col < virtual_col) ? in[grad_offset] : 0.0f;
-        
         sdata[threadIdx.y][threadIdx.x] += val;
     }
     __syncthreads();
@@ -1638,11 +1622,8 @@ __global__ void node_column_mean_reduce(
         sdata[0][threadIdx.y]  = tmp;
     __syncthreads();
     if ((threadIdx.y == 0) && (global_col < virtual_col)) {
-        node->mean_values[global_col] = sdata[0][threadIdx.x] / static_cast<float>(n_rows);
-#ifdef DEBUG
-        printf("  OUTPUT: out[%lu] = %.6f (obj=%lu, col=%lu)\n", 
-                (unsigned long)global_col, node->mean_values[global_col], (unsigned long)obj_idx, (unsigned long)col);
-#endif
+        float accumulated_sum = sdata[0][threadIdx.x];
+        node->mean_values[global_col] = (n_rows > 0) ? (accumulated_sum / static_cast<float>(n_rows)) : 0.0f;
     }
   }
 }
@@ -1950,7 +1931,28 @@ void add_leaf_node(
     if (threads_per_block > THREADS_PER_BLOCK) {
         threads_per_block = THREADS_PER_BLOCK;
     }
-    size_t shared_mem = sizeof(float)*2*threads_per_block * (1 + metadata->n_objs);
+    
+    // Validate kernel launch parameters
+    if (metadata->output_dim == 0 || threads_per_block == 0) {
+        std::cerr << "CUDA Error: Invalid kernel configuration - output_dim: " 
+                  << metadata->output_dim << ", threads_per_block: " << threads_per_block << std::endl;
+        return;
+    }
+    
+    // Calculate shared memory: (n_objs + 1) * threads_per_block floats
+    // Layout: [n_objs * blockDim.x for sums] + [blockDim.x for count]
+    size_t shared_mem = sizeof(float) * threads_per_block * (metadata->n_objs + 1);
+    
+    // Validate shared memory doesn't exceed device limits
+    cudaDeviceProp deviceProp;
+    cudaGetDeviceProperties(&deviceProp, 0);
+    if (shared_mem > deviceProp.sharedMemPerBlock) {
+        std::cerr << "CUDA Error: Shared memory requirement (" << shared_mem 
+                  << " bytes) exceeds device limit (" << deviceProp.sharedMemPerBlock 
+                  << " bytes)" << std::endl;
+        return;
+    }
+    
     reduce_leaf_sum<<<metadata->output_dim, threads_per_block, shared_mem>>>(dataset->obs->data, dataset->categorical_obs->data, dataset->grads->data, edata->values, edata->lambda_objs, node, dataset->n_samples, leaf_idx*metadata->output_dim, metadata->n_objs);
     cudaDeviceSynchronize();
        

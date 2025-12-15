@@ -582,7 +582,7 @@ void GBRL::_step_gpu(dataSet *dataset){
 
     size_t obs_size = sizeof(float)*n_num_features*n_samples;
     size_t cat_obs_size = sizeof(char)*n_cat_features*n_samples*MAX_CHAR_SIZE;
-    size_t grads_size = sizeof(float)*output_dim*n_samples;
+    size_t grads_size = sizeof(float)*output_dim*n_samples*this->metadata->n_objs;
 
     size_t cand_indices_size =  sizeof(int)*n_bins*this->metadata->input_dim;
     size_t cand_float_size =  sizeof(float)*n_bins*this->metadata->input_dim;
