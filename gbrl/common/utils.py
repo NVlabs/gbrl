@@ -287,9 +287,9 @@ def clip_grad_norm(grads: NumericalData, grad_clip: Optional[float]) ->\
             grads = np.clip(grads, a_min=-grad_clip, a_max=grad_clip)
         return grads
     if isinstance(grads, th.Tensor):
-        grad_norms = th.norm(grads, p=2, dim=1, keepdim=True)
+        grad_norms = th.norm(grads, p=2, dim=-1, keepdim=True)
     else:
-        grad_norms = np.linalg.norm(grads, axis=1, ord=2, keepdims=True)
+        grad_norms = np.linalg.norm(grads, axis=-1, ord=2, keepdims=True)
     mask = (grad_norms > grad_clip).squeeze()
     grads[mask] = grad_clip * grads[mask] / grad_norms[mask]
     return grads
