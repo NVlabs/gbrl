@@ -22,6 +22,89 @@
 #include "cuda_utils.h"
 #include "types.h"
 
+/**
+ * @brief CUDA kernel for selective copy of integer arrays
+ * 
+ * Copies elements from source to destination based on selection indices.
+ * Each thread processes one element from the indices array.
+ * 
+ * @param n_elements Number of elements to copy
+ * @param indices Array of indices to copy from source
+ * @param dest Destination array
+ * @param src Source array
+ * @param stride Number of values per element (for 2D arrays)
+ */
+__global__ void selective_copyi(const int n_elements, const int* __restrict__ indices, int* __restrict__ dest, const int* __restrict__ src, const int stride){
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < n_elements){
+        int src_idx = indices[idx];
+        for (int i = 0; i < stride; ++i){
+            dest[idx * stride + i] = src[src_idx * stride + i];
+        }
+    }
+}
+
+/**
+ * @brief CUDA kernel for selective copy of float arrays
+ * 
+ * @param n_elements Number of elements to copy
+ * @param indices Array of indices to copy from source
+ * @param dest Destination array
+ * @param src Source array
+ * @param stride Number of values per element
+ */
+__global__ void selective_copyf(const int n_elements, const int* __restrict__ indices, float* __restrict__ dest, const float* __restrict__ src, const int stride){
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < n_elements){
+        int src_idx = indices[idx];
+        for (int i = 0; i < stride; ++i){
+            dest[idx * stride + i] = src[src_idx * stride + i];
+        }
+    }
+}
+
+/**
+ * @brief CUDA kernel for selective copy of boolean arrays
+ * 
+ * @param n_elements Number of elements to copy
+ * @param indices Array of indices to copy from source
+ * @param dest Destination array
+ * @param src Source array
+ * @param stride Number of values per element
+ */
+__global__ void selective_copyb(const int n_elements, const int* __restrict__ indices, bool* __restrict__ dest, const bool* __restrict__ src, const int stride){
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < n_elements){
+        int src_idx = indices[idx];
+        for (int i = 0; i < stride; ++i){
+            dest[idx * stride + i] = src[src_idx * stride + i];
+        }
+    }
+}
+
+/**
+ * @brief CUDA kernel for selective copy of character arrays
+ * 
+ * Copies character strings (MAX_CHAR_SIZE bytes per string) based on indices.
+ * 
+ * @param n_elements Number of elements to copy
+ * @param indices Array of indices to copy from source
+ * @param dest Destination array
+ * @param src Source array
+ * @param stride Number of strings per element
+ */
+__global__ void selective_copyc(const int n_elements, const int* __restrict__ indices, char* __restrict__ dest, const char* __restrict__ src, const int stride){
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < n_elements){
+        int src_idx = indices[idx];
+        for (int i = 0; i < stride; ++i){
+            for (int j = 0; j < MAX_CHAR_SIZE; ++j){
+                dest[(idx * stride + i) * MAX_CHAR_SIZE + j] = src[(src_idx * stride + i) * MAX_CHAR_SIZE + j];
+            }
+        }
+    }
+}
+
 // Implementation notes for ensemble_data_alloc_cuda:
 // Allocates unified memory block with feature mapping arrays (4 vectors):
 // - feature_mapping: Original to internal index mapping (stored for export)
@@ -186,6 +269,83 @@ ensembleData* ensemble_copy_data_alloc_cuda(ensembleMetaData *metadata){
     return edata;
 }
 
+ensembleData* ensemble_compressed_data_alloc_cuda(ensembleMetaData *metadata, const int n_compressed_leaves, const int n_compressed_trees){
+    // Same function as normal alloc just allocates exact amount
+    ensembleData *edata = new ensembleData;
+    if (metadata == nullptr){
+        std::cerr << "Error metadata is nullptr cannot allocate ensembleData." << std::endl;
+        return nullptr;
+    }
+
+    char *data;
+    size_t bias_size = metadata->output_dim * sizeof(float);
+    size_t feature_mapping_size = metadata->input_dim * sizeof(int);
+    size_t feature_size = metadata->input_dim * sizeof(float);
+    size_t tree_size = n_compressed_trees * sizeof(int);
+    size_t split_sizes = (metadata->grow_policy == OBLIVIOUS) ? n_compressed_trees : n_compressed_leaves;
+    size_t value_sizes = metadata->output_dim * n_compressed_leaves * sizeof(float);
+    size_t cond_sizes = split_sizes*metadata->max_depth;
+    size_t edge_size = n_compressed_leaves*metadata->max_depth;
+
+    size_t data_size = bias_size
+                     + feature_mapping_size * 3
+                     + feature_size
+                     + tree_size
+                     + split_sizes * sizeof(int) // depths
+                     + value_sizes 
+                     + edge_size * (sizeof(bool) + sizeof(float)) // inequality directions + edge_weights
+                     + cond_sizes * (sizeof(int) + sizeof(float) + sizeof(bool) + sizeof(char)*MAX_CHAR_SIZE)
+                     + metadata->input_dim * sizeof(bool); 
+#ifdef DEBUG 
+    size_t sample_size = n_compressed_leaves * sizeof(int);
+    data_size += sample_size;
+#endif
+    cudaError_t alloc_error = allocateCudaMemory((void**)&data, data_size, "when trying to allocate memory for ensemble_compressed_data");
+    if (alloc_error != cudaSuccess) {
+        return nullptr;
+    }
+    cudaMemset(data, 0, data_size);
+    size_t trace = 0;
+    edata->bias = (float*)(data + trace);
+    trace += bias_size;
+    edata->feature_mapping = (int*)(data + trace);
+    trace += feature_mapping_size;
+    edata->reverse_num_feature_mapping = (int*)(data + trace);
+    trace += feature_mapping_size;
+    edata->reverse_cat_feature_mapping = (int*)(data + trace);
+    trace += feature_mapping_size;
+    edata->feature_weights = (float*)(data + trace);
+    trace += feature_size;
+#ifdef DEBUG 
+    edata->n_samples = (int *)(data + trace);
+    trace += sample_size;
+#endif
+    edata->tree_indices = (int *)(data + trace);
+    trace += tree_size;
+    edata->depths = (int *)(data + trace);
+    trace += split_sizes * sizeof(int);
+    edata->values = (float *)(data + trace);
+    trace += value_sizes;
+    edata->feature_indices = (int *)(data + trace);
+    trace += cond_sizes * sizeof(int);
+    edata->feature_values = (float *)(data + trace);
+    trace += cond_sizes * sizeof(float);
+    edata->edge_weights = (float *)(data + trace);
+    trace += edge_size * sizeof(float);
+    edata->is_numerics = (bool *)(data + trace);
+    trace += cond_sizes * sizeof(bool);
+    edata->inequality_directions = (bool *)(data + trace);
+    trace += edge_size * sizeof(bool);
+    edata->mapping_numerics = (bool *)(data + trace);
+    trace += metadata->input_dim * sizeof(bool);
+    edata->categorical_values = (char *)(data + trace);
+
+    metadata->n_trees = n_compressed_trees; 
+    metadata->n_leaves = n_compressed_leaves; 
+    edata->alloc_data_size = data_size;
+    return edata;
+}
+
 ensembleData* ensemble_data_copy_gpu_gpu(ensembleMetaData *metadata, ensembleData *other_edata, ensembleData *edata){
     if (edata == nullptr)
         edata = ensemble_copy_data_alloc_cuda(metadata);
@@ -284,6 +444,58 @@ ensembleData* ensemble_data_copy_cpu_gpu(ensembleMetaData *metadata, ensembleDat
     cudaMemcpy(edata->is_numerics, other_edata->is_numerics, cond_sizes * sizeof(bool), cudaMemcpyHostToDevice);
     cudaMemcpy(edata->inequality_directions, other_edata->inequality_directions, edge_size * sizeof(bool), cudaMemcpyHostToDevice);
     cudaMemcpy(edata->categorical_values, other_edata->categorical_values, cond_sizes * sizeof(char) * MAX_CHAR_SIZE, cudaMemcpyHostToDevice); 
+    return edata;
+}
+
+ensembleData* ensemble_compressed_data_copy_gpu_gpu(ensembleMetaData *metadata, ensembleData *other_edata, ensembleData *edata, const int n_compressed_leaves, const int n_compressed_trees, const int *leaf_indices, const int *tree_indices, const int *new_tree_indices){
+    if (edata == nullptr)
+        edata = ensemble_compressed_data_alloc_cuda(metadata, n_compressed_leaves, n_compressed_trees);
+    size_t bias_size = metadata->output_dim * sizeof(float);
+    size_t feature_size = metadata->input_dim * sizeof(float);
+    size_t feature_mapping_size = metadata->input_dim * sizeof(int);
+    size_t tree_size = n_compressed_trees * sizeof(int);
+    size_t split_sizes = (metadata->grow_policy == OBLIVIOUS) ? n_compressed_trees : n_compressed_leaves;
+    size_t data_size = sizeof(int)*(n_compressed_leaves + n_compressed_trees); 
+    int *data;
+    int *leaf_indices_gpu;
+    int *tree_indices_gpu;
+
+    cudaError_t alloc_error = allocateCudaMemory((void**)&data, data_size, "when trying to allocate memory for ensemble_copy_data_cpu_gpu");
+    if (alloc_error != cudaSuccess) {
+        return nullptr;
+    }
+    size_t trace = 0;
+    leaf_indices_gpu = (int *)(data + trace);
+    trace += n_compressed_leaves;
+    tree_indices_gpu = (int *)(data + trace);
+    cudaMemcpy(leaf_indices_gpu, leaf_indices, sizeof(int)*(n_compressed_leaves), cudaMemcpyHostToDevice);
+    cudaMemcpy(tree_indices_gpu, tree_indices, sizeof(int)*(n_compressed_trees), cudaMemcpyHostToDevice);
+    const int *split_indices = (metadata->grow_policy == OBLIVIOUS) ? tree_indices_gpu : leaf_indices_gpu;
+    cudaMemcpy(edata->bias, other_edata->bias, bias_size, cudaMemcpyDeviceToDevice);
+    cudaMemcpy(edata->feature_mapping, other_edata->feature_mapping, feature_mapping_size, cudaMemcpyDeviceToDevice);
+    cudaMemcpy(edata->reverse_num_feature_mapping, other_edata->reverse_num_feature_mapping, feature_mapping_size, cudaMemcpyDeviceToDevice);
+    cudaMemcpy(edata->reverse_cat_feature_mapping, other_edata->reverse_cat_feature_mapping, feature_mapping_size, cudaMemcpyDeviceToDevice);
+    cudaMemcpy(edata->mapping_numerics, other_edata->mapping_numerics, metadata->input_dim * sizeof(bool), cudaMemcpyDeviceToDevice);
+    cudaMemcpy(edata->feature_weights, other_edata->feature_weights, feature_size, cudaMemcpyDeviceToDevice);
+#ifdef DEBUG 
+    size_t sample_size = n_compressed_leaves * sizeof(int);
+    cudaMemcpy(edata->n_samples, other_edata->n_samples, sample_size, cudaMemcpyDeviceToDevice);
+#endif
+    cudaMemcpy(edata->tree_indices, new_tree_indices, tree_size, cudaMemcpyHostToDevice);
+    int n_blocks = split_sizes / THREADS_PER_BLOCK + 1;
+    selective_copyi<<<n_blocks, THREADS_PER_BLOCK>>>(split_sizes, split_indices, edata->depths, other_edata->depths, 1);
+
+    selective_copyi<<<n_blocks, THREADS_PER_BLOCK>>>(split_sizes, split_indices, edata->feature_indices, other_edata->feature_indices, metadata->max_depth);
+    selective_copyf<<<n_blocks, THREADS_PER_BLOCK>>>(split_sizes, split_indices, edata->feature_values, other_edata->feature_values, metadata->max_depth);
+    selective_copyb<<<n_blocks, THREADS_PER_BLOCK>>>(split_sizes, split_indices, edata->is_numerics, other_edata->is_numerics, metadata->max_depth);
+    selective_copyc<<<n_blocks, THREADS_PER_BLOCK>>>(split_sizes, split_indices, edata->categorical_values, other_edata->categorical_values, metadata->max_depth);
+
+    n_blocks = n_compressed_leaves / THREADS_PER_BLOCK + 1;
+    selective_copyf<<<n_blocks, THREADS_PER_BLOCK>>>(n_compressed_leaves, leaf_indices_gpu, edata->values, other_edata->values, metadata->output_dim);
+    selective_copyf<<<n_blocks, THREADS_PER_BLOCK>>>(n_compressed_leaves, leaf_indices_gpu, edata->edge_weights, other_edata->edge_weights, metadata->max_depth);
+    selective_copyb<<<n_blocks, THREADS_PER_BLOCK>>>(n_compressed_leaves, leaf_indices_gpu, edata->inequality_directions, other_edata->inequality_directions, metadata->max_depth);
+    cudaDeviceSynchronize();
+    cudaFree(data);
     return edata;
 }
 

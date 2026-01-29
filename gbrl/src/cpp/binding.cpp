@@ -983,6 +983,219 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         py::gil_scoped_release release; 
         self.print_tree(tree_idx); 
     }, py::arg("tree_idx") = -1, "Print specified tree index");
+gbrl.def("get_matrix_representation", [](GBRL &self, py::object &obs, py::object &categorical_obs){
+        const float* obs_ptr = nullptr;
+        int n_num_features = 0;
+        int n_samples = 0;
+        int n_obs_samples = 0;
+        
+        if (!obs.is_none()) {
+            py::array_t<float> obs_array = py::cast<py::array_t<float>>(obs);
+            if (!obs_array.attr("flags").attr("c_contiguous").cast<bool>())
+                throw std::runtime_error("Observation arrays must be C-contiguous");
+            py::buffer_info info_obs = obs_array.request();
+            obs_ptr = static_cast<const float*>(info_obs.ptr);
+            
+            if (info_obs.shape.size() == 1) {
+                // 1D array - could be single sample with multiple features or multiple samples with 1 feature
+                if (static_cast<int>(info_obs.shape[0]) == self.metadata->input_dim) {
+                    n_samples = 1;
+                    n_num_features = static_cast<int>(info_obs.shape[0]);
+                } else {
+                    n_samples = static_cast<int>(info_obs.shape[0]);
+                    n_num_features = 1;
+                }
+                n_obs_samples = n_samples;
+            } else {
+                n_obs_samples = static_cast<int>(info_obs.shape[0]);
+                n_num_features = static_cast<int>(info_obs.shape[1]);
+                n_samples = n_obs_samples;
+            }
+        }
+        
+        int n_cat_features = 0;
+        const char *cat_obs_ptr = nullptr;
+        if (!categorical_obs.is_none()) {
+            py::array py_array = py::cast<py::array>(categorical_obs);
+            if (!py_array.attr("flags").attr("c_contiguous").cast<bool>())
+                throw std::runtime_error("Categorical observation arrays must be C-contiguous");
+            py::buffer_info info_categorical_obs = py_array.request();
+            cat_obs_ptr = static_cast<const char*>(info_categorical_obs.ptr);
+            
+            if (info_categorical_obs.shape.size() == 1) {
+                // 1D array - could be single sample or multiple samples with 1 feature
+                int cat_size = static_cast<int>(info_categorical_obs.shape[0]);
+                if (obs_ptr == nullptr) {
+                    // Only categorical features
+                    if (cat_size == self.metadata->input_dim) {
+                        n_samples = 1;
+                        n_cat_features = cat_size;
+                    } else {
+                        n_samples = cat_size;
+                        n_cat_features = 1;
+                    }
+                } else {
+                    // Have both numerical and categorical
+                    if (cat_size == n_obs_samples) {
+                        n_cat_features = 1;
+                    } else if (n_obs_samples == 1) {
+                        n_cat_features = cat_size;
+                        n_samples = 1;
+                    } else {
+                        std::stringstream ss;
+                        ss << "Categorical observation dimension mismatch: got " << cat_size 
+                           << " but expected " << n_obs_samples << " samples";
+                        throw std::runtime_error(ss.str());
+                    }
+                }
+            } else {
+                int n_cat_samples = static_cast<int>(info_categorical_obs.shape[0]);
+                n_cat_features = static_cast<int>(info_categorical_obs.shape[1]);
+                
+                if (obs_ptr != nullptr && n_cat_samples != n_obs_samples) {
+                    std::stringstream ss;
+                    ss << "Number of categorical observation samples (" << n_cat_samples 
+                       << ") != number of numerical observation samples (" << n_obs_samples << ")";
+                    throw std::runtime_error(ss.str());
+                }
+                if (obs_ptr == nullptr) {
+                    n_samples = n_cat_samples;
+                }
+            }
+        }
+        
+        // Validate total feature count
+        if (obs_ptr == nullptr && cat_obs_ptr == nullptr) {
+            throw std::runtime_error("Cannot call get_matrix_representation without observations!");
+        }
+        
+        if (n_cat_features + n_num_features != self.metadata->input_dim) {
+            std::stringstream ss;
+            ss << "Total number of features (" << n_cat_features + n_num_features 
+               << ") != model input_dim (" << self.metadata->input_dim << ")";
+            throw std::runtime_error(ss.str());
+        }
+        
+        py::gil_scoped_release release; 
+        matrixRepresentation *matrix = self.get_matrix_representation(obs_ptr, cat_obs_ptr, n_samples, n_num_features, n_cat_features);  
+        py::gil_scoped_acquire acquire;
+       
+        auto capsule_A = py::capsule(matrix->A, [](void* ptr) {
+            delete[] reinterpret_cast<bool*>(ptr);
+        });
+        auto capsule_V = py::capsule(matrix->V, [](void* ptr) {
+            delete[] reinterpret_cast<float*>(ptr);
+        });
+        auto capsule_n_leaves_per_tree = py::capsule(matrix->n_leaves_per_tree, [](void* ptr) {
+            delete[] reinterpret_cast<int*>(ptr);
+        });
+        auto np_array_A = py::array_t<bool>({n_samples, matrix->n_leaves + 1}, matrix->A, capsule_A);
+        auto np_array_V = py::array_t<float>({matrix->n_leaves + 1, self.metadata->output_dim}, matrix->V, capsule_V);
+        auto np_array_n_leaves_per_tree = py::array_t<int>({matrix->n_trees}, matrix->n_leaves_per_tree, capsule_n_leaves_per_tree);
+        auto matrix_tuple = py::make_tuple(np_array_A, np_array_V, np_array_n_leaves_per_tree, matrix->n_leaves, matrix->n_trees);
+        delete matrix;
+        return matrix_tuple;
+    }, py::arg("obs"), py::arg("categorical_obs"), "Get matrix representation of model given an input");
+    gbrl.def("compress", [](GBRL &self, const int n_compressed_leaves, const int n_compressed_trees, py::object &leaf_indices, py::object &tree_indices, py::object &new_tree_indices, py::object &W){
+        // Validate input parameters
+        if (n_compressed_leaves <= 0) {
+            throw std::runtime_error("n_compressed_leaves must be positive");
+        }
+        if (n_compressed_trees <= 0) {
+            throw std::runtime_error("n_compressed_trees must be positive");
+        }
+        if (n_compressed_trees > self.metadata->n_trees) {
+            std::stringstream ss;
+            ss << "n_compressed_trees (" << n_compressed_trees 
+               << ") cannot exceed current number of trees (" << self.metadata->n_trees << ")";
+            throw std::runtime_error(ss.str());
+        }
+        
+        const int* leaf_indices_ptr = nullptr;
+        if (!leaf_indices.is_none()) {
+            py::array_t<int> leaf_indices_array = py::cast<py::array_t<int>>(leaf_indices);
+            if (!leaf_indices_array.attr("flags").attr("c_contiguous").cast<bool>())
+                throw std::runtime_error("leaf_indices array must be C-contiguous");
+            py::buffer_info leaf_info = leaf_indices_array.request();
+            leaf_indices_ptr = static_cast<const int*>(leaf_info.ptr);
+            
+            // Validate size
+            if (leaf_info.size != n_compressed_leaves) {
+                std::stringstream ss;
+                ss << "leaf_indices size (" << leaf_info.size 
+                   << ") does not match n_compressed_leaves (" << n_compressed_leaves << ")";
+                throw std::runtime_error(ss.str());
+            }
+        } else {
+            throw std::runtime_error("leaf_indices cannot be None");
+        }
+        
+        const int* tree_indices_ptr = nullptr;
+        if (!tree_indices.is_none()) {
+            py::array_t<int> tree_indices_array = py::cast<py::array_t<int>>(tree_indices);
+            if (!tree_indices_array.attr("flags").attr("c_contiguous").cast<bool>())
+                throw std::runtime_error("tree_indices array must be C-contiguous");
+            py::buffer_info tree_info = tree_indices_array.request();
+            tree_indices_ptr = static_cast<const int*>(tree_info.ptr);
+            
+            // Validate size
+            if (tree_info.size != n_compressed_trees) {
+                std::stringstream ss;
+                ss << "tree_indices size (" << tree_info.size 
+                   << ") does not match n_compressed_trees (" << n_compressed_trees << ")";
+                throw std::runtime_error(ss.str());
+            }
+        } else {
+            throw std::runtime_error("tree_indices cannot be None");
+        }
+        
+        const int* new_tree_indices_ptr = nullptr;
+        if (!new_tree_indices.is_none()) {
+            py::array_t<int> new_tree_indices_array = py::cast<py::array_t<int>>(new_tree_indices);
+            if (!new_tree_indices_array.attr("flags").attr("c_contiguous").cast<bool>())
+                throw std::runtime_error("new_tree_indices array must be C-contiguous");
+            py::buffer_info indices_info = new_tree_indices_array.request();
+            new_tree_indices_ptr = static_cast<const int*>(indices_info.ptr);
+            
+            // Validate size
+            if (indices_info.size != n_compressed_trees) {
+                std::stringstream ss;
+                ss << "new_tree_indices size (" << indices_info.size 
+                   << ") does not match n_compressed_trees (" << n_compressed_trees << ")";
+                throw std::runtime_error(ss.str());
+            }
+        } else {
+            throw std::runtime_error("new_tree_indices cannot be None");
+        }
+        
+        const float* W_ptr = nullptr;
+        if (!W.is_none()) {
+            py::array_t<float> W_array = py::cast<py::array_t<float>>(W);
+            if (!W_array.attr("flags").attr("c_contiguous").cast<bool>())
+                throw std::runtime_error("W array must be C-contiguous");
+            py::buffer_info w_info = W_array.request();
+            W_ptr = static_cast<const float*>(w_info.ptr);
+            
+            // Validate shape (should be n_leaves+1 x output_dim - original ensemble size)
+            if (w_info.ndim != 2) {
+                throw std::runtime_error("W must be a 2D array");
+            }
+            if (static_cast<int>(w_info.shape[0]) != self.metadata->n_leaves + 1 || 
+                static_cast<int>(w_info.shape[1]) != self.metadata->output_dim) {
+                std::stringstream ss;
+                ss << "W shape (" << w_info.shape[0] << ", " << w_info.shape[1] 
+                   << ") does not match expected (" << self.metadata->n_leaves + 1 
+                   << ", " << self.metadata->output_dim << ")";
+                throw std::runtime_error(ss.str());
+            }
+        } else {
+            throw std::runtime_error("W correction matrix cannot be None");
+        }
+        
+        py::gil_scoped_release release; 
+        self.compress_ensemble(n_compressed_leaves, n_compressed_trees, leaf_indices_ptr, tree_indices_ptr, new_tree_indices_ptr, W_ptr);  
+
+    }, py::arg("n_compressed_leaves"), py::arg("n_compressed_trees"), py::arg("leaf_indices"), py::arg("tree_indices"), py::arg("new_tree_indices"), py::arg("W") , "Compress ensemble");
     gbrl.def("tree_shap", [](GBRL &self, const int tree_idx, py::object &obs, py::object &categorical_obs, 
                             py::object &norm_values, py::object &base_poly, py::object &offset) -> py::array_t<float> {
         const float* obs_ptr = nullptr;

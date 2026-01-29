@@ -54,6 +54,7 @@ extern "C" {
 #ifdef USE_CUDA
 #include <cuda_runtime.h>
 #include "cuda_predictor.h"
+#include "cuda_compression.h"
 #include "cuda_fitter.h"
 #include "cuda_preprocess.h"
 #include "cuda_loss.h"
@@ -66,6 +67,7 @@ extern "C" {
 #include "optimizer.h"
 #include "fitter.h"
 #include "predictor.h"
+#include "compression.h"
 #include "loss.h"
 #include "utils.h"
 #include "shap.h"
@@ -431,6 +433,61 @@ void GBRL::ensemble_check(){
         std::cerr << "Error! ensemble has no optimizers!";
         throw std::runtime_error("Uninitialized ensemble");
     }
+}
+
+matrixRepresentation* GBRL::get_matrix_representation(const float *obs, const char *categorical_obs, const int n_samples, const int n_num_features, const int n_cat_features){
+    if (n_num_features != metadata->n_num_features || n_cat_features != metadata->n_cat_features){
+        std::cerr << "Error. Cannot use ensemble with this dataset. Excepted input with " << metadata->n_num_features << " numerical features followed by " << metadata->n_cat_features << " categorical features, but received " << n_num_features << " numerical features and " << n_cat_features << " categorical features.";
+        throw std::runtime_error("Incompatible dataset");
+    }
+    this->ensemble_check();
+    for (size_t i = 0; i < this->opts.size(); ++i){
+        if (this->opts[i]->scheduler->getType() == Linear){
+            std::cerr << "Error. matrix representation is only supported for Constant scheduling ";
+            throw std::runtime_error("Incompatible scheduler");
+        }
+    }
+
+    // Create dataHolder wrappers for raw pointers
+    dataHolder<const float> obs_holder{obs, cpu};
+    dataHolder<const char> cat_obs_holder{categorical_obs, cpu};
+    dataSet dataset{&obs_holder, &cat_obs_holder, nullptr, nullptr, n_samples};
+    matrixRepresentation* matrix = new matrixRepresentation;
+#ifdef USE_CUDA
+    if (this->device == gpu){
+        if (this->cuda_opt == nullptr){
+            this->cuda_opt = deepCopySGDOptimizerVectorToGPU(this->opts);
+            this->n_cuda_opts = static_cast<int>(this->opts.size());
+        }
+        get_matrix_representation_cuda(&dataset, this->metadata, this->edata, this->cuda_opt, this->n_cuda_opts, matrix);
+    }
+#endif
+    if (this->device == cpu)
+        Compressor::get_matrix_representation_cpu(&dataset, this->edata, this->metadata, this->parallel_predict, matrix, this->opts);
+    return matrix;
+
+}
+
+void GBRL::compress_ensemble(const int n_compressed_leaves, const int n_compressed_trees, const int *leaf_indices, const int *tree_indices, const int *new_tree_indices, const float *W){
+    this->ensemble_check();
+    for (size_t i = 0; i < this->opts.size(); ++i){
+        if (this->opts[i]->scheduler->getType() == Linear){
+            std::cerr << "Error. matrix representation is only supported for Constant scheduling ";
+            throw std::runtime_error("Incompatible scheduler");
+        }
+    }
+
+#ifdef USE_CUDA
+    if (this->device == gpu){
+        if (this->cuda_opt == nullptr){
+            this->cuda_opt = deepCopySGDOptimizerVectorToGPU(this->opts);
+            this->n_cuda_opts = static_cast<int>(this->opts.size());
+        }
+        this->edata = compress_ensemble_cuda(this->metadata, this->edata, this->cuda_opt, this->n_cuda_opts, n_compressed_leaves, n_compressed_trees, leaf_indices, tree_indices, new_tree_indices, W);
+    }
+#endif
+    if (this->device == cpu)
+        this->edata = Compressor::compress_ensemble(this->metadata, this->edata, this->opts, n_compressed_leaves, n_compressed_trees, leaf_indices, tree_indices, new_tree_indices, W);
 }
 
 int GBRL::get_num_trees(){

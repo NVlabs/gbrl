@@ -331,6 +331,14 @@ struct nodeInfo {
     bool is_right;                  /**< True if this is a right child */
 };
 
+struct matrixRepresentation {
+    bool *A;
+    float *V;
+    int n_leaves;
+    int n_trees;
+    int *n_leaves_per_tree;
+};
+
 // ============================================================================
 // Conversion Functions: String to Enum
 // ============================================================================
@@ -441,22 +449,34 @@ ensembleData* ensemble_data_alloc(ensembleMetaData *metadata);
 ensembleData* ensemble_copy_data_alloc(ensembleMetaData *metadata);
 
 /**
- * @brief Deep copy ensemble data
+ * @brief Create a full copy of ensemble data
+ * 
+ * Copies all ensemble parameters including tree structures, leaf values,
+ * feature mappings, and metadata from source to destination.
  * 
  * @param other_edata Source ensemble data to copy from
- * @param metadata Metadata describing the structure
- * @return Pointer to new ensembleData with copied values
+ * @param metadata Ensemble metadata defining structure
+ * @return Pointer to newly allocated ensemble data copy
  */
-ensembleData* copy_ensemble_data(
-    ensembleData *other_edata,
-    ensembleMetaData *metadata
-);
+ensembleData* copy_ensemble_data(ensembleData *other_edata, ensembleMetaData *metadata);
 
 /**
- * @brief Deallocate ensemble data and free memory
+ * @brief Create a compressed copy of ensemble data with selected trees/leaves
  * 
- * @param edata Ensemble data to deallocate
+ * Creates a new ensemble containing only the specified subset of trees and leaves.
+ * Copies all associated metadata including feature mappings, categorical values,
+ * and tree structure information for the selected subset.
+ * 
+ * @param other_edata Source ensemble data to copy from
+ * @param metadata Ensemble metadata defining structure
+ * @param leaf_indices Indices of leaves to include in compressed ensemble
+ * @param tree_indices Indices of trees to include in compressed ensemble
+ * @param n_compressed_leaves Number of leaves in compressed ensemble
+ * @param n_compressed_trees Number of trees in compressed ensemble
+ * @param new_tree_indices New starting leaf indices for each tree in compressed ensemble
+ * @return Pointer to newly allocated compressed ensemble data
  */
+ensembleData* copy_compressed_ensemble_data(ensembleData *other_edata, ensembleMetaData *metadata, const int *leaf_indices, const int *tree_indices, const int n_compressed_leaves, const int n_compressed_trees, const int *new_tree_indices);
 void ensemble_data_dealloc(ensembleData *edata);
 
 /**
