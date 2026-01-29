@@ -73,7 +73,6 @@ struct splitCondition {
     float edge_weight;              /**< Weight associated with this split edge */
     char *categorical_value;        /**< Value for categorical feature comparison */
 };
-
 /**
  * @brief Candidate split point to be evaluated during tree growing
  * 
@@ -239,6 +238,7 @@ struct ensembleMetaData {
     int n_num_features;             /**< Number of numerical features */
     int n_cat_features;             /**< Number of categorical features */
     int iteration;                  /**< Current training iteration */
+    int n_mono_constraints;        /**< Number of monotonic constraints */
 };
 
 /**
@@ -292,6 +292,10 @@ struct ensembleData {
     int *reverse_cat_feature_mapping;  /**< Maps internal categorical feature indices back to original feature indices (used in computation) */
     // Leaf split condition data
     int* feature_indices;           /**< Feature used at each internal node */
+    // Monotonic Constraints
+    int* mono_feature_idx;          /**< Index of the feature with constraint */
+    int* mono_output_idx;           /**< Index of the output dimension */
+    int* mono_constraint;           /**< Constraint type: -1 (decreasing), 1 (increasing) */
     float* feature_values;          /**< Threshold values for numerical splits */
     float *edge_weights;            /**< Weights for split edges */
     bool* is_numerics;              /**< Whether split is numerical (vs categorical) */
@@ -414,6 +418,7 @@ std::string schedulerTypeToString(schedulerFunc func);
  * @param split_score_func Function for scoring splits
  * @param generator_type Method for generating split candidates
  * @param grow_policy Tree growing strategy
+ * @param n_mono_constraints Number of monotonic constraints
  * @return Pointer to allocated ensembleMetaData structure
  */
 ensembleMetaData* ensemble_metadata_alloc(
@@ -421,7 +426,7 @@ ensembleMetaData* ensemble_metadata_alloc(
     int input_dim, int output_dim, int policy_dim, int max_depth,
     int min_data_in_leaf, int n_bins, int par_th, float cv_beta,
     int verbose, int batch_size, bool use_cv, scoreFunc split_score_func,
-    generatorType generator_type, growPolicy grow_policy
+    generatorType generator_type, growPolicy grow_policy, int n_mono_constraints
 );
 
 /**

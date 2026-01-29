@@ -163,7 +163,27 @@ std::string schedulerTypeToString(schedulerFunc func) {
     }
 }
 
-ensembleMetaData* ensemble_metadata_alloc(int max_trees, int max_leaves, int max_trees_batch, int max_leaves_batch, int input_dim, int output_dim, int policy_dim, int max_depth, int min_data_in_leaf, int n_bins, int par_th, float cv_beta, int verbose, int batch_size, bool use_cv, scoreFunc split_score_func, generatorType generator_type, growPolicy grow_policy){
+ensembleMetaData* ensemble_metadata_alloc(
+    int max_trees,
+    int max_leaves,
+    int max_trees_batch,
+    int max_leaves_batch,
+    int input_dim,
+    int output_dim,
+    int policy_dim,
+    int max_depth,
+    int min_data_in_leaf,
+    int n_bins,
+    int par_th,
+    float cv_beta,
+    int verbose,
+    int batch_size,
+    bool use_cv,
+    scoreFunc split_score_func,
+    generatorType generator_type,
+    growPolicy grow_policy,
+    int n_mono_constraints){
+
     ensembleMetaData *metadata = new ensembleMetaData;
     metadata->input_dim = input_dim; 
     metadata->output_dim = output_dim; 
@@ -188,6 +208,7 @@ ensembleMetaData* ensemble_metadata_alloc(int max_trees, int max_leaves, int max
     metadata->n_num_features = 0;
     metadata->n_cat_features = 0;
     metadata->iteration = 0;
+    metadata->n_mono_constraints = n_mono_constraints;
     return metadata;
 }
 
@@ -229,7 +250,17 @@ ensembleData* ensemble_data_alloc(ensembleMetaData *metadata){
     edata->edge_weights = new float[metadata->max_leaves * metadata->max_depth];
     data_size += sizeof(float) * metadata->max_leaves * metadata->max_depth;
     memset(edata->edge_weights, 0, metadata->max_leaves * metadata->max_depth * sizeof(float));
-    
+    // monotonic constraints
+    edata->mono_feature_idx = new int[metadata->n_mono_constraints];
+    data_size += sizeof(int) * metadata->n_mono_constraints;
+    memset(edata->mono_feature_idx, 0, metadata->n_mono_constraints * sizeof(int));
+    edata->mono_output_idx = new int[metadata->n_mono_constraints];
+    data_size += sizeof(int) * metadata->n_mono_constraints;
+    memset(edata->mono_output_idx, 0, metadata->n_mono_constraints * sizeof(int));
+    edata->mono_constraint = new int[metadata->n_mono_constraints];
+    data_size += sizeof(int) * metadata->n_mono_constraints;
+    memset(edata->mono_constraint, 0, metadata->n_mono_constraints * sizeof(int));
+
     edata->reverse_num_feature_mapping = new int[metadata->input_dim];
     data_size += sizeof(int) * metadata->input_dim;
     memset(edata->reverse_num_feature_mapping, 0, metadata->input_dim * sizeof(int));
@@ -294,6 +325,17 @@ ensembleData* ensemble_copy_data_alloc(ensembleMetaData *metadata){
     edata->edge_weights = new float[metadata->n_leaves * metadata->max_depth];
     data_size += sizeof(float) * metadata->n_leaves * metadata->max_depth;
     memset(edata->edge_weights, 0, metadata->n_leaves * metadata->max_depth * sizeof(float));
+    // monotonic constraints
+    edata->mono_feature_idx = new int[metadata->n_mono_constraints];
+    data_size += sizeof(int) * metadata->n_mono_constraints;
+    memset(edata->mono_feature_idx, 0, metadata->n_mono_constraints * sizeof(int));
+    edata->mono_output_idx = new int[metadata->n_mono_constraints];
+    data_size += sizeof(int) * metadata->n_mono_constraints;
+    memset(edata->mono_output_idx, 0, metadata->n_mono_constraints * sizeof(int));
+    edata->mono_constraint = new int[metadata->n_mono_constraints];
+    data_size += sizeof(int) * metadata->n_mono_constraints;
+    memset(edata->mono_constraint, 0, metadata->n_mono_constraints * sizeof(int));
+
     edata->reverse_num_feature_mapping = new int[metadata->input_dim];
     data_size += sizeof(int) * metadata->input_dim;
     memset(edata->reverse_num_feature_mapping, 0, metadata->input_dim * sizeof(int));
@@ -357,6 +399,17 @@ ensembleData* copy_ensemble_data(ensembleData *other_edata, ensembleMetaData *me
     edata->edge_weights = new float[metadata->n_leaves * metadata->max_depth];
     data_size += sizeof(float) * metadata->n_leaves * metadata->max_depth;
     memcpy(edata->edge_weights, other_edata->edge_weights, metadata->n_leaves * metadata->max_depth * sizeof(float));
+    // monotonic constraints
+    edata->mono_feature_idx = new int[metadata->n_mono_constraints];
+    data_size += sizeof(int) * metadata->n_mono_constraints;
+    memcpy(edata->mono_feature_idx, other_edata->mono_feature_idx, metadata->n_mono_constraints * sizeof(int));
+    edata->mono_output_idx = new int[metadata->n_mono_constraints];
+    data_size += sizeof(int) * metadata->n_mono_constraints;
+    memcpy(edata->mono_output_idx, other_edata->mono_output_idx, metadata->n_mono_constraints * sizeof(int));
+    edata->mono_constraint = new int[metadata->n_mono_constraints];
+    data_size += sizeof(int) * metadata->n_mono_constraints;
+    memcpy(edata->mono_constraint, other_edata->mono_constraint, metadata->n_mono_constraints * sizeof(int));
+
     edata->reverse_num_feature_mapping = new int[metadata->input_dim];
     data_size += sizeof(int) * metadata->input_dim;
     memcpy(edata->reverse_num_feature_mapping, other_edata->reverse_num_feature_mapping, metadata->input_dim * sizeof(int));
@@ -403,6 +456,9 @@ void ensemble_data_dealloc(ensembleData *edata){
     delete[] edata->is_numerics;
     delete[] edata->categorical_values;
     delete[] edata->inequality_directions; 
+    delete[] edata->mono_feature_idx;
+    delete[] edata->mono_output_idx;
+    delete[] edata->mono_constraint;
     delete edata;
 }
 
@@ -730,6 +786,20 @@ void save_ensemble_data(std::ofstream& file, ensembleData *edata, ensembleMetaDa
     file.write(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
     if (edata_cpu->edge_weights != nullptr)
         file.write(reinterpret_cast<char*>(edata_cpu->edge_weights), metadata->max_depth * metadata->n_leaves * sizeof(float));
+    // monotonic constraints
+    check = edata_cpu->mono_feature_idx != nullptr ? VALID : NULL_OPT;
+    file.write(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
+    if (edata_cpu->mono_feature_idx != nullptr)
+        file.write(reinterpret_cast<char*>(edata_cpu->mono_feature_idx), metadata->n_mono_constraints * sizeof(int));
+    check = edata_cpu->mono_output_idx != nullptr ? VALID : NULL_OPT;
+    file.write(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
+    if (edata_cpu->mono_output_idx != nullptr)
+        file.write(reinterpret_cast<char*>(edata_cpu->mono_output_idx), metadata->n_mono_constraints * sizeof(int));
+    check = edata_cpu->mono_constraint != nullptr ? VALID : NULL_OPT;
+    file.write(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
+    if (edata_cpu->mono_constraint != nullptr)
+        file.write(reinterpret_cast<char*>(edata_cpu->mono_constraint), metadata->n_mono_constraints * sizeof(int));    
+
     check = edata_cpu->reverse_num_feature_mapping != nullptr ? VALID : NULL_OPT;
     file.write(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
     if (edata_cpu->reverse_num_feature_mapping != nullptr)
@@ -812,6 +882,20 @@ ensembleData* load_ensemble_data(std::ifstream& file, ensembleMetaData *metadata
        if (check == VALID) {
         file.read(reinterpret_cast<char*>(edata_cpu->edge_weights), metadata->max_depth * metadata->n_leaves * sizeof(float));
     } 
+    // monotonic constraints
+    file.read(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
+       if (check == VALID) {
+        file.read(reinterpret_cast<char*>(edata_cpu->mono_feature_idx), metadata->n_mono_constraints * sizeof(int));
+    }
+    file.read(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
+       if (check == VALID) {
+        file.read(reinterpret_cast<char*>(edata_cpu->mono_output_idx), metadata->n_mono_constraints * sizeof(int));
+    }
+    file.read(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
+       if (check == VALID) {
+        file.read(reinterpret_cast<char*>(edata_cpu->mono_constraint), metadata->n_mono_constraints * sizeof(int));
+    }
+
     file.read(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
        if (check == VALID) {
         file.read(reinterpret_cast<char*>(edata_cpu->reverse_num_feature_mapping), metadata->input_dim * sizeof(int));
@@ -864,6 +948,10 @@ void allocate_ensemble_memory(ensembleMetaData *metadata, ensembleData *edata){
         memcpy(new_data->reverse_cat_feature_mapping, edata->reverse_cat_feature_mapping, metadata->input_dim * sizeof(int));
         memcpy(new_data->reverse_num_feature_mapping, edata->reverse_num_feature_mapping, metadata->input_dim * sizeof(int));
         memcpy(new_data->feature_mapping, edata->feature_mapping, metadata->input_dim * sizeof(int));
+        // monotonic constraints
+        memcpy(new_data->mono_feature_idx, edata->mono_feature_idx, metadata->n_mono_constraints * sizeof(int));
+        memcpy(new_data->mono_output_idx, edata->mono_output_idx, metadata->n_mono_constraints * sizeof(int));
+        memcpy(new_data->mono_constraint, edata->mono_constraint, metadata->n_mono_constraints * sizeof(int));
         memcpy(new_data->mapping_numerics, edata->mapping_numerics, metadata->input_dim * sizeof(bool));
         if (metadata->grow_policy == GREEDY){
             memcpy(new_data->depths, edata->depths, leaf_idx * sizeof(int));
@@ -885,6 +973,10 @@ void allocate_ensemble_memory(ensembleMetaData *metadata, ensembleData *edata){
 #endif
         delete[] edata->depths;
         delete[] edata->values;
+        // monotonic constraints
+        delete[] edata->mono_feature_idx;
+        delete[] edata->mono_output_idx;
+        delete[] edata->mono_constraint;
         // leaf data
         delete[] edata->feature_indices;
         delete[] edata->tree_indices;
@@ -910,6 +1002,13 @@ void allocate_ensemble_memory(ensembleMetaData *metadata, ensembleData *edata){
         edata->feature_indices = new_data->feature_indices;
         edata->feature_values = new_data->feature_values;
         edata->edge_weights = new_data->edge_weights;
+        edata->mono_feature_idx = new_data->mono_feature_idx;
+        edata->mono_output_idx = new_data->mono_output_idx;
+        edata->mono_constraint = new_data->mono_constraint;
+        edata->reverse_cat_feature_mapping = new_data->reverse_cat_feature_mapping;
+        edata->reverse_num_feature_mapping = new_data->reverse_num_feature_mapping;
+        edata->feature_mapping = new_data->feature_mapping;
+        edata->mapping_numerics = new_data->mapping_numerics;
         edata->is_numerics = new_data->is_numerics;
         edata->categorical_values = new_data->categorical_values;
         delete new_data;
