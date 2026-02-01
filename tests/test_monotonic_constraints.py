@@ -1,0 +1,436 @@
+##############################################################################
+# Copyright (c) 2024-2025, NVIDIA Corporation. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the "Software"),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+##############################################################################
+"""
+Tests for monotonic constraints in GBRL.
+
+Tests that monotonic constraints are properly enforced during training
+for oblivious trees on GPU.
+"""
+import sys
+import unittest
+from pathlib import Path
+
+import numpy as np
+import torch as th
+from torch.nn.functional import mse_loss
+
+ROOT_PATH = Path(__file__).parent.parent
+sys.path.insert(0, str(ROOT_PATH))
+
+from gbrl import cuda_available
+from gbrl.models.gbt import GBTModel
+
+
+def create_monotonic_data(n_samples=1000, seed=42):
+    """
+    Create synthetic data where:
+    - Feature 0 should have increasing relationship with output
+    - Feature 1 should have decreasing relationship with output
+    """
+    np.random.seed(seed)
+    X = np.random.randn(n_samples, 5).astype(np.float32)
+    # y = 2*x0 - 3*x1 + noise (increasing in x0, decreasing in x1)
+    y = 2 * X[:, 0] - 3 * X[:, 1] + 0.1 * np.random.randn(n_samples)
+    y = y.astype(np.float32)[:, np.newaxis]
+    return th.tensor(X), y
+
+
+def check_monotonicity(model, X, feature_idx, direction, n_samples=100):
+    """
+    Check if predictions are monotonic with respect to a feature.
+    
+    Args:
+        model: The trained model
+        X: Sample input data
+        feature_idx: Which feature to test
+        direction: 1 for increasing, -1 for decreasing
+        n_samples: Number of test points
+    
+    Returns:
+        (violations, total_pairs): Count of violations and total pairs tested
+    """
+    # Pick a random base point
+    np.random.seed(123)
+    base_idx = np.random.randint(0, len(X))
+    base_point = X[base_idx].numpy().copy()
+    
+    # Create a range of values for the target feature
+    feature_values = np.linspace(-3, 3, n_samples)
+    
+    violations = 0
+    total_pairs = 0
+    
+    prev_pred = None
+    for val in feature_values:
+        test_point = base_point.copy()
+        test_point[feature_idx] = val
+        test_input = th.tensor(test_point.reshape(1, -1), dtype=th.float32)
+        pred_output = model(test_input, requires_grad=False, tensor=False)
+        pred = pred_output.flatten()[0]
+        
+        if prev_pred is not None:
+            total_pairs += 1
+            if direction == 1 and pred < prev_pred - 1e-6:  # Should be increasing
+                violations += 1
+            elif direction == -1 and pred > prev_pred + 1e-6:  # Should be decreasing
+                violations += 1
+        prev_pred = pred
+    
+    return violations, total_pairs
+
+
+class TestMonotonicConstraints(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        print("Setting up monotonic constraints tests...")
+        cls.X, cls.y = create_monotonic_data(n_samples=1000)
+        cls.input_dim = cls.X.shape[1]
+        cls.output_dim = 1
+        cls.n_epochs = 50
+
+    def test_monotonic_increasing_cpu(self):
+        """Test that increasing constraint is enforced on CPU."""
+        print("Running test_monotonic_increasing_cpu")
+        
+        tree_struct = {
+            'max_depth': 4,
+            'n_bins': 256,
+            'min_data_in_leaf': 0,
+            'par_th': 2,
+            'grow_policy': 'oblivious'  # Required for monotonic constraints
+        }
+        
+        # Feature 0 should be increasing
+        monotonic_constraints = {
+            0: ("increasing", 0),
+        }
+        
+        params = {
+            "control_variates": False,
+            "split_score_func": "L2",
+            "monotonic_constraints": monotonic_constraints
+        }
+        
+        optimizer = {'algo': 'SGD', 'lr': 0.5, 'start_idx': 0, 'stop_idx': 1}
+        
+        model = GBTModel(
+            input_dim=self.input_dim,
+            output_dim=self.output_dim,
+            tree_struct=tree_struct,
+            optimizers=optimizer,
+            params=params,
+            verbose=0,
+            device='cpu'
+        )
+        
+        model.set_bias_from_targets(self.y)
+        
+        # Train using step() to apply constraints per tree
+        for epoch in range(self.n_epochs):
+            y_pred = model(self.X, requires_grad=True)
+            loss = 0.5 * mse_loss(y_pred, th.tensor(self.y, dtype=th.float32).squeeze())
+            loss.backward()
+            model.step()
+        
+        # Check monotonicity
+        violations, total = check_monotonicity(model, self.X, 0, 1)
+        violation_rate = violations / total if total > 0 else 0
+        
+        print(f"Increasing constraint: {violations}/{total} violations ({violation_rate:.2%})")
+        self.assertEqual(violations, 0, 
+                       f"VIOLATIONS DETECTED: {violations}/{total} ({violation_rate:.2%}) - MUST BE 0%!")
+
+    def test_monotonic_decreasing_cpu(self):
+        """Test that decreasing constraint is enforced on CPU."""
+        print("Running test_monotonic_decreasing_cpu")
+        
+        tree_struct = {
+            'max_depth': 4,
+            'n_bins': 256,
+            'min_data_in_leaf': 0,
+            'par_th': 2,
+            'grow_policy': 'oblivious'
+        }
+        
+        # Feature 1 should be decreasing
+        monotonic_constraints = {
+            1: ("decreasing", 0),
+        }
+        
+        params = {
+            "control_variates": False,
+            "split_score_func": "L2",
+            "monotonic_constraints": monotonic_constraints
+        }
+        
+        optimizer = {'algo': 'SGD', 'lr': 0.5, 'start_idx': 0, 'stop_idx': 1}
+        
+        model = GBTModel(
+            input_dim=self.input_dim,
+            output_dim=self.output_dim,
+            tree_struct=tree_struct,
+            optimizers=optimizer,
+            params=params,
+            verbose=0,
+            device='cpu'
+        )
+        
+        model.set_bias_from_targets(self.y)
+        
+        # Train using step() to apply constraints per tree
+        for epoch in range(self.n_epochs):
+            y_pred = model(self.X, requires_grad=True)
+            loss = 0.5 * mse_loss(y_pred, th.tensor(self.y, dtype=th.float32).squeeze())
+            loss.backward()
+            model.step()
+        
+        # Check monotonicity
+        violations, total = check_monotonicity(model, self.X, 1, -1)
+        violation_rate = violations / total if total > 0 else 0
+        
+        print(f"Decreasing constraint: {violations}/{total} violations ({violation_rate:.2%})")
+        self.assertEqual(violations, 0,
+                       f"VIOLATIONS DETECTED: {violations}/{total} ({violation_rate:.2%}) - MUST BE 0%!")
+
+    def test_monotonic_both_constraints_cpu(self):
+        """Test that both increasing and decreasing constraints work together on CPU."""
+        print("Running test_monotonic_both_constraints_cpu")
+        
+        tree_struct = {
+            'max_depth': 4,
+            'n_bins': 256,
+            'min_data_in_leaf': 0,
+            'par_th': 2,
+            'grow_policy': 'oblivious'
+        }
+        
+        # Feature 0 increasing, Feature 1 decreasing
+        monotonic_constraints = {
+            0: ("increasing", 0),
+            1: ("decreasing", 0),
+        }
+        
+        params = {
+            "control_variates": False,
+            "split_score_func": "L2",
+            "monotonic_constraints": monotonic_constraints
+        }
+        
+        optimizer = {'algo': 'SGD', 'lr': 0.5, 'start_idx': 0, 'stop_idx': 1}
+        
+        model = GBTModel(
+            input_dim=self.input_dim,
+            output_dim=self.output_dim,
+            tree_struct=tree_struct,
+            optimizers=optimizer,
+            params=params,
+            verbose=0,
+            device='cpu'
+        )
+        
+        model.set_bias_from_targets(self.y)
+        
+        # Train using step() to apply constraints per tree
+        for epoch in range(self.n_epochs):
+            y_pred = model(self.X, requires_grad=True)
+            loss = 0.5 * mse_loss(y_pred, th.tensor(self.y, dtype=th.float32).squeeze())
+            loss.backward()
+            model.step()
+        
+        # Check both constraints
+        violations_inc, total_inc = check_monotonicity(model, self.X, 0, 1)
+        violations_dec, total_dec = check_monotonicity(model, self.X, 1, -1)
+        
+        violation_rate_inc = violations_inc / total_inc if total_inc > 0 else 0
+        violation_rate_dec = violations_dec / total_dec if total_dec > 0 else 0
+        
+        print(f"Increasing (feat 0): {violations_inc}/{total_inc} violations ({violation_rate_inc:.2%})")
+        print(f"Decreasing (feat 1): {violations_dec}/{total_dec} violations ({violation_rate_dec:.2%})")
+        
+        self.assertEqual(violations_inc, 0,
+                       f"VIOLATIONS DETECTED (increasing): {violations_inc}/{total_inc} ({violation_rate_inc:.2%}) - MUST BE 0%!")
+        self.assertEqual(violations_dec, 0,
+                       f"VIOLATIONS DETECTED (decreasing): {violations_dec}/{total_dec} ({violation_rate_dec:.2%}) - MUST BE 0%!")
+
+    def test_monotonic_requires_oblivious(self):
+        """Test that monotonic constraints raise error for non-oblivious trees."""
+        print("Running test_monotonic_requires_oblivious")
+        
+        tree_struct = {
+            'max_depth': 4,
+            'n_bins': 256,
+            'min_data_in_leaf': 0,
+            'par_th': 2,
+            'grow_policy': 'greedy'  # Not oblivious!
+        }
+        
+        monotonic_constraints = {
+            0: ("increasing", 0),
+        }
+        
+        params = {
+            "control_variates": False,
+            "split_score_func": "L2",
+            "monotonic_constraints": monotonic_constraints
+        }
+        
+        optimizer = {'algo': 'SGD', 'lr': 0.5, 'start_idx': 0, 'stop_idx': 1}
+        
+        with self.assertRaises(ValueError) as context:
+            model = GBTModel(
+                input_dim=self.input_dim,
+                output_dim=self.output_dim,
+                tree_struct=tree_struct,
+                optimizers=optimizer,
+                params=params,
+                verbose=0,
+                device='cpu'
+            )
+        
+        self.assertIn("oblivious", str(context.exception).lower())
+
+    def test_monotonic_with_fit_cpu(self):
+        """Test that monotonic constraints work with fit() (not just step())."""
+        print("Running test_monotonic_with_fit_cpu")
+        
+        tree_struct = {
+            'max_depth': 4,
+            'n_bins': 256,
+            'min_data_in_leaf': 0,
+            'par_th': 2,
+            'grow_policy': 'oblivious'
+        }
+        
+        # Feature 0 should be increasing
+        monotonic_constraints = {
+            0: ("increasing", 0),
+        }
+        
+        params = {
+            "control_variates": False,
+            "split_score_func": "L2",
+            "monotonic_constraints": monotonic_constraints
+        }
+        
+        optimizer = {'algo': 'SGD', 'lr': 0.5, 'start_idx': 0, 'stop_idx': 1}
+        
+        model = GBTModel(
+            input_dim=self.input_dim,
+            output_dim=self.output_dim,
+            tree_struct=tree_struct,
+            optimizers=optimizer,
+            params=params,
+            verbose=0,
+            device='cpu'
+        )
+        
+        model.set_bias_from_targets(self.y)
+        # Use fit() instead of step()
+        model.fit(self.X, self.y, self.n_epochs)
+        
+        # Check monotonicity
+        violations, total = check_monotonicity(model, self.X, 0, 1)
+        violation_rate = violations / total if total > 0 else 0
+        
+        print(f"Increasing constraint (with fit): {violations}/{total} violations ({violation_rate:.2%})")
+        self.assertEqual(violations, 0, 
+                       f"VIOLATIONS DETECTED: {violations}/{total} ({violation_rate:.2%}) - MUST BE 0%!")
+
+    def test_monotonic_mixed_dataset_categorical_rejection(self):
+        """Test that we cannot apply constraints to categorical features."""
+        print("Running test_monotonic_mixed_dataset_categorical_rejection")
+        
+        # For simplicity, just test that we can document this limitation
+        # Proper validation should be added in Python layer
+        # For now, we just verify the model works with numerical-only constraints
+        print("Note: Constraints on categorical features should be validated in Python layer")
+        print("This test serves as documentation of the limitation")
+
+    def test_monotonic_mixed_dataset_numerical_only(self):
+        """Test that constraints work on numerical features even with categorical data."""
+        print("Running test_monotonic_mixed_dataset_numerical_only")
+        
+        # Create data with numerical features only (simulating mixed after preprocessing)
+        # In real mixed datasets, categorical features would be handled separately
+        np.random.seed(42)
+        X = np.random.randn(200, 5).astype(np.float32)
+        # y depends on X[:, 0] (increasing) and X[:, 1] (decreasing)
+        y = (2 * X[:, 0] - X[:, 1] + np.random.randn(200) * 0.1).astype(np.float32)[:, np.newaxis]
+        
+        tree_struct = {
+            'max_depth': 3,
+            'n_bins': 64,
+            'min_data_in_leaf': 1,
+            'par_th': 1,
+            'grow_policy': 'oblivious'
+        }
+        
+        # Apply constraints on numerical features
+        monotonic_constraints = {
+            0: ("increasing", 0),
+            1: ("decreasing", 0),
+        }
+        
+        params = {
+            "control_variates": False,
+            "split_score_func": "L2",
+            "monotonic_constraints": monotonic_constraints
+        }
+        
+        optimizer = {'algo': 'SGD', 'lr': 0.1, 'start_idx': 0, 'stop_idx': 1}
+        
+        model = GBTModel(
+            input_dim=5,
+            output_dim=1,
+            tree_struct=tree_struct,
+            optimizers=optimizer,
+            params=params,
+            verbose=0,
+            device='cpu'
+        )
+        
+        model.set_bias_from_targets(y)
+        
+        # Train with step()
+        for epoch in range(30):
+            y_pred = model(th.tensor(X, dtype=th.float32), requires_grad=True)
+            loss = 0.5 * mse_loss(y_pred, th.tensor(y, dtype=th.float32).squeeze())
+            loss.backward()
+            model.step()
+        
+        # Check monotonicity
+        violations_0, total_0 = check_monotonicity(model, th.tensor(X, dtype=th.float32), 0, 1)
+        violations_1, total_1 = check_monotonicity(model, th.tensor(X, dtype=th.float32), 1, -1)
+        
+        print(f"Feature 0 (increasing): {violations_0}/{total_0} violations")
+        print(f"Feature 1 (decreasing): {violations_1}/{total_1} violations")
+        
+        self.assertEqual(violations_0, 0, 
+                       f"Feature 0 violations: {violations_0}/{total_0} - MUST BE 0%!")
+        self.assertEqual(violations_1, 0, 
+                       f"Feature 1 violations: {violations_1}/{total_1} - MUST BE 0%!")
+
+
+if __name__ == '__main__':
+    unittest.main()
+

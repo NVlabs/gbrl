@@ -594,3 +594,101 @@ def ensure_leaf_tensor_or_array(array: NumericalData,
         array = array.detach().cpu().numpy()
 
     return array
+
+
+def process_monotonic_constraints(
+    constraints: Dict[int, Tuple[str, Union[int, Sequence[int]]]],
+    policy_dim: int,
+    input_dim: int
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Process user-friendly monotonic constraint specification into C++ format.
+
+    Converts a dictionary mapping feature indices to constraint specifications
+    into three C-contiguous numpy arrays that can be passed to the C++ backend.
+
+    The input format is designed to be user-friendly:
+    ```python
+    constraints = {
+        0: ("increasing", [0, 1]),    # Feature 0 increases actions 0 and 1
+        3: ("decreasing", 0),         # Feature 3 decreases action 0
+        5: (1, [0, 1, 2]),            # Feature 5 increases all actions (numeric)
+    }
+    ```
+
+    Args:
+        constraints: Dictionary mapping feature indices to constraint specs.
+            Keys are feature indices (int).
+            Values are tuples of (direction, output_dims) where:
+                - direction: "increasing"/"+"/1 or "decreasing"/"-"/-1
+                - output_dims: Single int or list of output dimension indices
+        policy_dim: Number of policy dimensions (constraints must be < policy_dim)
+        input_dim: Number of input features (for validation)
+
+    Returns:
+        Tuple of three C-contiguous int32 numpy arrays:
+            - feature_indices: Expanded feature indices for each constraint
+            - output_indices: Output dimension for each constraint
+            - constraint_dirs: Direction for each constraint (+1 or -1)
+
+    Raises:
+        ValueError: If constraints are invalid (bad feature index, output index,
+            or direction specification)
+
+    Example:
+        >>> constraints = {0: ("increasing", [0, 1]), 3: ("decreasing", 0)}
+        >>> feat, out, dirs = process_monotonic_constraints(constraints, 2, 10)
+        >>> feat  # array([0, 0, 3], dtype=int32)
+        >>> out   # array([0, 1, 0], dtype=int32)
+        >>> dirs  # array([1, 1, -1], dtype=int32)
+    """
+    if not constraints:
+        return (np.array([], dtype=np.int32),
+                np.array([], dtype=np.int32),
+                np.array([], dtype=np.int32))
+
+    feature_indices = []
+    output_indices = []
+    constraint_dirs = []
+
+    direction_map = {
+        "increasing": 1, "inc": 1, "+": 1, 1: 1,
+        "decreasing": -1, "dec": -1, "-": -1, -1: -1
+    }
+
+    for feat_idx, (direction, output_dims) in constraints.items():
+        # Validate feature index
+        if not isinstance(feat_idx, int) or feat_idx < 0 or feat_idx >= input_dim:
+            raise ValueError(
+                f"Invalid feature index {feat_idx}. "
+                f"Must be an integer in [0, {input_dim})"
+            )
+
+        # Parse direction
+        if direction not in direction_map:
+            raise ValueError(
+                f"Invalid constraint direction '{direction}' for feature {feat_idx}. "
+                f"Use 'increasing'/'+'/1 or 'decreasing'/'-'/-1"
+            )
+        dir_val = direction_map[direction]
+
+        # Normalize output_dims to list
+        if isinstance(output_dims, int):
+            output_dims = [output_dims]
+
+        # Validate and add each output dimension
+        for out_idx in output_dims:
+            if not isinstance(out_idx, int) or out_idx < 0 or out_idx >= policy_dim:
+                raise ValueError(
+                    f"Invalid output index {out_idx} for feature {feat_idx}. "
+                    f"Must be an integer in [0, {policy_dim})"
+                )
+            feature_indices.append(feat_idx)
+            output_indices.append(out_idx)
+            constraint_dirs.append(dir_val)
+
+    return (
+        np.ascontiguousarray(feature_indices, dtype=np.int32),
+        np.ascontiguousarray(output_indices, dtype=np.int32),
+        np.ascontiguousarray(constraint_dirs, dtype=np.int32)
+    )

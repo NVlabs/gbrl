@@ -108,6 +108,7 @@ class GBRL {
          * @param verbose Verbosity level
          * @param _device Device for computation ("cpu"/"gpu")
          * @param _learner_name Name identifier for this learner (default: "GBRL")
+         * @param n_mono_constraints Number of monotonic constraints (default: 0)
          */
         GBRL(
             int input_dim, int output_dim, int policy_dim,
@@ -120,7 +121,8 @@ class GBRL {
             std::string grow_policy,
             int verbose,
             std::string _device,
-            std::string _learner_name = "GBRL"
+            std::string _learner_name = "GBRL",
+            int n_mono_constraints = 0
         );
         
         /**
@@ -401,6 +403,7 @@ class GBRL {
          */
         void set_feature_mapping(const int *feature_mapping, const bool *mapping_numerics, const int input_dim);
         
+        void set_monotonic_constraints(const int *feature_indices, const int *output_idx, const int *constraint, const int n_constraints);
         /**
          * @brief Get current bias term
          * 

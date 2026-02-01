@@ -113,6 +113,20 @@ class BaseLearner(ABC):
             weights = np.ones(input_dim, dtype=np.single)
             feature_weights = np.ascontiguousarray(weights)
         self.feature_weights = feature_weights
+        
+        # Store raw monotonic constraints (will be processed in subclass reset)
+        self.monotonic_constraints = params.get('monotonic_constraints', None)
+        
+        # Validate that monotonic constraints require oblivious grow policy
+        if self.monotonic_constraints is not None:
+            grow_policy = tree_struct.get('grow_policy', 'greedy').lower()
+            if grow_policy != 'oblivious':
+                raise ValueError(
+                    "Monotonic constraints are only supported with oblivious trees. "
+                    f"Current grow_policy is '{grow_policy}'. "
+                    "Set grow_policy='oblivious' in tree_struct to use monotonic constraints."
+                )
+            
         self._cpp_model = None
         self.optimizers = None
         self.feature_mapping = None

@@ -36,7 +36,8 @@ from gbrl import GBRL_CPP
 from gbrl.common.utils import (NumericalData, concatenate_arrays,
                                ensure_leaf_tensor_or_array, get_poly_vectors,
                                normalize_vector_input, numerical_dtype,
-                               preprocess_features, to_numpy)
+                               preprocess_features, process_monotonic_constraints,
+                               to_numpy)
 from gbrl.learners.base import BaseLearner
 
 
@@ -89,8 +90,28 @@ class GBTLearner(BaseLearner):
             for i in range(len(self.optimizers)):
                 self.optimizers[i]['init_lr'] = lrs[i]
 
-        self._cpp_model = GBRL_CPP(**self.params, learner_name=self.learner_name)
+        # Process monotonic constraints first to know size for allocation
+        n_mono_constraints = 0
+        mono_data = None
+        if self.monotonic_constraints is not None:
+            feat_idx, out_idx, dirs = process_monotonic_constraints(
+                self.monotonic_constraints,
+                policy_dim=self.policy_dim,
+                input_dim=self.input_dim
+            )
+            if len(feat_idx) > 0:
+                n_mono_constraints = len(feat_idx)
+                mono_data = (feat_idx, out_idx, dirs)
+        
+        # Create C++ model with correct constraint buffer size
+        self._cpp_model = GBRL_CPP(**self.params, learner_name=self.learner_name, n_mono_constraints=n_mono_constraints)
         self._cpp_model.set_feature_weights(self.feature_weights)
+        
+        # Set monotonic constraint data if provided
+        if mono_data is not None:
+            feat_idx, out_idx, dirs = mono_data
+            self._cpp_model.set_monotonic_constraints(feat_idx, out_idx, dirs)
+        
         if self.student_model is not None:
             for i in range(len(self.optimizers)):
                 self.optimizers[i]['T'] -= self.total_iterations

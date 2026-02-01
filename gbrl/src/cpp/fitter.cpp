@@ -48,6 +48,7 @@
 
 
 void Fitter::step_cpu(dataSet *dataset, ensembleData *edata, ensembleMetaData *metadata){
+    std::cerr << "step_cpu: grow_policy=" << (int)metadata->grow_policy << " n_mono_constraints=" << metadata->n_mono_constraints << std::endl;
     const int output_dim = metadata->output_dim, par_th = metadata->par_th;
     const int n_trees = metadata->n_trees;
     if (metadata->use_cv && n_trees > 0){
@@ -100,6 +101,17 @@ void Fitter::step_cpu(dataSet *dataset, ensembleData *edata, ensembleMetaData *m
     else 
         added_leaves = Fitter::fit_oblivious_tree(dataset, edata, metadata, generator);
     Fitter::fit_leaves(dataset, edata, metadata, added_leaves);
+    
+    // Apply monotonic constraints AFTER leaf values are computed
+    if (metadata->n_mono_constraints > 0 && metadata->grow_policy == OBLIVIOUS) {
+        int tree_idx = metadata->n_trees - 1;
+        int tree_depth = edata->ensemble_info->depths[tree_idx];
+        int start_leaf_idx = edata->ensemble_info->tree_indices[tree_idx];
+        if (tree_depth > 0) {
+            std::cerr << "Applying constraints to tree " << tree_idx << " depth=" << tree_depth << std::endl;
+            Fitter::apply_monotonic_constraints_cpu(edata, metadata, tree_idx, tree_depth, start_leaf_idx);
+        }
+    }
 
     if (indices != nullptr){
         for (int i = 0; i < metadata->n_num_features; ++i)
@@ -223,6 +235,17 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
         else 
             added_leaves = Fitter::fit_oblivious_tree(&batch_dataset, edata, metadata, generator);
         Fitter::fit_leaves(&batch_dataset, edata, metadata, added_leaves);
+        
+        // Apply monotonic constraints AFTER leaf values are computed
+        if (metadata->n_mono_constraints > 0 && metadata->grow_policy == OBLIVIOUS) {
+            int tree_idx = metadata->n_trees - 1;
+            int tree_depth = edata->ensemble_info->depths[tree_idx];
+            int start_leaf_idx = edata->ensemble_info->tree_indices[tree_idx];
+            if (tree_depth > 0) {
+                Fitter::apply_monotonic_constraints_cpu(edata, metadata, tree_idx, tree_depth, start_leaf_idx);
+            }
+        }
+        
         // beginning index of new tree
         batch_start_idx += batch_n_samples;
         if (batch_start_idx >= dataset->n_samples)
@@ -477,6 +500,7 @@ int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMe
     }
 
     Fitter::update_ensemble_per_tree(edata, metadata, tree_nodes, 1 << depth);
+    
     added_leaves += 1 << depth;
     metadata->n_trees += 1;
     delete rootNode;
@@ -630,4 +654,112 @@ void Fitter::control_variates(dataSet *dataset, ensembleData *edata, ensembleMet
     delete[] covariance;
     delete[] alpha;
     delete[] momentum;
+}
+
+void Fitter::apply_monotonic_constraints_cpu(
+    ensembleData *edata,
+    ensembleMetaData *metadata,
+    int tree_idx,
+    int tree_depth,
+    int start_leaf_idx
+) {
+    if (metadata->n_mono_constraints <= 0 || tree_depth <= 0) return;
+    
+    const int n_leaves = 1 << tree_depth;
+    const int output_dim = metadata->output_dim;
+    
+    // Get feature indices for this tree (feature_indices[0] is root split)
+    int* feature_indices = new int[tree_depth];
+    for (int d = 0; d < tree_depth; ++d) {
+        feature_indices[d] = edata->feature_data->feature_indices[tree_idx * metadata->max_depth + d];
+    }
+    
+    // Get inequality directions for this tree (from first leaf)
+    int* inequality_directions = new int[tree_depth];
+    int ineq_base = start_leaf_idx * metadata->max_depth;
+    for (int d = 0; d < tree_depth; ++d) {
+        inequality_directions[d] = edata->feature_data->inequality_directions[ineq_base + d];
+    }
+    
+    // Build effective constraint map accounting for inequality direction
+    // effective_constraints[d] = effective constraint after considering split direction
+    int* effective_constraints = new int[tree_depth]();
+    bool has_any_constraint = false;
+    
+    for (int c = 0; c < metadata->n_mono_constraints; ++c) {
+        int global_feature_idx = edata->mono_constraints->feature_idx[c];
+        int constraint_dir = edata->mono_constraints->constraint[c];
+        
+        for (int d = 0; d < tree_depth; ++d) {
+            // CRITICAL: Convert internal feature index to global using reverse mapping
+            // feature_indices[d] is the INTERNAL index used by the tree builder
+            // We need to map it back to GLOBAL index to compare with constraints
+            int internal_idx = feature_indices[d];
+            int global_idx = edata->feature_mappings->reverse_num_feature_mapping[internal_idx];
+            
+            if (global_idx == global_feature_idx) {
+                // If inequality_direction is inverted (0), flip the constraint
+                // Standard direction (1): bit=0 has lower feature values (left)
+                // Inverted direction (0): bit=0 has higher feature values (left is now high!)
+                effective_constraints[d] = (inequality_directions[d] == 1) ? constraint_dir : -constraint_dir;
+                has_any_constraint = true;
+            }
+        }
+    }
+    
+    if (!has_any_constraint) {
+        delete[] feature_indices;
+        delete[] inequality_directions;
+        delete[] effective_constraints;
+        return;
+    }
+    
+    // Apply constraints iteratively (PAVA on hypercube)
+    bool changed = true;
+    const int max_iter = 100;
+    int iter = 0;
+    
+    while (changed && iter < max_iter) {
+        changed = false;
+        iter++;
+        
+        for (int out_idx = 0; out_idx < output_dim; ++out_idx) {
+            for (int d = 0; d < tree_depth; ++d) {
+                int constraint_dir = effective_constraints[d];
+                if (constraint_dir == 0) continue;
+                
+                // CRITICAL: Depth 0 (root) is MSB, depth (tree_depth-1) is LSB
+                int bit_mask = 1 << (tree_depth - 1 - d);
+                
+                // Process all leaf pairs that differ only in this bit
+                for (int i = 0; i < n_leaves; ++i) {
+                    // Only process when this bit is 0 (avoid double counting)
+                    if ((i & bit_mask) == 0) {
+                        int leaf0 = i;
+                        int leaf1 = i | bit_mask;
+                        
+                        int global_leaf0 = start_leaf_idx + leaf0;
+                        int global_leaf1 = start_leaf_idx + leaf1;
+                        
+                        float val0 = edata->leaf_data->values[global_leaf0 * output_dim + out_idx];
+                        float val1 = edata->leaf_data->values[global_leaf1 * output_dim + out_idx];
+                        
+                        // Check violation: constraint_dir=1 means val0 <= val1
+                        bool violation = (constraint_dir == 1) ? (val0 > val1) : (val0 < val1);
+                        
+                        if (violation) {
+                            float pooled = (val0 + val1) * 0.5f;
+                            edata->leaf_data->values[global_leaf0 * output_dim + out_idx] = pooled;
+                            edata->leaf_data->values[global_leaf1 * output_dim + out_idx] = pooled;
+                            changed = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    delete[] feature_indices;
+    delete[] inequality_directions;
+    delete[] effective_constraints;
 }

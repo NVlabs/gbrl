@@ -420,7 +420,7 @@ py::list getOptimizerConfigs(const std::vector<Optimizer*>& opts) {
 
 PYBIND11_MODULE(gbrl_cpp, m) {
     py::class_<GBRL> gbrl(m, "GBRL");
-    gbrl.def(py::init<int, int, int, int, int, int, int, float, std::string, std::string, bool, int, std::string, int, std::string, std::string>(),
+    gbrl.def(py::init<int, int, int, int, int, int, int, float, std::string, std::string, bool, int, std::string, int, std::string, std::string, int>(),
          py::arg("input_dim")=1, 
          py::arg("output_dim")=1, 
          py::arg("policy_dim")=1, 
@@ -437,6 +437,7 @@ PYBIND11_MODULE(gbrl_cpp, m) {
          py::arg("verbose")=0,
          py::arg("device")="cpu",
          py::arg("learner_name")="GBRL",
+         py::arg("n_mono_constraints")=0,
          "Constructor of the GBRL class");
     gbrl.def(py::init<GBRL&>(), py::arg("model"), "Copy constructor"); // This exposes the filename constructor
     gbrl.def_static("load", [](const std::string& filename) {
@@ -714,6 +715,38 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         py::gil_scoped_release release;
         self.set_feature_weights(&feature_weights_holder, input_dim);
     }, "Set GBRL model feature weights");
+    
+    // Set feature mapping for mixed categorical/numerical inputs
+    // Creates 4 arrays: feature_mapping, mapping_numerics (stored for export),
+    // reverse_num_feature_mapping, reverse_cat_feature_mapping (used in computation)
+    gbrl.def("set_monotonic_constraints", [](GBRL &self, const py::array_t<int> &feature_indices, const py::array_t<int> &output_indices, const py::array_t<int>& constraints) {
+        if (!feature_indices.attr("flags").attr("c_contiguous").cast<bool>()) {
+            throw std::runtime_error("Arrays must be C-contiguous");
+        }
+        if (!output_indices.attr("flags").attr("c_contiguous").cast<bool>()) {
+            throw std::runtime_error("Arrays must be C-contiguous");
+        }
+
+        // Get buffer info while holding GIL
+        py::buffer_info info = feature_indices.request();
+        int* feature_indices_ptr = static_cast<int*>(info.ptr);
+        int n_constraints = static_cast<int>(len(feature_indices));
+
+        info = output_indices.request();
+        int* output_indices_ptr = static_cast<int*>(info.ptr);
+        if (static_cast<int>(len(output_indices)) != n_constraints){
+            throw std::runtime_error("feature_indices and output_indices must have the same length");
+        }
+
+        info = constraints.request();
+        int* constraints_ptr = static_cast<int*>(info.ptr);
+        if (static_cast<int>(len(constraints)) != n_constraints){
+            throw std::runtime_error("feature_indices and constraints must have the same length");
+        }
+        
+        py::gil_scoped_release release; 
+        self.set_monotonic_constraints(feature_indices_ptr, output_indices_ptr, constraints_ptr, n_constraints); 
+    }, "Set GBRL model monotonic constraints");
     
     // Set feature mapping for mixed categorical/numerical inputs
     // Creates 4 arrays: feature_mapping, mapping_numerics (stored for export),

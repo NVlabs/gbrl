@@ -273,6 +273,7 @@ struct monotonicConstraints {
     int* feature_idx;          /**< Index of the feature with constraint */
     int* output_idx;           /**< Index of the output dimension */
     int* constraint;           /**< Constraint type: -1 (decreasing), 1 (increasing) */
+    int n_constraints;         /**< Number of monotonic constraints */
 };
 
 struct featureMapping {

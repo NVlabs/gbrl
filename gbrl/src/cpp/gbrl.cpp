@@ -96,9 +96,9 @@ GBRL::GBRL(int input_dim, int output_dim, int policy_dim, int max_depth, int min
 GBRL::GBRL(int input_dim, int output_dim, int policy_dim, int max_depth, int min_data_in_leaf, 
            int n_bins, int par_th, float cv_beta, std::string split_score_func,
            std::string generator_type, bool use_cv, int batch_size, 
-           std::string grow_policy, int verbose, std::string _device, std::string _learner_name){
+           std::string grow_policy, int verbose, std::string _device, std::string _learner_name, int n_mono_constraints){
     this->learner_name = _learner_name;
-    this->metadata = ensemble_metadata_alloc(INITAL_MAX_TREES, INITAL_MAX_TREES * (1 << max_depth), TREES_BATCH, TREES_BATCH * (1 << max_depth), input_dim, output_dim, policy_dim, max_depth, min_data_in_leaf, n_bins, par_th, cv_beta, verbose, batch_size, use_cv, stringToScoreFunc(split_score_func), stringTogeneratorType(generator_type), stringTogrowPolicy(grow_policy), 0);
+    this->metadata = ensemble_metadata_alloc(INITAL_MAX_TREES, INITAL_MAX_TREES * (1 << max_depth), TREES_BATCH, TREES_BATCH * (1 << max_depth), input_dim, output_dim, policy_dim, max_depth, min_data_in_leaf, n_bins, par_th, cv_beta, verbose, batch_size, use_cv, stringToScoreFunc(split_score_func), stringTogeneratorType(generator_type), stringTogrowPolicy(grow_policy), n_mono_constraints);
     this->sheader = create_header();
 #ifdef USE_CUDA
     if (stringTodeviceType(_device) == gpu){
@@ -313,6 +313,29 @@ void GBRL::set_feature_mapping(const int *feature_mapping, const bool *mapping_n
 
     delete[] reverse_num_feature_mapping;
     delete[] reverse_cat_feature_mapping;
+}
+
+
+void GBRL::set_monotonic_constraints(const int *feature_indices, const int *output_idx, const int *constraint, const int n_constraints){
+
+#ifdef USE_CUDA
+    if (this->device == gpu){
+        cudaMemcpy(this->edata->mono_constraints->feature_idx, feature_indices, sizeof(int)*n_constraints, cudaMemcpyHostToDevice);
+        cudaMemcpy(this->edata->mono_constraints->output_idx, output_idx, sizeof(int)*n_constraints, cudaMemcpyHostToDevice);
+        cudaMemcpy(this->edata->mono_constraints->constraint, constraint, sizeof(int)*n_constraints, cudaMemcpyHostToDevice);
+    }
+#endif
+    if (this->device == cpu){
+        memcpy(this->edata->mono_constraints->feature_idx, feature_indices, sizeof(int)*n_constraints);
+        memcpy(this->edata->mono_constraints->output_idx, output_idx, sizeof(int)*n_constraints);
+        memcpy(this->edata->mono_constraints->constraint, constraint, sizeof(int)*n_constraints);
+    }
+    if (this->metadata->verbose > 0){
+        std::cout << "Setting " << this->learner_name << " monotonic constraints " << std::endl;
+    }
+
+    this->edata->mono_constraints->n_constraints = n_constraints;
+    this->metadata->n_mono_constraints = n_constraints;  // Also update metadata
 }
 
 float* GBRL::get_bias(){

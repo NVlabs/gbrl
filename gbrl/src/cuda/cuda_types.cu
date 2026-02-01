@@ -41,6 +41,7 @@ ensembleData* ensemble_data_alloc_cuda(ensembleMetaData *metadata){
     edata->leaf_data = new leafData;
     edata->feature_data = new featureData;
     edata->mono_constraints = new monotonicConstraints;
+    edata->mono_constraints->n_constraints = 0;  // Initialize to 0
     edata->feature_mappings = new featureMapping;
 
     char *data;
@@ -138,6 +139,7 @@ ensembleData* ensemble_copy_data_alloc_cuda(ensembleMetaData *metadata){
     edata->leaf_data = new leafData;
     edata->feature_data = new featureData;
     edata->mono_constraints = new monotonicConstraints;
+    edata->mono_constraints->n_constraints = 0;  // Initialize to 0
     edata->feature_mappings = new featureMapping;
 
     char *data;

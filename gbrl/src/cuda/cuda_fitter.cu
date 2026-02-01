@@ -408,6 +408,13 @@ void evaluate_oblivious_splits_cuda(
     size_t shared_mem;
    
     calc_oblivious_parallelism(candidata->n_candidates, metadata->output_dim, tpb, metadata->split_score_func, depth);
+    
+    // Get monotonic constraint pointers (may be nullptr if no constraints)
+    const int* mono_feat_idx = edata->mono_constraints ? edata->mono_constraints->feature_idx : nullptr;
+    const int* mono_out_idx = edata->mono_constraints ? edata->mono_constraints->output_idx : nullptr;
+    const int* mono_constr = edata->mono_constraints ? edata->mono_constraints->constraint : nullptr;
+    const int n_mono = edata->mono_constraints ? edata->mono_constraints->n_constraints : 0;
+    
     for (int i = 0; i < n_nodes; ++i){
         if (metadata->split_score_func == Cosine){
             shared_mem = sizeof(float)*2*(metadata->output_dim + 2)*tpb;
@@ -426,7 +433,11 @@ void evaluate_oblivious_splits_cuda(
                 metadata->min_data_in_leaf,
                 split_data->oblivious_split_scores + candidata->n_candidates*i,
                 dataset->n_samples,
-                metadata->n_num_features);
+                metadata->n_num_features,
+                mono_feat_idx,
+                mono_out_idx,
+                mono_constr,
+                n_mono);
         } else if (metadata->split_score_func == L2){
             shared_mem = sizeof(float)*2*(metadata->output_dim + 1)*tpb;
             split_score_l2_cuda<<<candidata->n_candidates, tpb, shared_mem>>>(
@@ -443,7 +454,11 @@ void evaluate_oblivious_splits_cuda(
                 metadata->min_data_in_leaf,
                 split_data->oblivious_split_scores + candidata->n_candidates*i,
                 dataset->n_samples,
-                metadata->n_num_features);
+                metadata->n_num_features,
+                mono_feat_idx,
+                mono_out_idx,
+                mono_constr,
+                n_mono);
         }
     }
 
@@ -474,7 +489,11 @@ __global__ void split_score_cosine_cuda(
     const int min_data_in_leaf,
     float* __restrict__ split_scores,
     const int global_n_samples,
-    const int n_num_features){
+    const int n_num_features,
+    const int* __restrict__ mono_feature_idx,
+    const int* __restrict__ mono_output_idx,
+    const int* __restrict__ mono_constraint,
+    const int n_mono_constraints){
     extern __shared__ float sdata[];
     int n_samples = __ldg(&node->n_samples), n_cols = __ldg(&node->output_dim);
     int cand_idx = blockIdx.x;
@@ -588,22 +607,50 @@ __global__ void split_score_cosine_cuda(
 
     // thread 0 writes the final result
     if (threadIdx.x == 0){
+        int tmp_idx = __ldg(&candidate_indices[cand_idx]);
+        int feat_idx = (candidate_numeric[cand_idx]) ? r_num_mapping[tmp_idx] : r_cat_mapping[tmp_idx];
+        
+        // Convert sums to means first (left_mean and right_mean hold sums at this point)
+        for (int d = 0; d < n_cols; ++d){
+            left_mean[d] = (l_count[0] > 0.0f) ? left_mean[d] / l_count[0] : 0.0f;
+            right_mean[d] = (r_count[0] > 0.0f) ? right_mean[d] / r_count[0] : 0.0f;
+        }
+        
+        // Check monotonic constraints and apply PAVA-like pooling if violated
+        for (int c = 0; c < n_mono_constraints; ++c) {
+            if (mono_feature_idx[c] != feat_idx) continue;
+            
+            int out_idx = mono_output_idx[c];
+            int direction = mono_constraint[c];
+            
+            float l_val = left_mean[out_idx];
+            float r_val = right_mean[out_idx];
+            
+            // Check violation: Inc(+1) requires r >= l, Dec(-1) requires r <= l
+            bool violation = (direction == 1 && r_val < l_val) ||
+                            (direction == -1 && r_val > l_val);
+            
+            if (violation) {
+                // Pool the means (weighted average) for this output dimension
+                float total_cnt = l_count[0] + r_count[0];
+                float pooled = (l_count[0] * l_val + r_count[0] * r_val) / total_cnt;
+                left_mean[out_idx] = pooled;
+                right_mean[out_idx] = pooled;
+            }
+        }
+        
+        // Compute final score with potentially adjusted means
         float cosine = 0.0f, l_mean_norm = 0.0f, r_mean_norm = 0.0f;
         for (int d = 0; d < n_cols; ++d){
             l_mean_norm += left_mean[d] * left_mean[d];
             r_mean_norm += right_mean[d] * right_mean[d];
         }
-        l_mean_norm = (l_count[0] > 0.0f) ? l_mean_norm / (l_count[0]*l_count[0]) : 0.0f;
-        r_mean_norm = (r_count[0] > 0.0f) ? r_mean_norm / (r_count[0]*r_count[0]) : 0.0f;
         l_dot_sum[0] = (l_count[0] > 0.0f) ? l_dot_sum[0] / l_count[0] : 0.0f;
         r_dot_sum[0] = (r_count[0] > 0.0f) ? r_dot_sum[0] / r_count[0] : 0.0f;
         float denominator = l_count[0]* l_mean_norm + r_count[0] * r_mean_norm;
         if (denominator > 0.0f) {
             cosine = (l_dot_sum[0] + r_dot_sum[0]) / sqrtf(denominator);
         }
-        
-        int tmp_idx = __ldg(&candidate_indices[cand_idx]);
-        int feat_idx = (candidate_numeric[cand_idx]) ? r_num_mapping[tmp_idx] : r_cat_mapping[tmp_idx];
         
         split_scores[cand_idx] = cosine * __ldg(feature_weights + feat_idx);
     }  
@@ -625,7 +672,11 @@ __global__ void split_score_l2_cuda(
     const int min_data_in_leaf,
     float* __restrict__ split_scores,
     const int global_n_samples,
-    const int n_num_features){
+    const int n_num_features,
+    const int* __restrict__ mono_feature_idx,
+    const int* __restrict__ mono_output_idx,
+    const int* __restrict__ mono_constraint,
+    const int n_mono_constraints){
     extern __shared__ float sdata[];
 
     int n_samples = node->n_samples, n_cols = node->output_dim;
@@ -708,14 +759,44 @@ __global__ void split_score_l2_cuda(
             return;
         }  
 
-        for (int d = 0; d < n_cols; ++d){
-            left_mean[d] = (l_count[0] > 0) ? left_mean[d] / l_count[0] : 0.0f;
-            l_mean_norm += left_mean[d] * left_mean[d];
-            right_mean[d] = (r_count[0] > 0) ? right_mean[d] / r_count[0] : 0.0f;
-            r_mean_norm += right_mean[d] * right_mean[d];
-        }
         int tmp_idx = __ldg(&candidate_indices[cand_idx]);
         int feat_idx = (candidate_numeric[cand_idx]) ? r_num_mapping[tmp_idx] : r_cat_mapping[tmp_idx];
+
+        // Convert sums to means
+        for (int d = 0; d < n_cols; ++d){
+            left_mean[d] = (l_count[0] > 0) ? left_mean[d] / l_count[0] : 0.0f;
+            right_mean[d] = (r_count[0] > 0) ? right_mean[d] / r_count[0] : 0.0f;
+        }
+
+        // Check monotonic constraints and apply PAVA-like pooling if violated
+        for (int c = 0; c < n_mono_constraints; ++c) {
+            if (mono_feature_idx[c] != feat_idx) continue;
+            
+            int out_idx = mono_output_idx[c];
+            int direction = mono_constraint[c];
+            
+            float l_val = left_mean[out_idx];
+            float r_val = right_mean[out_idx];
+            
+            // Check violation: Inc(+1) requires r >= l, Dec(-1) requires r <= l
+            bool violation = (direction == 1 && r_val < l_val) ||
+                            (direction == -1 && r_val > l_val);
+            
+            if (violation) {
+                // Pool the means (weighted average) for this output dimension
+                float total_cnt = l_count[0] + r_count[0];
+                float pooled = (l_count[0] * l_val + r_count[0] * r_val) / total_cnt;
+                left_mean[out_idx] = pooled;
+                right_mean[out_idx] = pooled;
+            }
+        }
+
+        // Compute final score with potentially adjusted means
+        for (int d = 0; d < n_cols; ++d){
+            l_mean_norm += left_mean[d] * left_mean[d];
+            r_mean_norm += right_mean[d] * right_mean[d];
+        }
+        
         split_scores[cand_idx] = (l_count[0]*l_mean_norm + r_count[0]*r_mean_norm) * __ldg(feature_weights + feat_idx);
     }  
 }
@@ -1559,6 +1640,10 @@ void fit_tree_oblivious_cuda(
     allocate_ensemble_memory_cuda(metadata, edata);
     cudaMemcpy(edata->ensemble_info->tree_indices + metadata->n_trees, &metadata->n_leaves, sizeof(int), cudaMemcpyHostToDevice);
 
+    // Save starting leaf index for monotonic constraints
+    int start_leaf_idx = metadata->n_leaves;
+    int tree_idx = metadata->n_trees;
+
     TreeNodeGPU **tree_nodes = (TreeNodeGPU **)malloc((1 << metadata->max_depth) * sizeof(TreeNodeGPU *));
     // for oblivious trees
     TreeNodeGPU **child_tree_nodes = (TreeNodeGPU **)malloc((1 << metadata->max_depth) * sizeof(TreeNodeGPU *));
@@ -1599,6 +1684,11 @@ void fit_tree_oblivious_cuda(
     for (int node_idx = 0; node_idx < (1 << depth); ++node_idx){
         add_leaf_node(tree_nodes[node_idx], depth, metadata, edata, dataset);
         free_tree_node(tree_nodes[node_idx]);
+    }
+
+    // Apply monotonic constraints using PAVA after all leaves are computed
+    if (metadata->n_mono_constraints > 0 && depth > 0) {
+        apply_monotonic_constraints_cuda(edata, metadata, tree_idx, depth, start_leaf_idx);
     }
 
     root_node = nullptr;
@@ -1691,6 +1781,243 @@ void fit_tree_greedy_cuda(
     root_node = nullptr;
     metadata->n_trees++;
     free(tree_nodes);
+}
+
+// ============================================================================
+// Monotonic Constraints Implementation (PAVA for Oblivious Trees)
+// ============================================================================
+
+/**
+ * For oblivious trees, monotonic constraints create a partial order on leaves.
+ * 
+ * Consider a tree of depth D. Each leaf has an index from 0 to 2^D - 1.
+ * The binary representation of the leaf index tells us the path:
+ *   - bit k = 0 means we went LEFT at depth k (feature < threshold)
+ *   - bit k = 1 means we went RIGHT at depth k (feature >= threshold)
+ * 
+ * For a monotonic constraint on feature F used at depth d:
+ *   - If INCREASING (+1): leaves with bit d=1 should have >= value than leaves with bit d=0
+ *   - If DECREASING (-1): leaves with bit d=1 should have <= value than leaves with bit d=0
+ * 
+ * When multiple monotonic features exist, they define a partial order.
+ * We linearize this by treating the monotonic bits as a number and sorting.
+ * 
+ * Algorithm (following CatBoost's approach):
+ * 1. Find which depths use monotonic features for a given output
+ * 2. Build a linear order on leaves consistent with the partial order
+ * 3. Apply PAVA (Pool Adjacent Violators Algorithm) along that order
+ * 
+ * PAVA for isotonic regression:
+ * - Process leaves in order
+ * - Maintain a stack of "level sets" (contiguous groups with same adjusted value)
+ * - When adding a new element, if it violates monotonicity with the previous level set,
+ *   merge them and take the weighted average
+ * - Continue until no violations remain
+ */
+
+/**
+ * @brief Build the linear order of leaves for monotonic constraints
+ * 
+ * For leaves in an oblivious tree, this creates an ordering such that
+ * if leaf A must have value <= leaf B according to monotonic constraints,
+ * then A appears before B in the order.
+ * 
+ * @param tree_mono_constraints Array of size tree_depth: 0 (no constraint), +1 (increasing), -1 (decreasing)
+ * @param tree_depth Depth of the tree
+ * @param n_leaves Number of leaves (2^tree_depth)
+ * @param leaf_order Output: ordered indices of leaves
+ */
+__device__ void build_leaf_order(
+    const int* tree_mono_constraints,
+    int tree_depth,
+    int n_leaves,
+    int* leaf_order
+) {
+    // Count monotonic and non-monotonic splits
+    int mono_count = 0;
+    int mono_depths[32];  // Assuming max depth <= 32
+    int mono_dirs[32];    // Direction for each monotonic depth
+    
+    for (int d = 0; d < tree_depth; ++d) {
+        if (tree_mono_constraints[d] != 0) {
+            mono_dirs[mono_count] = tree_mono_constraints[d];
+            mono_depths[mono_count] = d;
+            mono_count++;
+        }
+    }
+    
+    // For each leaf, compute its position in the linear order
+    // The order is determined by the monotonic bits interpreted as a number
+    // with appropriate direction flipping for decreasing constraints
+    for (int leaf_idx = 0; leaf_idx < n_leaves; ++leaf_idx) {
+        int rank = 0;
+        for (int m = 0; m < mono_count; ++m) {
+            int d = mono_depths[m];
+            int bit = (leaf_idx >> d) & 1;
+            
+            // For decreasing constraint, flip the bit contribution
+            if (mono_dirs[m] == -1) {
+                bit = 1 - bit;
+            }
+            
+            // Build rank with highest-significance monotonic feature first
+            rank = (rank << 1) | bit;
+        }
+        
+        // Also need to handle non-monotonic features to place leaves correctly
+        // For non-monotonic features, leaves with different non-mono bits are in different "subtrees"
+        // We process each subtree independently in PAVA
+        
+        // For now, compute a combined index: (non_mono_bits, rank)
+        // This groups leaves by their non-monotonic path, then orders by monotonic rank
+        int non_mono_bits = 0;
+        int non_mono_count = 0;
+        for (int d = 0; d < tree_depth; ++d) {
+            if (tree_mono_constraints[d] == 0) {
+                int bit = (leaf_idx >> d) & 1;
+                non_mono_bits |= (bit << non_mono_count);
+                non_mono_count++;
+            }
+        }
+        
+        // Combined key: non_mono_bits * (1 << mono_count) + rank
+        int combined = (non_mono_bits << mono_count) | rank;
+        leaf_order[combined] = leaf_idx;
+    }
+}
+
+/**
+ * @brief PAVA kernel for applying isotonic regression to leaf values
+ * 
+ * Each block handles one output dimension.
+ * Within each block, thread 0 performs sequential PAVA (inherently sequential algorithm).
+ * 
+ * For trees with non-monotonic features, leaves are grouped into subtrees.
+ * PAVA is applied independently to each subtree.
+ */
+__global__ void pava_kernel(
+    float* __restrict__ values,
+    const int constraint_depth,    // Which depth has the constraint we're enforcing
+    const int constraint_dir,      // Direction: +1 (increasing) or -1 (decreasing)
+    const int tree_depth,
+    const int start_leaf_idx,
+    const int n_leaves_in_tree,
+    const int output_dim,
+    const int target_output        // Which output dimension to process
+) {
+    // Each block handles one "plane" of leaves where all other depths are fixed
+    // and only the constraint_depth varies
+    int plane_idx = blockIdx.x;
+    int n_planes = n_leaves_in_tree / 2;  // 2^(tree_depth-1) planes
+    
+    if (plane_idx >= n_planes) return;
+    
+    // Only thread 0 does the work (PAVA is sequential)
+    if (threadIdx.x != 0) return;
+    
+    // Build the two leaf indices for this plane
+    // The two leaves differ only in the bit at constraint_depth
+    int base_leaf = 0;
+    int bit_pos = 0;
+    for (int d = 0; d < tree_depth; ++d) {
+        if (d == constraint_depth) continue;  // Skip the constraint depth
+        
+        // Extract bit from plane_idx and place it at depth d
+        int bit = (plane_idx >> bit_pos) & 1;
+        base_leaf |= (bit << d);
+        bit_pos++;
+    }
+    
+    // The two leaves in this plane
+    int leaf0 = base_leaf;  // constraint bit = 0
+    int leaf1 = base_leaf | (1 << constraint_depth);  // constraint bit = 1
+    
+    int global_leaf0 = start_leaf_idx + leaf0;
+    int global_leaf1 = start_leaf_idx + leaf1;
+    
+    // Get current values
+    float val0 = values[global_leaf0 * output_dim + target_output];
+    float val1 = values[global_leaf1 * output_dim + target_output];
+    
+    // For increasing constraint (+1): leaf0 (bit=0) should have value <= leaf1 (bit=1)
+    // For decreasing constraint (-1): leaf0 (bit=0) should have value >= leaf1 (bit=1)
+    bool violation = (constraint_dir == 1 && val0 > val1) ||
+                     (constraint_dir == -1 && val0 < val1);
+    
+    if (violation) {
+        // Pool the values (simple average for 2 points)
+        float pooled = (val0 + val1) / 2.0f;
+        values[global_leaf0 * output_dim + target_output] = pooled;
+        values[global_leaf1 * output_dim + target_output] = pooled;
+    }
+}
+
+void apply_monotonic_constraints_cuda(
+    ensembleData *edata,
+    ensembleMetaData *metadata,
+    int tree_idx,
+    int tree_depth,
+    int start_leaf_idx
+) {
+    if (metadata->n_mono_constraints <= 0 || tree_depth <= 0) return;
+    
+    int n_leaves_in_tree = 1 << tree_depth;
+    int n_planes = n_leaves_in_tree / 2;  // Number of pairs of leaves
+    
+    // Copy feature indices for this tree to host to build constraint map
+    int* h_feature_indices = new int[tree_depth];
+    cudaMemcpy(h_feature_indices, 
+               edata->feature_data->feature_indices + tree_idx * metadata->max_depth,
+               tree_depth * sizeof(int), 
+               cudaMemcpyDeviceToHost);
+    
+    // Copy monotonic constraints to host
+    int* h_mono_feature_idx = new int[metadata->n_mono_constraints];
+    int* h_mono_output_idx = new int[metadata->n_mono_constraints];
+    int* h_mono_constraint = new int[metadata->n_mono_constraints];
+    
+    cudaMemcpy(h_mono_feature_idx, edata->mono_constraints->feature_idx,
+               metadata->n_mono_constraints * sizeof(int), cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_mono_output_idx, edata->mono_constraints->output_idx,
+               metadata->n_mono_constraints * sizeof(int), cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_mono_constraint, edata->mono_constraints->constraint,
+               metadata->n_mono_constraints * sizeof(int), cudaMemcpyDeviceToHost);
+    
+    // For each output dimension, apply PAVA separately for each constrained feature
+    for (int out_idx = 0; out_idx < metadata->policy_dim; ++out_idx) {
+        // Find which depths have constraints for this output
+        for (int c = 0; c < metadata->n_mono_constraints; ++c) {
+            if (h_mono_output_idx[c] != out_idx) continue;
+            
+            int feature_idx = h_mono_feature_idx[c];
+            int direction = h_mono_constraint[c];
+            
+            // Find if this feature is used in any depth of this tree
+            for (int d = 0; d < tree_depth; ++d) {
+                if (h_feature_indices[d] == feature_idx) {
+                    // Apply PAVA for this specific constraint
+                    // Launch one block per "plane" (pair of leaves differing only in bit d)
+                    pava_kernel<<<n_planes, 1>>>(
+                        edata->leaf_data->values,
+                        d,                    // constraint_depth
+                        direction,            // constraint_dir (+1 or -1)
+                        tree_depth,
+                        start_leaf_idx,
+                        n_leaves_in_tree,
+                        metadata->output_dim,
+                        out_idx              // target_output
+                    );
+                    cudaDeviceSynchronize();
+                    break;  // Feature found, constraint applied
+                }
+            }
+        }
+    }
+    
+    delete[] h_feature_indices;
+    delete[] h_mono_feature_idx;
+    delete[] h_mono_output_idx;
+    delete[] h_mono_constraint;
 }
 
 __device__ int strcmpCuda(const char* __restrict__ str_a,
