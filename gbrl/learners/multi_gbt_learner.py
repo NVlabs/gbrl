@@ -177,7 +177,7 @@ class MultiGBTLearner(BaseLearner):
 
         if model_idx is not None:
             assert not isinstance(grads, list), "When model_idx is specified, grads should not be a list"
-            grads = grads.reshape((n_objs, len(inputs), self.output_dim[model_idx]))  # type: ignore
+            grads = grads.reshape((self.n_objs, len(inputs), self.output_dim[model_idx]))  # type: ignore
 
             self._memory = []
             self._cpp_models[model_idx].step(obs=self.transform_data(num_inputs),
