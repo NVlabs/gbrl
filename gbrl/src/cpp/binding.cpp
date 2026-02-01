@@ -334,50 +334,50 @@ py::dict ensembleDataToDict(const ensembleData* data, const ensembleMetaData* me
         auto bias_capsule = py::capsule(data->bias, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
         d["bias"] = py::array_t<float>({metadata->output_dim}, data->bias, bias_capsule);
 
-        auto feature_mapping_capsule = py::capsule(data->feature_mapping, [](void* ptr) { delete[] reinterpret_cast<int*>(ptr); });
-        d["feature_mapping"] = py::array_t<int>({metadata->input_dim}, data->feature_mapping, feature_mapping_capsule);
+        auto feature_mapping_capsule = py::capsule(data->feature_mappings->feature_mapping, [](void* ptr) { delete[] reinterpret_cast<int*>(ptr); });
+        d["feature_mapping"] = py::array_t<int>({metadata->input_dim}, data->feature_mappings->feature_mapping, feature_mapping_capsule);
         
-        auto reverse_num_feature_mapping_capsule = py::capsule(data->reverse_num_feature_mapping, [](void* ptr) { delete[] reinterpret_cast<int*>(ptr); });
-        d["reverse_num_feature_mapping"] = py::array_t<int>({metadata->input_dim}, data->reverse_num_feature_mapping, reverse_num_feature_mapping_capsule);
+        auto reverse_num_feature_mapping_capsule = py::capsule(data->feature_mappings->reverse_num_feature_mapping, [](void* ptr) { delete[] reinterpret_cast<int*>(ptr); });
+        d["reverse_num_feature_mapping"] = py::array_t<int>({metadata->input_dim}, data->feature_mappings->reverse_num_feature_mapping, reverse_num_feature_mapping_capsule);
         
-        auto reverse_cat_feature_mapping_capsule = py::capsule(data->reverse_cat_feature_mapping, [](void* ptr) { delete[] reinterpret_cast<int*>(ptr); });
-        d["reverse_cat_feature_mapping"] = py::array_t<int>({metadata->input_dim}, data->reverse_cat_feature_mapping, reverse_cat_feature_mapping_capsule);
+        auto reverse_cat_feature_mapping_capsule = py::capsule(data->feature_mappings->reverse_cat_feature_mapping, [](void* ptr) { delete[] reinterpret_cast<int*>(ptr); });
+        d["reverse_cat_feature_mapping"] = py::array_t<int>({metadata->input_dim}, data->feature_mappings->reverse_cat_feature_mapping, reverse_cat_feature_mapping_capsule);
         
-        auto feature_weights_capsule = py::capsule(data->feature_weights, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
-        d["feature_weights"] = py::array_t<float>({metadata->input_dim}, data->feature_weights, feature_weights_capsule);
+        auto feature_weights_capsule = py::capsule(data->feature_data->feature_weights, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
+        d["feature_weights"] = py::array_t<float>({metadata->input_dim}, data->feature_data->feature_weights, feature_weights_capsule);
 
-        auto tree_indices_capsule = py::capsule(data->tree_indices, [](void* ptr) { delete[] reinterpret_cast<int*>(ptr); });
-        d["tree_indices"] = py::array_t<int>({metadata->n_trees}, data->tree_indices, tree_indices_capsule);
+        auto tree_indices_capsule = py::capsule(data->ensemble_info->tree_indices, [](void* ptr) { delete[] reinterpret_cast<int*>(ptr); });
+        d["tree_indices"] = py::array_t<int>({metadata->n_trees}, data->ensemble_info->tree_indices, tree_indices_capsule);
 
         int split_sizes = (metadata->grow_policy == OBLIVIOUS) ? metadata->n_trees : metadata->n_leaves;
 
-        auto depths_capsule = py::capsule(data->depths, [](void* ptr) { delete[] reinterpret_cast<int*>(ptr); });
-        d["depths"] = py::array_t<int>({split_sizes}, data->depths, depths_capsule);
+        auto depths_capsule = py::capsule(data->ensemble_info->depths, [](void* ptr) { delete[] reinterpret_cast<int*>(ptr); });
+        d["depths"] = py::array_t<int>({split_sizes}, data->ensemble_info->depths, depths_capsule);
 
-        auto values_capsule = py::capsule(data->values, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
-        d["values"] = py::array_t<float>({metadata->n_leaves, metadata->output_dim}, data->values, values_capsule);
+        auto values_capsule = py::capsule(data->leaf_data->values, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
+        d["values"] = py::array_t<float>({metadata->n_leaves, metadata->output_dim}, data->leaf_data->values, values_capsule);
 
-        auto feature_indices_capsule = py::capsule(data->feature_indices, [](void* ptr) { delete[] reinterpret_cast<int*>(ptr); });
-        d["feature_indices"] = py::array_t<int>({split_sizes, metadata->max_depth}, data->feature_indices, feature_indices_capsule);
+        auto feature_indices_capsule = py::capsule(data->feature_data->feature_indices, [](void* ptr) { delete[] reinterpret_cast<int*>(ptr); });
+        d["feature_indices"] = py::array_t<int>({split_sizes, metadata->max_depth}, data->feature_data->feature_indices, feature_indices_capsule);
 
-        auto feature_values_capsule = py::capsule(data->feature_values, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
-        d["feature_values"] = py::array_t<float>({split_sizes, metadata->max_depth}, data->feature_values, feature_values_capsule);
+        auto feature_values_capsule = py::capsule(data->feature_data->feature_values, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
+        d["feature_values"] = py::array_t<float>({split_sizes, metadata->max_depth}, data->feature_data->feature_values, feature_values_capsule);
 
-        auto edge_weights_capsule = py::capsule(data->edge_weights, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
-        d["edge_weights"] = py::array_t<float>({metadata->n_leaves, metadata->max_depth}, data->edge_weights, edge_weights_capsule);
+        auto edge_weights_capsule = py::capsule(data->leaf_data->edge_weights, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
+        d["edge_weights"] = py::array_t<float>({metadata->n_leaves, metadata->max_depth}, data->leaf_data->edge_weights, edge_weights_capsule);
 
-        auto is_numerics_capsule = py::capsule(data->is_numerics, [](void* ptr) { delete[] reinterpret_cast<bool*>(ptr); });
-        d["is_numerics"] = py::array_t<bool>({split_sizes, metadata->max_depth}, data->is_numerics, is_numerics_capsule);
+        auto is_numerics_capsule = py::capsule(data->feature_data->is_numerics, [](void* ptr) { delete[] reinterpret_cast<bool*>(ptr); });
+        d["is_numerics"] = py::array_t<bool>({split_sizes, metadata->max_depth}, data->feature_data->is_numerics, is_numerics_capsule);
 
-        auto inequality_directions_capsule = py::capsule(data->inequality_directions, [](void* ptr) { delete[] reinterpret_cast<bool*>(ptr); });
-        d["inequality_directions"] = py::array_t<bool>({metadata->n_leaves, metadata->max_depth}, data->inequality_directions, inequality_directions_capsule);
+        auto inequality_directions_capsule = py::capsule(data->feature_data->inequality_directions, [](void* ptr) { delete[] reinterpret_cast<bool*>(ptr); });
+        d["inequality_directions"] = py::array_t<bool>({metadata->n_leaves, metadata->max_depth}, data->feature_data->inequality_directions, inequality_directions_capsule);
         
-        auto mapping_numerics_capsule = py::capsule(data->mapping_numerics, [](void* ptr) { delete[] reinterpret_cast<bool*>(ptr); });
-        d["mapping_numerics"] = py::array_t<bool>({metadata->input_dim}, data->mapping_numerics, mapping_numerics_capsule);
+        auto mapping_numerics_capsule = py::capsule(data->feature_mappings->mapping_numerics, [](void* ptr) { delete[] reinterpret_cast<bool*>(ptr); });
+        d["mapping_numerics"] = py::array_t<bool>({metadata->input_dim}, data->feature_mappings->mapping_numerics, mapping_numerics_capsule);
 
         // Convert char* categorical_values to NumPy string array (S128)
-        auto categorical_capsule = py::capsule(data->categorical_values, [](void* ptr) { delete[] reinterpret_cast<char*>(ptr); });
-        d["categorical_values"] = py::array(py::dtype("S128"), {split_sizes, metadata->max_depth}, data->categorical_values, categorical_capsule);
+        auto categorical_capsule = py::capsule(data->feature_data->categorical_values, [](void* ptr) { delete[] reinterpret_cast<char*>(ptr); });
+        d["categorical_values"] = py::array(py::dtype("S128"), {split_sizes, metadata->max_depth}, data->feature_data->categorical_values, categorical_capsule);
         
         d["alloc_data_size"] = data->alloc_data_size;
 

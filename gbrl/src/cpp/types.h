@@ -269,6 +269,38 @@ struct dataSet {
     int n_samples;                          /**< Number of data samples */
 };
 
+struct monotonicConstraints {
+    int* feature_idx;          /**< Index of the feature with constraint */
+    int* output_idx;           /**< Index of the output dimension */
+    int* constraint;           /**< Constraint type: -1 (decreasing), 1 (increasing) */
+};
+
+struct featureMapping {
+    int* feature_mapping;           /**< Maps original feature indices to internal indices */
+    int* reverse_num_feature_mapping;  /**< Maps internal numerical feature indices back to original */
+    int* reverse_cat_feature_mapping;  /**< Maps internal categorical feature indices back to original */
+    bool* mapping_numerics;         /**< Indicates if each original feature is numerical (true) or categorical (false) */
+};
+
+struct ensembleInfo {
+    int* tree_indices;              /**< Starting leaf indices for each tree */
+    int* depths;                    /**< Depth of each leaf in tree structure */
+};
+
+struct leafData {
+    float* values;                  /**< Prediction values for the leaf */
+    float* edge_weights;            /**< Weights for edges leading to the leaf */
+};
+
+struct featureData {
+    int* feature_indices;           /**< Feature indices used at each split */
+    float* feature_values;          /**< Threshold values for numerical splits */
+    float* feature_weights;         /**< Importance weights for each feature */
+    bool* is_numerics;              /**< Whether each split is numerical */
+    bool* inequality_directions;    /**< Direction of inequality tests */
+    char* categorical_values;       /**< Values for categorical splits */
+};
+
 /**
  * @brief Data storage for the entire ensemble of trees
  * 
@@ -278,33 +310,17 @@ struct dataSet {
  */
 struct ensembleData {
     float *bias;                    /**< Global bias terms for each output */
-    float *feature_weights;         /**< Per-feature importance weights */
 #ifdef DEBUG
     int *n_samples;                 /**< Sample counts per leaf (debug only) */
 #endif 
-    int *tree_indices;              /**< Starting leaf indices for each tree */
-    int *depths;                    /**< Depth of each leaf in tree structure */
-    float *values;                  /**< Leaf prediction values */
-    
-    // These arrays support reordering of features for mixed categorical/numerical inputs
-    int *feature_mapping;           /**< Maps original feature indices to internal indices (stored for documentation/export) */
-    int *reverse_num_feature_mapping;  /**< Maps internal numerical feature indices back to original feature indices (used in computation) */
-    int *reverse_cat_feature_mapping;  /**< Maps internal categorical feature indices back to original feature indices (used in computation) */
-    // Leaf split condition data
-    int* feature_indices;           /**< Feature used at each internal node */
+    struct ensembleInfo *ensemble_info;              /**< Ensemble structure information */
+    struct leafData *leaf_data;                        /**< Leaf data information */
+    struct featureData *feature_data;                  /**< Feature split condition data */
     // Monotonic Constraints
-    int* mono_feature_idx;          /**< Index of the feature with constraint */
-    int* mono_output_idx;           /**< Index of the output dimension */
-    int* mono_constraint;           /**< Constraint type: -1 (decreasing), 1 (increasing) */
-    float* feature_values;          /**< Threshold values for numerical splits */
-    float *edge_weights;            /**< Weights for split edges */
-    bool* is_numerics;              /**< Whether split is numerical (vs categorical) */
-    bool* inequality_directions;    /**< Direction of inequality tests */
-    char* categorical_values;       /**< Values for categorical splits */
+    struct monotonicConstraints *mono_constraints;  /**< Monotonic constraints information */
+    struct featureMapping *feature_mappings;       /**< Feature mapping information */
 
-    bool *mapping_numerics;         /**< Indicates if each original feature is numerical (true) or categorical (false) (stored for documentation/export) */
-    
-    size_t alloc_data_size;         /**< Total allocated memory size */
+    size_t alloc_data_size;                         /**< Total allocated memory size */
 };
 
 /**

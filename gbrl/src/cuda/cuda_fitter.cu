@@ -81,6 +81,144 @@ void calc_oblivious_parallelism(
     }
 }
 
+__device__ __forceinline__ void check_and_project_split(
+    float* __restrict__ left_val, 
+    float* __restrict__ right_val, 
+    int constraint) 
+{
+    // Constraint: 0 (None), 1 (Increasing), -1 (Decreasing)
+    if (constraint == 0) return;
+
+    float l = *left_val;
+    float r = *right_val;
+
+    // Violation Check:
+    // Inc (1): Right must be >= Left. Violation if R < L.
+    // Dec (-1): Right must be <= Left. Violation if R > L.
+    bool violation = (constraint == 1 && r < l) || (constraint == -1 && r > l);
+
+    if (violation) {
+        // Project to unweighted mean (fastest for scoring approximation)
+        float pooled = 0.5f * (l + r);
+        *left_val = pooled;
+        *right_val = pooled;
+    }
+}
+
+template<int N>
+__device__ __forceinline__ void run_pava_registers(float* val) {
+    float stack_val[N];
+    int   stack_cnt[N]; 
+    int top = -1;
+
+    #pragma unroll
+    for (int i = 0; i < N; ++i) {
+        float curr_val = val[i];
+        int   curr_cnt = 1;
+
+        // Merge Backwards
+        while (top >= 0) {
+            // Check Monotonicity: Prev <= Curr
+            if (stack_val[top] <= curr_val) break; 
+
+            // Violation: Merge
+            float prev_sum = stack_val[top] * stack_cnt[top];
+            float curr_sum = curr_val * curr_cnt;
+            int new_cnt = stack_cnt[top] + curr_cnt;
+            
+            curr_val = (prev_sum + curr_sum) / new_cnt;
+            curr_cnt = new_cnt;
+            top--; 
+        }
+
+        // Push
+        top++;
+        stack_val[top] = curr_val;
+        stack_cnt[top] = curr_cnt;
+    }
+
+    // Flatten back
+    int ptr = 0;
+    for (int i = 0; i <= top; ++i) {
+        float avg = stack_val[i];
+        int count = stack_cnt[i];
+        #pragma unroll
+        for (int k = 0; k < count; ++k) {
+            val[ptr++] = avg;
+        }
+    }
+}
+
+__global__ void enforce_oblivious_pava_kernel(
+    float* __restrict__ values,       // [n_leaves * output_dim]
+    const int* __restrict__ tree_constraints, // [depth] constraints for this tree
+    const int leaf_start_idx,         
+    const int output_dim,
+    const int depth) 
+{
+    // One thread per output dimension (e.g., 2 for Actor-Critic, 1 for Value)
+    int dim_idx = threadIdx.x + blockIdx.x * blockDim.x;
+    if (dim_idx >= output_dim) return;
+
+    // Hardcoded max size for registers (Depth 6 = 64 leaves). 
+    // For Depth 4, this loop will just run 16 times.
+    const int MAX_N = 64; 
+    int n_leaves = 1 << depth;
+    
+    // 1. Load Global -> Registers
+    float val[MAX_N];
+    int   perm[MAX_N];
+    unsigned int keys[MAX_N];
+
+    int offset = leaf_start_idx * output_dim + dim_idx;
+
+    // Stride loading
+    for (int i = 0; i < n_leaves; ++i) {
+        val[i] = values[offset + i * output_dim];
+        perm[i] = i; 
+        
+        // 2. Generate Sort Key (Gray Code / Path Logic)
+        unsigned int key = 0;
+        for (int d = 0; d < depth; ++d) {
+            int c = tree_constraints[d]; 
+            // In oblivious trees, bit 'd' of index 'i' is the decision at depth 'd'
+            // (Assumes standard MSB->LSB or LSB->MSB mapping. Verify your build order!)
+            // Here assuming: bit (depth - 1 - d) corresponds to layer d.
+            int bit = (i >> (depth - 1 - d)) & 1; 
+
+            if (c == 1)       key = (key << 1) | bit;       // Inc: 0 < 1
+            else if (c == -1) key = (key << 1) | (1 - bit); // Dec: 1 < 0
+            else              key = (key << 1) | 0;         // None
+        }
+        keys[i] = key;
+    }
+
+    // 3. Bubble Sort in Registers (Fastest for N <= 32)
+    for (int i = 0; i < n_leaves - 1; ++i) {
+        for (int j = 0; j < n_leaves - i - 1; ++j) {
+            if (keys[j] > keys[j+1]) {
+                // Swap Everything
+                float tv = val[j]; val[j] = val[j+1]; val[j+1] = tv;
+                unsigned int tk = keys[j]; keys[j] = keys[j+1]; keys[j+1] = tk;
+                int tp = perm[j]; perm[j] = perm[j+1]; perm[j+1] = tp;
+            }
+        }
+    }
+
+    // 4. Run PAVA
+    // We instantiate for 64. If n_leaves < 64, we need to be careful.
+    // Better strategy: Call template based on depth.
+    if (depth <= 4)      run_pava_registers<16>(val); 
+    else if (depth == 5) run_pava_registers<32>(val);
+    else                 run_pava_registers<64>(val);
+
+    // 5. Scatter Write Back
+    for (int i = 0; i < n_leaves; ++i) {
+        int target = perm[i]; // Original index
+        values[offset + target * output_dim] = val[i];
+    }
+}
+
 __global__ void update_best_candidate_cuda(
     float* __restrict__ split_scores,
     int n_candidates,
@@ -186,14 +324,14 @@ void evaluate_greedy_splits(
         get_grid_dimensions(candidata->n_candidates, n_blocks, tpb);
         split_cosine_score_kernel<<<n_blocks, tpb>>>(
             node,
-            edata->feature_weights,
+            edata->feature_data->feature_weights,
             split_data->split_scores,
             candidata->candidate_indices,
             candidata->candidate_values,
             candidata->candidate_categories,
             candidata->candidate_numeric,
-            edata->reverse_num_feature_mapping,
-            edata->reverse_cat_feature_mapping,
+            edata->feature_mappings->reverse_num_feature_mapping,
+            edata->feature_mappings->reverse_cat_feature_mapping,
             candidata->n_candidates,
             split_data->left_sum,
             split_data->right_sum,
@@ -223,14 +361,14 @@ void evaluate_greedy_splits(
         get_grid_dimensions(candidata->n_candidates, n_blocks, tpb);
         split_l2_score_kernel<<<n_blocks, tpb>>>(
             node,
-            edata->feature_weights,
+            edata->feature_data->feature_weights,
             split_data->split_scores,
             candidata->candidate_indices,
             candidata->candidate_values,
             candidata->candidate_categories,
             candidata->candidate_numeric,
-            edata->reverse_num_feature_mapping,
-            edata->reverse_cat_feature_mapping,
+            edata->feature_mappings->reverse_num_feature_mapping,
+            edata->feature_mappings->reverse_cat_feature_mapping,
             candidata->n_candidates,
             split_data->left_sum,
             split_data->right_sum,
@@ -277,14 +415,14 @@ void evaluate_oblivious_splits_cuda(
                 dataset->obs->data,
                 dataset->categorical_obs->data,
                 dataset->build_grads->data,
-                edata->feature_weights,
+                edata->feature_data->feature_weights,
                 nodes[i],
                 candidata->candidate_indices,
                 candidata->candidate_values,
                 candidata->candidate_categories,
                 candidata->candidate_numeric,
-                edata->reverse_num_feature_mapping,
-                edata->reverse_cat_feature_mapping,
+                edata->feature_mappings->reverse_num_feature_mapping,
+                edata->feature_mappings->reverse_cat_feature_mapping,
                 metadata->min_data_in_leaf,
                 split_data->oblivious_split_scores + candidata->n_candidates*i,
                 dataset->n_samples,
@@ -294,14 +432,14 @@ void evaluate_oblivious_splits_cuda(
             split_score_l2_cuda<<<candidata->n_candidates, tpb, shared_mem>>>(
                 dataset->obs->data, dataset->categorical_obs->data,
                 dataset->build_grads->data,
-                edata->feature_weights,
+                edata->feature_data->feature_weights,
                 nodes[i],
                 candidata->candidate_indices,
                 candidata->candidate_values,
                 candidata->candidate_categories,
                 candidata->candidate_numeric,
-                edata->reverse_num_feature_mapping,
-                edata->reverse_cat_feature_mapping,
+                edata->feature_mappings->reverse_num_feature_mapping,
+                edata->feature_mappings->reverse_cat_feature_mapping,
                 metadata->min_data_in_leaf,
                 split_data->oblivious_split_scores + candidata->n_candidates*i,
                 dataset->n_samples,
@@ -1181,7 +1319,7 @@ void add_leaf_node(
     if (depth > 0){
         int n_threads = WARP_SIZE*((MAX_CHAR_SIZE + WARP_SIZE - 1) / WARP_SIZE);
         int global_idx = (metadata->grow_policy == GREEDY) ? leaf_idx : tree_idx;
-        copy_node_to_data<<<depth, n_threads>>>(node, edata->depths, edata->feature_indices, edata->feature_values, edata->edge_weights, edata->inequality_directions, edata->is_numerics, edata->categorical_values, global_idx, leaf_idx, metadata->max_depth);
+        copy_node_to_data<<<depth, n_threads>>>(node, edata->ensemble_info->depths, edata->feature_data->feature_indices, edata->feature_data->feature_values, edata->leaf_data->edge_weights, edata->feature_data->inequality_directions, edata->feature_data->is_numerics, edata->feature_data->categorical_values, global_idx, leaf_idx, metadata->max_depth);
         cudaDeviceSynchronize();
     }
 
@@ -1190,7 +1328,7 @@ void add_leaf_node(
         threads_per_block = THREADS_PER_BLOCK;
     }
     size_t shared_mem = sizeof(float)*2*threads_per_block;
-    reduce_leaf_sum<<<metadata->output_dim, threads_per_block, shared_mem>>>(dataset->obs->data, dataset->categorical_obs->data, dataset->grads->data, edata->values, node, dataset->n_samples, leaf_idx*metadata->output_dim, metadata->policy_dim);
+    reduce_leaf_sum<<<metadata->output_dim, threads_per_block, shared_mem>>>(dataset->obs->data, dataset->categorical_obs->data, dataset->grads->data, edata->leaf_data->values, node, dataset->n_samples, leaf_idx*metadata->output_dim, metadata->policy_dim);
     cudaDeviceSynchronize();
        
     metadata->n_leaves += 1;
@@ -1419,7 +1557,7 @@ void fit_tree_oblivious_cuda(
     splitDataGPU *split_data){
 
     allocate_ensemble_memory_cuda(metadata, edata);
-    cudaMemcpy(edata->tree_indices + metadata->n_trees, &metadata->n_leaves, sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(edata->ensemble_info->tree_indices + metadata->n_trees, &metadata->n_leaves, sizeof(int), cudaMemcpyHostToDevice);
 
     TreeNodeGPU **tree_nodes = (TreeNodeGPU **)malloc((1 << metadata->max_depth) * sizeof(TreeNodeGPU *));
     // for oblivious trees
@@ -1477,7 +1615,7 @@ void fit_tree_greedy_cuda(
     splitDataGPU *split_data){
 
     allocate_ensemble_memory_cuda(metadata, edata);
-    cudaMemcpy(edata->tree_indices + metadata->n_trees, &metadata->n_leaves, sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(edata->ensemble_info->tree_indices + metadata->n_trees, &metadata->n_leaves, sizeof(int), cudaMemcpyHostToDevice);
       
     TreeNodeGPU **tree_nodes = (TreeNodeGPU **)malloc((1 << metadata->max_depth) * sizeof(TreeNodeGPU *));
     

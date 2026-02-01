@@ -43,18 +43,18 @@ void Predictor::momentum_over_leaves(const float *obs, const char *categorical_o
     int categorical_obs_row = sample_idx*metadata->n_cat_features;
     const float cv_beta = metadata->cv_beta, cv_1_m_beta = 1.0f - metadata->cv_beta;
     
-    const bool *numerics = edata->is_numerics;
-    const float *feature_values = edata->feature_values;
-    const float *values = edata->values;
-    const int* feature_indices = edata->feature_indices;
-    const int* tree_indices = edata->tree_indices;
-    const bool* inequality_directions = edata->inequality_directions;
-    const char* categorical_values = edata->categorical_values;
+    const bool *numerics = edata->feature_data->is_numerics;
+    const float *feature_values = edata->feature_data->feature_values;
+    const float *values = edata->leaf_data->values;
+    const int* feature_indices = edata->feature_data->feature_indices;
+    const int* tree_indices = edata->ensemble_info->tree_indices;
+    const bool* inequality_directions = edata->feature_data->inequality_directions;
+    const char* categorical_values = edata->feature_data->categorical_values;
 
     int leaf_idx = tree_indices[tree_idx];
     while (leaf_idx < n_leaves && tree_idx < stop_tree_idx)
     {
-        int depth = edata->depths[leaf_idx];
+        int depth = edata->ensemble_info->depths[leaf_idx];
         passed = false;
         int cond_idx = leaf_idx*max_depth;
         for (int depth_idx = depth - 1; depth_idx >= 0; --depth_idx){
@@ -87,13 +87,13 @@ void Predictor::momentum_over_trees(const float *obs, const char *categorical_ob
     int categorical_obs_row = sample_idx*metadata->n_cat_features;
     const float cv_beta = metadata->cv_beta, cv_1_m_beta = 1.0f - metadata->cv_beta;
 
-    const bool *numerics = edata->is_numerics;
-    const int *depths = edata->depths;
-    const float *feature_values = edata->feature_values;
-    const float *values = edata->values;
-    const int* feature_indices = edata->feature_indices;
-    const int* tree_indices = edata->tree_indices;
-    const char* categorical_values = edata->categorical_values;
+    const bool *numerics = edata->feature_data->is_numerics;
+    const int *depths = edata->ensemble_info->depths;
+    const float *feature_values = edata->feature_data->feature_values;
+    const float *values = edata->leaf_data->values;
+    const int* feature_indices = edata->feature_data->feature_indices;
+    const int* tree_indices = edata->ensemble_info->tree_indices;
+    const char* categorical_values = edata->feature_data->categorical_values;
     
 
     while (tree_idx < stop_tree_idx)
@@ -196,18 +196,18 @@ void Predictor::predict_over_leaves(const float *obs, const char *categorical_ob
     int categorical_obs_row = sample_idx*metadata->n_cat_features;
     int theta_row = sample_idx*metadata->output_dim;
 
-    const bool *numerics = edata->is_numerics;
-    const float *feature_values = edata->feature_values;
-    const float *values = edata->values;
-    const int* feature_indices = edata->feature_indices;
-    const int* tree_indices = edata->tree_indices;
-    const bool* inequality_directions = edata->inequality_directions;
-    const char* categorical_values = edata->categorical_values;
+    const bool *numerics = edata->feature_data->is_numerics;
+    const float *feature_values = edata->feature_data->feature_values;
+    const float *values = edata->leaf_data->values;
+    const int* feature_indices = edata->feature_data->feature_indices;
+    const int* tree_indices = edata->ensemble_info->tree_indices;
+    const bool* inequality_directions = edata->feature_data->inequality_directions;
+    const char* categorical_values = edata->feature_data->categorical_values;
     int leaf_idx = tree_indices[tree_idx];
 
     while (leaf_idx < n_leaves && tree_idx < stop_tree_idx)
     {
-        int depth = edata->depths[leaf_idx];
+        int depth = edata->ensemble_info->depths[leaf_idx];
         passed = false;
         int cond_idx = leaf_idx*max_depth;
         for (int depth_idx = depth - 1; depth_idx >= 0; --depth_idx){
@@ -238,13 +238,13 @@ void Predictor::predict_over_trees(const float *obs, const char *categorical_obs
     int categorical_obs_row = sample_idx*metadata->n_cat_features;
     int theta_row = sample_idx*metadata->output_dim;
 
-    const bool *numerics = edata->is_numerics;
-    const int *depths = edata->depths;
-    const float *feature_values = edata->feature_values;
-    const float *values = edata->values;
-    const int* feature_indices = edata->feature_indices;
-    const int* tree_indices = edata->tree_indices;
-    const char* categorical_values = edata->categorical_values;
+    const bool *numerics = edata->feature_data->is_numerics;
+    const int *depths = edata->ensemble_info->depths;
+    const float *feature_values = edata->feature_data->feature_values;
+    const float *values = edata->leaf_data->values;
+    const int* feature_indices = edata->feature_data->feature_indices;
+    const int* tree_indices = edata->ensemble_info->tree_indices;
+    const char* categorical_values = edata->feature_data->categorical_values;
 
     while (tree_idx < stop_tree_idx)
     {

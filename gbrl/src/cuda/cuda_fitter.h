@@ -298,6 +298,14 @@ __global__ void update_best_candidate_cuda(
     const TreeNodeGPU* __restrict__ node
 );
 
+__global__ void enforce_oblivious_pava_kernel(
+    float* __restrict__ values,
+    const int* __restrict__ tree_constraints,
+    const int leaf_start_idx,
+    const int output_dim,
+    const int depth
+);
+
 /**
  * @brief CUDA kernel to reduce leaf gradient sum
  * 

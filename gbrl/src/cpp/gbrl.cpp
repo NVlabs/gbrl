@@ -79,7 +79,7 @@ GBRL::GBRL(int input_dim, int output_dim, int policy_dim, int max_depth, int min
            int verbose, 
            deviceType _device, std::string _learner_name){
     this->learner_name = _learner_name;
-    this->metadata = ensemble_metadata_alloc(INITAL_MAX_TREES, INITAL_MAX_TREES * (1 << max_depth), TREES_BATCH, TREES_BATCH * (1 << max_depth), input_dim, output_dim, policy_dim, max_depth, min_data_in_leaf, n_bins, par_th, cv_beta, verbose, batch_size, use_cv, split_score_func, generator_type, grow_policy);
+    this->metadata = ensemble_metadata_alloc(INITAL_MAX_TREES, INITAL_MAX_TREES * (1 << max_depth), TREES_BATCH, TREES_BATCH * (1 << max_depth), input_dim, output_dim, policy_dim, max_depth, min_data_in_leaf, n_bins, par_th, cv_beta, verbose, batch_size, use_cv, split_score_func, generator_type, grow_policy, 0);
     this->sheader = create_header();
 #ifdef USE_CUDA
     if (_device == gpu){
@@ -98,7 +98,7 @@ GBRL::GBRL(int input_dim, int output_dim, int policy_dim, int max_depth, int min
            std::string generator_type, bool use_cv, int batch_size, 
            std::string grow_policy, int verbose, std::string _device, std::string _learner_name){
     this->learner_name = _learner_name;
-    this->metadata = ensemble_metadata_alloc(INITAL_MAX_TREES, INITAL_MAX_TREES * (1 << max_depth), TREES_BATCH, TREES_BATCH * (1 << max_depth), input_dim, output_dim, policy_dim, max_depth, min_data_in_leaf, n_bins, par_th, cv_beta, verbose, batch_size, use_cv, stringToScoreFunc(split_score_func), stringTogeneratorType(generator_type), stringTogrowPolicy(grow_policy));
+    this->metadata = ensemble_metadata_alloc(INITAL_MAX_TREES, INITAL_MAX_TREES * (1 << max_depth), TREES_BATCH, TREES_BATCH * (1 << max_depth), input_dim, output_dim, policy_dim, max_depth, min_data_in_leaf, n_bins, par_th, cv_beta, verbose, batch_size, use_cv, stringToScoreFunc(split_score_func), stringTogeneratorType(generator_type), stringTogrowPolicy(grow_policy), 0);
     this->sheader = create_header();
 #ifdef USE_CUDA
     if (stringTodeviceType(_device) == gpu){
@@ -248,21 +248,21 @@ void GBRL::set_feature_weights(dataHolder<float> *feature_weights, const int inp
 #ifdef USE_CUDA
     if (this->device == gpu){
         if (feature_weights->device == cpu){
-            cudaMemcpy(this->edata->feature_weights, feature_weights->data, sizeof(float)*this->metadata->input_dim, cudaMemcpyHostToDevice);
+            cudaMemcpy(this->edata->feature_data->feature_weights, feature_weights->data, sizeof(float)*this->metadata->input_dim, cudaMemcpyHostToDevice);
         } else {
-            cudaMemcpy(this->edata->feature_weights, feature_weights->data, sizeof(float)*this->metadata->input_dim, cudaMemcpyDeviceToDevice);
+            cudaMemcpy(this->edata->feature_data->feature_weights, feature_weights->data, sizeof(float)*this->metadata->input_dim, cudaMemcpyDeviceToDevice);
         }
     }
 #endif
     if (this->device == cpu){
         if (feature_weights->device == gpu){
 #ifdef USE_CUDA
-            cudaMemcpy(this->edata->feature_weights, feature_weights->data, sizeof(float)*this->metadata->input_dim, cudaMemcpyDeviceToHost);
+            cudaMemcpy(this->edata->feature_data->feature_weights, feature_weights->data, sizeof(float)*this->metadata->input_dim, cudaMemcpyDeviceToHost);
 #else
             throw std::runtime_error("GBRL was not compiled for GPU but GPU data detected!");
 #endif
         } else
-            memcpy(this->edata->feature_weights, feature_weights->data, sizeof(float)*this->metadata->input_dim);
+            memcpy(this->edata->feature_data->feature_weights, feature_weights->data, sizeof(float)*this->metadata->input_dim);
     }
     if (this->metadata->verbose > 0)
         std::cout << "Setting " << this->learner_name << " feature weights " << std::endl;
@@ -295,17 +295,17 @@ void GBRL::set_feature_mapping(const int *feature_mapping, const bool *mapping_n
 
 #ifdef USE_CUDA
     if (this->device == gpu){
-        cudaMemcpy(this->edata->feature_mapping, feature_mapping, sizeof(int)*this->metadata->input_dim, cudaMemcpyHostToDevice);
-        cudaMemcpy(this->edata->mapping_numerics, mapping_numerics, sizeof(bool)*this->metadata->input_dim, cudaMemcpyHostToDevice);
-        cudaMemcpy(this->edata->reverse_num_feature_mapping, reverse_num_feature_mapping, sizeof(int)*this->metadata->input_dim, cudaMemcpyHostToDevice);
-        cudaMemcpy(this->edata->reverse_cat_feature_mapping, reverse_cat_feature_mapping, sizeof(int)*this->metadata->input_dim, cudaMemcpyHostToDevice);
+        cudaMemcpy(this->edata->feature_mappings->feature_mapping, feature_mapping, sizeof(int)*this->metadata->input_dim, cudaMemcpyHostToDevice);
+        cudaMemcpy(this->edata->feature_mappings->mapping_numerics, mapping_numerics, sizeof(bool)*this->metadata->input_dim, cudaMemcpyHostToDevice);
+        cudaMemcpy(this->edata->feature_mappings->reverse_num_feature_mapping, reverse_num_feature_mapping, sizeof(int)*this->metadata->input_dim, cudaMemcpyHostToDevice);
+        cudaMemcpy(this->edata->feature_mappings->reverse_cat_feature_mapping, reverse_cat_feature_mapping, sizeof(int)*this->metadata->input_dim, cudaMemcpyHostToDevice);
     }
 #endif
     if (this->device == cpu){
-        memcpy(this->edata->feature_mapping, feature_mapping, sizeof(int)*this->metadata->input_dim);
-        memcpy(this->edata->mapping_numerics, mapping_numerics, sizeof(bool)*this->metadata->input_dim);
-        memcpy(this->edata->reverse_num_feature_mapping, reverse_num_feature_mapping, sizeof(int)*this->metadata->input_dim);
-        memcpy(this->edata->reverse_cat_feature_mapping, reverse_cat_feature_mapping, sizeof(int)*this->metadata->input_dim);
+        memcpy(this->edata->feature_mappings->feature_mapping, feature_mapping, sizeof(int)*this->metadata->input_dim);
+        memcpy(this->edata->feature_mappings->mapping_numerics, mapping_numerics, sizeof(bool)*this->metadata->input_dim);
+        memcpy(this->edata->feature_mappings->reverse_num_feature_mapping, reverse_num_feature_mapping, sizeof(int)*this->metadata->input_dim);
+        memcpy(this->edata->feature_mappings->reverse_cat_feature_mapping, reverse_cat_feature_mapping, sizeof(int)*this->metadata->input_dim);
     }
     if (this->metadata->verbose > 0){
         std::cout << "Setting " << this->learner_name << " feature mapping " << std::endl;
@@ -334,12 +334,12 @@ float* GBRL::get_feature_weights(){
 #ifdef USE_CUDA
     if (this->device == gpu){
         float *feature_weights = new float[this->metadata->input_dim];
-        cudaMemcpy(feature_weights, this->edata->feature_weights, sizeof(float) * this->metadata->input_dim, cudaMemcpyDeviceToHost);
+        cudaMemcpy(feature_weights, this->edata->feature_data->feature_weights, sizeof(float) * this->metadata->input_dim, cudaMemcpyDeviceToHost);
         return feature_weights;
     }
 #endif 
     if (this->device == cpu)
-        return copy_mat(this->edata->feature_weights, this->metadata->input_dim, this->metadata->par_th);
+        return copy_mat(this->edata->feature_data->feature_weights, this->metadata->input_dim, this->metadata->par_th);
     return nullptr;
 }
 
@@ -349,16 +349,16 @@ void GBRL::get_feature_mapping(int*& feature_mapping, bool*& mapping_numerics){
     if (this->device == gpu){
         feature_mapping = new int[this->metadata->input_dim];
         mapping_numerics = new bool[this->metadata->input_dim];
-        cudaMemcpy(feature_mapping, this->edata->feature_mapping, sizeof(int) * this->metadata->input_dim, cudaMemcpyDeviceToHost);
-        cudaMemcpy(mapping_numerics, this->edata->mapping_numerics, sizeof(bool) * this->metadata->input_dim, cudaMemcpyDeviceToHost);
+        cudaMemcpy(feature_mapping, this->edata->feature_mappings->feature_mapping, sizeof(int) * this->metadata->input_dim, cudaMemcpyDeviceToHost);
+        cudaMemcpy(mapping_numerics, this->edata->feature_mappings->mapping_numerics, sizeof(bool) * this->metadata->input_dim, cudaMemcpyDeviceToHost);
         return;
     }
 #endif 
     if (this->device == cpu){
         feature_mapping = new int[this->metadata->input_dim];
         mapping_numerics = new bool[this->metadata->input_dim];
-        memcpy(feature_mapping, this->edata->feature_mapping, sizeof(int) * this->metadata->input_dim);
-        memcpy(mapping_numerics, this->edata->mapping_numerics, sizeof(bool) * this->metadata->input_dim);
+        memcpy(feature_mapping, this->edata->feature_mappings->feature_mapping, sizeof(int) * this->metadata->input_dim);
+        memcpy(mapping_numerics, this->edata->feature_mappings->mapping_numerics, sizeof(bool) * this->metadata->input_dim);
         return;
     }
     feature_mapping = nullptr;
@@ -1370,8 +1370,8 @@ void GBRL::print_tree(int tree_idx = -1){
         edata_cpu = this->edata;
 
     int n_trees = this->metadata->n_trees;
-    int stop_leaf_idx = (tree_idx == n_trees - 1) ? this->metadata->n_leaves : edata_cpu->tree_indices[tree_idx+1];
-    int n_leaves = stop_leaf_idx - edata_cpu->tree_indices[tree_idx];
+    int stop_leaf_idx = (tree_idx == n_trees - 1) ? this->metadata->n_leaves : edata_cpu->ensemble_info->tree_indices[tree_idx+1];
+    int n_leaves = stop_leaf_idx - edata_cpu->ensemble_info->tree_indices[tree_idx];
 
     std::cout << growPolicyToString(this->metadata->grow_policy) <<" DecisionTree idx: " << tree_idx;
     std::cout <<  " output_dim: " << this->metadata->output_dim << " n_bins: " << this->metadata->n_bins;
@@ -1379,7 +1379,7 @@ void GBRL::print_tree(int tree_idx = -1){
     std::cout << " input_dim: " << this->metadata->input_dim << " with " << this->metadata->n_num_features << " numerical features and " << this->metadata->n_cat_features << " categorical features" << std::endl;
     std::cout << "Leaf Nodes: " << n_leaves << std::endl;
     int ctr = 0;
-    for (int leaf_idx = edata_cpu->tree_indices[tree_idx]; leaf_idx < stop_leaf_idx; ++leaf_idx){
+    for (int leaf_idx = edata_cpu->ensemble_info->tree_indices[tree_idx]; leaf_idx < stop_leaf_idx; ++leaf_idx){
         print_leaf(leaf_idx, ctr, tree_idx, edata_cpu, this->metadata);
         ctr++;
     }
@@ -1434,20 +1434,20 @@ void GBRL::plot_tree(int tree_idx, const std::string &filename){
     std::unordered_set<std::string> edgesSet;
 
     int n_trees = this->metadata->n_trees;
-    int stop_leaf_idx = tree_idx == n_trees - 1 ? this->metadata->n_leaves  : edata_cpu->tree_indices[tree_idx+1];
+    int stop_leaf_idx = tree_idx == n_trees - 1 ? this->metadata->n_leaves  : edata_cpu->ensemble_info->tree_indices[tree_idx+1];
     
-    for (int leaf_idx = edata_cpu->tree_indices[tree_idx]; leaf_idx < stop_leaf_idx; ++leaf_idx){
+    for (int leaf_idx = edata_cpu->ensemble_info->tree_indices[tree_idx]; leaf_idx < stop_leaf_idx; ++leaf_idx){
         int nodeIndex = 0, parentIdx = 0; 
         int idx = (this->metadata->grow_policy == OBLIVIOUS) ? tree_idx : leaf_idx;
-        int depth = edata_cpu->depths[idx];
+        int depth = edata_cpu->ensemble_info->depths[idx];
         int cond_idx = idx * this->metadata->max_depth;
         // Process the root node
-        int feature_idx = edata_cpu->feature_indices[cond_idx];
-        float feature_value = edata_cpu->feature_values[cond_idx];
-        char *categorical_value = edata_cpu->categorical_values + cond_idx * MAX_CHAR_SIZE;
-        bool inequality_direction  = edata_cpu->inequality_directions[leaf_idx*this->metadata->max_depth];
-        float edge_weight  = edata_cpu->edge_weights[leaf_idx*this->metadata->max_depth];
-        bool is_numeric  = edata_cpu->is_numerics[cond_idx];
+        int feature_idx = edata_cpu->feature_data->feature_indices[cond_idx];
+        float feature_value = edata_cpu->feature_data->feature_values[cond_idx];
+        char *categorical_value = edata_cpu->feature_data->categorical_values + cond_idx * MAX_CHAR_SIZE;
+        bool inequality_direction  = edata_cpu->feature_data->inequality_directions[leaf_idx*this->metadata->max_depth];
+        float edge_weight  = edata_cpu->leaf_data->edge_weights[leaf_idx*this->metadata->max_depth];
+        bool is_numeric  = edata_cpu->feature_data->is_numerics[cond_idx];
         
         if (nodesMap.find(nodeIndex) == nodesMap.end()) {  // Check if the root node already exists
             std::strcpy(buffer, std::to_string(nodeIndex).c_str());
@@ -1463,10 +1463,10 @@ void GBRL::plot_tree(int tree_idx, const std::string &filename){
 
         std::vector<bool> path;
         for (int i = 1; i < depth; ++i){
-            feature_idx = edata_cpu->feature_indices[cond_idx + i];
-            feature_value = edata_cpu->feature_values[cond_idx + i];
-            char *categorical_value = edata_cpu->categorical_values + (cond_idx + i)*MAX_CHAR_SIZE;
-            is_numeric = edata_cpu->is_numerics[cond_idx + i];
+            feature_idx = edata_cpu->feature_data->feature_indices[cond_idx + i];
+            feature_value = edata_cpu->feature_data->feature_values[cond_idx + i];
+            char *categorical_value = edata_cpu->feature_data->categorical_values + (cond_idx + i)*MAX_CHAR_SIZE;
+            is_numeric = edata_cpu->feature_data->is_numerics[cond_idx + i];
             path.push_back(inequality_direction);
             nodeIndex = binaryToDecimal(path);
         
@@ -1501,12 +1501,12 @@ void GBRL::plot_tree(int tree_idx, const std::string &filename){
 
             parentNode = currentNode;
             parentIdx = nodeIndex;
-            inequality_direction = edata_cpu->inequality_directions[leaf_idx*this->metadata->max_depth + i];
-            edge_weight = edata_cpu->edge_weights[leaf_idx*this->metadata->max_depth + i];
+            inequality_direction = edata_cpu->feature_data->inequality_directions[leaf_idx*this->metadata->max_depth + i];
+            edge_weight = edata_cpu->leaf_data->edge_weights[leaf_idx*this->metadata->max_depth + i];
 
         }
     
-        std::string leafLabel = "val = " + VectoString(edata_cpu->values + leaf_idx*this->metadata->output_dim, this->metadata->output_dim);
+        std::string leafLabel = "val = " + VectoString(edata_cpu->leaf_data->values + leaf_idx*this->metadata->output_dim, this->metadata->output_dim);
         std::string uniqueLeafLabel = leafLabel + "_idx_" + std::to_string(leaf_idx); 
         std::strcpy(buffer, uniqueLeafLabel.c_str());
         currentNode = agnode(g, buffer, true);
@@ -1518,8 +1518,8 @@ void GBRL::plot_tree(int tree_idx, const std::string &filename){
         std::strcpy(buffer, leafLabel.c_str());  // Setting the displayed label
         agset(currentNode, (char*)"label", buffer);
         std::stringstream edgeLabel;
-        edgeLabel << (edata_cpu->inequality_directions[leaf_idx * this->metadata->max_depth + depth - 1] ? "Yes\nweight: " : "No\nweight: ")
-                  << std::fixed << std::setprecision(3) << edata_cpu->edge_weights[leaf_idx * this->metadata->max_depth + depth - 1];
+        edgeLabel << (edata_cpu->feature_data->inequality_directions[leaf_idx * this->metadata->max_depth + depth - 1] ? "Yes\nweight: " : "No\nweight: ")
+                  << std::fixed << std::setprecision(3) << edata_cpu->leaf_data->edge_weights[leaf_idx * this->metadata->max_depth + depth - 1];
         std::strcpy(buffer, edgeLabel.str().c_str());
         agsafeset(edge, (char*)"label", buffer, (char*)"");  // Fixing edge label
     }

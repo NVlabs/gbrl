@@ -262,7 +262,7 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
 
 int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaData *metadata, const SplitCandidateGenerator &generator){
     allocate_ensemble_memory(metadata, edata);
-    edata->tree_indices[metadata->n_trees] = metadata->n_leaves;
+    edata->ensemble_info->tree_indices[metadata->n_trees] = metadata->n_leaves;
     int depth = 0, node_idx_cntr = 0, chosen_idx = 0;
     float best_score, parent_score = -INFINITY;
     int n_samples = dataset->n_samples;
@@ -329,7 +329,7 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
                 for (int j = start_idx; j < end_idx; ++j) {
                     float score = crnt_node->getSplitScore(dataset, metadata->split_score_func, split_candidates[j], metadata->min_data_in_leaf);
                     int feat_idx = (split_candidates[j].categorical_value == nullptr) ? split_candidates[j].feature_idx : split_candidates[j].feature_idx + metadata->n_num_features; 
-                    score = score * edata->feature_weights[feat_idx] - parent_score;
+                    score = score * edata->feature_data->feature_weights[feat_idx] - parent_score;
                     
 #ifdef DEBUG
                     std::cout << " cand: " <<  j << " score: " <<  score << " parent score: " <<  parent_score << " info: " << split_candidates[j] << std::endl;
@@ -376,7 +376,7 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
 
 int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMetaData *metadata, const SplitCandidateGenerator &generator){
     allocate_ensemble_memory(metadata, edata);
-    edata->tree_indices[metadata->n_trees] = metadata->n_leaves;
+    edata->ensemble_info->tree_indices[metadata->n_trees] = metadata->n_leaves;
     
     int depth = 0, node_idx_cntr = 0, chosen_idx = 0;
     float best_score;
@@ -430,9 +430,9 @@ int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMe
                 }
                 // Use reverse mapping to get original feature index for weighting
                 int feat_idx = (split_candidates[j].categorical_value == nullptr) 
-                    ? edata->reverse_num_feature_mapping[split_candidates[j].feature_idx] 
-                    : edata->reverse_cat_feature_mapping[split_candidates[j].feature_idx];
-                score = score * edata->feature_weights[feat_idx];
+                    ? edata->feature_mappings->reverse_num_feature_mapping[split_candidates[j].feature_idx] 
+                    : edata->feature_mappings->reverse_cat_feature_mapping[split_candidates[j].feature_idx];
+                score = score * edata->feature_data->feature_weights[feat_idx];
                 
 #ifdef DEBUG
                 std::cout << " cand: " <<  j << " score: " <<  score << " info: " << split_candidates[j] << std::endl;
@@ -486,7 +486,7 @@ int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMe
 
 void Fitter::fit_leaves(dataSet *dataset, ensembleData *edata, ensembleMetaData *metadata, const int added_leaves){
     for (int leaf_idx = 0; leaf_idx < added_leaves; ++leaf_idx){
-        Fitter::calc_leaf_value(dataset, edata, metadata, edata->tree_indices[metadata->n_trees - 1] + leaf_idx, metadata->n_trees - 1);
+        Fitter::calc_leaf_value(dataset, edata, metadata, edata->ensemble_info->tree_indices[metadata->n_trees - 1] + leaf_idx, metadata->n_trees - 1);
     }
 }
 
@@ -495,20 +495,20 @@ void Fitter::update_ensemble_per_leaf(ensembleData *edata, ensembleMetaData *met
 #ifdef DEBUG
     edata->n_samples[idx] = node->n_samples;
 #endif
-    edata->depths[idx] = node->depth;
+    edata->ensemble_info->depths[idx] = node->depth;
     int row_idx = idx*metadata->max_depth;
     if (node->depth > 0){
         for (int i = 0; i < node->depth; ++i){
             if (node->split_conditions[i].categorical_value != nullptr){
-                memcpy(edata->categorical_values + (row_idx + i)*MAX_CHAR_SIZE, node->split_conditions[i].categorical_value, sizeof(char)*MAX_CHAR_SIZE);
-                edata->is_numerics[row_idx+ i] = false;
+                memcpy(edata->feature_data->categorical_values + (row_idx + i)*MAX_CHAR_SIZE, node->split_conditions[i].categorical_value, sizeof(char)*MAX_CHAR_SIZE);
+                edata->feature_data->is_numerics[row_idx+ i] = false;
             } else {
-                edata->is_numerics[row_idx+ i] = true;
+                edata->feature_data->is_numerics[row_idx+ i] = true;
             }
-            edata->feature_indices[row_idx+ i] = node->split_conditions[i].feature_idx;
-            edata->feature_values[row_idx+ i] = node->split_conditions[i].feature_value;
-            edata->inequality_directions[row_idx + i] = node->split_conditions[i].inequality_direction;
-            edata->edge_weights[row_idx + i] = node->split_conditions[i].edge_weight;
+            edata->feature_data->feature_indices[row_idx+ i] = node->split_conditions[i].feature_idx;
+            edata->feature_data->feature_values[row_idx+ i] = node->split_conditions[i].feature_value;
+            edata->feature_data->inequality_directions[row_idx + i] = node->split_conditions[i].inequality_direction;
+            edata->leaf_data->edge_weights[row_idx + i] = node->split_conditions[i].edge_weight;
         }
     }
     metadata->n_leaves += 1;
@@ -521,20 +521,20 @@ void Fitter::update_ensemble_per_tree(ensembleData *edata, ensembleMetaData *met
 #ifdef DEBUG
         edata->n_samples[metadata->n_leaves] = node->n_samples;
 #endif
-        edata->depths[idx] = node->depth;
+        edata->ensemble_info->depths[idx] = node->depth;
         int row_idx = idx*metadata->max_depth;
         if (node->depth > 0){
             for (int i = 0; i < node->depth; ++i){
                 if (node->split_conditions[i].categorical_value != nullptr){
-                    memcpy(edata->categorical_values + (row_idx + i)*MAX_CHAR_SIZE, node->split_conditions[i].categorical_value, sizeof(char)*MAX_CHAR_SIZE);
-                    edata->is_numerics[row_idx+ i] = false;
+                    memcpy(edata->feature_data->categorical_values + (row_idx + i)*MAX_CHAR_SIZE, node->split_conditions[i].categorical_value, sizeof(char)*MAX_CHAR_SIZE);
+                    edata->feature_data->is_numerics[row_idx+ i] = false;
                 } else {
-                    edata->is_numerics[row_idx+ i] = true;
+                    edata->feature_data->is_numerics[row_idx+ i] = true;
                 }
-                edata->feature_indices[row_idx+ i] = node->split_conditions[i].feature_idx;
-                edata->feature_values[row_idx+ i] = node->split_conditions[i].feature_value;
-                edata->inequality_directions[metadata->n_leaves*metadata->max_depth + i] = node->split_conditions[i].inequality_direction;
-                edata->edge_weights[metadata->n_leaves*metadata->max_depth + i] = node->split_conditions[i].edge_weight;
+                edata->feature_data->feature_indices[row_idx+ i] = node->split_conditions[i].feature_idx;
+                edata->feature_data->feature_values[row_idx+ i] = node->split_conditions[i].feature_value;
+                edata->feature_data->inequality_directions[metadata->n_leaves*metadata->max_depth + i] = node->split_conditions[i].inequality_direction;
+                edata->leaf_data->edge_weights[metadata->n_leaves*metadata->max_depth + i] = node->split_conditions[i].edge_weight;
             }
         }
         metadata->n_leaves += 1;
@@ -546,7 +546,7 @@ void Fitter::calc_leaf_value(dataSet *dataset, ensembleData *edata, ensembleMeta
     int output_dim = metadata->output_dim;
     const float *obs = dataset->obs->data, *grads = dataset->grads->data;
     const char *categorical_obs = dataset->categorical_obs->data;
-    int depth = (metadata->grow_policy == OBLIVIOUS) ? edata->depths[tree_idx] : edata->depths[leaf_idx];
+    int depth = (metadata->grow_policy == OBLIVIOUS) ? edata->ensemble_info->depths[tree_idx] : edata->ensemble_info->depths[leaf_idx];
     int cond_idx = (metadata->grow_policy == OBLIVIOUS) ? tree_idx*metadata->max_depth : leaf_idx*metadata->max_depth;
     int ineq_cond = leaf_idx*metadata->max_depth;
     float count = 0;
@@ -558,7 +558,7 @@ void Fitter::calc_leaf_value(dataSet *dataset, ensembleData *edata, ensembleMeta
         cat_row_idx = i*metadata->n_cat_features;
         passed = false;
         for (int depth_idx = depth - 1; depth_idx >= 0; --depth_idx){
-            passed = (edata->is_numerics[cond_idx + depth_idx]) ? (obs[row_idx + edata->feature_indices[cond_idx + depth_idx]] > edata->feature_values[cond_idx + depth_idx]) == edata->inequality_directions[ineq_cond + depth_idx] : (strcmp(&categorical_obs[(cat_row_idx + edata->feature_indices[cond_idx + depth_idx]) * MAX_CHAR_SIZE], edata->categorical_values + (cond_idx + depth_idx)*MAX_CHAR_SIZE) == 0) == edata->inequality_directions[ineq_cond + depth_idx];
+            passed = (edata->feature_data->is_numerics[cond_idx + depth_idx]) ? (obs[row_idx + edata->feature_data->feature_indices[cond_idx + depth_idx]] > edata->feature_data->feature_values[cond_idx + depth_idx]) == edata->feature_data->inequality_directions[ineq_cond + depth_idx] : (strcmp(&categorical_obs[(cat_row_idx + edata->feature_data->feature_indices[cond_idx + depth_idx]) * MAX_CHAR_SIZE], edata->feature_data->categorical_values + (cond_idx + depth_idx)*MAX_CHAR_SIZE) == 0) == edata->feature_data->inequality_directions[ineq_cond + depth_idx];
             if (!passed)
                 break;
         }
@@ -567,13 +567,13 @@ void Fitter::calc_leaf_value(dataSet *dataset, ensembleData *edata, ensembleMeta
 
             #pragma omp simd
             for (int d = 0; d < output_dim; ++d)
-                edata->values[leaf_idx*output_dim + d] += grads[idx + d];
+                edata->leaf_data->values[leaf_idx*output_dim + d] += grads[idx + d];
             count += 1;
         }
     }
     if (count > 0){
         for (int d = 0; d < output_dim; ++d){
-            edata->values[leaf_idx*output_dim + d] /= count;
+            edata->leaf_data->values[leaf_idx*output_dim + d] /= count;
         }
     }
 #ifdef DEBUG

@@ -492,15 +492,15 @@ std::ostream& operator<<(std::ostream& os, const TreeNode& obj){
 void print_leaf(const int global_leaf_idx, const int leaf_idx, const int tree_idx, const ensembleData *edata, const ensembleMetaData *metadata){
     int idx = (metadata->grow_policy == OBLIVIOUS) ? tree_idx : global_leaf_idx;
     std::cout << "Leaf idx: " << leaf_idx << " tree_idx: " << tree_idx;
-    std::cout << " output_dim: " << metadata->output_dim << " depth: " << edata->depths[idx];
+    std::cout << " output_dim: " << metadata->output_dim << " depth: " << edata->ensemble_info->depths[idx];
 #ifdef DEBUG
     std::cout << " n_samples: " << edata->n_samples[global_leaf_idx]  << " value: [";
 #else 
     std::cout << " value: [";
  #endif    
-    if (edata->values != nullptr){
+    if (edata->leaf_data->values != nullptr){
         for (int i = 0 ; i < metadata->output_dim ; i++){
-            std::cout << edata->values[global_leaf_idx * metadata->output_dim + i];
+            std::cout << edata->leaf_data->values[global_leaf_idx * metadata->output_dim + i];
             if (i < metadata->output_dim - 1)
                 std::cout << ", ";
         }
@@ -509,42 +509,42 @@ void print_leaf(const int global_leaf_idx, const int leaf_idx, const int tree_id
     int cond_idx = idx * metadata->max_depth;
     std::cout << "] ";
     std::cout << " feature_idxs: [";
-    for (int i = 0 ; i < edata->depths[idx] ; i++){
-        if (edata->is_numerics[cond_idx + i])
-            std::cout << edata->feature_indices[cond_idx + i];
+    for (int i = 0 ; i < edata->ensemble_info->depths[idx] ; i++){
+        if (edata->feature_data->is_numerics[cond_idx + i])
+            std::cout << edata->feature_data->feature_indices[cond_idx + i];
         else
-            std::cout << std::to_string(edata->feature_indices[cond_idx + i] + metadata->n_num_features);
+            std::cout << std::to_string(edata->feature_data->feature_indices[cond_idx + i] + metadata->n_num_features);
 
-        if (i < edata->depths[idx] - 1)
+        if (i < edata->ensemble_info->depths[idx] - 1)
             std::cout << ", ";
     }
     std::cout << "] ";
     std::cout << " inequality_directions: [";
-    for (int i = 0 ; i < edata->depths[idx] ; i++){
-        std::cout << edata->inequality_directions[global_leaf_idx * metadata->max_depth + i];
-        if (i < edata->depths[idx] - 1)
+    for (int i = 0 ; i < edata->ensemble_info->depths[idx] ; i++){
+        std::cout << edata->feature_data->inequality_directions[global_leaf_idx * metadata->max_depth + i];
+        if (i < edata->ensemble_info->depths[idx] - 1)
             std::cout << ", ";
     }
     
     std::cout << "] ";
     std::cout << " feature_values: [";
-    for (int i = 0 ; i < edata->depths[idx] ; i++){
-        if (edata->is_numerics[cond_idx + i]){
-            std::cout << edata->feature_values[cond_idx + i];
+    for (int i = 0 ; i < edata->ensemble_info->depths[idx] ; i++){
+        if (edata->feature_data->is_numerics[cond_idx + i]){
+            std::cout << edata->feature_data->feature_values[cond_idx + i];
         }    
         else {
             for (int j = 0; j < MAX_CHAR_SIZE; ++j)
-                std::cout << edata->categorical_values[(cond_idx + i)*MAX_CHAR_SIZE + j];
+                std::cout << edata->feature_data->categorical_values[(cond_idx + i)*MAX_CHAR_SIZE + j];
         }
-        if (i < edata->depths[idx] - 1)
+        if (i < edata->ensemble_info->depths[idx] - 1)
             std::cout << ", ";
     }
     
     std::cout << "]" << std::endl;
     std::cout << " edge_weights: [";
-    for (int i = 0 ; i < edata->depths[idx] ; i++){
-        std::cout << edata->edge_weights[global_leaf_idx * metadata->max_depth + i];
-        if (i < edata->depths[idx] - 1)
+    for (int i = 0 ; i < edata->ensemble_info->depths[idx] ; i++){
+        std::cout << edata->leaf_data->edge_weights[global_leaf_idx * metadata->max_depth + i];
+        if (i < edata->ensemble_info->depths[idx] - 1)
             std::cout << ", ";
     }
     std::cout << "]" << std::endl;
