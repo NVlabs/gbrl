@@ -1,10 +1,22 @@
-//////////////////////////////////////////////////////////////////////////////
 // Copyright (c) 2024-2026, NVIDIA Corporation. All rights reserved.
 //
-// This work is made available under the Nvidia Source Code License-NC.
-// To view a copy of this license, visit
-// https://nvlabs.github.io/gbrl/license.html
+// Permission is hereby granted, free of charge, to any person obtaining a
+// copy of this software and associated documentation files (the "Software"),
+// to deal in the Software without restriction, including without limitation
+// the rights to use, copy, modify, merge, publish, distribute, sublicense,
+// and/or sell copies of the Software, and to permit persons to whom the
+// Software is furnished to do so, subject to the following conditions:
 //
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+// THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+// DEALINGS IN THE SOFTWARE.
 //////////////////////////////////////////////////////////////////////////////
 /**
  * @file types.cpp
@@ -493,27 +505,38 @@ ensembleData* copy_compressed_ensemble_data(ensembleData *other_edata, ensembleM
     }
     ensembleData *edata = new ensembleData;
     size_t data_size = 0;
+    
+    // Allocate sub-structs on CPU
+    edata->ensemble_info = new ensembleInfo;
+    edata->leaf_data = new leafData;
+    edata->feature_data = new featureData;
+    edata->mono_constraints = new monotonicConstraints;
+    edata->mono_constraints->n_constraints = 0;  // Initialize to 0
+    edata->feature_mappings = new featureMapping;
+    
     edata->bias = new float[metadata->output_dim];
     data_size += sizeof(float) * metadata->output_dim;
     memcpy(edata->bias, other_edata->bias, metadata->output_dim * sizeof(float));
-    edata->feature_mapping = new int[metadata->input_dim];
-    memcpy(edata->feature_mapping, other_edata->feature_mapping, metadata->input_dim * sizeof(int));
+    
+    // Feature mappings
+    edata->feature_mappings->feature_mapping = new int[metadata->input_dim];
+    memcpy(edata->feature_mappings->feature_mapping, other_edata->feature_mappings->feature_mapping, metadata->input_dim * sizeof(int));
     data_size += sizeof(int) * metadata->input_dim;
-    edata->feature_mapping = new int[metadata->input_dim];
-    memcpy(edata->feature_mapping, other_edata->feature_mapping, metadata->input_dim * sizeof(int));
+    edata->feature_mappings->reverse_num_feature_mapping = new int[metadata->input_dim];
+    memcpy(edata->feature_mappings->reverse_num_feature_mapping, other_edata->feature_mappings->reverse_num_feature_mapping, metadata->input_dim * sizeof(int));
     data_size += sizeof(int) * metadata->input_dim;
-    edata->reverse_num_feature_mapping = new int[metadata->input_dim];
-    memcpy(edata->reverse_num_feature_mapping, other_edata->reverse_num_feature_mapping, metadata->input_dim * sizeof(int));
+    edata->feature_mappings->reverse_cat_feature_mapping = new int[metadata->input_dim];
+    memcpy(edata->feature_mappings->reverse_cat_feature_mapping, other_edata->feature_mappings->reverse_cat_feature_mapping, metadata->input_dim * sizeof(int));
     data_size += sizeof(int) * metadata->input_dim;
-    edata->reverse_cat_feature_mapping = new int[metadata->input_dim];
-    memcpy(edata->reverse_cat_feature_mapping, other_edata->reverse_cat_feature_mapping, metadata->input_dim * sizeof(int));
-    data_size += sizeof(int) * metadata->input_dim;
-    edata->mapping_numerics = new bool[metadata->input_dim];
-    memcpy(edata->mapping_numerics, other_edata->mapping_numerics, metadata->input_dim * sizeof(bool));
+    edata->feature_mappings->mapping_numerics = new bool[metadata->input_dim];
+    memcpy(edata->feature_mappings->mapping_numerics, other_edata->feature_mappings->mapping_numerics, metadata->input_dim * sizeof(bool));
     data_size += sizeof(bool) * metadata->input_dim;
-    edata->feature_weights = new float[metadata->input_dim];
+    
+    // Feature data - feature_weights
+    edata->feature_data->feature_weights = new float[metadata->input_dim];
     data_size += sizeof(float) * metadata->input_dim;
-    memcpy(edata->feature_weights, other_edata->feature_weights, metadata->input_dim * sizeof(float));
+    memcpy(edata->feature_data->feature_weights, other_edata->feature_data->feature_weights, metadata->input_dim * sizeof(float));
+    
     int split_sizes = (metadata->grow_policy == OBLIVIOUS) ? n_compressed_trees : n_compressed_leaves;
     const int *split_indices = (metadata->grow_policy == OBLIVIOUS) ? tree_indices : leaf_indices;
 #ifdef DEBUG
@@ -522,43 +545,57 @@ ensembleData* copy_compressed_ensemble_data(ensembleData *other_edata, ensembleM
     memset(edata->n_samples, 0, n_compressed_leaves * sizeof(int));
     selective_copy(n_compressed_leaves, leaf_indices, edata->n_samples, other_edata->n_samples, 1);
 #endif
-    edata->tree_indices = new int[n_compressed_trees];
+    // Ensemble info
+    edata->ensemble_info->tree_indices = new int[n_compressed_trees];
     data_size += sizeof(int) * n_compressed_trees;
-    memcpy(edata->tree_indices, new_tree_indices, n_compressed_trees * sizeof(int));
-    edata->depths = new int[split_sizes];
+    memcpy(edata->ensemble_info->tree_indices, new_tree_indices, n_compressed_trees * sizeof(int));
+    edata->ensemble_info->depths = new int[split_sizes];
     data_size += sizeof(int) * split_sizes;
-    memset(edata->depths, 0, split_sizes * sizeof(int));
-    selective_copy(split_sizes, split_indices, edata->depths, other_edata->depths, 1);
-    edata->values = new float[n_compressed_leaves * metadata->output_dim];
+    memset(edata->ensemble_info->depths, 0, split_sizes * sizeof(int));
+    selective_copy(split_sizes, split_indices, edata->ensemble_info->depths, other_edata->ensemble_info->depths, 1);
+    
+    // Leaf data
+    edata->leaf_data->values = new float[n_compressed_leaves * metadata->output_dim];
     data_size += sizeof(float) * n_compressed_leaves * metadata->output_dim;
-    memset(edata->values, 0, n_compressed_leaves*metadata->output_dim * sizeof(float));
-    selective_copy(n_compressed_leaves, leaf_indices, edata->values, other_edata->values, metadata->output_dim);
-    // leaf data
-    edata->feature_indices = new int[split_sizes * metadata->max_depth];
-    data_size += sizeof(int) * split_sizes * metadata->max_depth;
-    memset(edata->feature_indices, 0, split_sizes*metadata->max_depth * sizeof(int));
-    selective_copy(split_sizes, split_indices, edata->feature_indices, other_edata->feature_indices, metadata->max_depth);
-    edata->feature_values = new float[split_sizes * metadata->max_depth];
-    data_size += sizeof(float) * split_sizes * metadata->max_depth;
-    memset(edata->feature_values, 0, split_sizes * metadata->max_depth * sizeof(float));
-    selective_copy(split_sizes, split_indices, edata->feature_values, other_edata->feature_values, metadata->max_depth);
-    edata->edge_weights = new float[n_compressed_leaves * metadata->max_depth];
+    memset(edata->leaf_data->values, 0, n_compressed_leaves*metadata->output_dim * sizeof(float));
+    selective_copy(n_compressed_leaves, leaf_indices, edata->leaf_data->values, other_edata->leaf_data->values, metadata->output_dim);
+    edata->leaf_data->edge_weights = new float[n_compressed_leaves * metadata->max_depth];
     data_size += sizeof(float) * n_compressed_leaves * metadata->max_depth;
-    memset(edata->edge_weights, 0, n_compressed_leaves * metadata->max_depth * sizeof(float));
-    selective_copy(n_compressed_leaves, leaf_indices, edata->edge_weights, other_edata->edge_weights, metadata->max_depth);
-    edata->is_numerics = new bool[split_sizes * metadata->max_depth];
+    memset(edata->leaf_data->edge_weights, 0, n_compressed_leaves * metadata->max_depth * sizeof(float));
+    selective_copy(n_compressed_leaves, leaf_indices, edata->leaf_data->edge_weights, other_edata->leaf_data->edge_weights, metadata->max_depth);
+    
+    // Feature data
+    edata->feature_data->feature_indices = new int[split_sizes * metadata->max_depth];
+    data_size += sizeof(int) * split_sizes * metadata->max_depth;
+    memset(edata->feature_data->feature_indices, 0, split_sizes*metadata->max_depth * sizeof(int));
+    selective_copy(split_sizes, split_indices, edata->feature_data->feature_indices, other_edata->feature_data->feature_indices, metadata->max_depth);
+    edata->feature_data->feature_values = new float[split_sizes * metadata->max_depth];
+    data_size += sizeof(float) * split_sizes * metadata->max_depth;
+    memset(edata->feature_data->feature_values, 0, split_sizes * metadata->max_depth * sizeof(float));
+    selective_copy(split_sizes, split_indices, edata->feature_data->feature_values, other_edata->feature_data->feature_values, metadata->max_depth);
+    edata->feature_data->is_numerics = new bool[split_sizes * metadata->max_depth];
     data_size += sizeof(bool) * split_sizes * metadata->max_depth;
-    memset(edata->is_numerics, 0, split_sizes * metadata->max_depth * sizeof(bool));
-    selective_copy(split_sizes, split_indices, edata->is_numerics, other_edata->is_numerics, metadata->max_depth);
-    edata->categorical_values = new char[split_sizes * metadata->max_depth * MAX_CHAR_SIZE];
+    memset(edata->feature_data->is_numerics, 0, split_sizes * metadata->max_depth * sizeof(bool));
+    selective_copy(split_sizes, split_indices, edata->feature_data->is_numerics, other_edata->feature_data->is_numerics, metadata->max_depth);
+    edata->feature_data->categorical_values = new char[split_sizes * metadata->max_depth * MAX_CHAR_SIZE];
     data_size += sizeof(char) * split_sizes * metadata->max_depth * MAX_CHAR_SIZE;
-    memset(edata->categorical_values, 0, split_sizes * metadata->max_depth * sizeof(char) * MAX_CHAR_SIZE);
-    selective_copy(split_sizes, split_indices, edata->is_numerics, other_edata->is_numerics, metadata->max_depth);
-    selective_copy_char(split_sizes, split_indices, edata->categorical_values, other_edata->categorical_values, metadata->max_depth);
-    edata->inequality_directions = new bool[n_compressed_leaves * metadata->max_depth]; 
+    memset(edata->feature_data->categorical_values, 0, split_sizes * metadata->max_depth * sizeof(char) * MAX_CHAR_SIZE);
+    selective_copy_char(split_sizes, split_indices, edata->feature_data->categorical_values, other_edata->feature_data->categorical_values, metadata->max_depth);
+    edata->feature_data->inequality_directions = new bool[n_compressed_leaves * metadata->max_depth]; 
     data_size += sizeof(bool) * n_compressed_leaves * metadata->max_depth;
-    memset(edata->inequality_directions, 0, n_compressed_leaves * metadata->max_depth * sizeof(bool));
-    selective_copy(n_compressed_leaves, leaf_indices, edata->inequality_directions, other_edata->inequality_directions, metadata->max_depth);
+    memset(edata->feature_data->inequality_directions, 0, n_compressed_leaves * metadata->max_depth * sizeof(bool));
+    selective_copy(n_compressed_leaves, leaf_indices, edata->feature_data->inequality_directions, other_edata->feature_data->inequality_directions, metadata->max_depth);
+    
+    // Monotonic constraints - allocate but keep empty for compressed
+    edata->mono_constraints->feature_idx = new int[metadata->n_mono_constraints];
+    data_size += sizeof(int) * metadata->n_mono_constraints;
+    memcpy(edata->mono_constraints->feature_idx, other_edata->mono_constraints->feature_idx, metadata->n_mono_constraints * sizeof(int));
+    edata->mono_constraints->output_idx = new int[metadata->n_mono_constraints];
+    data_size += sizeof(int) * metadata->n_mono_constraints;
+    memcpy(edata->mono_constraints->output_idx, other_edata->mono_constraints->output_idx, metadata->n_mono_constraints * sizeof(int));
+    edata->mono_constraints->constraint = new int[metadata->n_mono_constraints];
+    data_size += sizeof(int) * metadata->n_mono_constraints;
+    memcpy(edata->mono_constraints->constraint, other_edata->mono_constraints->constraint, metadata->n_mono_constraints * sizeof(int));
     
     metadata->max_trees = n_compressed_trees;
     metadata->max_leaves = n_compressed_leaves;

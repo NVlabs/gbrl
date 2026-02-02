@@ -1,15 +1,32 @@
-
-//////////////////////////////////////////////////////////////////////////////
-// Copyright (c) 2024, NVIDIA Corporation. All rights reserved.
+// Copyright (c) 2024-2026, NVIDIA Corporation. All rights reserved.
 //
-// This work is made available under the Nvidia Source Code License-NC.
-// To view a copy of this license, visit
-// https://nvlabs.github.io/gbrl/license.html
+// Permission is hereby granted, free of charge, to any person obtaining a
+// copy of this software and associated documentation files (the "Software"),
+// to deal in the Software without restriction, including without limitation
+// the rights to use, copy, modify, merge, publish, distribute, sublicense,
+// and/or sell copies of the Software, and to permit persons to whom the
+// Software is furnished to do so, subject to the following conditions:
 //
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+// THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+// DEALINGS IN THE SOFTWARE.
 //////////////////////////////////////////////////////////////////////////////
 /**
  * @file cuda_compression.cu
  * @brief CUDA kernels for GPU-accelerated tree ensemble compression
+ * 
+ * @warning EXPERIMENTAL - UNDER ACTIVE RESEARCH
+ * This module implements tree ensemble compression algorithms that are currently
+ * under active research and development. The API, behavior, and results may change
+ * without notice. This feature has not been fully validated and is intended for
+ * internal research use only.
  * 
  * Implements GPU-accelerated versions of tree compression operations including
  * matrix representation generation and ensemble compression. Provides significant
@@ -102,19 +119,19 @@ void get_matrix_representation_cuda(dataSet *dataset, ensembleMetaData *metadata
 
     if (metadata->grow_policy == GREEDY){
         if (metadata->n_cat_features == 0)
-            get_representation_kernel_numerical_only<<<metadata->n_leaves, threads_per_block>>>(device_batch_obs, dataset->n_samples, metadata->n_num_features, edata->feature_indices, edata->depths, edata->feature_values, edata->inequality_directions, edata->values, metadata->output_dim, metadata->max_depth, metadata->n_leaves, device_A);
+            get_representation_kernel_numerical_only<<<metadata->n_leaves, threads_per_block>>>(device_batch_obs, dataset->n_samples, metadata->n_num_features, edata->feature_data->feature_indices, edata->ensemble_info->depths, edata->feature_data->feature_values, edata->feature_data->inequality_directions, edata->leaf_data->values, metadata->output_dim, metadata->max_depth, metadata->n_leaves, device_A);
         else
-            get_representation_kernel_tree_wise<<<metadata->n_leaves, threads_per_block>>>(device_batch_obs, device_batch_cat_obs, dataset->n_samples, metadata->n_num_features, metadata->n_cat_features, edata->feature_indices, edata->depths, edata->feature_values, edata->inequality_directions, edata->values, edata->categorical_values, edata->is_numerics, metadata->output_dim, metadata->max_depth, metadata->n_leaves, device_A);
+            get_representation_kernel_tree_wise<<<metadata->n_leaves, threads_per_block>>>(device_batch_obs, device_batch_cat_obs, dataset->n_samples, metadata->n_num_features, metadata->n_cat_features, edata->feature_data->feature_indices, edata->ensemble_info->depths, edata->feature_data->feature_values, edata->feature_data->inequality_directions, edata->leaf_data->values, edata->feature_data->categorical_values, edata->feature_data->is_numerics, metadata->output_dim, metadata->max_depth, metadata->n_leaves, device_A);
     } else{
         
         if (metadata->n_cat_features == 0)
-            get_representation_oblivious_kernel_numerical_only<<<metadata->n_trees, threads_per_block>>>(device_batch_obs, dataset->n_samples, metadata->n_num_features, edata->feature_indices, edata->depths, edata->feature_values, edata->inequality_directions, edata->values, edata->tree_indices, metadata->output_dim, metadata->max_depth, metadata->n_leaves, device_A);
+            get_representation_oblivious_kernel_numerical_only<<<metadata->n_trees, threads_per_block>>>(device_batch_obs, dataset->n_samples, metadata->n_num_features, edata->feature_data->feature_indices, edata->ensemble_info->depths, edata->feature_data->feature_values, edata->feature_data->inequality_directions, edata->leaf_data->values, edata->ensemble_info->tree_indices, metadata->output_dim, metadata->max_depth, metadata->n_leaves, device_A);
         else
-            get_representation_oblivious_kernel_tree_wise<<<metadata->n_trees, threads_per_block>>>(device_batch_obs, device_batch_cat_obs, dataset->n_samples, metadata->n_num_features, metadata->n_cat_features, edata->feature_indices, edata->depths, edata->feature_values, edata->inequality_directions, edata->values, edata->tree_indices, edata->categorical_values, edata->is_numerics, metadata->output_dim, metadata->max_depth, metadata->n_leaves, device_A);
+            get_representation_oblivious_kernel_tree_wise<<<metadata->n_trees, threads_per_block>>>(device_batch_obs, device_batch_cat_obs, dataset->n_samples, metadata->n_num_features, metadata->n_cat_features, edata->feature_data->feature_indices, edata->ensemble_info->depths, edata->feature_data->feature_values, edata->feature_data->inequality_directions, edata->leaf_data->values, edata->ensemble_info->tree_indices, edata->feature_data->categorical_values, edata->feature_data->is_numerics, metadata->output_dim, metadata->max_depth, metadata->n_leaves, device_A);
     }
     cudaDeviceSynchronize();
     n_blocks = metadata->n_leaves / THREADS_PER_BLOCK + 1; 
-    get_V_kernel<<<n_blocks, THREADS_PER_BLOCK>>>(device_V, edata->values, opts, n_opts, metadata->output_dim, metadata->n_leaves);
+    get_V_kernel<<<n_blocks, THREADS_PER_BLOCK>>>(device_V, edata->leaf_data->values, opts, n_opts, metadata->output_dim, metadata->n_leaves);
     cudaDeviceSynchronize();
     matrix->A = new bool[A_size];
     cudaMemcpy(matrix->A, device_A, A_size, cudaMemcpyDeviceToHost);
@@ -126,7 +143,7 @@ void get_matrix_representation_cuda(dataSet *dataset, ensembleMetaData *metadata
     matrix->n_leaves = metadata->n_leaves;
     cudaFree(device_data);
     int *tree_indices = new int[metadata->n_trees];
-    cudaMemcpy(tree_indices, edata->tree_indices,  sizeof(int)*metadata->n_trees, cudaMemcpyDeviceToHost);
+    cudaMemcpy(tree_indices, edata->ensemble_info->tree_indices,  sizeof(int)*metadata->n_trees, cudaMemcpyDeviceToHost);
     matrix->n_leaves_per_tree = new int[metadata->n_trees];
     for (int i = 0; i < metadata->n_trees - 1; ++i )
         matrix->n_leaves_per_tree[i] = tree_indices[i+1] - tree_indices[i];
@@ -169,7 +186,7 @@ ensembleData * compress_ensemble_cuda(ensembleMetaData *metadata, ensembleData *
     }
     cudaMemcpy(device_W, W, W_size, cudaMemcpyHostToDevice);
     int n_blocks = (n_compressed_leaves + 1) / THREADS_PER_BLOCK + 1;
-    add_W_matrix_to_values_kernel<<<n_blocks, THREADS_PER_BLOCK>>>(device_W, compressed_edata->values, compressed_edata->bias, opts, n_opts, n_compressed_leaves, metadata->output_dim);
+    add_W_matrix_to_values_kernel<<<n_blocks, THREADS_PER_BLOCK>>>(device_W, compressed_edata->leaf_data->values, compressed_edata->bias, opts, n_opts, n_compressed_leaves, metadata->output_dim);
     cudaDeviceSynchronize();
     cudaFree(device_W);
 

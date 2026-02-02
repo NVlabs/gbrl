@@ -1,5 +1,5 @@
 ##############################################################################
-# Copyright (c) 2024-2025, NVIDIA Corporation. All rights reserved.
+# Copyright (c) 2024-2026, NVIDIA Corporation. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a
 # copy of this software and associated documentation files (the "Software"),
@@ -19,6 +19,19 @@
 # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 # DEALINGS IN THE SOFTWARE.
 ##############################################################################
+"""
+Tree Ensemble Compression Module
+
+.. warning::
+    **EXPERIMENTAL - UNDER ACTIVE RESEARCH**
+    
+    This module implements tree ensemble compression algorithms that are currently
+    under active research and development. The API, behavior, and results may change
+    without notice. This feature has not been fully validated and is intended for
+    internal research use only.
+    
+    Do not rely on this functionality.
+"""
 from typing import Any, Dict, Optional, Tuple, Type, Union
 
 import numpy as np
@@ -171,6 +184,12 @@ def get_least_squares_W(C: th.Tensor, A: th.Tensor, V: th.Tensor, lambda_reg: fl
 class TreeCompression:
     """
     Base class for compressing gradient boosted tree ensembles.
+    
+    .. warning::
+        **EXPERIMENTAL - UNDER ACTIVE RESEARCH**
+        
+        This class is part of ongoing research and has not been fully validated.
+        The API may change without notice. For internal research use only.
     
     Reduces the number of trees in an ensemble while maintaining prediction accuracy
     through gradient-based optimization. Supports both 'first_k' (remove first k trees)

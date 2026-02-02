@@ -1,5 +1,5 @@
 //////////////////////////////////////////////////////////////////////////////
-// Copyright (c) 2024-2025, NVIDIA Corporation. All rights reserved.
+// Copyright (c) 2024-2026, NVIDIA Corporation. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
 // copy of this software and associated documentation files (the "Software"),
@@ -22,6 +22,12 @@
 /**
  * @file compression.cpp
  * @brief Implementation of tree ensemble compression algorithms
+ * 
+ * @warning EXPERIMENTAL - UNDER ACTIVE RESEARCH
+ * This module implements tree ensemble compression algorithms that are currently
+ * under active research and development. The API, behavior, and results may change
+ * without notice. This feature has not been fully validated and is intended for
+ * internal research use only.
  * 
  * Provides CPU-based compression for gradient boosted tree ensembles,
  * including matrix representation generation and tree selection for model
@@ -103,8 +109,8 @@ void Compressor::get_matrix_representation_cpu(dataSet *dataset, const ensembleD
     get_V(matrix, edata, metadata, opts);
     matrix->n_leaves_per_tree = new int[metadata->n_trees];
     for (int i = 0; i < metadata->n_trees - 1; ++i )
-        matrix->n_leaves_per_tree[i] = edata->tree_indices[i+1] - edata->tree_indices[i];
-    matrix->n_leaves_per_tree[metadata->n_trees - 1] = metadata->n_leaves - edata->tree_indices[metadata->n_trees - 1];
+        matrix->n_leaves_per_tree[i] = edata->ensemble_info->tree_indices[i+1] - edata->ensemble_info->tree_indices[i];
+    matrix->n_leaves_per_tree[metadata->n_trees - 1] = metadata->n_leaves - edata->ensemble_info->tree_indices[metadata->n_trees - 1];
     matrix->n_trees = metadata->n_trees;
 }
 
@@ -134,12 +140,12 @@ void Compressor::get_representation_matrix_over_leaves(const float *obs, const c
     const int obs_row = sample_idx * n_num_features;
     const int categorical_obs_row = sample_idx * n_cat_features;
 
-    const bool *numerics = edata->is_numerics;
-    const float *feature_values = edata->feature_values;
-    const int* feature_indices = edata->feature_indices;
-    const int* tree_indices = edata->tree_indices;
-    const bool* inequality_directions = edata->inequality_directions;
-    const char* categorical_values = edata->categorical_values;
+    const bool *numerics = edata->feature_data->is_numerics;
+    const float *feature_values = edata->feature_data->feature_values;
+    const int* feature_indices = edata->feature_data->feature_indices;
+    const int* tree_indices = edata->ensemble_info->tree_indices;
+    const bool* inequality_directions = edata->feature_data->inequality_directions;
+    const char* categorical_values = edata->feature_data->categorical_values;
     
     int tree_idx = start_tree_idx;
     int leaf_idx = tree_indices[tree_idx];
@@ -148,7 +154,7 @@ void Compressor::get_representation_matrix_over_leaves(const float *obs, const c
 
     while (leaf_idx < n_leaves && tree_idx < stop_tree_idx)
     {
-        const int depth = edata->depths[leaf_idx];
+        const int depth = edata->ensemble_info->depths[leaf_idx];
         const int cond_idx = leaf_idx * max_depth;
         bool passed = false;
         
@@ -202,12 +208,12 @@ void Compressor::get_representation_matrix_over_trees(const float *obs, const ch
     const int obs_row = sample_idx * n_num_features;
     const int categorical_obs_row = sample_idx * n_cat_features;
 
-    const bool *numerics = edata->is_numerics;
-    const int *depths = edata->depths;
-    const float *feature_values = edata->feature_values;
-    const int* feature_indices = edata->feature_indices;
-    const int* tree_indices = edata->tree_indices;
-    const char* categorical_values = edata->categorical_values;
+    const bool *numerics = edata->feature_data->is_numerics;
+    const int *depths = edata->ensemble_info->depths;
+    const float *feature_values = edata->feature_data->feature_values;
+    const int* feature_indices = edata->feature_data->feature_indices;
+    const int* tree_indices = edata->ensemble_info->tree_indices;
+    const char* categorical_values = edata->feature_data->categorical_values;
     const int offset_leaf_idx = tree_indices[start_tree_idx];
     
     bool *A_row = matrix->A + sample_idx * n_leaves_plus_one;
@@ -268,7 +274,7 @@ void Compressor::add_W_matrix_to_values(const float *W, const ensembleData *edat
     #pragma omp simd
 #endif
             for (int leaf_idx = start_idx; leaf_idx < end_idx; ++leaf_idx){
-                float *leaf_values = edata->values + leaf_idx * output_dim;
+                float *leaf_values = edata->leaf_data->values + leaf_idx * output_dim;
                 const float *W_values = W + (leaf_idx + 1) * output_dim;
                 for (size_t opt_idx = 0; opt_idx < opts.size(); ++opt_idx){
                     opts[opt_idx]->add_scaled(leaf_values, W_values, 0);
@@ -277,7 +283,7 @@ void Compressor::add_W_matrix_to_values(const float *W, const ensembleData *edat
         }
     } else {
         for (int leaf_idx = 0; leaf_idx < size; ++leaf_idx){
-            float *leaf_values = edata->values + leaf_idx * output_dim;
+            float *leaf_values = edata->leaf_data->values + leaf_idx * output_dim;
             const float *W_values = W + (leaf_idx + 1) * output_dim;
             for (size_t opt_idx = 0; opt_idx < opts.size(); ++opt_idx){
                 opts[opt_idx]->add_scaled(leaf_values, W_values, 0);
@@ -315,7 +321,7 @@ void Compressor::get_V(matrixRepresentation *matrix, const ensembleData *edata, 
 #endif
             for (int leaf_idx = start_idx; leaf_idx < end_idx; ++leaf_idx){
                 float *V_dest = matrix->V + (leaf_idx + 1) * output_dim;
-                const float *leaf_values = edata->values + leaf_idx * output_dim;
+                const float *leaf_values = edata->leaf_data->values + leaf_idx * output_dim;
                 for (size_t opt_idx = 0; opt_idx < opts.size(); ++opt_idx){
                     opts[opt_idx]->copy_and_scale(V_dest, leaf_values, 0);
                 }
@@ -324,7 +330,7 @@ void Compressor::get_V(matrixRepresentation *matrix, const ensembleData *edata, 
     } else {
         for (int leaf_idx = 0; leaf_idx < size; ++leaf_idx){
             float *V_dest = matrix->V + (leaf_idx + 1) * output_dim;
-            const float *leaf_values = edata->values + leaf_idx * output_dim;
+            const float *leaf_values = edata->leaf_data->values + leaf_idx * output_dim;
             for (size_t opt_idx = 0; opt_idx < opts.size(); ++opt_idx){
                 opts[opt_idx]->copy_and_scale(V_dest, leaf_values, 0);
             }

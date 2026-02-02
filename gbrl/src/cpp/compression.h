@@ -1,5 +1,5 @@
 //////////////////////////////////////////////////////////////////////////////
-// Copyright (c) 2024-2025, NVIDIA Corporation. All rights reserved.
+// Copyright (c) 2024-2026, NVIDIA Corporation. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
 // copy of this software and associated documentation files (the "Software"),
@@ -22,6 +22,12 @@
 /**
  * @file compression.h
  * @brief Tree ensemble compression utilities for CPU
+ * 
+ * @warning EXPERIMENTAL - UNDER ACTIVE RESEARCH
+ * This module implements tree ensemble compression algorithms that are currently
+ * under active research and development. The API, behavior, and results may change
+ * without notice. This feature has not been fully validated and is intended for
+ * internal research use only.
  * 
  * Provides static methods for compressing gradient boosted tree ensembles
  * by selecting a subset of trees while maintaining prediction accuracy through
