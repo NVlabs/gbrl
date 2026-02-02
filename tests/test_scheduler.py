@@ -29,6 +29,7 @@ from pathlib import Path
 
 import numpy as np
 import torch as th
+from torch.nn.functional import mse_loss
 
 ROOT_PATH = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT_PATH))
@@ -287,6 +288,239 @@ class TestScheduler(unittest.TestCase):
             pred_tree1_cpu, pred_tree1_gpu, rtol=1e-4, atol=1e-5,
             err_msg="Tree 1 predictions should match between CPU and GPU"
         )
+
+
+class TestSchedulerPersistence(unittest.TestCase):
+    """Test save/load/copy functionality with linear scheduler."""
+    
+    def test_save_load_with_linear_scheduler_cpu(self):
+        """Test that saving and loading preserves linear scheduler on CPU."""
+        print("Running test_save_load_with_linear_scheduler_cpu")
+        import tempfile
+        import os
+        
+        np.random.seed(42)
+        X = np.array([[1.0], [2.0], [3.0], [4.0]], dtype=np.float32)
+        y = np.array([[0.0], [0.0], [1.0], [1.0]], dtype=np.float32)
+        
+        tree_struct = {
+            'max_depth': 1,
+            'n_bins': 4,
+            'min_data_in_leaf': 1,
+            'par_th': 1,
+            'grow_policy': 'oblivious'
+        }
+        
+        optimizer = {
+            'algo': 'SGD',
+            'lr': 1.0,
+            'stop_lr': 0.1,
+            'T': 4,
+            'scheduler': 'Linear',
+            'start_idx': 0,
+            'stop_idx': 1
+        }
+        
+        params = {
+            "control_variates": False,
+            "split_score_func": "L2",
+        }
+        
+        model = GBTModel(
+            input_dim=1,
+            output_dim=1,
+            tree_struct=tree_struct,
+            optimizers=optimizer,
+            params=params,
+            verbose=0,
+            device='cpu'
+        )
+        
+        # Train 2 trees
+        for _ in range(2):
+            y_pred = model(th.tensor(X), requires_grad=True)
+            loss = 0.5 * mse_loss(y_pred, th.tensor(y).squeeze())
+            loss.backward()
+            model.step()
+        
+        # Get predictions before save
+        pred_before = model(X, tensor=False)
+        iteration_before = model.get_iteration()
+        
+        # Save and load
+        with tempfile.TemporaryDirectory() as tmpdir:
+            save_path = os.path.join(tmpdir, "scheduler_model")
+            model.save_learner(save_path)
+            
+            loaded_model = GBTModel.load_learner(save_path, device='cpu')
+        
+        # Check predictions match
+        pred_after = loaded_model(X, tensor=False)
+        np.testing.assert_allclose(pred_before, pred_after, rtol=1e-5, atol=1e-6,
+                                   err_msg="Predictions should match after load")
+        
+        # Check iteration count preserved
+        iteration_after = loaded_model.get_iteration()
+        self.assertEqual(iteration_before, iteration_after, "Iteration count should be preserved")
+        
+        # Train more trees and verify scheduler continues correctly
+        for _ in range(2):
+            y_pred = loaded_model(th.tensor(X), requires_grad=True)
+            loss = 0.5 * mse_loss(y_pred, th.tensor(y).squeeze())
+            loss.backward()
+            loaded_model.step()
+        
+        final_iteration = loaded_model.get_iteration()
+        self.assertEqual(final_iteration, 4, "Should have 4 trees total after continued training")
+        print(f"Iterations: before={iteration_before}, after_load={iteration_after}, final={final_iteration}")
+    
+    def test_copy_with_linear_scheduler_cpu(self):
+        """Test that copying preserves linear scheduler on CPU."""
+        print("Running test_copy_with_linear_scheduler_cpu")
+        
+        np.random.seed(42)
+        X = np.array([[1.0], [2.0], [3.0], [4.0]], dtype=np.float32)
+        y = np.array([[0.0], [0.0], [1.0], [1.0]], dtype=np.float32)
+        
+        tree_struct = {
+            'max_depth': 1,
+            'n_bins': 4,
+            'min_data_in_leaf': 1,
+            'par_th': 1,
+            'grow_policy': 'oblivious'
+        }
+        
+        optimizer = {
+            'algo': 'SGD',
+            'lr': 1.0,
+            'stop_lr': 0.1,
+            'T': 4,
+            'scheduler': 'Linear',
+            'start_idx': 0,
+            'stop_idx': 1
+        }
+        
+        params = {
+            "control_variates": False,
+            "split_score_func": "L2",
+        }
+        
+        model = GBTModel(
+            input_dim=1,
+            output_dim=1,
+            tree_struct=tree_struct,
+            optimizers=optimizer,
+            params=params,
+            verbose=0,
+            device='cpu'
+        )
+        
+        # Train 2 trees
+        for _ in range(2):
+            y_pred = model(th.tensor(X), requires_grad=True)
+            loss = 0.5 * mse_loss(y_pred, th.tensor(y).squeeze())
+            loss.backward()
+            model.step()
+        
+        # Get predictions before copy
+        pred_before = model(X, tensor=False)
+        
+        # Copy
+        copied_model = model.copy()
+        
+        # Check predictions match
+        pred_after = copied_model(X, tensor=False)
+        np.testing.assert_allclose(pred_before, pred_after, rtol=1e-5, atol=1e-6,
+                                   err_msg="Predictions should match after copy")
+        
+        # Train original more
+        for _ in range(2):
+            y_pred = model(th.tensor(X), requires_grad=True)
+            loss = 0.5 * mse_loss(y_pred, th.tensor(y).squeeze())
+            loss.backward()
+            model.step()
+        
+        # Check copied model unchanged
+        pred_copied_unchanged = copied_model(X, tensor=False)
+        np.testing.assert_allclose(pred_after, pred_copied_unchanged, rtol=1e-5, atol=1e-6,
+                                   err_msg="Copied model should be unchanged after training original")
+        
+        print(f"Original iterations: {model.get_iteration()}, Copy iterations: {copied_model.get_iteration()}")
+        self.assertEqual(model.get_iteration(), 4, "Original should have 4 trees")
+        self.assertEqual(copied_model.get_iteration(), 2, "Copy should still have 2 trees")
+    
+    def test_save_load_with_linear_scheduler_gpu(self):
+        """Test that saving and loading preserves linear scheduler on GPU."""
+        print("Running test_save_load_with_linear_scheduler_gpu")
+        
+        if not cuda_available():
+            self.skipTest("CUDA not available")
+        
+        import tempfile
+        import os
+        
+        np.random.seed(42)
+        X = np.array([[1.0], [2.0], [3.0], [4.0]], dtype=np.float32)
+        y = np.array([[0.0], [0.0], [1.0], [1.0]], dtype=np.float32)
+        X_gpu = th.tensor(X).cuda()
+        y_gpu = th.tensor(y).cuda().squeeze()
+        
+        tree_struct = {
+            'max_depth': 1,
+            'n_bins': 4,
+            'min_data_in_leaf': 1,
+            'par_th': 1,
+            'grow_policy': 'oblivious'
+        }
+        
+        optimizer = {
+            'algo': 'SGD',
+            'lr': 1.0,
+            'stop_lr': 0.1,
+            'T': 4,
+            'scheduler': 'Linear',
+            'start_idx': 0,
+            'stop_idx': 1
+        }
+        
+        params = {
+            "control_variates": False,
+            "split_score_func": "L2",
+        }
+        
+        model = GBTModel(
+            input_dim=1,
+            output_dim=1,
+            tree_struct=tree_struct,
+            optimizers=optimizer,
+            params=params,
+            verbose=0,
+            device='cuda'
+        )
+        
+        # Train 2 trees
+        for _ in range(2):
+            y_pred = model(X_gpu, requires_grad=True)
+            loss = 0.5 * mse_loss(y_pred, y_gpu)
+            loss.backward()
+            model.step()
+        
+        # Get predictions before save
+        pred_before = model(X_gpu, tensor=False)
+        
+        # Save and load
+        with tempfile.TemporaryDirectory() as tmpdir:
+            save_path = os.path.join(tmpdir, "scheduler_model_gpu")
+            model.save_learner(save_path)
+            
+            loaded_model = GBTModel.load_learner(save_path, device='cuda')
+        
+        # Check predictions match
+        pred_after = loaded_model(X_gpu, tensor=False)
+        np.testing.assert_allclose(pred_before, pred_after, rtol=1e-4, atol=1e-5,
+                                   err_msg="GPU predictions should match after load")
+        
+        print(f"GPU save/load test passed. Iterations: {loaded_model.get_iteration()}")
 
 
 if __name__ == '__main__':

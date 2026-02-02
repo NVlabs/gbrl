@@ -1034,6 +1034,254 @@ class TestMonotonicConstraintsGPU(unittest.TestCase):
         self.assertEqual(violations_2, 0, 
                        f"Interleaved GPU - num2 violations: {violations_2}/{total_2} - MUST BE 0%!")
 
+
+class TestMonotonicConstraintsPersistence(unittest.TestCase):
+    """Test save/load/copy functionality with monotonic constraints."""
+    
+    @classmethod
+    def setUpClass(cls):
+        print("Setting up persistence tests for monotonic constraints...")
+        cls.X, cls.y = create_monotonic_data(n_samples=500)
+        cls.input_dim = cls.X.shape[1]
+        cls.output_dim = 1
+        cls.n_epochs = 20
+    
+    def test_save_load_with_constraints_cpu(self):
+        """Test that saving and loading preserves monotonic constraints on CPU."""
+        print("Running test_save_load_with_constraints_cpu")
+        import tempfile
+        import os
+        
+        tree_struct = {
+            'max_depth': 3,
+            'n_bins': 64,
+            'min_data_in_leaf': 1,
+            'par_th': 1,
+            'grow_policy': 'oblivious'
+        }
+        
+        monotonic_constraints = {
+            0: ("increasing", 0),
+        }
+        
+        params = {
+            "control_variates": False,
+            "split_score_func": "L2",
+            "monotonic_constraints": monotonic_constraints
+        }
+        
+        optimizer = {'algo': 'SGD', 'lr': 0.3, 'start_idx': 0, 'stop_idx': 1}
+        
+        model = GBTModel(
+            input_dim=self.input_dim,
+            output_dim=self.output_dim,
+            tree_struct=tree_struct,
+            optimizers=optimizer,
+            params=params,
+            verbose=0,
+            device='cpu'
+        )
+        
+        model.set_bias_from_targets(self.y)
+        
+        # Train
+        for epoch in range(self.n_epochs):
+            y_pred = model(self.X, requires_grad=True)
+            loss = 0.5 * mse_loss(y_pred, th.tensor(self.y, dtype=th.float32).squeeze())
+            loss.backward()
+            model.step()
+        
+        # Check monotonicity before save
+        violations_before, total_before = check_monotonicity(model, self.X, 0, 1)
+        self.assertEqual(violations_before, 0, "Model should have no violations before save")
+        
+        # Get predictions before save
+        pred_before = model(self.X, requires_grad=False, tensor=False)
+        
+        # Save and load
+        with tempfile.TemporaryDirectory() as tmpdir:
+            save_path = os.path.join(tmpdir, "test_model")
+            model.save_learner(save_path)
+            
+            loaded_model = GBTModel.load_learner(save_path, device='cpu')
+        
+        # Check predictions match
+        pred_after = loaded_model(self.X, requires_grad=False, tensor=False)
+        np.testing.assert_allclose(pred_before, pred_after, rtol=1e-5, atol=1e-6,
+                                   err_msg="Predictions should match after load")
+        
+        # Check monotonicity preserved after load
+        violations_after, total_after = check_monotonicity(loaded_model, self.X, 0, 1)
+        print(f"Before save: {violations_before}/{total_before}, After load: {violations_after}/{total_after}")
+        self.assertEqual(violations_after, 0, "Loaded model should still have no violations")
+        
+        # Train more on loaded model and check constraints still enforced
+        for epoch in range(5):
+            y_pred = loaded_model(self.X, requires_grad=True)
+            loss = 0.5 * mse_loss(y_pred, th.tensor(self.y, dtype=th.float32).squeeze())
+            loss.backward()
+            loaded_model.step()
+        
+        violations_continued, total_continued = check_monotonicity(loaded_model, self.X, 0, 1)
+        print(f"After continued training: {violations_continued}/{total_continued}")
+        self.assertEqual(violations_continued, 0, "Continued training should maintain constraints")
+    
+    def test_copy_with_constraints_cpu(self):
+        """Test that copying preserves monotonic constraints on CPU."""
+        print("Running test_copy_with_constraints_cpu")
+        
+        tree_struct = {
+            'max_depth': 3,
+            'n_bins': 64,
+            'min_data_in_leaf': 1,
+            'par_th': 1,
+            'grow_policy': 'oblivious'
+        }
+        
+        monotonic_constraints = {
+            0: ("increasing", 0),
+            1: ("decreasing", 0),
+        }
+        
+        params = {
+            "control_variates": False,
+            "split_score_func": "L2",
+            "monotonic_constraints": monotonic_constraints
+        }
+        
+        optimizer = {'algo': 'SGD', 'lr': 0.3, 'start_idx': 0, 'stop_idx': 1}
+        
+        model = GBTModel(
+            input_dim=self.input_dim,
+            output_dim=self.output_dim,
+            tree_struct=tree_struct,
+            optimizers=optimizer,
+            params=params,
+            verbose=0,
+            device='cpu'
+        )
+        
+        model.set_bias_from_targets(self.y)
+        
+        # Train
+        for epoch in range(self.n_epochs):
+            y_pred = model(self.X, requires_grad=True)
+            loss = 0.5 * mse_loss(y_pred, th.tensor(self.y, dtype=th.float32).squeeze())
+            loss.backward()
+            model.step()
+        
+        # Get predictions before copy
+        pred_before = model(self.X, requires_grad=False, tensor=False)
+        
+        # Copy
+        copied_model = model.copy()
+        
+        # Check predictions match
+        pred_after = copied_model(self.X, requires_grad=False, tensor=False)
+        np.testing.assert_allclose(pred_before, pred_after, rtol=1e-5, atol=1e-6,
+                                   err_msg="Predictions should match after copy")
+        
+        # Check monotonicity preserved after copy
+        violations_inc, total_inc = check_monotonicity(copied_model, self.X, 0, 1)
+        violations_dec, total_dec = check_monotonicity(copied_model, self.X, 1, -1)
+        
+        print(f"Copied model - increasing: {violations_inc}/{total_inc}, decreasing: {violations_dec}/{total_dec}")
+        self.assertEqual(violations_inc, 0, "Copied model should have no increasing violations")
+        self.assertEqual(violations_dec, 0, "Copied model should have no decreasing violations")
+        
+        # Train more on copied model (should not affect original)
+        for epoch in range(5):
+            y_pred = copied_model(self.X, requires_grad=True)
+            loss = 0.5 * mse_loss(y_pred, th.tensor(self.y, dtype=th.float32).squeeze())
+            loss.backward()
+            copied_model.step()
+        
+        # Original should be unchanged
+        pred_original = model(self.X, requires_grad=False, tensor=False)
+        np.testing.assert_allclose(pred_before, pred_original, rtol=1e-5, atol=1e-6,
+                                   err_msg="Original model should be unchanged after training copy")
+        
+        # Copied model should still respect constraints
+        violations_continued, _ = check_monotonicity(copied_model, self.X, 0, 1)
+        self.assertEqual(violations_continued, 0, "Continued training on copy should maintain constraints")
+    
+    def test_save_load_with_constraints_gpu(self):
+        """Test that saving and loading preserves monotonic constraints on GPU."""
+        print("Running test_save_load_with_constraints_gpu")
+        
+        if not cuda_available():
+            self.skipTest("CUDA not available")
+        
+        import tempfile
+        import os
+        
+        X_gpu = self.X.cuda()
+        y_tensor = th.from_numpy(self.y).cuda().squeeze()
+        
+        tree_struct = {
+            'max_depth': 3,
+            'n_bins': 64,
+            'min_data_in_leaf': 1,
+            'par_th': 1,
+            'grow_policy': 'oblivious'
+        }
+        
+        monotonic_constraints = {
+            0: ("increasing", 0),
+        }
+        
+        params = {
+            "control_variates": False,
+            "split_score_func": "L2",
+            "monotonic_constraints": monotonic_constraints
+        }
+        
+        optimizer = {'algo': 'SGD', 'lr': 0.3, 'start_idx': 0, 'stop_idx': 1}
+        
+        model = GBTModel(
+            input_dim=self.input_dim,
+            output_dim=self.output_dim,
+            tree_struct=tree_struct,
+            optimizers=optimizer,
+            params=params,
+            verbose=0,
+            device='cuda'
+        )
+        
+        model.set_bias_from_targets(self.y)
+        
+        # Train
+        for epoch in range(self.n_epochs):
+            y_pred = model(X_gpu, requires_grad=True)
+            loss = 0.5 * mse_loss(y_pred, y_tensor)
+            loss.backward()
+            model.step()
+        
+        # Get predictions before save
+        pred_before = model(X_gpu, requires_grad=False, tensor=False)
+        
+        # Check monotonicity before save
+        violations_before, total_before = check_monotonicity(model, X_gpu, 0, 1)
+        self.assertEqual(violations_before, 0, "GPU model should have no violations before save")
+        
+        # Save and load
+        with tempfile.TemporaryDirectory() as tmpdir:
+            save_path = os.path.join(tmpdir, "test_model_gpu")
+            model.save_learner(save_path)
+            
+            loaded_model = GBTModel.load_learner(save_path, device='cuda')
+        
+        # Check predictions match
+        pred_after = loaded_model(X_gpu, requires_grad=False, tensor=False)
+        np.testing.assert_allclose(pred_before, pred_after, rtol=1e-4, atol=1e-5,
+                                   err_msg="GPU predictions should match after load")
+        
+        # Check monotonicity preserved
+        violations_after, total_after = check_monotonicity(loaded_model, X_gpu, 0, 1)
+        print(f"GPU - Before save: {violations_before}/{total_before}, After load: {violations_after}/{total_after}")
+        self.assertEqual(violations_after, 0, "Loaded GPU model should still have no violations")
+
+
 if __name__ == '__main__':
     unittest.main()
 
