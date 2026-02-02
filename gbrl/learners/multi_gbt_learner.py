@@ -905,7 +905,9 @@ class MultiGBTLearner(BaseLearner):
             compression_params.update(kwargs)
 
             if actions is not None:
-                assert log_std is not None, "log_std must be provided for policy compression"
+                # Only require log_std for Gaussian-like distributions
+                if dist_type in ('gaussian', 'normal', 'diag_gaussian'):
+                    assert log_std is not None, "log_std must be provided for Gaussian policy compression"
                 compression_params['dist_type'] = dist_type
                 compressor = ParametricActorCompression(**compression_params)
                 parameters, losses = compressor.compress(A, V, actions, log_std)

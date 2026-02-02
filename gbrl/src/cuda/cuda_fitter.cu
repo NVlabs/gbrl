@@ -532,9 +532,11 @@ __global__ void split_score_cosine_cuda(
             if (violation) {
                 // Pool the means (weighted average) for this output dimension
                 float total_cnt = l_count[0] + r_count[0];
-                float pooled = (l_count[0] * l_val + r_count[0] * r_val) / total_cnt;
-                left_mean[out_idx] = pooled;
-                right_mean[out_idx] = pooled;
+                if (total_cnt > 0.0f) {
+                    float pooled = (l_count[0] * l_val + r_count[0] * r_val) / total_cnt;
+                    left_mean[out_idx] = pooled;
+                    right_mean[out_idx] = pooled;
+                }
             }
         }
         

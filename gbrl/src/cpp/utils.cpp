@@ -170,6 +170,9 @@ template void selective_copy<bool>(const int num_indices, const int* indices, bo
 void selective_copy_char(const int num_indices, const int* indices, char* dest, const char* src, const int elements_dim){
     #pragma omp parallel for
     for (int i = 0; i < num_indices; ++i) {
-        memcpy(dest + (i*elements_dim)*MAX_CHAR_SIZE, src + (indices[i] * elements_dim) * MAX_CHAR_SIZE, sizeof(char)*MAX_CHAR_SIZE);
+        // Copy all elements_dim strings (each of size MAX_CHAR_SIZE) for this index
+        memcpy(dest + (i * elements_dim) * MAX_CHAR_SIZE, 
+               src + (indices[i] * elements_dim) * MAX_CHAR_SIZE, 
+               elements_dim * MAX_CHAR_SIZE);
     }
 }

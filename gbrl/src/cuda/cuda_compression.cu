@@ -118,6 +118,25 @@ void get_matrix_representation_cuda(dataSet *dataset, ensembleMetaData *metadata
     
     int n_blocks, threads_per_block;
     get_grid_dimensions(dataset->n_samples, n_blocks, threads_per_block);
+    
+    // Validate that required feature buffers exist before proceeding
+    if (metadata->n_num_features > 0 && device_batch_obs == nullptr) {
+        std::cerr << "ERROR: Numerical features expected but dataset obs buffer is null" << std::endl;
+        matrix->A = nullptr;
+        matrix->V = nullptr;
+        matrix->n_leaves = 0;
+        cudaFree(device_data);
+        return;
+    }
+    if (metadata->n_cat_features > 0 && device_batch_cat_obs == nullptr) {
+        std::cerr << "ERROR: Categorical features expected but dataset categorical_obs buffer is null" << std::endl;
+        matrix->A = nullptr;
+        matrix->V = nullptr;
+        matrix->n_leaves = 0;
+        cudaFree(device_data);
+        return;
+    }
+    
     cudaMemcpy(device_V, edata->bias, sizeof(float)*output_dim, cudaMemcpyDeviceToDevice);
     
     if (n_opts == 0){
@@ -196,6 +215,12 @@ void get_matrix_representation_cuda(dataSet *dataset, ensembleMetaData *metadata
 ensembleData * compress_ensemble_cuda(ensembleMetaData *metadata, ensembleData *edata, SGDOptimizerGPU** opts, const int n_opts, const int n_compressed_leaves, const int n_compressed_trees, const int *leaf_indices, const int *tree_indices, const int *new_tree_indices, const float *W){
     // First create the compressed ensemble (this updates metadata->n_leaves to n_compressed_leaves)
     ensembleData* compressed_edata = ensemble_compressed_data_copy_gpu_gpu(metadata, edata, nullptr, n_compressed_leaves, n_compressed_trees, leaf_indices, tree_indices, new_tree_indices);
+    
+    // Check for allocation failure
+    if (compressed_edata == nullptr) {
+        std::cerr << "ERROR: Failed to create compressed ensemble data" << std::endl;
+        return nullptr;
+    }
     
     // Now apply W correction matrix to the compressed ensemble values
     // W is sized (n_compressed_leaves + 1, output_dim) which matches metadata->n_leaves after compression
