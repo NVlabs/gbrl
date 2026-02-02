@@ -658,8 +658,10 @@ class GBTLearner(BaseLearner):
         # Compute new tree indices for compressed model
         new_tree_indices = np.zeros(n_compressed_trees, dtype=np.int32)
         if n_compressed_trees > 1:
+            # Convert tensor to CPU numpy before indexing with numpy array
+            n_leaves_per_tree_np = n_leaves_per_tree.cpu().numpy()
             new_tree_indices[1:] = np.cumsum(
-                n_leaves_per_tree[compressed_tree_indices].cpu().numpy()
+                n_leaves_per_tree_np[compressed_tree_indices]
             )[:-1].astype(np.int32)
 
         self._cpp_model.compress(n_compressed_leaves, n_compressed_trees, compressed_leaf_indices,

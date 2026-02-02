@@ -227,6 +227,9 @@ class TreeCompression:
         self.method = method
         self.use_W = use_W
         if list(self.compression.parameters()):
+            # Guard against None optimizer_kwargs
+            if optimizer_kwargs is None:
+                optimizer_kwargs = {}
             self.optimizer = optimizer_class(self.compression.parameters(), **optimizer_kwargs)
         self.gradient_steps = gradient_steps
 
@@ -413,7 +416,7 @@ class ParametricActorCompression(TreeCompression):
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
-            losses.append(loss)
+            losses.append(loss.item())
             print(f"{i + 1}/{self.gradient_steps} - compression loss: {loss.item()}")
         return self.compression.get_parameters(A, V), losses
 

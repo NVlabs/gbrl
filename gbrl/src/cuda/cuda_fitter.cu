@@ -682,10 +682,14 @@ __global__ void split_score_l2_cuda(
                             (direction == -1 && l_val < r_val);
             
             if (violation) {
-                // Pool the means for this output dimension
-                float pooled = (l_val + r_val) * 0.5f;
-                left_mean[out_idx] = pooled;
-                right_mean[out_idx] = pooled;
+                // Pool the means using count-weighted averaging
+                int total_count = l_count[0] + r_count[0];
+                if (total_count > 0) {
+                    float pooled = (l_val * l_count[0] + r_val * r_count[0]) / total_count;
+                    left_mean[out_idx] = pooled;
+                    right_mean[out_idx] = pooled;
+                }
+                // If total_count == 0, keep existing values (no samples to pool)
             }
         }
 
@@ -1875,11 +1879,10 @@ void apply_monotonic_constraints_cuda(
                tree_depth * sizeof(int), 
                cudaMemcpyDeviceToHost);
     
-    // FIX: Copy inequality directions for this tree
+    // FIX: Copy inequality directions for this tree from per-depth base (not per-leaf)
     bool* h_inequality_directions = new bool[tree_depth];
-    int ineq_base = start_leaf_idx * metadata->max_depth;
     cudaMemcpy(h_inequality_directions,
-               edata->feature_data->inequality_directions + ineq_base,
+               edata->feature_data->inequality_directions + tree_idx * metadata->max_depth,
                tree_depth * sizeof(bool),
                cudaMemcpyDeviceToHost);
     
@@ -1915,9 +1918,14 @@ void apply_monotonic_constraints_cuda(
         int constraint_output = h_mono_output_idx[c];
         
         for (int d = 0; d < tree_depth; ++d) {
-            // Convert internal feature index to global using reverse mapping
+            // Convert internal feature index to global using reverse mapping with bounds checks
             int internal_idx = h_feature_indices[d];
+            if (internal_idx < 0 || internal_idx >= metadata->n_num_features) continue;
+            
             int global_idx = h_reverse_mapping[internal_idx];
+            // Total features = n_num_features + n_cat_features
+            int total_features = metadata->n_num_features + metadata->n_cat_features;
+            if (global_idx < 0 || global_idx >= total_features) continue;
             
             if (global_idx == global_feature_idx) {
                 // If inequality_direction is inverted (false), flip the constraint

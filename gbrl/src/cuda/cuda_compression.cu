@@ -59,6 +59,7 @@
  */
 void get_matrix_representation_cuda(dataSet *dataset, ensembleMetaData *metadata, ensembleData *edata, SGDOptimizerGPU** opts, const int n_opts, matrixRepresentation *matrix){
     int n_samples = dataset->n_samples;
+    int output_dim = metadata->output_dim;
     float *device_batch_obs;
     char *device_batch_cat_obs;
     char *device_data;
@@ -66,40 +67,58 @@ void get_matrix_representation_cuda(dataSet *dataset, ensembleMetaData *metadata
     bool *device_A;
     // assuming row-major order
     size_t A_size = dataset->n_samples * (metadata->n_leaves+1) * sizeof(bool);
-    size_t V_size = (metadata->n_leaves+1) * metadata->output_dim * sizeof(float);
+    size_t V_size = (metadata->n_leaves+1) * output_dim * sizeof(float);
     size_t obs_matrix_size = dataset->n_samples * metadata->n_num_features * sizeof(float);
     size_t cat_obs_matrix_size = dataset->n_samples * metadata->n_cat_features * sizeof(char) * MAX_CHAR_SIZE;
-    cudaError_t alloc_error  = allocateCudaMemory((void**)&device_data, obs_matrix_size + cat_obs_matrix_size + A_size + V_size, "when trying to allocate matrix representation");
+    
+    // Calculate allocation size based on what data is already on device
+    size_t extra_alloc_size = 0;
+    bool obs_on_device = (dataset->obs != nullptr && dataset->obs->data != nullptr && dataset->obs->device != cpu);
+    bool cat_on_device = (dataset->categorical_obs != nullptr && dataset->categorical_obs->data != nullptr && dataset->categorical_obs->device != cpu);
+    
+    if (!obs_on_device) extra_alloc_size += obs_matrix_size;
+    if (!cat_on_device) extra_alloc_size += cat_obs_matrix_size;
+    
+    cudaError_t alloc_error = allocateCudaMemory((void**)&device_data, extra_alloc_size + A_size + V_size, "when trying to allocate matrix representation");
     if (alloc_error != cudaSuccess) {
         return;
     }
-
-    // Allocate host buffer
-    char* host_data = new char[obs_matrix_size + cat_obs_matrix_size + A_size + V_size];
-    memset(host_data, 0, obs_matrix_size + cat_obs_matrix_size + A_size + V_size);
-    // Copy data into host buffer
-    if (dataset->obs != nullptr && dataset->obs->data != nullptr) {
-        std::memcpy(host_data, dataset->obs->data, obs_matrix_size);
-    }
-    if (dataset->categorical_obs != nullptr && dataset->categorical_obs->data != nullptr) {
-        std::memcpy(host_data + obs_matrix_size + V_size + A_size, dataset->categorical_obs->data, cat_obs_matrix_size);
-    }
-    
-    cudaMemcpy(device_data, host_data, obs_matrix_size + cat_obs_matrix_size + A_size + V_size, cudaMemcpyHostToDevice);
-    delete[] host_data;
+    cudaMemset(device_data, 0, extra_alloc_size + A_size + V_size);
 
     size_t trace = 0;
-    device_batch_obs = (float*)device_data;
-    trace += obs_matrix_size;
     device_V = (float *)(device_data + trace);
     trace += V_size;
     device_A = (bool *)(device_data + trace);
     trace += A_size;
-    device_batch_cat_obs = (char *)(device_data + trace);
+    
+    // Handle obs data - device-aware copy
+    if (dataset->obs != nullptr && dataset->obs->data != nullptr) {
+        if (obs_on_device) {
+            device_batch_obs = const_cast<float*>(dataset->obs->data);
+        } else {
+            device_batch_obs = (float*)(device_data + trace);
+            trace += obs_matrix_size;
+            cudaMemcpy(device_batch_obs, dataset->obs->data, obs_matrix_size, cudaMemcpyHostToDevice);
+        }
+    } else {
+        device_batch_obs = nullptr;
+    }
+    
+    // Handle categorical obs data - device-aware copy
+    if (dataset->categorical_obs != nullptr && dataset->categorical_obs->data != nullptr) {
+        if (cat_on_device) {
+            device_batch_cat_obs = const_cast<char*>(dataset->categorical_obs->data);
+        } else {
+            device_batch_cat_obs = (char*)(device_data + trace);
+            cudaMemcpy(device_batch_cat_obs, dataset->categorical_obs->data, cat_obs_matrix_size, cudaMemcpyHostToDevice);
+        }
+    } else {
+        device_batch_cat_obs = nullptr;
+    }
     
     int n_blocks, threads_per_block;
     get_grid_dimensions(dataset->n_samples, n_blocks, threads_per_block);
-    cudaMemcpy(device_V, edata->bias, sizeof(float)*metadata->output_dim, cudaMemcpyDeviceToDevice);
+    cudaMemcpy(device_V, edata->bias, sizeof(float)*output_dim, cudaMemcpyDeviceToDevice);
     
     if (n_opts == 0){
         std::cerr << "No optimizers." << std::endl;
@@ -133,11 +152,14 @@ void get_matrix_representation_cuda(dataSet *dataset, ensembleMetaData *metadata
     n_blocks = metadata->n_leaves / THREADS_PER_BLOCK + 1; 
     get_V_kernel<<<n_blocks, THREADS_PER_BLOCK>>>(device_V, edata->leaf_data->values, opts, n_opts, metadata->output_dim, metadata->n_leaves);
     cudaDeviceSynchronize();
-    matrix->A = new bool[A_size];
+    // Allocate by element count, not byte size
+    int A_elems = n_samples * (metadata->n_leaves + 1);
+    int V_elems = (metadata->n_leaves + 1) * output_dim;
+    matrix->A = new bool[A_elems];
     cudaMemcpy(matrix->A, device_A, A_size, cudaMemcpyDeviceToHost);
     for (int i = 0; i < n_samples; i++)
         matrix->A[i*(metadata->n_leaves + 1)] = true;
-    matrix->V = new float[V_size];
+    matrix->V = new float[V_elems];
     cudaMemcpy(matrix->V, device_V, V_size, cudaMemcpyDeviceToHost);
     // Copy results back to CPU
     matrix->n_leaves = metadata->n_leaves;

@@ -136,8 +136,8 @@ void selective_copy(const int num_indices, const int* indices, T* dest, const T*
 void selective_copy_char(const int num_indices, const int* indices, char* dest, const char* src, const int elements_dim);
 
 inline void valid_tree_idx(const int tree_idx, const ensembleMetaData* metadata){
-    if (tree_idx < 0 || tree_idx > metadata->n_trees){
-        std::cerr << "ERROR: invalid tree_idx " << tree_idx << " in ensemble with ntrees = " << metadata->n_trees <<std::endl;
+    if (tree_idx < 0 || tree_idx >= metadata->n_trees){
+        std::cerr << "ERROR: invalid tree_idx " << tree_idx << " in ensemble with ntrees = " << metadata->n_trees << " (valid range: 0 to " << metadata->n_trees - 1 << ")" <<std::endl;
         throw std::runtime_error("Invalid tree index");
     }
 }

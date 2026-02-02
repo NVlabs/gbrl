@@ -203,11 +203,13 @@ class SharedActorCriticLearner(GBTLearner):
             trees_to_keep (int): Number of trees to retain in the compressed model.
             gradient_steps (int): Number of optimization steps during compression.
             features (NumericalData): Input feature matrix (n_samples, n_features).
-            actions (th.Tensor, optional): Target actions (for policy compression). Required if dist_type
-                is not 'supervised_learning'.
+            actions (th.Tensor, optional): Target actions (for policy compression). Required
+                unless dist_type is 'deterministic' or 'supervised_learning'.
             log_std (th.Tensor, optional): Log standard deviation (only used for certain policy types).
             method (str): Tree selection method. Defaults to 'first_k'.
-            dist_type (str): Compression type ('supervised_learning', 'actor', etc.).
+            dist_type (str): Compression type. Supported: 'deterministic', 'supervised_learning',
+                'categorical', 'gaussian'. For 'deterministic' and 'supervised_learning', actions
+                are not required.
             optimizer_kwargs (dict, optional): Optimizer configuration.
             temperature (float): Temperature parameter for soft selection.
             lambda_reg (float): L2 regularization coefficient on weights.
@@ -216,9 +218,11 @@ class SharedActorCriticLearner(GBTLearner):
         Returns:
             float: Final loss value after compression.
         """
-        assert actions is not None, "Cannot compress a shared actor-critic policy without actions"
-        assert dist_type != 'supervised_learning', \
-            "Cannot compress a shared actor-critic policy using supervised learning compression methods"
+        # Actions are only required for probabilistic policy compression
+        if dist_type not in {'deterministic', 'supervised_learning'}:
+            assert actions is not None, \
+                f"Cannot compress with dist_type='{dist_type}' without actions. " \
+                "Actions are required for probabilistic policy compression (categorical, gaussian)."
         
         A, V, n_leaves_per_tree, n_leaves, n_trees = self.get_matrix_representation(features)
         # Convert to tensors with explicit dtypes
@@ -255,8 +259,10 @@ class SharedActorCriticLearner(GBTLearner):
         # Compute new tree indices for compressed model
         new_tree_indices = np.zeros(n_compressed_trees, dtype=np.int32)
         if n_compressed_trees > 1:
+            # Convert tensor to CPU numpy before indexing with numpy array
+            n_leaves_per_tree_np = n_leaves_per_tree.cpu().numpy()
             new_tree_indices[1:] = np.cumsum(
-                n_leaves_per_tree[compressed_tree_indices].cpu().numpy()
+                n_leaves_per_tree_np[compressed_tree_indices]
             )[:-1].astype(np.int32)
         
         self._cpp_model.compress(n_compressed_leaves, n_compressed_trees, compressed_leaf_indices,
