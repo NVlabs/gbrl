@@ -1915,22 +1915,28 @@ __global__ void pava_kernel(
     // Only thread 0 does the work (PAVA is sequential)
     if (threadIdx.x != 0) return;
     
+    // CRITICAL FIX: Use proper bit ordering where depth 0 (root) is MSB
+    // Bit position for this depth: (tree_depth - 1 - constraint_depth)
+    int bit_pos = tree_depth - 1 - constraint_depth;
+    int bit_mask = 1 << bit_pos;
+    
     // Build the two leaf indices for this plane
-    // The two leaves differ only in the bit at constraint_depth
+    // Use plane_idx to enumerate all combinations of other bits
     int base_leaf = 0;
-    int bit_pos = 0;
+    int plane_bit = 0;
     for (int d = 0; d < tree_depth; ++d) {
+        int d_bit_pos = tree_depth - 1 - d;
         if (d == constraint_depth) continue;  // Skip the constraint depth
         
-        // Extract bit from plane_idx and place it at depth d
-        int bit = (plane_idx >> bit_pos) & 1;
-        base_leaf |= (bit << d);
-        bit_pos++;
+        // Extract bit from plane_idx
+        int bit = (plane_idx >> plane_bit) & 1;
+        base_leaf |= (bit << d_bit_pos);
+        plane_bit++;
     }
     
     // The two leaves in this plane
     int leaf0 = base_leaf;  // constraint bit = 0
-    int leaf1 = base_leaf | (1 << constraint_depth);  // constraint bit = 1
+    int leaf1 = base_leaf | bit_mask;  // constraint bit = 1
     
     int global_leaf0 = start_leaf_idx + leaf0;
     int global_leaf1 = start_leaf_idx + leaf1;
@@ -1964,11 +1970,26 @@ void apply_monotonic_constraints_cuda(
     int n_leaves_in_tree = 1 << tree_depth;
     int n_planes = n_leaves_in_tree / 2;  // Number of pairs of leaves
     
-    // Copy feature indices for this tree to host to build constraint map
+    // Copy feature indices for this tree to host
     int* h_feature_indices = new int[tree_depth];
     cudaMemcpy(h_feature_indices, 
                edata->feature_data->feature_indices + tree_idx * metadata->max_depth,
                tree_depth * sizeof(int), 
+               cudaMemcpyDeviceToHost);
+    
+    // FIX: Copy inequality directions for this tree
+    int* h_inequality_directions = new int[tree_depth];
+    int ineq_base = start_leaf_idx * metadata->max_depth;
+    cudaMemcpy(h_inequality_directions,
+               edata->feature_data->inequality_directions + ineq_base,
+               tree_depth * sizeof(int),
+               cudaMemcpyDeviceToHost);
+    
+    // FIX: Copy reverse feature mapping to convert internal->global indices
+    int* h_reverse_mapping = new int[metadata->n_num_features];
+    cudaMemcpy(h_reverse_mapping,
+               edata->feature_mappings->reverse_num_feature_mapping,
+               metadata->n_num_features * sizeof(int),
                cudaMemcpyDeviceToHost);
     
     // Copy monotonic constraints to host
@@ -1983,41 +2004,87 @@ void apply_monotonic_constraints_cuda(
     cudaMemcpy(h_mono_constraint, edata->mono_constraints->constraint,
                metadata->n_mono_constraints * sizeof(int), cudaMemcpyDeviceToHost);
     
-    // For each output dimension, apply PAVA separately for each constrained feature
-    for (int out_idx = 0; out_idx < metadata->policy_dim; ++out_idx) {
-        // Find which depths have constraints for this output
-        for (int c = 0; c < metadata->n_mono_constraints; ++c) {
-            if (h_mono_output_idx[c] != out_idx) continue;
+    // Build effective constraint map accounting for inequality direction
+    int* effective_constraints = new int[tree_depth]();
+    bool has_any_constraint = false;
+    
+    for (int c = 0; c < metadata->n_mono_constraints; ++c) {
+        int global_feature_idx = h_mono_feature_idx[c];
+        int constraint_dir = h_mono_constraint[c];
+        int constraint_output = h_mono_output_idx[c];
+        
+        for (int d = 0; d < tree_depth; ++d) {
+            // FIX: Convert internal feature index to global using reverse mapping
+            int internal_idx = h_feature_indices[d];
+            int global_idx = h_reverse_mapping[internal_idx];
             
-            int feature_idx = h_mono_feature_idx[c];
-            int direction = h_mono_constraint[c];
-            
-            // Find if this feature is used in any depth of this tree
+            if (global_idx == global_feature_idx) {
+                // FIX: If inequality_direction is inverted (0), flip the constraint
+                int effective_dir = (h_inequality_directions[d] == 1) ? constraint_dir : -constraint_dir;
+                effective_constraints[d] = effective_dir;
+                has_any_constraint = true;
+            }
+        }
+    }
+    
+    if (!has_any_constraint) {
+        delete[] h_feature_indices;
+        delete[] h_inequality_directions;
+        delete[] h_reverse_mapping;
+        delete[] h_mono_feature_idx;
+        delete[] h_mono_output_idx;
+        delete[] h_mono_constraint;
+        delete[] effective_constraints;
+        return;
+    }
+    
+    // Apply constraints iteratively (PAVA on hypercube)
+    const int max_iter = 100;
+    for (int iter = 0; iter < max_iter; ++iter) {
+        for (int out_idx = 0; out_idx < metadata->output_dim; ++out_idx) {
             for (int d = 0; d < tree_depth; ++d) {
-                if (h_feature_indices[d] == feature_idx) {
-                    // Apply PAVA for this specific constraint
-                    // Launch one block per "plane" (pair of leaves differing only in bit d)
-                    pava_kernel<<<n_planes, 1>>>(
-                        edata->leaf_data->values,
-                        d,                    // constraint_depth
-                        direction,            // constraint_dir (+1 or -1)
-                        tree_depth,
-                        start_leaf_idx,
-                        n_leaves_in_tree,
-                        metadata->output_dim,
-                        out_idx              // target_output
-                    );
-                    cudaDeviceSynchronize();
-                    break;  // Feature found, constraint applied
+                int constraint_dir = effective_constraints[d];
+                if (constraint_dir == 0) continue;
+                
+                // Check if this output has a constraint for this feature
+                bool has_output_constraint = false;
+                for (int c = 0; c < metadata->n_mono_constraints; ++c) {
+                    if (h_mono_output_idx[c] == out_idx) {
+                        int global_feature_idx = h_mono_feature_idx[c];
+                        int internal_idx = h_feature_indices[d];
+                        int global_idx = h_reverse_mapping[internal_idx];
+                        if (global_idx == global_feature_idx) {
+                            has_output_constraint = true;
+                            break;
+                        }
+                    }
                 }
+                
+                if (!has_output_constraint) continue;
+                
+                // Apply PAVA for this depth and output
+                pava_kernel<<<n_planes, 1>>>(
+                    edata->leaf_data->values,
+                    d,                    // constraint_depth
+                    constraint_dir,       // constraint_dir (+1 or -1)
+                    tree_depth,
+                    start_leaf_idx,
+                    n_leaves_in_tree,
+                    metadata->output_dim,
+                    out_idx              // target_output
+                );
+                cudaDeviceSynchronize();
             }
         }
     }
     
     delete[] h_feature_indices;
+    delete[] h_inequality_directions;
+    delete[] h_reverse_mapping;
     delete[] h_mono_feature_idx;
     delete[] h_mono_output_idx;
     delete[] h_mono_constraint;
+    delete[] effective_constraints;
 }
 
 __device__ int strcmpCuda(const char* __restrict__ str_a,

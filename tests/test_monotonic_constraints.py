@@ -54,7 +54,7 @@ def create_monotonic_data(n_samples=1000, seed=42):
     return th.tensor(X), y
 
 
-def check_monotonicity(model, X, feature_idx, direction, n_samples=100):
+def check_monotonicity(model, X, feature_idx, direction, n_samples=100, output_idx=0):
     """
     Check if predictions are monotonic with respect to a feature.
     
@@ -64,6 +64,7 @@ def check_monotonicity(model, X, feature_idx, direction, n_samples=100):
         feature_idx: Which feature to test
         direction: 1 for increasing, -1 for decreasing
         n_samples: Number of test points
+        output_idx: Which output to check (for multi-output models)
     
     Returns:
         (violations, total_pairs): Count of violations and total pairs tested
@@ -71,7 +72,7 @@ def check_monotonicity(model, X, feature_idx, direction, n_samples=100):
     # Pick a random base point
     np.random.seed(123)
     base_idx = np.random.randint(0, len(X))
-    base_point = X[base_idx].numpy().copy()
+    base_point = X[base_idx].cpu().numpy().copy()
     
     # Create a range of values for the target feature
     feature_values = np.linspace(-3, 3, n_samples)
@@ -79,13 +80,21 @@ def check_monotonicity(model, X, feature_idx, direction, n_samples=100):
     violations = 0
     total_pairs = 0
     
+    # Determine device for test inputs
+    device = X.device
+    
     prev_pred = None
     for val in feature_values:
         test_point = base_point.copy()
         test_point[feature_idx] = val
-        test_input = th.tensor(test_point.reshape(1, -1), dtype=th.float32)
+        test_input = th.tensor(test_point.reshape(1, -1), dtype=th.float32, device=device)
         pred_output = model(test_input, requires_grad=False, tensor=False)
-        pred = pred_output.flatten()[0]
+        
+        # Handle multi-output
+        if len(pred_output.shape) > 1 and pred_output.shape[1] > 1:
+            pred = pred_output[0, output_idx]
+        else:
+            pred = pred_output.flatten()[0]
         
         if prev_pred is not None:
             total_pairs += 1
@@ -430,6 +439,429 @@ class TestMonotonicConstraints(unittest.TestCase):
         self.assertEqual(violations_1, 0, 
                        f"Feature 1 violations: {violations_1}/{total_1} - MUST BE 0%!")
 
+    def test_monotonic_multioutput_same_feature(self):
+        """Test that one feature can constrain multiple outputs."""
+        print("Running test_monotonic_multioutput_same_feature")
+        
+        # Create multi-output data where feature 0 affects both outputs
+        np.random.seed(42)
+        X = np.random.randn(500, 5).astype(np.float32)
+        # Output 0: increasing with feature 0
+        # Output 1: also increasing with feature 0 (but different scale)
+        y0 = (2 * X[:, 0] + 0.5 * X[:, 2] + np.random.randn(500) * 0.1).astype(np.float32)
+        y1 = (X[:, 0] + X[:, 3] + np.random.randn(500) * 0.1).astype(np.float32)
+        y = np.column_stack([y0, y1])
+        
+        tree_struct = {
+            'max_depth': 3,
+            'n_bins': 64,
+            'min_data_in_leaf': 1,
+            'par_th': 1,
+            'grow_policy': 'oblivious'
+        }
+        
+        # Feature 0 should be increasing for both outputs
+        monotonic_constraints = {
+            0: ("increasing", [0, 1]),  # Feature 0 applies to both output 0 and output 1
+        }
+        
+        params = {
+            "control_variates": False,
+            "split_score_func": "L2",
+            "monotonic_constraints": monotonic_constraints
+        }
+        
+        optimizer = {'algo': 'SGD', 'lr': 0.1, 'start_idx': 0, 'stop_idx': 2}
+        
+        model = GBTModel(
+            input_dim=5,
+            output_dim=2,
+            tree_struct=tree_struct,
+            optimizers=optimizer,
+            params=params,
+            verbose=0,
+            device='cpu'
+        )
+        
+        model.set_bias_from_targets(y)
+        
+        # Train with step()
+        for epoch in range(30):
+            y_pred = model(th.tensor(X, dtype=th.float32), requires_grad=True)
+            loss = 0.5 * mse_loss(y_pred, th.tensor(y, dtype=th.float32))
+            loss.backward()
+            model.step()
+        
+        # Check monotonicity for both outputs
+        X_tensor = th.tensor(X, dtype=th.float32)
+        
+        # Check output 0, feature 0
+        violations_0_0, total_0_0 = check_monotonicity(model, X_tensor, 0, 1, output_idx=0)
+        # Check output 1, feature 0
+        violations_1_0, total_1_0 = check_monotonicity(model, X_tensor, 0, 1, output_idx=1)
+        
+        print(f"Output 0, Feature 0 (increasing): {violations_0_0}/{total_0_0} violations")
+        print(f"Output 1, Feature 0 (increasing): {violations_1_0}/{total_1_0} violations")
+        
+        self.assertEqual(violations_0_0, 0, 
+                       f"Output 0, Feature 0 violations: {violations_0_0}/{total_0_0} - MUST BE 0%!")
+        self.assertEqual(violations_1_0, 0, 
+                       f"Output 1, Feature 0 violations: {violations_1_0}/{total_1_0} - MUST BE 0%!")
+
+    def test_monotonic_multioutput_different_features(self):
+        """Test that different features can constrain different outputs."""
+        print("Running test_monotonic_multioutput_different_features")
+        
+        # Create multi-output data with different monotonic relationships
+        np.random.seed(42)
+        X = np.random.randn(500, 5).astype(np.float32)
+        # Output 0: increasing with feature 0, decreasing with feature 1
+        # Output 1: increasing with feature 2
+        y0 = (2 * X[:, 0] - X[:, 1] + np.random.randn(500) * 0.1).astype(np.float32)
+        y1 = (1.5 * X[:, 2] + 0.5 * X[:, 4] + np.random.randn(500) * 0.1).astype(np.float32)
+        y = np.column_stack([y0, y1])
+        
+        tree_struct = {
+            'max_depth': 3,
+            'n_bins': 64,
+            'min_data_in_leaf': 1,
+            'par_th': 1,
+            'grow_policy': 'oblivious'
+        }
+        
+        # Different constraints for different outputs
+        monotonic_constraints = {
+            0: ("increasing", 0),   # Feature 0, output 0: increasing
+            1: ("decreasing", 0),   # Feature 1, output 0: decreasing
+            2: ("increasing", 1),   # Feature 2, output 1: increasing
+        }
+        
+        params = {
+            "control_variates": False,
+            "split_score_func": "L2",
+            "monotonic_constraints": monotonic_constraints
+        }
+        
+        optimizer = {'algo': 'SGD', 'lr': 0.1, 'start_idx': 0, 'stop_idx': 2}
+        
+        model = GBTModel(
+            input_dim=5,
+            output_dim=2,
+            tree_struct=tree_struct,
+            optimizers=optimizer,
+            params=params,
+            verbose=0,
+            device='cpu'
+        )
+        
+        model.set_bias_from_targets(y)
+        
+        # Train with step()
+        for epoch in range(30):
+            y_pred = model(th.tensor(X, dtype=th.float32), requires_grad=True)
+            loss = 0.5 * mse_loss(y_pred, th.tensor(y, dtype=th.float32))
+            loss.backward()
+            model.step()
+        
+        # Check monotonicity for all constraints
+        X_tensor = th.tensor(X, dtype=th.float32)
+        
+        violations_0_0, total_0_0 = check_monotonicity(model, X_tensor, 0, 1, output_idx=0)
+        violations_0_1, total_0_1 = check_monotonicity(model, X_tensor, 1, -1, output_idx=0)
+        violations_1_2, total_1_2 = check_monotonicity(model, X_tensor, 2, 1, output_idx=1)
+        
+        print(f"Output 0, Feature 0 (increasing): {violations_0_0}/{total_0_0} violations")
+        print(f"Output 0, Feature 1 (decreasing): {violations_0_1}/{total_0_1} violations")
+        print(f"Output 1, Feature 2 (increasing): {violations_1_2}/{total_1_2} violations")
+        
+        self.assertEqual(violations_0_0, 0, 
+                       f"Output 0, Feature 0: {violations_0_0}/{total_0_0} - MUST BE 0%!")
+        self.assertEqual(violations_0_1, 0, 
+                       f"Output 0, Feature 1: {violations_0_1}/{total_0_1} - MUST BE 0%!")
+        self.assertEqual(violations_1_2, 0, 
+                       f"Output 1, Feature 2: {violations_1_2}/{total_1_2} - MUST BE 0%!")
+
+class TestMonotonicConstraintsGPU(unittest.TestCase):
+    """Test monotonic constraints on GPU"""
+    
+    def setUp(self):
+        print("Setting up GPU monotonic constraints tests...")
+        if not cuda_available():
+            self.skipTest("CUDA not available, skipping GPU tests")
+        
+        self.X, self.y = create_monotonic_data(n_samples=1000)
+        # X is already a tensor, just move to GPU
+        self.X = self.X.cuda()
+        self.y_tensor = th.from_numpy(self.y).cuda().squeeze()
+        self.n_epochs = 30
+    
+    def test_monotonic_increasing_gpu(self):
+        """Test that increasing monotonic constraints work on GPU."""
+        print("Running test_monotonic_increasing_gpu")
+        
+        tree_struct = {
+            'max_depth': 3,
+            'n_bins': 64,
+            'min_data_in_leaf': 1,
+            'par_th': 1,
+            'grow_policy': 'oblivious'
+        }
+        
+        monotonic_constraints = {
+            0: ("increasing", 0),
+        }
+        
+        params = {
+            "control_variates": False,
+            "split_score_func": "L2",
+            "monotonic_constraints": monotonic_constraints
+        }
+        
+        optimizer = {'algo': 'SGD', 'lr': 0.3, 'start_idx': 0, 'stop_idx': 1}
+        
+        model = GBTModel(
+            input_dim=5,
+            output_dim=1,
+            tree_struct=tree_struct,
+            optimizers=optimizer,
+            params=params,
+            verbose=0,
+            device='cuda'
+        )
+        
+        model.set_bias_from_targets(self.y)
+        
+        # Train using step() to apply constraints per tree
+        for epoch in range(self.n_epochs):
+            y_pred = model(self.X, requires_grad=True)
+            loss = 0.5 * mse_loss(y_pred, self.y_tensor)
+            loss.backward()
+            model.step()
+        
+        # Check monotonicity
+        violations, total = check_monotonicity(model, self.X, 0, 1)
+        print(f"GPU - Feature 0 (increasing): {violations}/{total} violations")
+        
+        self.assertEqual(violations, 0, 
+                       f"GPU - Feature 0 violations: {violations}/{total} - MUST BE 0%!")
+    
+    def test_monotonic_decreasing_gpu(self):
+        """Test that decreasing monotonic constraints work on GPU."""
+        print("Running test_monotonic_decreasing_gpu")
+        
+        tree_struct = {
+            'max_depth': 3,
+            'n_bins': 64,
+            'min_data_in_leaf': 1,
+            'par_th': 1,
+            'grow_policy': 'oblivious'
+        }
+        
+        monotonic_constraints = {
+            1: ("decreasing", 0),
+        }
+        
+        params = {
+            "control_variates": False,
+            "split_score_func": "L2",
+            "monotonic_constraints": monotonic_constraints
+        }
+        
+        optimizer = {'algo': 'SGD', 'lr': 0.5, 'start_idx': 0, 'stop_idx': 1}
+        
+        model = GBTModel(
+            input_dim=5,
+            output_dim=1,
+            tree_struct=tree_struct,
+            optimizers=optimizer,
+            params=params,
+            verbose=0,
+            device='cuda'
+        )
+        
+        model.set_bias_from_targets(self.y)
+        
+        # Train using step()
+        for epoch in range(self.n_epochs):
+            y_pred = model(self.X, requires_grad=True)
+            loss = 0.5 * mse_loss(y_pred, self.y_tensor)
+            loss.backward()
+            model.step()
+        
+        # Check monotonicity on feature 1
+        violations, total = check_monotonicity(model, self.X, 1, -1)
+        print(f"GPU - Feature 1 (decreasing): {violations}/{total} violations")
+        
+        self.assertEqual(violations, 0, 
+                       f"GPU - Feature 1 violations: {violations}/{total} - MUST BE 0%!")
+    
+    def test_monotonic_both_constraints_gpu(self):
+        """Test that multiple constraints work on GPU."""
+        print("Running test_monotonic_both_constraints_gpu")
+        
+        tree_struct = {
+            'max_depth': 3,
+            'n_bins': 64,
+            'min_data_in_leaf': 1,
+            'par_th': 1,
+            'grow_policy': 'oblivious'
+        }
+        
+        monotonic_constraints = {
+            0: ("increasing", 0),
+            1: ("decreasing", 0),
+        }
+        
+        params = {
+            "control_variates": False,
+            "split_score_func": "L2",
+            "monotonic_constraints": monotonic_constraints
+        }
+        
+        optimizer = {'algo': 'SGD', 'lr': 0.5, 'start_idx': 0, 'stop_idx': 1}
+        
+        model = GBTModel(
+            input_dim=5,
+            output_dim=1,
+            tree_struct=tree_struct,
+            optimizers=optimizer,
+            params=params,
+            verbose=0,
+            device='cuda'
+        )
+        
+        model.set_bias_from_targets(self.y)
+        
+        # Train using step()
+        for epoch in range(self.n_epochs):
+            y_pred = model(self.X, requires_grad=True)
+            loss = 0.5 * mse_loss(y_pred, self.y_tensor)
+            loss.backward()
+            model.step()
+        
+        # Check both constraints
+        violations_0, total_0 = check_monotonicity(model, self.X, 0, 1)
+        violations_1, total_1 = check_monotonicity(model, self.X, 1, -1)
+        
+        print(f"GPU - Feature 0 (increasing): {violations_0}/{total_0} violations")
+        print(f"GPU - Feature 1 (decreasing): {violations_1}/{total_1} violations")
+        
+        self.assertEqual(violations_0, 0, 
+                       f"GPU - Feature 0 violations: {violations_0}/{total_0} - MUST BE 0%!")
+        self.assertEqual(violations_1, 0, 
+                       f"GPU - Feature 1 violations: {violations_1}/{total_1} - MUST BE 0%!")
+    
+    def test_monotonic_with_fit_gpu(self):
+        """Test that fit() applies constraints correctly on GPU."""
+        print("Running test_monotonic_with_fit_gpu")
+        
+        tree_struct = {
+            'max_depth': 3,
+            'n_bins': 64,
+            'min_data_in_leaf': 1,
+            'par_th': 1,
+            'grow_policy': 'oblivious'
+        }
+        
+        monotonic_constraints = {
+            0: ("increasing", 0),
+        }
+        
+        params = {
+            "control_variates": False,
+            "split_score_func": "L2",
+            "monotonic_constraints": monotonic_constraints
+        }
+        
+        optimizer = {'algo': 'SGD', 'lr': 0.5, 'start_idx': 0, 'stop_idx': 1}
+        
+        model = GBTModel(
+            input_dim=5,
+            output_dim=1,
+            tree_struct=tree_struct,
+            optimizers=optimizer,
+            params=params,
+            verbose=0,
+            device='cuda'
+        )
+        
+        model.set_bias_from_targets(self.y)
+        
+        # Train using fit() instead of step()
+        model.fit(self.X.cpu().numpy(), self.y, iterations=self.n_epochs)
+        
+        # Check monotonicity
+        violations, total = check_monotonicity(model, self.X, 0, 1)
+        print(f"GPU fit() - Feature 0 (increasing): {violations}/{total} violations")
+        
+        self.assertEqual(violations, 0, 
+                       f"GPU fit() - Feature 0 violations: {violations}/{total} - MUST BE 0%!")
+    
+    def test_monotonic_multioutput_gpu(self):
+        """Test that multi-output constraints work on GPU."""
+        print("Running test_monotonic_multioutput_gpu")
+        
+        # Create multi-output data
+        np.random.seed(42)
+        X = np.random.randn(500, 5).astype(np.float32)
+        y0 = (2 * X[:, 0] + 0.5 * X[:, 2] + np.random.randn(500) * 0.1).astype(np.float32)
+        y1 = (X[:, 0] + X[:, 3] + np.random.randn(500) * 0.1).astype(np.float32)
+        y = np.column_stack([y0, y1])
+        
+        X_tensor = th.from_numpy(X).cuda()
+        y_tensor = th.from_numpy(y).cuda()
+        
+        tree_struct = {
+            'max_depth': 3,
+            'n_bins': 64,
+            'min_data_in_leaf': 1,
+            'par_th': 1,
+            'grow_policy': 'oblivious'
+        }
+        
+        # Feature 0 should be increasing for both outputs
+        monotonic_constraints = {
+            0: ("increasing", [0, 1]),
+        }
+        
+        params = {
+            "control_variates": False,
+            "split_score_func": "L2",
+            "monotonic_constraints": monotonic_constraints
+        }
+        
+        optimizer = {'algo': 'SGD', 'lr': 0.1, 'start_idx': 0, 'stop_idx': 2}
+        
+        model = GBTModel(
+            input_dim=5,
+            output_dim=2,
+            tree_struct=tree_struct,
+            optimizers=optimizer,
+            params=params,
+            verbose=0,
+            device='cuda'
+        )
+        
+        model.set_bias_from_targets(y)
+        
+        # Train with step()
+        for epoch in range(30):
+            y_pred = model(X_tensor, requires_grad=True)
+            loss = 0.5 * mse_loss(y_pred, y_tensor)
+            loss.backward()
+            model.step()
+        
+        # Check monotonicity for both outputs
+        violations_0_0, total_0_0 = check_monotonicity(model, X_tensor, 0, 1, output_idx=0)
+        violations_1_0, total_1_0 = check_monotonicity(model, X_tensor, 0, 1, output_idx=1)
+        
+        print(f"GPU Multi-output - Output 0, Feature 0: {violations_0_0}/{total_0_0} violations")
+        print(f"GPU Multi-output - Output 1, Feature 0: {violations_1_0}/{total_1_0} violations")
+        
+        self.assertEqual(violations_0_0, 0, 
+                       f"GPU Multi-output 0: {violations_0_0}/{total_0_0} - MUST BE 0%!")
+        self.assertEqual(violations_1_0, 0, 
+                       f"GPU Multi-output 1: {violations_1_0}/{total_1_0} - MUST BE 0%!")
 
 if __name__ == '__main__':
     unittest.main()
