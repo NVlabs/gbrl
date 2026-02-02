@@ -1,5 +1,5 @@
 //////////////////////////////////////////////////////////////////////////////
-// Copyright (c) 2024-2025, NVIDIA Corporation. All rights reserved.
+// Copyright (c) 2024-2026, NVIDIA Corporation. All rights reserved.
 //
 // This work is made available under the Nvidia Source Code License-NC.
 // To view a copy of this license, visit
@@ -182,6 +182,153 @@ float TreeNode::getSplitScore(dataSet *dataset, scoreFunc split_score_func, cons
             return -INFINITY;
         }
     }
+}
+
+float TreeNode::getSplitScoreWithConstraints(
+    dataSet *dataset,
+    scoreFunc split_score_func,
+    const splitCandidate &split_candidate,
+    const int min_data_in_leaf,
+    const int global_feature_idx,
+    const monotonicConstraints *mono_constraints,
+    const int n_mono_constraints
+) {
+    // Check for duplicate splits along the path
+    bool is_numeric = split_candidate.categorical_value == nullptr;
+    if (this->depth > 0) {
+        if (is_numeric) {
+            for (int i = 0; i < this->depth; ++i) {
+                if (this->split_conditions[i].categorical_value == nullptr && 
+                    this->split_conditions[i].feature_value == split_candidate.feature_value && 
+                    this->split_conditions[i].feature_idx == split_candidate.feature_idx)
+                    return -INFINITY;
+            }
+        } else {
+            for (int i = 0; i < this->depth; ++i) {
+                if (this->split_conditions[i].categorical_value != nullptr && 
+                    strcmp(this->split_conditions[i].categorical_value, split_candidate.categorical_value) == 0 && 
+                    this->split_conditions[i].feature_idx == split_candidate.feature_idx)
+                    return -INFINITY;
+            }
+        }
+    }
+    
+    // Check if this feature has a monotonic constraint (only for numerical features)
+    int constraint_dir = 0;
+    int constraint_output_idx = -1;
+    if (is_numeric && mono_constraints != nullptr && n_mono_constraints > 0) {
+        for (int c = 0; c < n_mono_constraints; ++c) {
+            if (mono_constraints->feature_idx[c] == global_feature_idx) {
+                constraint_dir = mono_constraints->constraint[c];
+                constraint_output_idx = mono_constraints->output_idx[c];
+                break;
+            }
+        }
+    }
+    
+    // If no constraint or categorical, use regular scoring
+    if (constraint_dir == 0 || !is_numeric) {
+        return this->getSplitScore(dataset, split_score_func, split_candidate, min_data_in_leaf);
+    }
+    
+    // Use constraint-aware scoring (only L2 for now, can extend to Cosine later)
+    if (split_score_func == L2) {
+        return this->splitScoreL2WithConstraint(
+            dataset->obs->data, dataset->build_grads->data, 
+            split_candidate, min_data_in_leaf, constraint_dir, constraint_output_idx
+        );
+    } else {
+        // For Cosine, fall back to regular scoring for now
+        // TODO: Implement constraint-aware Cosine scoring if needed
+        return this->getSplitScore(dataset, split_score_func, split_candidate, min_data_in_leaf);
+    }
+}
+
+float TreeNode::splitScoreL2WithConstraint(
+    const float *obs,
+    const float *grads,
+    const splitCandidate &split_candidate,
+    const int min_data_in_leaf,
+    const int constraint_dir,
+    const int output_idx
+) {
+    int left_count = 0, right_count = 0;
+    int n_cols = this->output_dim, n_features = this->n_num_features;
+    const int *_sample_indices = this->sample_indices;
+
+    float *left_mean = new float[n_cols]; 
+    float *right_mean = new float[n_cols]; 
+
+    #pragma omp simd
+    for (int d = 0; d < n_cols; ++d) {
+        left_mean[d] = 0;
+        right_mean[d] = 0;
+    }
+    int sample_idx, grad_row;
+
+    // Accumulate sums
+    for (int n = 0; n < this->n_samples; ++n) {
+        sample_idx = _sample_indices[n];
+        grad_row = sample_idx * n_cols;
+        if (obs[sample_idx * n_features + split_candidate.feature_idx] > split_candidate.feature_value) {
+            #pragma omp simd
+            for (int d = 0; d < n_cols; ++d)
+                right_mean[d] += grads[grad_row + d];
+            ++right_count;
+        } else {
+            #pragma omp simd
+            for (int d = 0; d < n_cols; ++d)
+                left_mean[d] += grads[grad_row + d];
+            ++left_count;
+        }
+    }
+
+    if (left_count < min_data_in_leaf || right_count < min_data_in_leaf) {
+        delete[] left_mean;
+        delete[] right_mean;
+        return -INFINITY;
+    } 
+
+    float left_count_f = static_cast<float>(left_count);
+    float right_count_f = static_cast<float>(right_count);
+    float left_count_recip = (left_count > 0) ? 1.0f / left_count : 0.0f;
+    float right_count_recip = (right_count > 0) ? 1.0f / right_count_f : 0.0f;
+
+    // Compute means
+    #pragma omp simd
+    for (int d = 0; d < n_cols; ++d) {
+        left_mean[d] *= left_count_recip;
+        right_mean[d] *= right_count_recip;
+    }
+    
+    // Pool means for the specific output dimension if constraint is violated
+    // constraint_dir = 1: left should be <= right (increasing)
+    // constraint_dir = -1: left should be >= right (decreasing)
+    if (output_idx >= 0 && output_idx < n_cols) {
+        bool violation = false;
+        if (constraint_dir == 1) {
+            // Increasing: left_mean should be <= right_mean
+            violation = (left_mean[output_idx] > right_mean[output_idx]);
+        } else if (constraint_dir == -1) {
+            // Decreasing: left_mean should be >= right_mean
+            violation = (left_mean[output_idx] < right_mean[output_idx]);
+        }
+        
+        if (violation) {
+            float pooled = (left_mean[output_idx] + right_mean[output_idx]) * 0.5f;
+            left_mean[output_idx] = pooled;
+            right_mean[output_idx] = pooled;
+        }
+    }
+    
+    // Compute score using (possibly pooled) means
+    float left_mean_norm = squared_norm(left_mean, n_cols);
+    float right_mean_norm = squared_norm(right_mean, n_cols);
+    delete[] left_mean;
+    delete[] right_mean;
+    
+    float split_score = left_count_f * left_mean_norm + right_count_f * right_mean_norm;
+    return split_score;
 }
 
 float TreeNode::splitScoreCosine(const float *obs, const float *grads, const splitCandidate &split_candidate, const int min_data_in_leaf){

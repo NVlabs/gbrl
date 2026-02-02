@@ -1,5 +1,5 @@
 //////////////////////////////////////////////////////////////////////////////
-// Copyright (c) 2024-2025, NVIDIA Corporation. All rights reserved.
+// Copyright (c) 2024-2026, NVIDIA Corporation. All rights reserved.
 //
 // This work is made available under the Nvidia Source Code License-NC.
 // To view a copy of this license, visit
@@ -768,7 +768,7 @@ __global__ void split_score_l2_cuda(
             right_mean[d] = (r_count[0] > 0) ? right_mean[d] / r_count[0] : 0.0f;
         }
 
-        // Check monotonic constraints and apply PAVA-like pooling if violated
+        // Check monotonic constraints and apply pooling if violated
         for (int c = 0; c < n_mono_constraints; ++c) {
             if (mono_feature_idx[c] != feat_idx) continue;
             
@@ -778,14 +778,13 @@ __global__ void split_score_l2_cuda(
             float l_val = left_mean[out_idx];
             float r_val = right_mean[out_idx];
             
-            // Check violation: Inc(+1) requires r >= l, Dec(-1) requires r <= l
-            bool violation = (direction == 1 && r_val < l_val) ||
-                            (direction == -1 && r_val > l_val);
+            // Check violation: Inc(+1) requires l <= r, Dec(-1) requires l >= r
+            bool violation = (direction == 1 && l_val > r_val) ||
+                            (direction == -1 && l_val < r_val);
             
             if (violation) {
-                // Pool the means (weighted average) for this output dimension
-                float total_cnt = l_count[0] + r_count[0];
-                float pooled = (l_count[0] * l_val + r_count[0] * r_val) / total_cnt;
+                // Pool the means for this output dimension
+                float pooled = (l_val + r_val) * 0.5f;
                 left_mean[out_idx] = pooled;
                 right_mean[out_idx] = pooled;
             }
@@ -2004,9 +2003,11 @@ void apply_monotonic_constraints_cuda(
     cudaMemcpy(h_mono_constraint, edata->mono_constraints->constraint,
                metadata->n_mono_constraints * sizeof(int), cudaMemcpyDeviceToHost);
     
-    // Build effective constraint map accounting for inequality direction
-    int* effective_constraints = new int[tree_depth]();
-    bool has_any_constraint = false;
+    // Build map: depth -> (effective_constraint, output_idx) for this tree
+    int** effective_constraints = new int*[tree_depth];
+    for (int d = 0; d < tree_depth; ++d) {
+        effective_constraints[d] = new int[metadata->output_dim]();
+    }
     
     for (int c = 0; c < metadata->n_mono_constraints; ++c) {
         int global_feature_idx = h_mono_feature_idx[c];
@@ -2014,67 +2015,36 @@ void apply_monotonic_constraints_cuda(
         int constraint_output = h_mono_output_idx[c];
         
         for (int d = 0; d < tree_depth; ++d) {
-            // FIX: Convert internal feature index to global using reverse mapping
+            // Convert internal feature index to global using reverse mapping
             int internal_idx = h_feature_indices[d];
             int global_idx = h_reverse_mapping[internal_idx];
             
             if (global_idx == global_feature_idx) {
-                // FIX: If inequality_direction is inverted (0), flip the constraint
+                // If inequality_direction is inverted (0), flip the constraint
                 int effective_dir = (h_inequality_directions[d] == 1) ? constraint_dir : -constraint_dir;
-                effective_constraints[d] = effective_dir;
-                has_any_constraint = true;
+                effective_constraints[d][constraint_output] = effective_dir;
             }
         }
     }
     
-    if (!has_any_constraint) {
-        delete[] h_feature_indices;
-        delete[] h_inequality_directions;
-        delete[] h_reverse_mapping;
-        delete[] h_mono_feature_idx;
-        delete[] h_mono_output_idx;
-        delete[] h_mono_constraint;
-        delete[] effective_constraints;
-        return;
-    }
-    
-    // Apply constraints iteratively (PAVA on hypercube)
-    const int max_iter = 100;
-    for (int iter = 0; iter < max_iter; ++iter) {
-        for (int out_idx = 0; out_idx < metadata->output_dim; ++out_idx) {
-            for (int d = 0; d < tree_depth; ++d) {
-                int constraint_dir = effective_constraints[d];
-                if (constraint_dir == 0) continue;
-                
-                // Check if this output has a constraint for this feature
-                bool has_output_constraint = false;
-                for (int c = 0; c < metadata->n_mono_constraints; ++c) {
-                    if (h_mono_output_idx[c] == out_idx) {
-                        int global_feature_idx = h_mono_feature_idx[c];
-                        int internal_idx = h_feature_indices[d];
-                        int global_idx = h_reverse_mapping[internal_idx];
-                        if (global_idx == global_feature_idx) {
-                            has_output_constraint = true;
-                            break;
-                        }
-                    }
-                }
-                
-                if (!has_output_constraint) continue;
-                
-                // Apply PAVA for this depth and output
-                pava_kernel<<<n_planes, 1>>>(
-                    edata->leaf_data->values,
-                    d,                    // constraint_depth
-                    constraint_dir,       // constraint_dir (+1 or -1)
-                    tree_depth,
-                    start_leaf_idx,
-                    n_leaves_in_tree,
-                    metadata->output_dim,
-                    out_idx              // target_output
-                );
-                cudaDeviceSynchronize();
-            }
+    // Apply constraints using single-pass PAVA (like CatBoost)
+    for (int out_idx = 0; out_idx < metadata->output_dim; ++out_idx) {
+        for (int d = 0; d < tree_depth; ++d) {
+            int constraint_dir = effective_constraints[d][out_idx];
+            if (constraint_dir == 0) continue;
+            
+            // Apply PAVA for this depth and output
+            pava_kernel<<<n_planes, 1>>>(
+                edata->leaf_data->values,
+                d,                    // constraint_depth
+                constraint_dir,       // constraint_dir (+1 or -1)
+                tree_depth,
+                start_leaf_idx,
+                n_leaves_in_tree,
+                metadata->output_dim,
+                out_idx              // target_output
+            );
+            cudaDeviceSynchronize();
         }
     }
     
@@ -2084,6 +2054,9 @@ void apply_monotonic_constraints_cuda(
     delete[] h_mono_feature_idx;
     delete[] h_mono_output_idx;
     delete[] h_mono_constraint;
+    for (int d = 0; d < tree_depth; ++d) {
+        delete[] effective_constraints[d];
+    }
     delete[] effective_constraints;
 }
 
