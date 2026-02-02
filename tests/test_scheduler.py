@@ -125,11 +125,11 @@ class TestScheduler(unittest.TestCase):
         # For simplicity, just verify the predictions are what we expect:
         # Sample 2,3 should have prediction ~0.55 (lr * leaf_value)
         
-        print(f"\nCPU Linear Scheduler Test:")
+        print("\nCPU Linear Scheduler Test:")
         print(f"  Tree 0 predictions: {pred_tree0.flatten()}")
         print(f"  Tree 1 predictions: {pred_tree1.flatten()}")
-        print(f"  Expected tree 0 (samples 2,3): ~0.55 (lr=0.55)")
-        print(f"  Expected tree 1 (samples 2,3): ~0.045 (lr=0.1, reduced residual)")
+        print("  Expected tree 0 (samples 2,3): ~0.55 (lr=0.55)")
+        print("  Expected tree 1 (samples 2,3): ~0.045 (lr=0.1, reduced residual)")
         
         # The key test: Tree 0 samples 2,3 should be exactly 0.55
         # (with depth=1, bias=0, target=1 for samples 2,3, gradient=-1, leaf=-(-1)=1, pred=lr*1=0.55)
@@ -175,7 +175,7 @@ class TestScheduler(unittest.TestCase):
         pred_tree0 = self._get_tree_predictions(model, 'cuda', 0, 1)
         pred_tree1 = self._get_tree_predictions(model, 'cuda', 1, 2)
         
-        print(f"\nGPU Linear Scheduler Test:")
+        print("\nGPU Linear Scheduler Test:")
         print(f"  Tree 0 predictions: {pred_tree0.flatten()}")
         print(f"  Tree 1 predictions: {pred_tree1.flatten()}")
         
@@ -223,7 +223,7 @@ class TestScheduler(unittest.TestCase):
         
         # With constant lr=1.0, both trees should have same scaling
         # (though raw leaf values differ based on residuals)
-        print(f"\nCPU Constant Scheduler Test:")
+        print("\nCPU Constant Scheduler Test:")
         print(f"  Tree 0 avg contribution: {tree0_contribution:.6f} (lr=1.0)")
         print(f"  Tree 1 avg contribution: {tree1_contribution:.6f} (lr=1.0)")
         

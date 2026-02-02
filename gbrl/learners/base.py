@@ -121,11 +121,8 @@ class BaseLearner(ABC):
         if self.monotonic_constraints is not None:
             grow_policy = tree_struct.get('grow_policy', 'greedy').lower()
             if grow_policy != 'oblivious':
-                raise ValueError(
-                    "Monotonic constraints are only supported with oblivious trees. "
-                    f"Current grow_policy is '{grow_policy}'. "
-                    "Set grow_policy='oblivious' in tree_struct to use monotonic constraints."
-                )
+                msg = f"Monotonic constraints require oblivious grow_policy, got '{grow_policy}'"
+                raise ValueError(msg)
             
         self._cpp_model = None
         self.optimizers = None

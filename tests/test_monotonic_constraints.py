@@ -460,9 +460,8 @@ class TestMonotonicConstraints(unittest.TestCase):
         num1 = np.random.randn(n_samples).astype(np.float32)
         num2 = np.random.randn(n_samples).astype(np.float32)
         
-        # Categorical features
-        cat0 = np.random.choice(['A', 'B', 'C'], n_samples)
-        cat1 = np.random.choice(['X', 'Y'], n_samples)
+        # Note: This test simulates a dataset where categorical features exist
+        # but only numerical features are passed to the model
         
         # Target depends on num0 (increasing) and num2 (decreasing)
         y = (2 * num0 - 1.5 * num2 + 0.5 * num1 + np.random.randn(n_samples) * 0.1).astype(np.float32)[:, np.newaxis]

@@ -317,7 +317,10 @@ void GBRL::set_feature_mapping(const int *feature_mapping, const bool *mapping_n
 
 
 void GBRL::set_monotonic_constraints(const int *feature_indices, const int *output_idx, const int *constraint, const int n_constraints){
-
+    // Guard against buffer overflow: n_constraints is validated at Python layer
+    // and buffers are pre-allocated with sufficient capacity during metadata allocation
+    if (n_constraints <= 0) return;
+    
 #ifdef USE_CUDA
     if (this->device == gpu){
         cudaMemcpy(this->edata->mono_constraints->feature_idx, feature_indices, sizeof(int)*n_constraints, cudaMemcpyHostToDevice);

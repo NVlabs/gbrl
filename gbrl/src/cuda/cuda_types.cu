@@ -416,7 +416,7 @@ void allocate_ensemble_memory_cuda(ensembleMetaData *metadata, ensembleData *eda
         cudaMemcpy(new_data->feature_mappings->reverse_num_feature_mapping, edata->feature_mappings->reverse_num_feature_mapping, metadata->input_dim * sizeof(int), cudaMemcpyDeviceToDevice);
         cudaMemcpy(new_data->feature_mappings->reverse_cat_feature_mapping, edata->feature_mappings->reverse_cat_feature_mapping, metadata->input_dim * sizeof(int), cudaMemcpyDeviceToDevice);
         cudaMemcpy(new_data->feature_data->feature_weights, edata->feature_data->feature_weights, metadata->input_dim * sizeof(float), cudaMemcpyDeviceToDevice);
-        cudaMemcpy(new_data->feature_mappings->mapping_numerics, edata->feature_mappings->mapping_numerics, metadata->input_dim * sizeof(int), cudaMemcpyDeviceToDevice);
+        cudaMemcpy(new_data->feature_mappings->mapping_numerics, edata->feature_mappings->mapping_numerics, metadata->input_dim * sizeof(bool), cudaMemcpyDeviceToDevice);
 #ifdef DEBUG
         cudaMemcpy(new_data->n_samples, edata->n_samples, leaf_idx * sizeof(int), cudaMemcpyDeviceToDevice);
 #endif 

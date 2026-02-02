@@ -1863,11 +1863,11 @@ void apply_monotonic_constraints_cuda(
                cudaMemcpyDeviceToHost);
     
     // FIX: Copy inequality directions for this tree
-    int* h_inequality_directions = new int[tree_depth];
+    bool* h_inequality_directions = new bool[tree_depth];
     int ineq_base = start_leaf_idx * metadata->max_depth;
     cudaMemcpy(h_inequality_directions,
                edata->feature_data->inequality_directions + ineq_base,
-               tree_depth * sizeof(int),
+               tree_depth * sizeof(bool),
                cudaMemcpyDeviceToHost);
     
     // FIX: Copy reverse feature mapping to convert internal->global indices
@@ -1907,8 +1907,8 @@ void apply_monotonic_constraints_cuda(
             int global_idx = h_reverse_mapping[internal_idx];
             
             if (global_idx == global_feature_idx) {
-                // If inequality_direction is inverted (0), flip the constraint
-                int effective_dir = (h_inequality_directions[d] == 1) ? constraint_dir : -constraint_dir;
+                // If inequality_direction is inverted (false), flip the constraint
+                int effective_dir = h_inequality_directions[d] ? constraint_dir : -constraint_dir;
                 effective_constraints[d][constraint_output] = effective_dir;
             }
         }
