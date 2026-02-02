@@ -109,9 +109,11 @@ def check_monotonicity(model, X, feature_idx, direction, n_samples=100, output_i
 
 
 class TestMonotonicConstraints(unittest.TestCase):
+    """Test monotonic constraints on CPU."""
 
     @classmethod
     def setUpClass(cls):
+        """Set up test data for monotonic constraint tests."""
         print("Setting up monotonic constraints tests...")
         cls.X, cls.y = create_monotonic_data(n_samples=1000)
         cls.input_dim = cls.X.shape[1]
@@ -368,13 +370,10 @@ class TestMonotonicConstraints(unittest.TestCase):
 
     def test_monotonic_mixed_dataset_categorical_rejection(self):
         """Test that we cannot apply constraints to categorical features."""
-        print("Running test_monotonic_mixed_dataset_categorical_rejection")
-        
-        # For simplicity, just test that we can document this limitation
-        # Proper validation should be added in Python layer
-        # For now, we just verify the model works with numerical-only constraints
-        print("Note: Constraints on categorical features should be validated in Python layer")
-        print("This test serves as documentation of the limitation")
+        self.skipTest(
+            "Constraints on categorical features validated in Python layer - "
+            "this test documents the limitation"
+        )
 
     def test_monotonic_mixed_dataset_numerical_only(self):
         """Test that constraints work on numerical features even with categorical data."""
@@ -669,9 +668,10 @@ class TestMonotonicConstraints(unittest.TestCase):
                        f"Output 1, Feature 2: {violations_1_2}/{total_1_2} - MUST BE 0%!")
 
 class TestMonotonicConstraintsGPU(unittest.TestCase):
-    """Test monotonic constraints on GPU"""
+    """Test monotonic constraints on GPU."""
     
     def setUp(self):
+        """Set up GPU test data and skip if CUDA unavailable."""
         print("Setting up GPU monotonic constraints tests...")
         if not cuda_available():
             self.skipTest("CUDA not available, skipping GPU tests")
@@ -1039,6 +1039,7 @@ class TestMonotonicConstraintsPersistence(unittest.TestCase):
     
     @classmethod
     def setUpClass(cls):
+        """Set up test data for persistence tests."""
         print("Setting up persistence tests for monotonic constraints...")
         cls.X, cls.y = create_monotonic_data(n_samples=500)
         cls.input_dim = cls.X.shape[1]

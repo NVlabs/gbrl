@@ -43,7 +43,11 @@ class TestScheduler(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        """Set up simple deterministic test data with obvious split."""
+        """Set up simple deterministic test data with obvious split.
+        
+        Creates data where X > 0 → high value and X <= 0 → low value
+        for predictable tree splits.
+        """
         # Simple data: X > 0 → high value, X <= 0 → low value
         # This ensures predictable tree splits
         cls.X = np.array([[-2.0], [-1.0], [1.0], [2.0]], dtype=np.float32)
