@@ -10,7 +10,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gbrl"
-version = "1.1.6"
+version = "1.1.7"
 description = "Gradient Boosted Trees for RL"
 readme = { file = "README.md", content-type = "text/markdown" }
 authors = [
@@ -52,7 +52,7 @@ Repository = "https://github.com/NVlabs/gbrl"
 
 [tool.poetry]
 name = "gbrl"
-version = "1.1.6"
+version = "1.1.7"
 description = "Gradient Boosted Trees for RL"
 authors = ["Benjamin Fuhrer <bfuhrer@nvidia.com>", "Chen Tessler <ctessler@nvidia.com>", "Gal Dalal <galal@nvidia.com>"]
 readme = "README.md"
@@ -71,6 +71,9 @@ matplotlib = ">=3.5.0"
 jinja2 = ">=3.1.6"
 setuptools = ">=78.1.1"
 Pillow = ">=11.3.0"
+fonttools = ">=4.60.2"
+filelock = ">=3.20.1"
+
 
 [tool.poetry.group.dev]
 [tool.poetry.group.dev.dependencies]

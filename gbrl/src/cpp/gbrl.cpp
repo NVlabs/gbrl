@@ -521,9 +521,10 @@ void GBRL::set_optimizer(optimizerAlgo algo, schedulerFunc scheduler_func, float
         } else if (scheduler_func == Linear){
 
 #ifdef USE_CUDA
-        if (this->device == gpu){
-            std::cerr << "Linear schedular has CPU support only." << std::endl;
-            throw std::runtime_error("Incompatible GPU scheduler");
+        // Linear scheduler is supported on GPU for oblivious trees only
+        if (this->device == gpu && this->metadata->grow_policy != OBLIVIOUS){
+            std::cerr << "Linear scheduler on GPU requires oblivious trees (grow_policy='oblivious')." << std::endl;
+            throw std::runtime_error("Incompatible GPU scheduler: Linear scheduler requires oblivious trees");
             return;
         }
 #endif

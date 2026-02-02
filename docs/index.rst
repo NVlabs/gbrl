@@ -7,6 +7,29 @@ Welcome to GBRL's documentation!
 ================================
 GBRL is a Python-based Gradient Boosting Trees (GBT) library, similar to popular packages such as `XGBoost <https://xgboost.readthedocs.io/en/stable/>`__ , `CatBoost <https://catboost.ai/>`__ , but specifically designed and optimized for reinforcement learning (RL). GBRL is implemented in C++/CUDA aimed to seamlessly integrate within popular RL libraries. 
 
+Feature Support Matrix
+----------------------
+
+The following table summarizes feature availability by tree type and device:
+
++----------------------------+---------------------+-------------------+---------------------+-------------------+
+| Feature                    | Greedy CPU          | Greedy GPU        | Oblivious CPU       | Oblivious GPU     |
++============================+=====================+===================+=====================+===================+
+| Tree Fitting               | ✓                   | ✓                 | ✓                   | ✓                 |
++----------------------------+---------------------+-------------------+---------------------+-------------------+
+| Monotonic Constraints      | ✗                   | ✗                 | ✓ (policy only)     | ✓ (policy only)   |
++----------------------------+---------------------+-------------------+---------------------+-------------------+
+| Linear LR Scheduler        | ✓                   | ✗                 | ✓                   | ✓                 |
++----------------------------+---------------------+-------------------+---------------------+-------------------+
+| Constant LR Scheduler      | ✓                   | ✓                 | ✓                   | ✓                 |
++----------------------------+---------------------+-------------------+---------------------+-------------------+
+| ADAM Optimizer             | ✓                   | ✗                 | ✓                   | ✗                 |
++----------------------------+---------------------+-------------------+---------------------+-------------------+
+| SGD Optimizer              | ✓                   | ✓                 | ✓                   | ✓                 |
++----------------------------+---------------------+-------------------+---------------------+-------------------+
+| Control Variates           | ✓                   | ✗                 | ✓                   | ✗                 |
++----------------------------+---------------------+-------------------+---------------------+-------------------+
+
 .. toctree::
    :maxdepth: 2
    :caption: User Guide:

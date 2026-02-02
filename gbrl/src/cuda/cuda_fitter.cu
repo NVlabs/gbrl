@@ -105,120 +105,6 @@ __device__ __forceinline__ void check_and_project_split(
     }
 }
 
-template<int N>
-__device__ __forceinline__ void run_pava_registers(float* val) {
-    float stack_val[N];
-    int   stack_cnt[N]; 
-    int top = -1;
-
-    #pragma unroll
-    for (int i = 0; i < N; ++i) {
-        float curr_val = val[i];
-        int   curr_cnt = 1;
-
-        // Merge Backwards
-        while (top >= 0) {
-            // Check Monotonicity: Prev <= Curr
-            if (stack_val[top] <= curr_val) break; 
-
-            // Violation: Merge
-            float prev_sum = stack_val[top] * stack_cnt[top];
-            float curr_sum = curr_val * curr_cnt;
-            int new_cnt = stack_cnt[top] + curr_cnt;
-            
-            curr_val = (prev_sum + curr_sum) / new_cnt;
-            curr_cnt = new_cnt;
-            top--; 
-        }
-
-        // Push
-        top++;
-        stack_val[top] = curr_val;
-        stack_cnt[top] = curr_cnt;
-    }
-
-    // Flatten back
-    int ptr = 0;
-    for (int i = 0; i <= top; ++i) {
-        float avg = stack_val[i];
-        int count = stack_cnt[i];
-        #pragma unroll
-        for (int k = 0; k < count; ++k) {
-            val[ptr++] = avg;
-        }
-    }
-}
-
-__global__ void enforce_oblivious_pava_kernel(
-    float* __restrict__ values,       // [n_leaves * output_dim]
-    const int* __restrict__ tree_constraints, // [depth] constraints for this tree
-    const int leaf_start_idx,         
-    const int output_dim,
-    const int depth) 
-{
-    // One thread per output dimension (e.g., 2 for Actor-Critic, 1 for Value)
-    int dim_idx = threadIdx.x + blockIdx.x * blockDim.x;
-    if (dim_idx >= output_dim) return;
-
-    // Hardcoded max size for registers (Depth 6 = 64 leaves). 
-    // For Depth 4, this loop will just run 16 times.
-    const int MAX_N = 64; 
-    int n_leaves = 1 << depth;
-    
-    // 1. Load Global -> Registers
-    float val[MAX_N];
-    int   perm[MAX_N];
-    unsigned int keys[MAX_N];
-
-    int offset = leaf_start_idx * output_dim + dim_idx;
-
-    // Stride loading
-    for (int i = 0; i < n_leaves; ++i) {
-        val[i] = values[offset + i * output_dim];
-        perm[i] = i; 
-        
-        // 2. Generate Sort Key (Gray Code / Path Logic)
-        unsigned int key = 0;
-        for (int d = 0; d < depth; ++d) {
-            int c = tree_constraints[d]; 
-            // In oblivious trees, bit 'd' of index 'i' is the decision at depth 'd'
-            // (Assumes standard MSB->LSB or LSB->MSB mapping. Verify your build order!)
-            // Here assuming: bit (depth - 1 - d) corresponds to layer d.
-            int bit = (i >> (depth - 1 - d)) & 1; 
-
-            if (c == 1)       key = (key << 1) | bit;       // Inc: 0 < 1
-            else if (c == -1) key = (key << 1) | (1 - bit); // Dec: 1 < 0
-            else              key = (key << 1) | 0;         // None
-        }
-        keys[i] = key;
-    }
-
-    // 3. Bubble Sort in Registers (Fastest for N <= 32)
-    for (int i = 0; i < n_leaves - 1; ++i) {
-        for (int j = 0; j < n_leaves - i - 1; ++j) {
-            if (keys[j] > keys[j+1]) {
-                // Swap Everything
-                float tv = val[j]; val[j] = val[j+1]; val[j+1] = tv;
-                unsigned int tk = keys[j]; keys[j] = keys[j+1]; keys[j+1] = tk;
-                int tp = perm[j]; perm[j] = perm[j+1]; perm[j+1] = tp;
-            }
-        }
-    }
-
-    // 4. Run PAVA
-    // We instantiate for 64. If n_leaves < 64, we need to be careful.
-    // Better strategy: Call template based on depth.
-    if (depth <= 4)      run_pava_registers<16>(val); 
-    else if (depth == 5) run_pava_registers<32>(val);
-    else                 run_pava_registers<64>(val);
-
-    // 5. Scatter Write Back
-    for (int i = 0; i < n_leaves; ++i) {
-        int target = perm[i]; // Original index
-        values[offset + target * output_dim] = val[i];
-    }
-}
-
 __global__ void update_best_candidate_cuda(
     float* __restrict__ split_scores,
     int n_candidates,
@@ -1801,7 +1687,7 @@ void fit_tree_greedy_cuda(
  * When multiple monotonic features exist, they define a partial order.
  * We linearize this by treating the monotonic bits as a number and sorting.
  * 
- * Algorithm (following CatBoost's approach):
+ * Algorithm:
  * 1. Find which depths use monotonic features for a given output
  * 2. Build a linear order on leaves consistent with the partial order
  * 3. Apply PAVA (Pool Adjacent Violators Algorithm) along that order
@@ -2004,9 +1890,10 @@ void apply_monotonic_constraints_cuda(
                metadata->n_mono_constraints * sizeof(int), cudaMemcpyDeviceToHost);
     
     // Build map: depth -> (effective_constraint, output_idx) for this tree
+    // Only allocate for policy_dim since monotonic constraints only apply to policy outputs
     int** effective_constraints = new int*[tree_depth];
     for (int d = 0; d < tree_depth; ++d) {
-        effective_constraints[d] = new int[metadata->output_dim]();
+        effective_constraints[d] = new int[metadata->policy_dim]();
     }
     
     for (int c = 0; c < metadata->n_mono_constraints; ++c) {
@@ -2027,8 +1914,9 @@ void apply_monotonic_constraints_cuda(
         }
     }
     
-    // Apply constraints using single-pass PAVA (like CatBoost)
-    for (int out_idx = 0; out_idx < metadata->output_dim; ++out_idx) {
+    // Apply constraints using single-pass PAVA
+    // Only iterate over policy_dim since monotonic constraints only apply to policy outputs
+    for (int out_idx = 0; out_idx < metadata->policy_dim; ++out_idx) {
         for (int d = 0; d < tree_depth; ++d) {
             int constraint_dir = effective_constraints[d][out_idx];
             if (constraint_dir == 0) continue;

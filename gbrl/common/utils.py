@@ -251,14 +251,18 @@ def setup_optimizer(optimizer: Dict, prefix: str = '') -> Dict:
         optimizer = {k.replace(prefix, ''): v for k, v in optimizer.items()}
     lr = optimizer.get('lr', 1.0) if 'init_lr' not in optimizer else \
         optimizer['init_lr']
-    # setup scheduler
-    optimizer['scheduler'] = 'Const'
+    # setup scheduler - check if explicitly set, otherwise default to Const
+    if 'scheduler' not in optimizer:
+        optimizer['scheduler'] = 'Const'
     assert isinstance(lr, (int, float, str)), "lr must be a float or string"
     if isinstance(lr, str) and 'lin_' in lr:
         assert 'T' in optimizer, "Linear optimizer must contain T the total"
         "   number of iterations used for scheduling"
         lr = lr.replace('lin_', '')
         optimizer['scheduler'] = 'Linear'
+    # Normalize scheduler name (linear -> Linear, const -> Const)
+    sched = optimizer.get('scheduler', 'Const').lower()
+    optimizer['scheduler'] = 'Linear' if sched == 'linear' else 'Const'
     optimizer['init_lr'] = float(lr)
     optimizer['algo'] = optimizer.get('algo', 'SGD')
     assert optimizer['algo'] in APPROVED_OPTIMIZERS, \

@@ -673,7 +673,8 @@ void Fitter::apply_monotonic_constraints_cpu(
     if (metadata->n_mono_constraints <= 0 || tree_depth <= 0) return;
     
     const int n_leaves = 1 << tree_depth;
-    const int output_dim = metadata->output_dim;
+    const int policy_dim = metadata->policy_dim;  // Only apply constraints to policy outputs
+    const int output_dim = metadata->output_dim;  // For indexing into leaf values array
     
     // Get feature indices for this tree (feature_indices[0] is root split)
     int* feature_indices = new int[tree_depth];
@@ -689,10 +690,10 @@ void Fitter::apply_monotonic_constraints_cpu(
     }
     
     // Build map: depth -> (effective_constraint, output_idx) for this tree
-    // effective_constraints[d][out_idx] = constraint direction for depth d and output out_idx
+    // Only allocate for policy_dim since monotonic constraints only apply to policy outputs
     int** effective_constraints = new int*[tree_depth];
     for (int d = 0; d < tree_depth; ++d) {
-        effective_constraints[d] = new int[output_dim]();
+        effective_constraints[d] = new int[policy_dim]();
     }
     
     for (int c = 0; c < metadata->n_mono_constraints; ++c) {
@@ -716,9 +717,9 @@ void Fitter::apply_monotonic_constraints_cpu(
         }
     }
     
-    // Apply constraints using single-pass PAVA (like CatBoost)
-    // For each output dimension and each constrained depth, apply pooling
-    for (int out_idx = 0; out_idx < output_dim; ++out_idx) {
+    // Apply constraints using single-pass PAVA
+    // Only iterate over policy_dim since monotonic constraints only apply to policy outputs
+    for (int out_idx = 0; out_idx < policy_dim; ++out_idx) {
         for (int d = 0; d < tree_depth; ++d) {
             int constraint_dir = effective_constraints[d][out_idx];
             if (constraint_dir == 0) continue;

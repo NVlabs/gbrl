@@ -49,6 +49,8 @@ struct SGDOptimizerGPU {
     int start_idx;            /**< Starting tree index */
     int stop_idx;             /**< Stopping tree index */
     float init_lr;            /**< Initial learning rate */
+    float stop_lr;            /**< Final learning rate (for Linear scheduler) */
+    int T;                    /**< Total iterations (for Linear scheduler) */
     schedulerFunc scheduler;  /**< Scheduler type */
 };
 

@@ -339,3 +339,186 @@ SHAP values are calculated internally and can be plotted using the `SHAP library
     ax.set_title("SHAP values Action 2")
 
     plt.show()
+
+Learning Rate Schedulers
+------------------------
+GBRL supports learning rate scheduling to control the learning rate throughout training. Two schedulers are available:
+
+- **Constant** (default): Fixed learning rate throughout training
+- **Linear**: Linearly interpolates between an initial and final learning rate
+
+.. note::
+
+    Linear scheduler on GPU is only supported for oblivious trees (``grow_policy='oblivious'``).
+
+Constant Scheduler (Default)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+    # Constant learning rate (default behavior)
+    optimizer = {
+        'algo': 'SGD',
+        'lr': 0.1,  # Fixed learning rate
+        'start_idx': 0,
+        'stop_idx': out_dim
+    }
+
+Linear Scheduler
+~~~~~~~~~~~~~~~~
+
+The linear scheduler interpolates the learning rate from ``lr`` (initial) to ``stop_lr`` (final) over ``T`` trees:
+
+.. math::
+
+    lr_t = lr + \frac{t}{T} \times (stop\_lr - lr)
+
+where :math:`t` is the current tree index (1-indexed).
+
+.. code-block:: python
+
+    # Linear learning rate decay from 0.1 to 0.01 over 100 trees
+    optimizer = {
+        'algo': 'SGD',
+        'lr': 0.1,           # Initial learning rate
+        'stop_lr': 0.01,     # Final learning rate
+        'T': 100,            # Number of trees for the schedule
+        'scheduler': 'Linear',
+        'start_idx': 0,
+        'stop_idx': out_dim
+    }
+
+    tree_struct = {
+        'max_depth': 4,
+        'n_bins': 256,
+        'min_data_in_leaf': 0,
+        'par_th': 2,
+        'grow_policy': 'oblivious'  # Required for GPU linear scheduler
+    }
+
+    gbt_model = GBTModel(
+        input_dim=input_dim,
+        output_dim=out_dim,
+        tree_struct=tree_struct,
+        optimizers=optimizer,
+        params=gbrl_params,
+        verbose=1,
+        device=device
+    )
+
+Monotonic Constraints
+---------------------
+Monotonic constraints enforce that the model output is monotonically increasing or decreasing with respect to specific input features. This is useful for incorporating domain knowledge or ensuring interpretable behavior.
+
+.. note::
+
+    Monotonic constraints are only supported for **oblivious trees** (``grow_policy='oblivious'``).
+    Constraints apply to **policy outputs only** (not value function outputs in actor-critic models).
+
+Setting Monotonic Constraints
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Constraints are specified as a dictionary mapping feature indices to constraint specifications:
+
+.. code-block:: python
+
+    constraints = {
+        feature_index: (direction, output_indices),
+        ...
+    }
+
+Where:
+
+- ``feature_index``: The input feature to constrain (int)
+- ``direction``: ``"increasing"`` (or ``"+"`` or ``1``) or ``"decreasing"`` (or ``"-"`` or ``-1``)
+- ``output_indices``: Single int or list of output dimensions to apply the constraint to
+
+Only specify the features you want to constrain - unlisted features have no constraints.
+
+.. code-block:: python
+
+    from gbrl.models import GBTModel
+
+    input_dim = 4
+    out_dim = 2
+
+    # Feature 0: increasing for output 0
+    # Feature 1: decreasing for outputs 0 and 1
+    # Features 2-3: no constraints (not listed)
+    monotonic_constraints = {
+        0: ("increasing", 0),
+        1: ("decreasing", [0, 1]),
+    }
+
+    tree_struct = {
+        'max_depth': 4,
+        'n_bins': 256,
+        'min_data_in_leaf': 0,
+        'par_th': 2,
+        'grow_policy': 'oblivious'  # Required for monotonic constraints
+    }
+
+    # Specify which output dimensions are policy (constraints apply to these)
+    optimizer = {
+        'algo': 'SGD',
+        'lr': 0.1,
+        'start_idx': 0,
+        'stop_idx': out_dim  # policy_dim - constraints apply to indices 0 to stop_idx-1
+    }
+
+    gbrl_params = {
+        'split_score_func': 'Cosine',
+        'generator_type': 'Quantile'
+    }
+
+    gbt_model = GBTModel(
+        input_dim=input_dim,
+        output_dim=out_dim,
+        tree_struct=tree_struct,
+        optimizers=optimizer,
+        params=gbrl_params,
+        monotonic_constraints=monotonic_constraints,
+        verbose=1,
+        device='cuda'  # GPU supported for oblivious trees
+    )
+
+Combining Schedulers and Constraints
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Monotonic constraints and linear schedulers can be used together:
+
+.. code-block:: python
+
+    monotonic_constraints = {
+        0: ("increasing", 0),
+        1: ("decreasing", [0, 1]),
+    }
+
+    optimizer = {
+        'algo': 'SGD',
+        'lr': 0.1,
+        'stop_lr': 0.01,
+        'T': 100,
+        'scheduler': 'Linear',
+        'start_idx': 0,
+        'stop_idx': out_dim
+    }
+
+    tree_struct = {
+        'max_depth': 4,
+        'n_bins': 256,
+        'min_data_in_leaf': 0,
+        'par_th': 2,
+        'grow_policy': 'oblivious'
+    }
+
+    gbt_model = GBTModel(
+        input_dim=input_dim,
+        output_dim=out_dim,
+        tree_struct=tree_struct,
+        optimizers=optimizer,
+        params=gbrl_params,
+        monotonic_constraints=monotonic_constraints,
+        verbose=1,
+        device='cuda'
+    )

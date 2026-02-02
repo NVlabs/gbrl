@@ -54,12 +54,13 @@ For a detailed usage example, see `tutorial.ipynb`
     - MultiRMSE loss (only)
 - Categorical inputs
 - Input feature weights - (CPU/GPU)
+- Monotonic constraints - (CPU/GPU, policy only)
 ### GBT Inference
 - SGD optimizer - (CPU/GPU)
 - ADAM optimizer - (CPU only)
 - Control Variates (gradient variance reduction technique) - (CPU only)
 - Shared Tree for policy and value function - (CPU/GPU)
-- Linear and constant learning rate scheduler - (CPU/GPU only constant)
+- Linear and constant learning rate scheduler - (CPU/GPU, linear scheduler GPU only for oblivious trees)
 - Support for up to two different optimizers (e.g, policy/value) - **(CPU/GPU if both are SGD)
 - SHAP value calculation
 

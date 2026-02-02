@@ -21,6 +21,26 @@
 #include "cuda_fitter.h"
 #include "cuda_utils.h"
 
+/**
+ * @brief Device function to compute learning rate based on scheduler type
+ * 
+ * @param opt Optimizer containing scheduler parameters
+ * @param tree_idx Current tree index (used as iteration t for linear scheduler)
+ * @return Learning rate for this tree
+ */
+__device__ __forceinline__ float get_lr_device(const SGDOptimizerGPU* opt, int tree_idx) {
+    if (opt->scheduler == Const) {
+        return opt->init_lr;
+    } else if (opt->scheduler == Linear) {
+        float T_ = static_cast<float>(opt->T);
+        float t_ = static_cast<float>(tree_idx) + 1.0f;
+        float progress_remaining = (T_ - t_) / T_;
+        float lr = opt->init_lr + (1.0f - progress_remaining) * (opt->stop_lr - opt->init_lr);
+        return (lr < opt->stop_lr) ? opt->stop_lr : lr;
+    }
+    return opt->init_lr;
+}
+
 SGDOptimizerGPU** deepCopySGDOptimizerVectorToGPU(const std::vector<Optimizer*>& host_opts) {
     // Allocate memory for array of SGDOptimizerGPU pointers
     cudaError_t error;
@@ -51,6 +71,16 @@ SGDOptimizerGPU** deepCopySGDOptimizerVectorToGPU(const std::vector<Optimizer*>&
         
         schedulerFunc scheduler = host_opts[i]->scheduler->getType();
         cudaMemcpy(&(device_opt->scheduler), &scheduler, sizeof(schedulerFunc), cudaMemcpyHostToDevice);
+        
+        // Copy linear scheduler parameters if applicable
+        if (scheduler == Linear) {
+            LinearScheduler* lin_sched = dynamic_cast<LinearScheduler*>(host_opts[i]->scheduler);
+            if (lin_sched) {
+                cudaMemcpy(&(device_opt->stop_lr), &(lin_sched->stop_lr), sizeof(float), cudaMemcpyHostToDevice);
+                cudaMemcpy(&(device_opt->T), &(lin_sched->T), sizeof(int), cudaMemcpyHostToDevice);
+            }
+        }
+        
         cudaMemcpy(&(device_opts[i]), &device_opt, sizeof(SGDOptimizerGPU*), cudaMemcpyHostToDevice);
     }
     // Return the pointer to the array of SGDOptimizerGPU pointers
@@ -421,28 +451,33 @@ __global__ void predict_kernel_numerical_only(const float* __restrict__ obs, flo
 __global__ void predict_oblivious_kernel_numerical_only(const float* __restrict__ obs, float* __restrict__ preds, const int n_samples, const int n_num_features, 
                                                         const int* __restrict__ feature_indices, const int* __restrict__ depths, const float* __restrict__ feature_values, const bool* __restrict__ inequality_directions, const float* __restrict__ leaf_values,
                                                         const int* __restrict__ tree_indices, SGDOptimizerGPU** opts, const int n_opts, const int output_dim, const int max_depth, const int tree_offset){
-    int leaf_idx, initial_leaf_idx = __ldg(tree_indices + blockIdx.x + tree_offset);
+    int tree_idx = blockIdx.x + tree_offset;
+    int leaf_idx, initial_leaf_idx = __ldg(tree_indices + tree_idx);
     for (int sample_idx = threadIdx.x; sample_idx < n_samples; sample_idx += blockDim.x){
         leaf_idx = 0;
-        for (int depth_idx = 0; depth_idx < __ldg(depths + blockIdx.x + tree_offset); depth_idx++){ 
-            bool decision = (__ldg(&obs[sample_idx*n_num_features + __ldg(feature_indices + (blockIdx.x + tree_offset) * max_depth + depth_idx)])) > (__ldg(feature_values + (blockIdx.x + tree_offset) * max_depth + depth_idx));
-            leaf_idx |= (decision <<  (__ldg(depths + blockIdx.x + tree_offset) - 1 - depth_idx));
+        for (int depth_idx = 0; depth_idx < __ldg(depths + tree_idx); depth_idx++){ 
+            bool decision = (__ldg(&obs[sample_idx*n_num_features + __ldg(feature_indices + tree_idx * max_depth + depth_idx)])) > (__ldg(feature_values + tree_idx * max_depth + depth_idx));
+            leaf_idx |= (decision <<  (__ldg(depths + tree_idx) - 1 - depth_idx));
         }
         if (n_opts == 1){
+            float lr = get_lr_device(opts[0], tree_idx);
             for (int i = opts[0]->start_idx; i < opts[0]->stop_idx; ++i){
-                atomicAdd(&preds[sample_idx*output_dim + i], -__ldg(&opts[0]->init_lr) * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
+                atomicAdd(&preds[sample_idx*output_dim + i], -lr * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
             }
         } else if (n_opts == 2){
+            float lr0 = get_lr_device(opts[0], tree_idx);
+            float lr1 = get_lr_device(opts[1], tree_idx);
             for (int i = opts[0]->start_idx; i < opts[0]->stop_idx; ++i){
-                atomicAdd(&preds[sample_idx*output_dim + i], -__ldg(&opts[0]->init_lr) * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
+                atomicAdd(&preds[sample_idx*output_dim + i], -lr0 * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
             }
             for (int i = opts[1]->start_idx; i < opts[1]->stop_idx; ++i){
-                atomicAdd(&preds[sample_idx*output_dim + i], -__ldg(&opts[1]->init_lr) * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
+                atomicAdd(&preds[sample_idx*output_dim + i], -lr1 * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
             }
         } else {
             for (int opt_idx=0; opt_idx < n_opts; ++opt_idx){
+                float lr = get_lr_device(opts[opt_idx], tree_idx);
                 for (int i = opts[opt_idx]->start_idx; i < opts[opt_idx]->stop_idx; ++i)
-                    atomicAdd(&preds[sample_idx*output_dim + i], -__ldg(&opts[opt_idx]->init_lr) * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
+                    atomicAdd(&preds[sample_idx*output_dim + i], -lr * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
             }
         }
     }
@@ -474,20 +509,24 @@ __global__ void predict_oblivious_kernel_tree_wise(const float* __restrict__ obs
         }
 
         if (n_opts == 1){
+            float lr = get_lr_device(opts[0], tree_idx);
             for (int i = opts[0]->start_idx; i < opts[0]->stop_idx; ++i){
-                atomicAdd(&preds[sample_idx*output_dim + i], -__ldg(&opts[0]->init_lr) * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
+                atomicAdd(&preds[sample_idx*output_dim + i], -lr * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
             }
         } else if (n_opts == 2) {
+            float lr0 = get_lr_device(opts[0], tree_idx);
+            float lr1 = get_lr_device(opts[1], tree_idx);
             for (int i = opts[0]->start_idx; i < opts[0]->stop_idx; ++i){
-                atomicAdd(&preds[sample_idx*output_dim + i], -__ldg(&opts[0]->init_lr) * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
+                atomicAdd(&preds[sample_idx*output_dim + i], -lr0 * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
             }
             for (int i = opts[1]->start_idx; i < opts[1]->stop_idx; ++i){
-                atomicAdd(&preds[sample_idx*output_dim + i], -__ldg(&opts[1]->init_lr) * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
+                atomicAdd(&preds[sample_idx*output_dim + i], -lr1 * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
             }
         } else {
             for (int opt_idx = 0; opt_idx < n_opts; ++opt_idx){
+                float lr = get_lr_device(opts[opt_idx], tree_idx);
                 for (int i = opts[opt_idx]->start_idx; i < opts[opt_idx]->stop_idx; ++i)
-                    atomicAdd(&preds[sample_idx*output_dim + i], -__ldg(&opts[opt_idx]->init_lr) * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
+                    atomicAdd(&preds[sample_idx*output_dim + i], -lr * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
             }
         }
     }
