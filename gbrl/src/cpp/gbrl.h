@@ -506,6 +506,39 @@ class GBRL {
          */
         ensembleData* get_ensemble_data();
 
+        /**
+         * @brief Generate matrix representation (A, V) for tree ensemble compression
+         * 
+         * Converts the tree ensemble into a matrix factorization form where A is a
+         * binary matrix indicating which leaves are activated by each sample, and V
+         * contains the scaled leaf values. This representation enables compression
+         * analysis and optimization.
+         * 
+         * @param obs Numerical feature observations (n_samples x n_num_features)
+         * @param categorical_obs Categorical feature observations (n_samples x n_cat_features)
+         * @param n_samples Number of data samples
+         * @param n_num_features Number of numerical features
+         * @param n_cat_features Number of categorical features
+         * @return Pointer to matrixRepresentation structure containing A, V matrices
+         */
+        matrixRepresentation* get_matrix_representation(const float *obs, const char *categorical_obs, const int n_samples, const int n_num_features, const int n_cat_features);
+        
+        /**
+         * @brief Compress ensemble by selecting subset of trees and leaves
+         * 
+         * Applies correction matrix W to maintain prediction accuracy, then creates
+         * a compressed ensemble containing only the specified trees and leaves. Updates
+         * metadata to reflect compressed dimensions and replaces internal ensemble data.
+         * 
+         * @param n_compressed_leaves Number of leaves in compressed ensemble
+         * @param n_compressed_trees Number of trees in compressed ensemble
+         * @param leaf_indices Indices of leaves to retain (length n_compressed_leaves)
+         * @param tree_indices Indices of trees to retain (length n_compressed_trees)
+         * @param new_tree_indices New starting leaf indices for trees (length n_compressed_trees)
+         * @param W Correction matrix to apply before compression (n_leaves+1 x output_dim)
+         */
+        void compress_ensemble(const int n_compressed_leaves, const int n_compressed_trees, const int *leaf_indices, const int *tree_indices, const int *new_tree_indices, const float *W);
+
         ensembleData *edata;                /**< Ensemble parameter data */
         ensembleMetaData *metadata;         /**< Ensemble metadata */
         serializationHeader sheader;        /**< Serialization header */

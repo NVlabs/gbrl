@@ -22,6 +22,7 @@
 
 set(CUDA_SOURCES
     cuda_predictor.cu
+    cuda_compression.cu
     cuda_fitter.cu
     cuda_loss.cu
     cuda_types.cu

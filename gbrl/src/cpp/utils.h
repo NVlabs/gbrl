@@ -92,17 +92,39 @@ template<typename T>
 int count_distinct(T *arr, int n);
 
 /**
- * @brief Validate tree index is within valid range
+ * @brief Selectively copy elements from source to destination based on indices
  * 
- * @param tree_idx Index to validate
- * @param metadata Ensemble metadata containing valid tree count
- * @throws std::runtime_error if index is out of range
+ * Copies elements from src to dest array based on index array. For each index i,
+ * copies elements_dim contiguous values starting from src[indices[i]*elements_dim]
+ * to dest[i*elements_dim]. Parallelized with OpenMP for performance.
+ * 
+ * @tparam T Element type (float, int, bool)
+ * @param num_indices Number of elements to copy
+ * @param indices Array of source indices
+ * @param dest Destination array
+ * @param src Source array
+ * @param elements_dim Number of components per element
  */
-inline void valid_tree_idx(const int tree_idx, const ensembleMetaData* metadata) {
-    if (tree_idx < 0 || tree_idx > metadata->n_trees) {
-        std::cerr << "ERROR: invalid tree_idx " << tree_idx 
-                  << " in ensemble with n_trees = " << metadata->n_trees
-                  << std::endl;
+template <typename T>
+void selective_copy(const int num_indices, const int* indices, T* dest, const T* src, const int elements_dim);
+
+/**
+ * @brief Selectively copy character strings with fixed size
+ * 
+ * Specialized selective copy for character arrays where each string has
+ * MAX_CHAR_SIZE bytes. Uses memcpy for efficient bulk copying.
+ * 
+ * @param num_indices Number of string groups to copy
+ * @param indices Array of source indices
+ * @param dest Destination character array
+ * @param src Source character array
+ * @param elements_dim Number of strings per indexed group
+ */
+void selective_copy_char(const int num_indices, const int* indices, char* dest, const char* src, const int elements_dim);
+
+inline void valid_tree_idx(const int tree_idx, const ensembleMetaData* metadata){
+    if (tree_idx < 0 || tree_idx > metadata->n_trees){
+        std::cerr << "ERROR: invalid tree_idx " << tree_idx << " in ensemble with ntrees = " << metadata->n_trees <<std::endl;
         throw std::runtime_error("Invalid tree index");
     }
 }

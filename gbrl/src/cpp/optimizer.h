@@ -66,26 +66,44 @@ class Optimizer {
         Optimizer(const Optimizer& other);
         
         /**
-         * @brief Perform optimization step
+         * @brief Pure virtual: Perform optimization step on parameters
          * 
-         * Updates parameters using gradients and learning rate schedule.
-         * 
-         * @param theta Parameters to update
-         * @param raw_grad_theta Gradient of loss w.r.t. parameters
-         * @param t Current iteration number
-         * @param sample_idx Sample index being processed
+         * @param theta Parameters to update (modified in-place)
+         * @param raw_grad_theta Gradient values
+         * @param t Current iteration/timestep
+         * @param sample_idx Sample index for per-sample state
          */
-        virtual void step(
-            float *theta,
-            const float *raw_grad_theta,
-            int t,
-            int sample_idx
-        ) = 0;
+        virtual void step(float *theta, const float *raw_grad_theta, int t, int sample_idx) = 0;
         
         /**
-         * @brief Get optimizer configuration
+         * @brief Copy and scale values by negative learning rate
          * 
-         * @return Pointer to configuration struct, caller must delete
+         * Copies values from source to destination, scaling by -lr(t).
+         * Used for matrix representation generation (V = -lr * leaf_values).
+         * Only operates on indices [start_idx, stop_idx) for this optimizer.
+         * 
+         * @param scaled_grad_theta Destination array for scaled values
+         * @param raw_grad_theta Source values to copy and scale
+         * @param t Current iteration for learning rate lookup
+         */
+        void copy_and_scale(float *scaled_grad_theta, const float *raw_grad_theta, int t);
+        
+        /**
+         * @brief Add inverse-scaled values to destination
+         * 
+         * Subtracts source values divided by learning rate from destination.
+         * Used for compression correction: dest -= src / lr(t).
+         * Only operates on indices [start_idx, stop_idx) for this optimizer.
+         * 
+         * @param raw_grad_theta Destination array (modified in-place)
+         * @param scaled_grad_theta Source values to inverse-scale and subtract
+         * @param t Current iteration for learning rate lookup
+         */
+        void add_scaled(float *raw_grad_theta, const float *scaled_grad_theta, int t);
+        
+        /**
+         * @brief Get optimizer configuration for serialization
+         * @return Pointer to config struct, caller must delete
          */
         virtual optimizerConfig* getConfig() = 0;
         
