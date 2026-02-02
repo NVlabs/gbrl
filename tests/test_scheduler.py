@@ -274,7 +274,7 @@ class TestScheduler(unittest.TestCase):
         pred_tree0_gpu = self._get_tree_predictions(model_cpu, 'cuda', 0, 1)
         pred_tree1_gpu = self._get_tree_predictions(model_cpu, 'cuda', 1, 2)
         
-        print(f"\nCPU vs GPU Linear Scheduler:")
+        print("\nCPU vs GPU Linear Scheduler:")
         print(f"  Tree 0 CPU: {pred_tree0_cpu.flatten()}")
         print(f"  Tree 0 GPU: {pred_tree0_gpu.flatten()}")
         print(f"  Tree 1 CPU: {pred_tree1_cpu.flatten()}")

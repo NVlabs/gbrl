@@ -307,7 +307,7 @@ class TestMonotonicConstraints(unittest.TestCase):
         optimizer = {'algo': 'SGD', 'lr': 0.5, 'start_idx': 0, 'stop_idx': 1}
         
         with self.assertRaises(ValueError) as context:
-            model = GBTModel(
+            GBTModel(
                 input_dim=self.input_dim,
                 output_dim=self.output_dim,
                 tree_struct=tree_struct,
