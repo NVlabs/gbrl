@@ -94,30 +94,6 @@ void calc_oblivious_parallelism(
     }
 }
 
-__device__ __forceinline__ void check_and_project_split(
-    float* __restrict__ left_val, 
-    float* __restrict__ right_val, 
-    int constraint) 
-{
-    // Constraint: 0 (None), 1 (Increasing), -1 (Decreasing)
-    if (constraint == 0) return;
-
-    float l = *left_val;
-    float r = *right_val;
-
-    // Violation Check:
-    // Inc (1): Right must be >= Left. Violation if R < L.
-    // Dec (-1): Right must be <= Left. Violation if R > L.
-    bool violation = (constraint == 1 && r < l) || (constraint == -1 && r > l);
-
-    if (violation) {
-        // Project to unweighted mean (fastest for scoring approximation)
-        float pooled = 0.5f * (l + r);
-        *left_val = pooled;
-        *right_val = pooled;
-    }
-}
-
 __global__ void update_best_candidate_cuda(
     float* __restrict__ split_scores,
     int n_candidates,
@@ -1720,77 +1696,6 @@ void fit_tree_greedy_cuda(
  */
 
 /**
- * @brief Build the linear order of leaves for monotonic constraints
- * 
- * For leaves in an oblivious tree, this creates an ordering such that
- * if leaf A must have value <= leaf B according to monotonic constraints,
- * then A appears before B in the order.
- * 
- * @param tree_mono_constraints Array of size tree_depth: 0 (no constraint), +1 (increasing), -1 (decreasing)
- * @param tree_depth Depth of the tree
- * @param n_leaves Number of leaves (2^tree_depth)
- * @param leaf_order Output: ordered indices of leaves
- */
-__device__ void build_leaf_order(
-    const int* tree_mono_constraints,
-    int tree_depth,
-    int n_leaves,
-    int* leaf_order
-) {
-    // Count monotonic and non-monotonic splits
-    int mono_count = 0;
-    int mono_depths[32];  // Assuming max depth <= 32
-    int mono_dirs[32];    // Direction for each monotonic depth
-    
-    for (int d = 0; d < tree_depth; ++d) {
-        if (tree_mono_constraints[d] != 0) {
-            mono_dirs[mono_count] = tree_mono_constraints[d];
-            mono_depths[mono_count] = d;
-            mono_count++;
-        }
-    }
-    
-    // For each leaf, compute its position in the linear order
-    // The order is determined by the monotonic bits interpreted as a number
-    // with appropriate direction flipping for decreasing constraints
-    for (int leaf_idx = 0; leaf_idx < n_leaves; ++leaf_idx) {
-        int rank = 0;
-        for (int m = 0; m < mono_count; ++m) {
-            int d = mono_depths[m];
-            int bit = (leaf_idx >> d) & 1;
-            
-            // For decreasing constraint, flip the bit contribution
-            if (mono_dirs[m] == -1) {
-                bit = 1 - bit;
-            }
-            
-            // Build rank with highest-significance monotonic feature first
-            rank = (rank << 1) | bit;
-        }
-        
-        // Also need to handle non-monotonic features to place leaves correctly
-        // For non-monotonic features, leaves with different non-mono bits are in different "subtrees"
-        // We process each subtree independently in PAVA
-        
-        // For now, compute a combined index: (non_mono_bits, rank)
-        // This groups leaves by their non-monotonic path, then orders by monotonic rank
-        int non_mono_bits = 0;
-        int non_mono_count = 0;
-        for (int d = 0; d < tree_depth; ++d) {
-            if (tree_mono_constraints[d] == 0) {
-                int bit = (leaf_idx >> d) & 1;
-                non_mono_bits |= (bit << non_mono_count);
-                non_mono_count++;
-            }
-        }
-        
-        // Combined key: non_mono_bits * (1 << mono_count) + rank
-        int combined = (non_mono_bits << mono_count) | rank;
-        leaf_order[combined] = leaf_idx;
-    }
-}
-
-/**
  * @brief PAVA kernel for applying isotonic regression to leaf values
  * 
  * Each block handles one output dimension.
@@ -1955,7 +1860,16 @@ void apply_monotonic_constraints_cuda(
                 metadata->output_dim,
                 out_idx              // target_output
             );
-            cudaDeviceSynchronize();
+            cudaError_t launch_err = cudaGetLastError();
+            if (launch_err != cudaSuccess) {
+                std::cerr << "ERROR: pava_kernel launch failed (depth=" << d << ", dir=" << constraint_dir 
+                          << ", tree_depth=" << tree_depth << ", start_idx=" << start_leaf_idx 
+                          << ", n_leaves=" << n_leaves_in_tree << "): " << cudaGetErrorString(launch_err) << std::endl;
+            }
+            cudaError_t sync_err = cudaDeviceSynchronize();
+            if (sync_err != cudaSuccess) {
+                std::cerr << "ERROR: pava_kernel sync failed: " << cudaGetErrorString(sync_err) << std::endl;
+            }
         }
     }
     

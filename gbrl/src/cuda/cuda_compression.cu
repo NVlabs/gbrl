@@ -155,6 +155,7 @@ void get_matrix_representation_cuda(dataSet *dataset, ensembleMetaData *metadata
     if (threads_per_block > deviceProp.maxThreadsPerBlock)
         threads_per_block = deviceProp.maxThreadsPerBlock;
 
+    cudaError_t kernel_error;
     if (metadata->grow_policy == GREEDY){
         if (metadata->n_cat_features == 0)
             get_representation_kernel_numerical_only<<<metadata->n_leaves, threads_per_block>>>(device_batch_obs, dataset->n_samples, metadata->n_num_features, edata->feature_data->feature_indices, edata->ensemble_info->depths, edata->feature_data->feature_values, edata->feature_data->inequality_directions, edata->leaf_data->values, metadata->output_dim, metadata->max_depth, metadata->n_leaves, device_A);
@@ -167,10 +168,44 @@ void get_matrix_representation_cuda(dataSet *dataset, ensembleMetaData *metadata
         else
             get_representation_oblivious_kernel_tree_wise<<<metadata->n_trees, threads_per_block>>>(device_batch_obs, device_batch_cat_obs, dataset->n_samples, metadata->n_num_features, metadata->n_cat_features, edata->feature_data->feature_indices, edata->ensemble_info->depths, edata->feature_data->feature_values, edata->feature_data->inequality_directions, edata->leaf_data->values, edata->ensemble_info->tree_indices, edata->feature_data->categorical_values, edata->feature_data->is_numerics, metadata->output_dim, metadata->max_depth, metadata->n_leaves, device_A);
     }
-    cudaDeviceSynchronize();
+    kernel_error = cudaGetLastError();
+    if (kernel_error != cudaSuccess) {
+        std::cerr << "ERROR: Representation kernel launch failed: " << cudaGetErrorString(kernel_error) << std::endl;
+        matrix->A = nullptr;
+        matrix->V = nullptr;
+        matrix->n_leaves = 0;
+        cudaFree(device_data);
+        return;
+    }
+    kernel_error = cudaDeviceSynchronize();
+    if (kernel_error != cudaSuccess) {
+        std::cerr << "ERROR: Representation kernel sync failed: " << cudaGetErrorString(kernel_error) << std::endl;
+        matrix->A = nullptr;
+        matrix->V = nullptr;
+        matrix->n_leaves = 0;
+        cudaFree(device_data);
+        return;
+    }
     n_blocks = metadata->n_leaves / THREADS_PER_BLOCK + 1; 
     get_V_kernel<<<n_blocks, THREADS_PER_BLOCK>>>(device_V, edata->leaf_data->values, opts, n_opts, metadata->output_dim, metadata->n_leaves);
-    cudaDeviceSynchronize();
+    kernel_error = cudaGetLastError();
+    if (kernel_error != cudaSuccess) {
+        std::cerr << "ERROR: get_V_kernel launch failed: " << cudaGetErrorString(kernel_error) << std::endl;
+        matrix->A = nullptr;
+        matrix->V = nullptr;
+        matrix->n_leaves = 0;
+        cudaFree(device_data);
+        return;
+    }
+    kernel_error = cudaDeviceSynchronize();
+    if (kernel_error != cudaSuccess) {
+        std::cerr << "ERROR: get_V_kernel sync failed: " << cudaGetErrorString(kernel_error) << std::endl;
+        matrix->A = nullptr;
+        matrix->V = nullptr;
+        matrix->n_leaves = 0;
+        cudaFree(device_data);
+        return;
+    }
     // Allocate by element count, not byte size
     int A_elems = n_samples * (metadata->n_leaves + 1);
     int V_elems = (metadata->n_leaves + 1) * output_dim;
@@ -183,8 +218,23 @@ void get_matrix_representation_cuda(dataSet *dataset, ensembleMetaData *metadata
     // Copy results back to CPU
     matrix->n_leaves = metadata->n_leaves;
     cudaFree(device_data);
+    
+    // Guard against n_trees == 0 to avoid accessing tree_indices[-1]
+    if (metadata->n_trees == 0) {
+        matrix->n_trees = 0;
+        matrix->n_leaves_per_tree = nullptr;
+        return;
+    }
+    
     int *tree_indices = new int[metadata->n_trees];
-    cudaMemcpy(tree_indices, edata->ensemble_info->tree_indices,  sizeof(int)*metadata->n_trees, cudaMemcpyDeviceToHost);
+    cudaError_t copy_error = cudaMemcpy(tree_indices, edata->ensemble_info->tree_indices, sizeof(int)*metadata->n_trees, cudaMemcpyDeviceToHost);
+    if (copy_error != cudaSuccess) {
+        std::cerr << "ERROR: Failed to copy tree_indices: " << cudaGetErrorString(copy_error) << std::endl;
+        delete[] tree_indices;
+        matrix->n_trees = 0;
+        matrix->n_leaves_per_tree = nullptr;
+        return;
+    }
     matrix->n_leaves_per_tree = new int[metadata->n_trees];
     for (int i = 0; i < metadata->n_trees - 1; ++i )
         matrix->n_leaves_per_tree[i] = tree_indices[i+1] - tree_indices[i];
@@ -234,13 +284,33 @@ ensembleData * compress_ensemble_cuda(ensembleMetaData *metadata, ensembleData *
     cudaMemcpy(device_W, W, W_size, cudaMemcpyHostToDevice);
     int n_blocks = (n_compressed_leaves + 1) / THREADS_PER_BLOCK + 1;
     add_W_matrix_to_values_kernel<<<n_blocks, THREADS_PER_BLOCK>>>(device_W, compressed_edata->leaf_data->values, compressed_edata->bias, opts, n_opts, n_compressed_leaves, metadata->output_dim);
-    cudaDeviceSynchronize();
+    cudaError_t launch_error = cudaGetLastError();
+    if (launch_error != cudaSuccess) {
+        std::cerr << "ERROR: add_W_matrix_to_values_kernel launch failed: " << cudaGetErrorString(launch_error) << std::endl;
+        cudaFree(device_W);
+        ensemble_data_dealloc_cuda(compressed_edata);
+        return nullptr;
+    }
+    cudaError_t sync_error = cudaDeviceSynchronize();
+    if (sync_error != cudaSuccess) {
+        std::cerr << "ERROR: add_W_matrix_to_values_kernel sync failed: " << cudaGetErrorString(sync_error) << std::endl;
+        cudaFree(device_W);
+        ensemble_data_dealloc_cuda(compressed_edata);
+        return nullptr;
+    }
     cudaFree(device_W);
 
     // Reset original data and copy compressed data into it
     // This strategy avoids memory fragmentation
+    // First zero out edata, then copy compressed data into it
     cudaMemset(edata->bias, 0, edata->alloc_data_size);
-    edata = ensemble_data_copy_gpu_gpu(metadata, compressed_edata, edata);
+    ensembleData* copy_result = ensemble_data_copy_gpu_gpu(metadata, compressed_edata, edata);
+    if (copy_result == nullptr) {
+        std::cerr << "ERROR: ensemble_data_copy_gpu_gpu failed during compression" << std::endl;
+        ensemble_data_dealloc_cuda(compressed_edata);
+        return nullptr;
+    }
+    edata = copy_result;
     ensemble_data_dealloc_cuda(compressed_edata);
     return edata;
 }
@@ -365,7 +435,7 @@ __global__ void get_representation_kernel_numerical_only(const float* __restrict
         depth_idx = __ldg(depths + blockIdx.x) - 1;
         passed = true;
         while (depth_idx >= 0 && passed) {
-            passed = (__ldg(&obs[sample_idx*n_num_features + __ldg(feature_indices + cond_idx + depth_idx)]) > __ldg(feature_values + cond_idx + depth_idx) == inequality_directions[cond_idx + depth_idx]);
+            passed = ((__ldg(&obs[sample_idx*n_num_features + __ldg(feature_indices + cond_idx + depth_idx)]) > __ldg(feature_values + cond_idx + depth_idx)) == inequality_directions[cond_idx + depth_idx]);
             depth_idx--;
         }
         if (passed){
@@ -410,7 +480,7 @@ __global__ void get_representation_kernel_tree_wise(const float* __restrict__ ob
         depth_idx = __ldg(depths + blockIdx.x) - 1;
         while(depth_idx >= 0 && passed){
             if (is_numerics[cond_idx + depth_idx]){
-                passed = __ldg(&obs[sample_idx*n_num_features + __ldg(&feature_indices[cond_idx + depth_idx])]) > __ldg(&feature_values[cond_idx + depth_idx]) == inequality_directions[cond_idx + depth_idx];
+                passed = ((__ldg(&obs[sample_idx*n_num_features + __ldg(&feature_indices[cond_idx + depth_idx])]) > __ldg(&feature_values[cond_idx + depth_idx])) == inequality_directions[cond_idx + depth_idx]);
             } 
             else {
                 equal = true;
@@ -452,22 +522,35 @@ __global__ void add_W_matrix_to_values_kernel(const float * __restrict__ W, floa
         int value_idx = idx*output_dim;
         int offset_value = (idx + 1)*output_dim;
         if (n_opts == 1){
-            for (int i = opts[0]->start_idx; i < opts[0]->stop_idx; ++i){
-                leaf_values[value_idx + i] -= __ldg(W + offset_value + i)  / opts[0]->init_lr;
+            // Defensive guard: skip division if init_lr is zero to avoid NaN/inf
+            float lr0 = opts[0]->init_lr;
+            if (lr0 != 0.0f) {
+                for (int i = opts[0]->start_idx; i < opts[0]->stop_idx; ++i){
+                    leaf_values[value_idx + i] -= __ldg(W + offset_value + i) / lr0;
+                }
             }
         } 
         else if (n_opts == 2) {
-            for (int i = opts[0]->start_idx; i < opts[0]->stop_idx; ++i){
-                leaf_values[value_idx + i] -= __ldg(W + offset_value + i)  / opts[0]->init_lr;
+            float lr0 = opts[0]->init_lr;
+            float lr1 = opts[1]->init_lr;
+            if (lr0 != 0.0f) {
+                for (int i = opts[0]->start_idx; i < opts[0]->stop_idx; ++i){
+                    leaf_values[value_idx + i] -= __ldg(W + offset_value + i) / lr0;
+                }
             }
-            for (int i = opts[1]->start_idx; i < opts[1]->stop_idx; ++i){
-                leaf_values[value_idx + i] -= __ldg(W + offset_value + i)  / opts[1]->init_lr;
+            if (lr1 != 0.0f) {
+                for (int i = opts[1]->start_idx; i < opts[1]->stop_idx; ++i){
+                    leaf_values[value_idx + i] -= __ldg(W + offset_value + i) / lr1;
+                }
             }
         }
         else {
             for (int opt_idx = 0; opt_idx < n_opts; ++opt_idx){
-                for (int i = opts[opt_idx]->start_idx; i < opts[opt_idx]->stop_idx; ++i)
-                    leaf_values[value_idx + i] -= __ldg(W + offset_value + i)  / opts[opt_idx]->init_lr;
+                float lr = opts[opt_idx]->init_lr;
+                if (lr != 0.0f) {
+                    for (int i = opts[opt_idx]->start_idx; i < opts[opt_idx]->stop_idx; ++i)
+                        leaf_values[value_idx + i] -= __ldg(W + offset_value + i) / lr;
+                }
             }
             }
         if (idx == 0){

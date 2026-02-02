@@ -264,6 +264,8 @@ def setup_optimizer(optimizer: Dict, prefix: str = '') -> Dict:
     sched = optimizer.get('scheduler', 'Const').lower()
     optimizer['scheduler'] = 'Linear' if sched == 'linear' else 'Const'
     optimizer['init_lr'] = float(lr)
+    if optimizer['init_lr'] <= 0:
+        raise ValueError("init_lr must be > 0")
     optimizer['algo'] = optimizer.get('algo', 'SGD')
     assert optimizer['algo'] in APPROVED_OPTIMIZERS, \
         f"optimization algo has to be in {APPROVED_OPTIMIZERS}"
