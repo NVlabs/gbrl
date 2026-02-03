@@ -141,8 +141,8 @@ def construct_compression_matrix(tree_selection: th.Tensor, n_leaves_per_tree: t
     k = selection_mask * cumsum_m
     # Create an index matrix for columns
     indices = k.unsqueeze(1)   # Convert to zero-based index
-    # Construct the binary matrix C
-    C = th.zeros((L, L_prime), dtype=th.float32, device=n_leaves_per_tree.device)
+    # Construct the binary matrix C - allocate on selection_mask.device to avoid device mismatch
+    C = th.zeros((L, L_prime), dtype=th.float32, device=selection_mask.device)
     C.scatter_(1, indices.long(), selection_mask.unsqueeze(1))
     del selection_mask
     return C
@@ -261,13 +261,11 @@ class TreeCompression:
                 loss.backward()
                 self.optimizer.step()
                 losses.append(loss.item())
-                print(f"{i + 1}/{self.gradient_steps} - compression loss: {loss.item()}")
         else:
             with th.no_grad():
                 predictions = self.compression(A, V)
                 loss = nn.functional.mse_loss(predictions, targets)
                 del predictions
-            print(f"Compression loss: {loss.item()}")
             losses.append(loss.item())
         compression_params = self.compression.get_parameters(A, V)
         return compression_params, losses
@@ -333,7 +331,7 @@ class SharedActorCriticCompression(TreeCompression):
             predictions = self.compression(A, V)
             compressed_theta = predictions[:, :-1]
             compressed_critic = predictions[:, -1]
-            critic_loss = 0.5*nn.functional.mse_loss(compressed_critic, critic_targets)
+            critic_loss = self.vf_coef * nn.functional.mse_loss(compressed_critic, critic_targets)
             dist = categorical_dist(compressed_theta) if self.dist_type == 'categorical' else \
                 gaussian_dist(compressed_theta, log_std)
             log_prob = dist.log_prob(actions)
@@ -343,8 +341,8 @@ class SharedActorCriticCompression(TreeCompression):
             loss.backward()
             self.optimizer.step()
             losses.append(loss.item())
-            print(f"{i + 1}/{self.gradient_steps} - compression loss: {loss.item()} with actor loss: "
-                  f"{actor_loss.item()} critic loss: {critic_loss} reg loss: {self.compression.reg_loss} ")
+            reg_loss_val = self.compression.reg_loss.item() if hasattr(self.compression.reg_loss, 'item') else float(self.compression.reg_loss)
+            print(f"{i + 1}/{self.gradient_steps} - compression loss: {loss.item()} with actor loss: {actor_loss.item()} critic loss: {critic_loss.item()} reg loss: {reg_loss_val}")
         return self.compression.get_parameters(A, V), losses
 
 
@@ -403,9 +401,12 @@ class ParametricActorCompression(TreeCompression):
         losses = []
         if self.method == 'first_k' and not self.use_W:
             return self.compression.get_parameters(A, V), [0]
+        # Guard: skip gradient loop if no optimizer
+        if self.optimizer is None:
+            return self.compression.get_parameters(A, V), [0]
         for i in range(self.gradient_steps):
             compressed_theta = self.compression(A, V)
-            if self.dist_type == 'deterministic':
+            if self.dist_type in ('deterministic', 'supervised_learning'):
                 loss = nn.functional.mse_loss(compressed_theta, targets)
             else:
                 dist = categorical_dist(compressed_theta) if self.dist_type == 'categorical' else \
@@ -417,7 +418,6 @@ class ParametricActorCompression(TreeCompression):
             loss.backward()
             self.optimizer.step()
             losses.append(loss.item())
-            print(f"{i + 1}/{self.gradient_steps} - compression loss: {loss.item()}")
         return self.compression.get_parameters(A, V), losses
 
 
@@ -444,7 +444,7 @@ class CompressionMethod(nn.Module):
     def __init__(self, k: int, n_trees: int, n_leaves_per_tree: th.Tensor,
                  n_leaves: int, least_squares_W: bool, lambda_reg: float = 1.0,
                  device: str = 'cpu', actor_critic: bool = False):
-        super(CompressionMethod, self).__init__()  # Ensure proper initializatio
+        super(CompressionMethod, self).__init__()  # Ensure proper initialization
         self.k = k
         self.n_trees = n_trees
         self.n_leaves_per_tree = n_leaves_per_tree
@@ -478,6 +478,9 @@ class CompressionMethod(nn.Module):
                 W = self.W
             else:
                 W_critic = get_least_squares_W(C, A, V[:, -1], self.lambda_reg)
+                # Guard: initialize self.W if None before concatenation
+                if self.W is None:
+                    self.W = get_least_squares_W(C, A, V[:, :-1], self.lambda_reg)
                 W = th.cat([self.W, W_critic], dim=1)
         else:
             W = self.W
@@ -527,6 +530,8 @@ class CompressionMethod(nn.Module):
             else:
                 W_critic = get_least_squares_W(C, A, V[:, -1], self.lambda_reg)
                 W = th.cat([self.W, W_critic.unsqueeze(-1)], dim=1)
+        else:
+            W = self.W
         return (selection_mask.clone().detach().cpu().numpy().astype(np.int32),
                 tree_selection.clone().detach().cpu().numpy().astype(np.int32),
                 W.clone().detach().cpu().numpy().astype(np.single), n_compressed_trees, n_compressed_leaves)
@@ -547,10 +552,11 @@ class FirstK(CompressionMethod):
                                      actor_critic)
         if not least_squares_W:
             if use_W:
-                self.W = nn.Parameter(th.randn(n_leaves + 1, output_dim - 1 if actor_critic and least_squares_W else
+                self.W = nn.Parameter(th.randn(n_leaves + 1, output_dim - 1 if actor_critic else
                                                output_dim, dtype=th.float32, device=device), requires_grad=True)
             else:
-                self.W = th.zeros(n_leaves + 1, output_dim, device=device, dtype=th.float32)
+                self.W = th.zeros(n_leaves + 1, output_dim - 1 if actor_critic else output_dim,
+                                  device=device, dtype=th.float32)
 
     def get_tree_selection(self) -> th.Tensor:
         """
@@ -559,6 +565,8 @@ class FirstK(CompressionMethod):
         Returns:
             th.Tensor: Binary mask with 0s for first k trees, 1s for remaining trees.
         """
+        if self.k < 0 or self.k >= self.n_trees:
+            raise ValueError(f"k must be in range [0, n_trees-1], got k={self.k}, n_trees={self.n_trees}")
         tree_selection = th.zeros(self.n_trees, dtype=th.float32, device=self.device)
         tree_selection[self.k:] = 1.0
         self.reg_loss = 0.0
@@ -585,10 +593,11 @@ class BestK(CompressionMethod):
                                     actor_critic)
         if not least_squares_W:
             if use_W:
-                self.W = nn.Parameter(th.randn(n_leaves + 1, output_dim - 1 if actor_critic and least_squares_W else
+                self.W = nn.Parameter(th.randn(n_leaves + 1, output_dim - 1 if actor_critic else
                                                output_dim, dtype=th.float32, device=device), requires_grad=True)
             else:
-                self.W = th.zeros(n_leaves + 1, output_dim, device=device, dtype=th.float32)
+                self.W = th.zeros(n_leaves + 1, output_dim - 1 if actor_critic else output_dim,
+                                  device=device, dtype=th.float32)
         self.logits = nn.Parameter(th.randn(n_trees, dtype=th.float32, device=device), requires_grad=True)
         self.temperature = temperature
 
@@ -602,6 +611,8 @@ class BestK(CompressionMethod):
         Returns:
             th.Tensor: Binary mask for selected trees (1 = keep, 0 = remove).
         """
+        if self.k < 0 or self.k >= self.n_trees:
+            raise ValueError(f"k must be in range [0, n_trees-1], got k={self.k}, n_trees={self.n_trees}")
         probs = th.sigmoid(self.logits / self.temperature)
         sorted_indices = th.argsort(probs, descending=True)
         # Create a mask for the top n_trees - k probabilities

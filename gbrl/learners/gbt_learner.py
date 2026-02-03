@@ -592,13 +592,16 @@ class GBTLearner(BaseLearner):
         if isinstance(features, th.Tensor):
             features = features.detach().cpu().numpy().astype(np.single)
         num_features, cat_features = preprocess_features(features)
+        # Ensure float32 dtype for C++ backend
+        if num_features is not None:
+            num_features = num_features.astype(np.single)
         return self._cpp_model.get_matrix_representation(num_features, cat_features)
 
     def compress(self, trees_to_keep: int, gradient_steps: int, features: NumericalData,
                  actions: Optional[th.Tensor] = None, log_std: Optional[th.Tensor] = None,
                  method: str = 'first_k', dist_type: str = 'supervised_learning',
                  optimizer_kwargs: Optional[Dict[str, Any]] = None,
-                 least_squares_W: bool = True, temperature: float = 1.0, lambda_reg: float = 1.0, **kwargs):
+                 least_squares_W: bool = True, temperature: float = 1.0, lambda_reg: float = 1.0, **kwargs) -> float:
         """
         Compresses the tree ensemble by selecting and retraining a subset of trees.
 
@@ -623,13 +626,22 @@ class GBTLearner(BaseLearner):
         assert actions is not None or dist_type == 'supervised_learning', \
             "Cannot compress a policy without actions unless using supervised_learning mode"
         
+        # Validate model state and trees_to_keep before expensive matrix computation
+        assert self._cpp_model is not None, "Cannot compress: no model has been trained"
+        total_trees = self._cpp_model.get_num_trees()
+        if trees_to_keep <= 0:
+            raise ValueError(f"trees_to_keep must be > 0, got {trees_to_keep}")
+        if trees_to_keep >= total_trees:
+            raise ValueError(f"trees_to_keep must be < total number of trees ({total_trees}), got {trees_to_keep}")
+        
         A, V, n_leaves_per_tree, n_leaves, n_trees = self.get_matrix_representation(features)
+        
         # Convert to tensors with explicit dtype
         A = th.tensor(A, dtype=th.float32, device=self.device)
         V = th.tensor(V, dtype=th.float32, device=self.device)
         n_leaves_per_tree = th.tensor(n_leaves_per_tree, dtype=th.int64, device=self.device)
-        k = self.get_num_trees() - trees_to_keep
-        compression_params = {'k': k, 'gradient_steps': gradient_steps,
+        trees_to_remove = total_trees - trees_to_keep
+        compression_params = {'k': trees_to_remove, 'gradient_steps': gradient_steps,
                               'method': method,
                               'optimizer_kwargs': optimizer_kwargs,
                               'temperature': temperature, 'n_leaves': n_leaves, 'n_trees': n_trees,
@@ -668,11 +680,21 @@ class GBTLearner(BaseLearner):
 
         self._cpp_model.compress(n_compressed_leaves, n_compressed_trees, compressed_leaf_indices,
                                  compressed_tree_indices, new_tree_indices, W)
-        print(f"Finished compressing - compressed model has {self.get_num_trees()} trees")
+        if self.verbose > 0:
+            print(f"Finished compressing - compressed model has {self.get_num_trees()} trees")
         
-        # Clean up
+        # Defensive check for empty losses
+        if not losses:
+            del compressor, A, V, n_leaves_per_tree
+            del leaves_selection, tree_selection, W, parameters
+            raise RuntimeError("No losses computed by compressor during compression operation")
+        
+        final_loss = losses[-1]
+        # Clean up large tensors
         del compressor, A, V, n_leaves_per_tree
-        return losses[-1]
+        del leaves_selection, tree_selection, W, parameters, losses
+        
+        return final_loss
 
     def print_ensemble_metadata(self):
         """Prints the metadata of the ensemble."""

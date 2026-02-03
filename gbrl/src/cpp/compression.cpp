@@ -36,7 +36,6 @@
 
 #include <cstring>
 #include <omp.h>
-#include <iostream>
 
 #include "compression.h"
 #include "types.h"
@@ -61,7 +60,7 @@ void Compressor::get_matrix_representation_cpu(dataSet *dataset, const ensembleD
     const int par_th = metadata->par_th, n_samples = dataset->n_samples;
     // first column is all ones for including bias
     bool *A = new bool[n_samples*(metadata->n_leaves + 1)];
-    memset(A, 0, n_samples*(metadata->n_leaves + 1));
+    memset(A, 0, n_samples*(metadata->n_leaves + 1)*sizeof(bool));
     for (int i = 0; i < n_samples; i++)
         A[i*(metadata->n_leaves + 1)] = true;
     matrix->A = A;
@@ -360,6 +359,12 @@ void Compressor::get_V(matrixRepresentation *matrix, const ensembleData *edata, 
 ensembleData* Compressor::compress_ensemble(ensembleMetaData *metadata, ensembleData *edata, std::vector<Optimizer*> opts, const int n_compressed_leaves, const int n_compressed_trees, const int *leaf_indices, const int *tree_indices, const int *new_tree_indices, const float *W){
     // First copy selected leaves/trees to compressed ensemble (this also updates metadata)
     ensembleData* compressed_edata = copy_compressed_ensemble_data(edata, metadata, leaf_indices, tree_indices, n_compressed_leaves, n_compressed_trees, new_tree_indices);
+    
+    // Check if copy failed before deallocating original
+    if (compressed_edata == nullptr) {
+        return nullptr;
+    }
+    
     // Deallocate original ensemble
     ensemble_data_dealloc(edata);
     // Now apply W correction to the compressed ensemble (metadata->n_leaves is now n_compressed_leaves)

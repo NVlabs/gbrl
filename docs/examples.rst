@@ -373,7 +373,19 @@ The linear scheduler interpolates the learning rate from ``lr`` (initial) to ``s
 
     lr_t = lr + \frac{t}{T} \times (stop\_lr - lr)
 
-where :math:`t` is the current tree index (1-indexed).
+where :math:`t` is the current tree index (0-indexed, so :math:`t \in [0, T-1]`). The schedule covers trees 0 through T-1, and at tree T and beyond, the learning rate is held constant at ``stop_lr``. This means:
+
+- At tree 0: :math:`lr_0 = lr` (initial learning rate)
+- At tree T-1: :math:`lr_{T-1} = lr + \frac{T-1}{T} \times (stop\_lr - lr)` (approaching final learning rate)
+- At tree T and beyond: :math:`lr_t = stop\_lr` (held constant)
+
+**Edge Case (T=1):** When ``T=1``, the schedule contains only tree 0 which uses ``lr`` (since :math:`lr_0 = lr + 0/1 \times (stop\_lr - lr) = lr`). The interpolation phase is skipped, so tree 1 and all subsequent trees immediately use ``stop_lr``.
+
+**Parameter Constraints:**
+
+- ``T`` must be a positive integer (minimum 1). It should equal the number of trees you expect to build.
+- ``lr`` and ``stop_lr`` must be positive floats. ``stop_lr`` can be greater than ``lr`` for warming schedules.
+- At tree T and for all subsequent trees, the scheduler holds at ``stop_lr``.
 
 .. code-block:: python
 
@@ -413,7 +425,30 @@ Monotonic constraints enforce that the model output is monotonically increasing 
 .. note::
 
     Monotonic constraints are only supported for **oblivious trees** (``grow_policy='oblivious'``).
-    Constraints apply to **policy outputs only** (not value function outputs in actor-critic models).
+    Constraints apply to the output dimensions defined by ``start_idx`` to ``stop_idx-1`` in the 
+    optimizer configuration. For ``GBTModel``, this typically covers all outputs. For actor-critic 
+    models, constraints affect only the policy outputs (not value function outputs).
+
+**How Constraints Are Enforced:**
+
+Monotonic constraints are enforced through two mechanisms:
+
+1. **During tree growing:** Incompatible splits are rejected or pruned to preserve monotonicity.
+   The constraint-aware scoring function pools the left and right child means when a split
+   would violate the monotonic ordering, effectively reducing the score of such splits.
+
+2. **After each tree is built:** Gradient-based updates that would violate constraints are
+   projected or clipped by the optimizer for the affected output indices (``start_idx`` to
+   ``stop_idx-1``). A pool-adjacent-violators (PAVA) algorithm is applied to ensure leaf
+   values respect the specified monotonic ordering.
+
+**Practical Trade-offs:**
+
+- Split search may be slower due to constraint checking and mean pooling during scoring
+- Convergence may be affected for ``GBTModel`` and actor-critic models (policy outputs only)
+  since some gradient directions are restricted
+- The constraint projection ensures predictions are monotonic but may result in suboptimal
+  fit compared to unconstrained models
 
 Setting Monotonic Constraints
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -429,8 +464,10 @@ Constraints are specified as a dictionary mapping feature indices to constraint 
 
 Where:
 
-- ``feature_index``: The input feature to constrain (int)
-- ``direction``: ``"increasing"`` (or ``"+"`` or ``1``) or ``"decreasing"`` (or ``"-"`` or ``-1``)
+- ``feature_index``: The input feature to constrain (int or numpy integer type)
+- ``direction``: The constraint direction. All three forms are accepted as valid inputs for each direction:
+  ``'increasing'``, ``'+'``, or ``1`` for increasing constraints, and 
+  ``'decreasing'``, ``'-'``, or ``-1`` for decreasing constraints.
 - ``output_indices``: Single int or list of output dimensions to apply the constraint to
 
 Only specify the features you want to constrain - unlisted features have no constraints.
@@ -458,12 +495,12 @@ Only specify the features you want to constrain - unlisted features have no cons
         'grow_policy': 'oblivious'  # Required for monotonic constraints
     }
 
-    # Specify which output dimensions are policy (constraints apply to these)
+    # Specify which output dimensions to optimize (constraints apply to indices start_idx to stop_idx-1)
     optimizer = {
         'algo': 'SGD',
         'lr': 0.1,
         'start_idx': 0,
-        'stop_idx': out_dim  # policy_dim - constraints apply to indices 0 to stop_idx-1
+        'stop_idx': out_dim  # constraints apply to output indices 0 to stop_idx-1
     }
 
     gbrl_params = {

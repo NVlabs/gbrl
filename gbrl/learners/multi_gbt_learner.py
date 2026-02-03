@@ -872,7 +872,7 @@ class MultiGBTLearner(BaseLearner):
                  method: str = 'first_k', dist_type: str = 'supervised_learning',
                  optimizer_kwargs: Optional[Dict[str, Any]] = None,
                  least_squares_W: bool = True, temperature: float = 1.0, lambda_reg: float = 1.0,
-                 model_idx: Optional[int] = None, **kwargs):
+                 model_idx: Optional[int] = None, **kwargs) -> Union[float, List[float]]:
         """
         Compresses the tree ensemble by selecting and retraining a subset of trees.
 
@@ -896,13 +896,11 @@ class MultiGBTLearner(BaseLearner):
             Union[float, list[float]]: Final loss value after compression.
         """
 
-        def _compress(A, V, n_leaves_per_tree, compression_params, cpp_model, model_idx):
+        def _compress(A, V, n_leaves_per_tree, compression_params, cpp_model, idx):
             # Convert to tensors with explicit dtypes
             A = th.tensor(A, dtype=th.float32, device=self.device)
             V = th.tensor(V, dtype=th.float32, device=self.device)
             n_leaves_per_tree = th.tensor(n_leaves_per_tree, dtype=th.int64, device=self.device)
-
-            compression_params.update(kwargs)
 
             if actions is not None:
                 # Only require log_std for Gaussian-like distributions
@@ -932,41 +930,59 @@ class MultiGBTLearner(BaseLearner):
 
             cpp_model.compress(n_compressed_leaves, n_compressed_trees, compressed_leaf_indices,
                                compressed_tree_indices, new_tree_indices, W)
-            print(f"Finished compressing model {model_idx} - compressed model has {self.get_num_trees(model_idx=model_idx)} trees")
-            del compressor
+            if self.verbose > 0:
+                print(f"Finished compressing model {idx} - compressed model has {self.get_num_trees(model_idx=idx)} trees")
             return losses[-1]
 
         A, V, n_leaves_per_tree, n_leaves, n_trees = self.get_matrix_representation(features, model_idx)
         if model_idx is None:
+            # Validate trees_to_keep for all learners before performing any compression
+            for i in range(self.n_learners):
+                current_trees = self.get_num_trees(model_idx=i)
+                if trees_to_keep <= 0:
+                    raise ValueError(f"trees_to_keep must be > 0, got {trees_to_keep}")
+                if trees_to_keep >= current_trees:
+                    raise ValueError(f"trees_to_keep ({trees_to_keep}) must be < current tree count ({current_trees}) for model {i}")
+            
+            # All validations passed, proceed with compression
             losses = []
             for i in range(self.n_learners):
-                k = self.get_num_trees(model_idx=i) - trees_to_keep
-                compression_params = {'k': k, 'gradient_steps': gradient_steps, 'method': method,
+                current_trees = self.get_num_trees(model_idx=i)
+                trees_to_remove = current_trees - trees_to_keep
+                learner_output_dim = self.output_dim[i] if isinstance(self.output_dim, list) else self.output_dim
+                compression_params = {'k': trees_to_remove, 'gradient_steps': gradient_steps, 'method': method,
                                       'optimizer_kwargs': optimizer_kwargs,
                                       'temperature': temperature, 'n_leaves': n_leaves[i],
                                       'n_trees': n_trees[i],
                                       'n_leaves_per_tree': n_leaves_per_tree[i],
                                       'lambda_reg': lambda_reg,
-                                      'output_dim': self.output_dim,
+                                      'output_dim': learner_output_dim,
                                       'device': self.device}
                 compression_params.update(kwargs)
                 loss = _compress(A[i], V[i], n_leaves_per_tree[i], compression_params,
                                  self._cpp_models[i], i)
                 losses.append(loss)
         else:
-            k = self.get_num_trees(model_idx=model_idx) - trees_to_keep
-            compression_params = {'k': k, 'gradient_steps': gradient_steps, 'method': method,
+            current_trees = self.get_num_trees(model_idx=model_idx)
+            if trees_to_keep <= 0:
+                raise ValueError(f"trees_to_keep must be > 0, got {trees_to_keep}")
+            if trees_to_keep >= current_trees:
+                raise ValueError(f"trees_to_keep ({trees_to_keep}) must be < current tree count ({current_trees})")
+            trees_to_remove = current_trees - trees_to_keep
+            learner_output_dim = self.output_dim[model_idx] if isinstance(self.output_dim, list) else self.output_dim
+            compression_params = {'k': trees_to_remove, 'gradient_steps': gradient_steps, 'method': method,
                                   'optimizer_kwargs': optimizer_kwargs,
                                   'temperature': temperature, 'n_leaves': n_leaves,
                                   'n_trees': n_trees,
                                   'n_leaves_per_tree': n_leaves_per_tree,
                                   'lambda_reg': lambda_reg,
-                                  'output_dim': self.output_dim,
+                                  'output_dim': learner_output_dim,
                                   'device': self.device}
             compression_params.update(kwargs)
             losses = _compress(A, V, n_leaves_per_tree, compression_params,
                                self._cpp_models[model_idx], model_idx)
 
+        # Clean up large matrices
         del A
         del V
         del n_leaves_per_tree

@@ -60,7 +60,7 @@ For a detailed usage example, see `tutorial.ipynb`
 - ADAM optimizer - (CPU only)
 - Control Variates (gradient variance reduction technique) - (CPU only)
 - Shared Tree for policy and value function - (CPU/GPU)
-- Linear and constant learning rate scheduler - (CPU/GPU, linear scheduler GPU only for oblivious trees)
+- Linear and constant learning rate scheduler - (CPU/GPU, linear scheduler GPU only for Oblivious trees)
 - Support for up to two different optimizers (e.g, policy/value) - **(CPU/GPU if both are SGD)
 - SHAP value calculation
 

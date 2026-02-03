@@ -86,12 +86,9 @@ void get_matrix_representation_cuda(dataSet *dataset, ensembleMetaData *metadata
     cudaMemset(device_data, 0, extra_alloc_size + A_size + V_size);
 
     size_t trace = 0;
-    device_V = (float *)(device_data + trace);
-    trace += V_size;
-    device_A = (bool *)(device_data + trace);
-    trace += A_size;
     
     // Handle obs data - device-aware copy
+    // Place obs first to ensure float alignment (obs_matrix_size is always 4-byte aligned)
     if (dataset->obs != nullptr && dataset->obs->data != nullptr) {
         if (obs_on_device) {
             device_batch_obs = const_cast<float*>(dataset->obs->data);
@@ -110,11 +107,18 @@ void get_matrix_representation_cuda(dataSet *dataset, ensembleMetaData *metadata
             device_batch_cat_obs = const_cast<char*>(dataset->categorical_obs->data);
         } else {
             device_batch_cat_obs = (char*)(device_data + trace);
+            trace += cat_obs_matrix_size;
             cudaMemcpy(device_batch_cat_obs, dataset->categorical_obs->data, cat_obs_matrix_size, cudaMemcpyHostToDevice);
         }
     } else {
         device_batch_cat_obs = nullptr;
     }
+    
+    // Align trace to 4 bytes for float V array
+    trace = (trace + 3) & ~3;
+    device_V = (float *)(device_data + trace);
+    trace += V_size;
+    device_A = (bool *)(device_data + trace);
     
     int n_blocks, threads_per_block;
     get_grid_dimensions(dataset->n_samples, n_blocks, threads_per_block);

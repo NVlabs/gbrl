@@ -19,3 +19,4 @@ docs/_build/
 *ncu-rep
 *.sh
 local_binaries/
+tmp/

@@ -195,7 +195,7 @@ class SharedActorCriticLearner(GBTLearner):
                  actions: Optional[th.Tensor] = None, log_std: Optional[th.Tensor] = None,
                  method: str = 'first_k', dist_type: str = 'deterministic',
                  optimizer_kwargs: Optional[Dict[str, Any]] = None,
-                 temperature: float = 1.0, lambda_reg: float = 1.0, **kwargs):
+                 temperature: float = 1.0, lambda_reg: float = 1.0, **kwargs) -> float:
         """
         Compresses the tree ensemble by selecting and retraining a subset of trees.
 
@@ -224,13 +224,29 @@ class SharedActorCriticLearner(GBTLearner):
                 f"Cannot compress with dist_type='{dist_type}' without actions. " \
                 "Actions are required for probabilistic policy compression (categorical, gaussian)."
         
+        # Validate dist_type is one of the allowed values
+        allowed_dist_types = {'deterministic', 'supervised_learning', 'categorical', 'gaussian'}
+        if dist_type not in allowed_dist_types:
+            raise ValueError(
+                f"Invalid dist_type '{dist_type}'. "
+                f"Allowed values are: {sorted(allowed_dist_types)}"
+            )
+        
+        # Validate trees_to_keep before expensive matrix representation call
+        total_trees = self.get_num_trees()
+        if trees_to_keep <= 0:
+            raise ValueError(f"trees_to_keep must be > 0, got {trees_to_keep}")
+        if trees_to_keep >= total_trees:
+            raise ValueError(f"trees_to_keep must be < total number of trees ({total_trees}), got {trees_to_keep}")
+        
         A, V, n_leaves_per_tree, n_leaves, n_trees = self.get_matrix_representation(features)
+        trees_to_remove = total_trees - trees_to_keep
+        
         # Convert to tensors with explicit dtypes
         A = th.tensor(A, dtype=th.float32, device=self.device)
         V = th.tensor(V, dtype=th.float32, device=self.device)
         n_leaves_per_tree = th.tensor(n_leaves_per_tree, dtype=th.int64, device=self.device)
-        k = self.get_num_trees() - trees_to_keep
-        compression_params = {'k': k, 'gradient_steps': gradient_steps,
+        compression_params = {'k': trees_to_remove, 'gradient_steps': gradient_steps,
                               'method': method,
                               'optimizer_kwargs': optimizer_kwargs,
                               'temperature': temperature, 'n_leaves': n_leaves, 'n_trees': n_trees,
@@ -267,11 +283,22 @@ class SharedActorCriticLearner(GBTLearner):
         
         self._cpp_model.compress(n_compressed_leaves, n_compressed_trees, compressed_leaf_indices,
                                  compressed_tree_indices, new_tree_indices, W)
-        print(f"Finished compressing - compressed model has {self.get_num_trees()} trees")
+        if self.verbose > 0:
+            print(f"Finished compressing - compressed model has {self.get_num_trees()} trees")
         
-        # Clean up
+        # Defensive check for empty losses
+        if not losses:
+            # Clean up resources before raising
+            del compressor, A, V, n_leaves_per_tree
+            del leaves_selection, tree_selection, W, parameters
+            raise RuntimeError("No losses computed by compressor during compression operation")
+        
+        final_loss = losses[-1]
+        # Clean up large tensors
         del compressor, A, V, n_leaves_per_tree
-        return losses[-1]
+        del leaves_selection, tree_selection, W, parameters, losses
+        
+        return final_loss
 
     def __copy__(self) -> "SharedActorCriticLearner":
         """

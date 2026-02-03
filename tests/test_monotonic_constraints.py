@@ -25,7 +25,9 @@ Tests for monotonic constraints in GBRL.
 Tests that monotonic constraints are properly enforced during training
 for oblivious trees on GPU.
 """
+import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -51,10 +53,10 @@ def create_monotonic_data(n_samples=1000, seed=42):
     # y = 2*x0 - 3*x1 + noise (increasing in x0, decreasing in x1)
     y = 2 * X[:, 0] - 3 * X[:, 1] + 0.1 * np.random.randn(n_samples)
     y = y.astype(np.float32)[:, np.newaxis]
-    return th.tensor(X), y
+    return th.tensor(X), th.tensor(y)
 
 
-def check_monotonicity(model, X, feature_idx, direction, n_samples=100, output_idx=0):
+def check_monotonicity(model, X, feature_idx, direction, n_samples=100, output_idx=0, num_base_points=5):
     """
     Check if predictions are monotonic with respect to a feature.
     
@@ -63,16 +65,16 @@ def check_monotonicity(model, X, feature_idx, direction, n_samples=100, output_i
         X: Sample input data
         feature_idx: Which feature to test
         direction: 1 for increasing, -1 for decreasing
-        n_samples: Number of test points
+        n_samples: Number of test points per base point
         output_idx: Which output to check (for multi-output models)
+        num_base_points: Number of random base points to test
     
     Returns:
         (violations, total_pairs): Count of violations and total pairs tested
     """
-    # Pick a random base point
-    np.random.seed(123)
-    base_idx = np.random.randint(0, len(X))
-    base_point = X[base_idx].cpu().numpy().copy()
+    # Pick multiple random base points for more thorough testing
+    rng = np.random.default_rng(123)
+    base_indices = rng.choice(len(X), size=min(num_base_points, len(X)), replace=False)
     
     # Create a range of values for the target feature
     feature_values = np.linspace(-3, 3, n_samples)
@@ -83,27 +85,32 @@ def check_monotonicity(model, X, feature_idx, direction, n_samples=100, output_i
     # Determine device for test inputs
     device = X.device
     
-    prev_pred = None
-    for val in feature_values:
-        test_point = base_point.copy()
-        test_point[feature_idx] = val
-        test_input = th.tensor(test_point.reshape(1, -1), dtype=th.float32, device=device)
-        pred_output = model(test_input, requires_grad=False, tensor=False)
+    # Test monotonicity across multiple base points
+    for base_idx in base_indices:
+        base_point = X[base_idx].cpu().numpy().copy()
+        prev_pred = None
         
-        # Handle multi-output
-        if len(pred_output.shape) > 1 and pred_output.shape[1] > 1:
-            pred = pred_output[0, output_idx]
-        else:
-            pred = pred_output.flatten()[0]
-        
-        if prev_pred is not None:
-            total_pairs += 1
-            # Use 1e-5 tolerance to account for floating point precision in GPU computation
-            if direction == 1 and pred < prev_pred - 1e-5:  # Should be increasing
-                violations += 1
-            elif direction == -1 and pred > prev_pred + 1e-5:  # Should be decreasing
-                violations += 1
-        prev_pred = pred
+        for val in feature_values:
+            test_point = base_point.copy()
+            test_point[feature_idx] = val
+            test_input = th.tensor(test_point.reshape(1, -1), dtype=th.float32, device=device)
+            pred_output = model(test_input, requires_grad=False, tensor=False)
+            
+            # Handle multi-output
+            if len(pred_output.shape) > 1 and pred_output.shape[1] > 1:
+                pred = pred_output[0, output_idx]
+            else:
+                pred = pred_output.flatten()[0]
+            
+            if prev_pred is not None:
+                total_pairs += 1
+                # Use 1e-5 tolerance to account for floating point precision in GPU computation
+                if direction == 1 and pred < prev_pred - 1e-5:  # Should be increasing
+                    violations += 1
+                elif direction == -1 and pred > prev_pred + 1e-5:  # Should be decreasing
+                    violations += 1
+            
+            prev_pred = pred
     
     return violations, total_pairs
 
@@ -160,7 +167,7 @@ class TestMonotonicConstraints(unittest.TestCase):
         # Train using step() to apply constraints per tree
         for epoch in range(self.n_epochs):
             y_pred = model(self.X, requires_grad=True)
-            loss = 0.5 * mse_loss(y_pred, th.tensor(self.y, dtype=th.float32).squeeze())
+            loss = 0.5 * mse_loss(y_pred, self.y.squeeze())
             loss.backward()
             model.step()
         
@@ -212,7 +219,7 @@ class TestMonotonicConstraints(unittest.TestCase):
         # Train using step() to apply constraints per tree
         for epoch in range(self.n_epochs):
             y_pred = model(self.X, requires_grad=True)
-            loss = 0.5 * mse_loss(y_pred, th.tensor(self.y, dtype=th.float32).squeeze())
+            loss = 0.5 * mse_loss(y_pred, self.y.squeeze())
             loss.backward()
             model.step()
         
@@ -265,7 +272,7 @@ class TestMonotonicConstraints(unittest.TestCase):
         # Train using step() to apply constraints per tree
         for epoch in range(self.n_epochs):
             y_pred = model(self.X, requires_grad=True)
-            loss = 0.5 * mse_loss(y_pred, th.tensor(self.y, dtype=th.float32).squeeze())
+            loss = 0.5 * mse_loss(y_pred, self.y.squeeze())
             loss.backward()
             model.step()
         
@@ -679,7 +686,7 @@ class TestMonotonicConstraintsGPU(unittest.TestCase):
         self.X, self.y = create_monotonic_data(n_samples=1000)
         # X is already a tensor, just move to GPU
         self.X = self.X.cuda()
-        self.y_tensor = th.from_numpy(self.y).cuda().squeeze()
+        self.y_tensor = self.y.cuda().squeeze()
         self.n_epochs = 30
     
     def test_monotonic_increasing_gpu(self):
@@ -1049,8 +1056,6 @@ class TestMonotonicConstraintsPersistence(unittest.TestCase):
     def test_save_load_with_constraints_cpu(self):
         """Test that saving and loading preserves monotonic constraints on CPU."""
         print("Running test_save_load_with_constraints_cpu")
-        import tempfile
-        import os
         
         tree_struct = {
             'max_depth': 3,
@@ -1087,7 +1092,7 @@ class TestMonotonicConstraintsPersistence(unittest.TestCase):
         # Train
         for epoch in range(self.n_epochs):
             y_pred = model(self.X, requires_grad=True)
-            loss = 0.5 * mse_loss(y_pred, th.tensor(self.y, dtype=th.float32).squeeze())
+            loss = 0.5 * mse_loss(y_pred, self.y.squeeze())
             loss.backward()
             model.step()
         
@@ -1118,7 +1123,7 @@ class TestMonotonicConstraintsPersistence(unittest.TestCase):
         # Train more on loaded model and check constraints still enforced
         for epoch in range(5):
             y_pred = loaded_model(self.X, requires_grad=True)
-            loss = 0.5 * mse_loss(y_pred, th.tensor(self.y, dtype=th.float32).squeeze())
+            loss = 0.5 * mse_loss(y_pred, self.y.squeeze())
             loss.backward()
             loaded_model.step()
         
@@ -1166,7 +1171,7 @@ class TestMonotonicConstraintsPersistence(unittest.TestCase):
         # Train
         for epoch in range(self.n_epochs):
             y_pred = model(self.X, requires_grad=True)
-            loss = 0.5 * mse_loss(y_pred, th.tensor(self.y, dtype=th.float32).squeeze())
+            loss = 0.5 * mse_loss(y_pred, self.y.squeeze())
             loss.backward()
             model.step()
         
@@ -1192,7 +1197,7 @@ class TestMonotonicConstraintsPersistence(unittest.TestCase):
         # Train more on copied model (should not affect original)
         for epoch in range(5):
             y_pred = copied_model(self.X, requires_grad=True)
-            loss = 0.5 * mse_loss(y_pred, th.tensor(self.y, dtype=th.float32).squeeze())
+            loss = 0.5 * mse_loss(y_pred, self.y.squeeze())
             loss.backward()
             copied_model.step()
         
@@ -1212,11 +1217,8 @@ class TestMonotonicConstraintsPersistence(unittest.TestCase):
         if not cuda_available():
             self.skipTest("CUDA not available")
         
-        import tempfile
-        import os
-        
         X_gpu = self.X.cuda()
-        y_tensor = th.from_numpy(self.y).cuda().squeeze()
+        y_tensor = self.y.cuda().squeeze()
         
         tree_struct = {
             'max_depth': 3,

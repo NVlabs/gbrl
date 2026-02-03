@@ -716,15 +716,19 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         self.set_feature_weights(&feature_weights_holder, input_dim);
     }, "Set GBRL model feature weights");
     
-    // Set feature mapping for mixed categorical/numerical inputs
-    // Creates 4 arrays: feature_mapping, mapping_numerics (stored for export),
-    // reverse_num_feature_mapping, reverse_cat_feature_mapping (used in computation)
+    // Set monotonic constraints for model outputs
+    // Configures per-feature monotonicity constraints: each feature can be constrained
+    // to be monotonically increasing (+1) or decreasing (-1) for specific output dimensions.
+    // Populates internal constraint arrays used during tree fitting and prediction.
     gbrl.def("set_monotonic_constraints", [](GBRL &self, const py::array_t<int> &feature_indices, const py::array_t<int> &output_indices, const py::array_t<int>& constraints) {
         if (!feature_indices.attr("flags").attr("c_contiguous").cast<bool>()) {
-            throw std::runtime_error("Arrays must be C-contiguous");
+            throw std::runtime_error("feature_indices must be C-contiguous");
         }
         if (!output_indices.attr("flags").attr("c_contiguous").cast<bool>()) {
-            throw std::runtime_error("Arrays must be C-contiguous");
+            throw std::runtime_error("output_indices must be C-contiguous");
+        }
+        if (!constraints.attr("flags").attr("c_contiguous").cast<bool>()) {
+            throw std::runtime_error("constraints must be C-contiguous");
         }
 
         // Get buffer info while holding GIL

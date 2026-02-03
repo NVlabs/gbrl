@@ -256,12 +256,16 @@ def setup_optimizer(optimizer: Dict, prefix: str = '') -> Dict:
         optimizer['scheduler'] = 'Const'
     assert isinstance(lr, (int, float, str)), "lr must be a float or string"
     if isinstance(lr, str) and 'lin_' in lr:
-        assert 'T' in optimizer, ("Linear optimizer must contain T the total "
-                                   "number of iterations used for scheduling")
+        if 'T' not in optimizer:
+            raise ValueError("Linear scheduler requires 'T' (total number of iterations) to be specified.")
         lr = lr.replace('lin_', '')
         optimizer['scheduler'] = 'Linear'
+    # Validate scheduler type before normalization
+    sched_value = optimizer.get('scheduler', 'Const')
+    if not isinstance(sched_value, str):
+        raise ValueError("scheduler must be a string ('linear', 'const', or 'constant')")
     # Normalize scheduler name (linear -> Linear, const/constant -> Const)
-    sched = optimizer.get('scheduler', 'Const').lower()
+    sched = sched_value.lower()
     if sched == 'linear':
         optimizer['scheduler'] = 'Linear'
     elif sched in ('const', 'constant'):
@@ -696,6 +700,13 @@ def process_monotonic_constraints(
         # Normalize output_dims to list (handle numpy scalars and integers)
         if isinstance(output_dims, (int, np.integer)) or np.isscalar(output_dims):
             output_dims = np.atleast_1d(output_dims).tolist()
+
+        # Check for empty output_dims after normalization
+        if not output_dims:
+            raise ValueError(
+                f"No output indices provided for feature {feat_idx}. "
+                f"output_dims cannot be empty."
+            )
 
         # Validate and add each output dimension
         for out_idx in output_dims:
