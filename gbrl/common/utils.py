@@ -676,7 +676,7 @@ def process_monotonic_constraints(
 
     for feat_idx, (direction, output_dims) in constraints.items():
         # Validate feature index
-        if not isinstance(feat_idx, int) or feat_idx < 0 or feat_idx >= input_dim:
+        if not isinstance(feat_idx, (int, np.integer)) or feat_idx < 0 or feat_idx >= input_dim:
             raise ValueError(
                 f"Invalid feature index {feat_idx}. "
                 f"Must be an integer in [0, {input_dim})"
@@ -690,13 +690,13 @@ def process_monotonic_constraints(
             )
         dir_val = direction_map[direction]
 
-        # Normalize output_dims to list
-        if isinstance(output_dims, int):
-            output_dims = [output_dims]
+        # Normalize output_dims to list (handle numpy scalars and integers)
+        if isinstance(output_dims, (int, np.integer)) or np.isscalar(output_dims):
+            output_dims = np.atleast_1d(output_dims).tolist()
 
         # Validate and add each output dimension
         for out_idx in output_dims:
-            if not isinstance(out_idx, int) or out_idx < 0 or out_idx >= policy_dim:
+            if not isinstance(out_idx, (int, np.integer)) or out_idx < 0 or out_idx >= policy_dim:
                 raise ValueError(
                     f"Invalid output index {out_idx} for feature {feat_idx}. "
                     f"Must be an integer in [0, {policy_dim})"
