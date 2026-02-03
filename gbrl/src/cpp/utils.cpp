@@ -1,10 +1,23 @@
 //////////////////////////////////////////////////////////////////////////////
-// Copyright (c) 2024-2025, NVIDIA Corporation. All rights reserved.
+// Copyright (c) 2024-2026, NVIDIA Corporation. All rights reserved.
 //
-// This work is made available under the Nvidia Source Code License-NC.
-// To view a copy of this license, visit
-// https://nvlabs.github.io/gbrl/license.html
+// Permission is hereby granted, free of charge, to any person obtaining a
+// copy of this software and associated documentation files (the "Software"),
+// to deal in the Software without restriction, including without limitation
+// the rights to use, copy, modify, merge, publish, distribute, sublicense,
+// and/or sell copies of the Software, and to permit persons to whom the
+// Software is furnished to do so, subject to the following conditions:
 //
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+// THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+// DEALINGS IN THE SOFTWARE.
 //////////////////////////////////////////////////////////////////////////////
 /**
  * @file utils.cpp
@@ -112,3 +125,54 @@ int count_distinct(T *arr, int n) {
 // Explicit template instantiations
 template int count_distinct<int>(int* arr, int n);
 template int count_distinct<float>(float* arr, int n);
+
+/**
+ * @brief Selectively copy elements from source to destination array
+ * 
+ * Copies elements from src to dest based on provided indices. Each element
+ * has elements_dim components that are copied together. Parallelized with OpenMP.
+ * 
+ * @tparam T Element type (float, int, bool)
+ * @param num_indices Number of elements to copy
+ * @param indices Array of source indices to copy from
+ * @param dest Destination array
+ * @param src Source array
+ * @param elements_dim Dimensionality of each element (number of components)
+ */
+template <typename T>
+void selective_copy(const int num_indices, const int* indices, T* dest, const T* src, const int elements_dim){
+    #pragma omp parallel for
+    for (int i = 0; i < num_indices; ++i) {
+        int start_idx = indices[i];
+        for (int j = 0; j < elements_dim; ++j) {
+            dest[i*elements_dim + j] = src[start_idx*elements_dim + j];
+        }
+    }
+}
+
+template void selective_copy<float>(const int num_indices, const int* indices, float* dest, const float* src, const int elements_dim);
+template void selective_copy<int>(const int num_indices, const int* indices, int* dest, const int* src, const int elements_dim);
+template void selective_copy<bool>(const int num_indices, const int* indices, bool* dest, const bool* src, const int elements_dim);
+
+/**
+ * @brief Selectively copy character strings from source to destination
+ * 
+ * Specialized version of selective_copy for character arrays with fixed-size
+ * strings (MAX_CHAR_SIZE bytes each). Uses memcpy for efficient copying.
+ * Parallelized with OpenMP.
+ * 
+ * @param num_indices Number of strings to copy
+ * @param indices Array of source indices to copy from
+ * @param dest Destination character array
+ * @param src Source character array
+ * @param elements_dim Number of strings per indexed element
+ */
+void selective_copy_char(const int num_indices, const int* indices, char* dest, const char* src, const int elements_dim){
+    #pragma omp parallel for
+    for (int i = 0; i < num_indices; ++i) {
+        // Copy all elements_dim strings (each of size MAX_CHAR_SIZE) for this index
+        memcpy(dest + (i * elements_dim) * MAX_CHAR_SIZE, 
+               src + (indices[i] * elements_dim) * MAX_CHAR_SIZE, 
+               elements_dim * MAX_CHAR_SIZE);
+    }
+}

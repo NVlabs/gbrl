@@ -1,5 +1,5 @@
 //////////////////////////////////////////////////////////////////////////////
-// Copyright (c) 2024-2025, NVIDIA Corporation. All rights reserved.
+// Copyright (c) 2024-2026, NVIDIA Corporation. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
 // copy of this software and associated documentation files (the "Software"),
@@ -110,6 +110,32 @@ class TreeNode {
         );
         
         /**
+         * @brief Compute split quality score with monotonic constraint enforcement
+         * 
+         * For oblivious trees, this version pools left/right means for constrained
+         * policy dimensions before computing the score, ensuring the score reflects
+         * the post-monotonization values.
+         * 
+         * @param dataset Training dataset
+         * @param split_score_func Scoring function to use (L2 or Cosine)
+         * @param split_candidate Candidate split to evaluate
+         * @param min_data_in_leaf Minimum samples required per leaf
+         * @param global_feature_idx Global feature index (after reverse mapping)
+         * @param mono_constraints Monotonic constraints structure (can be nullptr)
+         * @param n_mono_constraints Number of monotonic constraints
+         * @return Score indicating split quality (higher is better)
+         */
+        float getSplitScoreWithConstraints(
+            dataSet *dataset,
+            scoreFunc split_score_func,
+            const splitCandidate &split_candidate,
+            const int min_data_in_leaf,
+            const int global_feature_idx,
+            const monotonicConstraints *mono_constraints,
+            const int n_mono_constraints
+        );
+        
+        /**
          * @brief Score numerical split using cosine similarity
          * 
          * @param obs Numerical observations
@@ -155,6 +181,26 @@ class TreeNode {
             const float *grads,
             const splitCandidate &split_candidate,
             const int min_data_in_leaf
+        );
+        
+        /**
+         * @brief Score numerical split using L2 norm with monotonic constraint pooling
+         * 
+         * @param obs Numerical observations
+         * @param grads Gradient values
+         * @param split_candidate Split to evaluate
+         * @param min_data_in_leaf Minimum samples per leaf
+         * @param constraint_dir Constraint direction for this feature (-1, 0, or 1)
+         * @param output_idx The specific output dimension to constrain
+         * @return L2-based split score with pooled means for constrained dimension
+         */
+        float splitScoreL2WithConstraint(
+            const float *obs,
+            const float *grads,
+            const splitCandidate &split_candidate,
+            const int min_data_in_leaf,
+            const int constraint_dir,
+            const int output_idx
         );
         
         /**

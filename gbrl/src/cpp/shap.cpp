@@ -1,5 +1,5 @@
 //////////////////////////////////////////////////////////////////////////////
-// Copyright (c) 2024-2025, NVIDIA Corporation. All rights reserved.
+// Copyright (c) 2024-2026, NVIDIA Corporation. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
 // copy of this software and associated documentation files (the "Software"),
@@ -37,8 +37,8 @@
 
 
 shapData* alloc_shap_data(const ensembleMetaData *metadata, const ensembleData *edata, const int tree_idx){
-    int stop_leaf_idx = (tree_idx == metadata->n_trees - 1) ? metadata->n_leaves : edata->tree_indices[tree_idx+1];
-    int start_leaf_idx = edata->tree_indices[tree_idx];
+    int stop_leaf_idx = (tree_idx == metadata->n_trees - 1) ? metadata->n_leaves : edata->ensemble_info->tree_indices[tree_idx+1];
+    int start_leaf_idx = edata->ensemble_info->tree_indices[tree_idx];
     int n_leaves = stop_leaf_idx - start_leaf_idx;
 
     stack<nodeInfo> node_stack(n_leaves * metadata->max_depth);
@@ -80,29 +80,29 @@ shapData* alloc_shap_data(const ensembleMetaData *metadata, const ensembleData *
         // Store the parent index for the current node
         parents[n_nodes] = crnt_node.parent_idx;
         if (crnt_node.depth > 0)
-            weights[n_nodes] = edata->edge_weights[leaf_idx*metadata->max_depth + crnt_node.depth - 1];
+            weights[n_nodes] = edata->leaf_data->edge_weights[leaf_idx*metadata->max_depth + crnt_node.depth - 1];
         if (crnt_node.is_left)
             left_children[crnt_node.parent_idx] = crnt_node.idx;
         if (crnt_node.is_right)
             right_children[crnt_node.parent_idx] = crnt_node.idx;
         // If not at leaf, push children nodes onto the stack
-        if (crnt_node.depth  < edata->depths[idx]) {
+        if (crnt_node.depth  < edata->ensemble_info->depths[idx]) {
             nodeInfo right_child = {0, n_nodes, crnt_node.depth + 1, false, true};
             
             node_stack.push(right_child);
             nodeInfo left_child = {0, n_nodes, crnt_node.depth + 1, true, false};
             node_stack.push(left_child);
-            int feature_idx = edata->feature_indices[idx*metadata->max_depth + crnt_node.depth];
+            int feature_idx = edata->feature_data->feature_indices[idx*metadata->max_depth + crnt_node.depth];
             feature_indices[n_nodes] = feature_idx;
-            if (edata->is_numerics[idx*metadata->max_depth + crnt_node.depth])
-                feature_values[n_nodes] = edata->feature_values[idx*metadata->max_depth + crnt_node.depth];
+            if (edata->feature_data->is_numerics[idx*metadata->max_depth + crnt_node.depth])
+                feature_values[n_nodes] = edata->feature_data->feature_values[idx*metadata->max_depth + crnt_node.depth];
             else 
-                 memcpy(categorical_values + n_nodes*MAX_CHAR_SIZE, edata->categorical_values + (idx*metadata->max_depth + crnt_node.depth)*MAX_CHAR_SIZE, sizeof(char)*MAX_CHAR_SIZE);
-            numerics[n_nodes] = edata->is_numerics[idx*metadata->max_depth + crnt_node.depth];
+                 memcpy(categorical_values + n_nodes*MAX_CHAR_SIZE, edata->feature_data->categorical_values + (idx*metadata->max_depth + crnt_node.depth)*MAX_CHAR_SIZE, sizeof(char)*MAX_CHAR_SIZE);
+            numerics[n_nodes] = edata->feature_data->is_numerics[idx*metadata->max_depth + crnt_node.depth];
 
         } else {
             // Calculate number of unique features at the leaf node
-            int n_unique_features = count_distinct(edata->feature_indices + idx * metadata->max_depth, edata->depths[idx]);
+            int n_unique_features = count_distinct(edata->feature_data->feature_indices + idx * metadata->max_depth, edata->ensemble_info->depths[idx]);
             // Backtrack to update max_unique_features array
             int parent_idx = parents[n_nodes];
             if (n_unique_features > max_unique_features[n_nodes])
@@ -114,10 +114,10 @@ shapData* alloc_shap_data(const ensembleMetaData *metadata, const ensembleData *
             }
             // Increment leaf index and mark children as non-existent (-1)
             float cond_prob = 1.0f;
-            for (int d = 0; d < edata->depths[idx]; d++)
-                cond_prob *= edata->edge_weights[leaf_idx*metadata->max_depth + d];
+            for (int d = 0; d < edata->ensemble_info->depths[idx]; d++)
+                cond_prob *= edata->leaf_data->edge_weights[leaf_idx*metadata->max_depth + d];
             for (int d = 0; d < metadata->output_dim; ++d)
-                predictions[n_nodes*metadata->output_dim + d] = edata->values[leaf_idx*metadata->output_dim + d]*cond_prob;
+                predictions[n_nodes*metadata->output_dim + d] = edata->leaf_data->values[leaf_idx*metadata->output_dim + d]*cond_prob;
             ++leaf_idx;
         }
 

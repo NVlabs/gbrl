@@ -1,5 +1,5 @@
 ##############################################################################
-# Copyright (c) 2024-2025, NVIDIA Corporation. All rights reserved.
+# Copyright (c) 2024-2026, NVIDIA Corporation. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a
 # copy of this software and associated documentation files (the "Software"),
@@ -113,6 +113,17 @@ class BaseLearner(ABC):
             weights = np.ones(input_dim, dtype=np.single)
             feature_weights = np.ascontiguousarray(weights)
         self.feature_weights = feature_weights
+        
+        # Store raw monotonic constraints (will be processed in subclass reset)
+        self.monotonic_constraints = params.get('monotonic_constraints', None)
+        
+        # Validate that monotonic constraints require oblivious grow policy
+        if self.monotonic_constraints is not None:
+            grow_policy = tree_struct.get('grow_policy', 'greedy').lower()
+            if grow_policy != 'oblivious':
+                msg = f"Monotonic constraints require oblivious grow_policy, got '{grow_policy}'"
+                raise ValueError(msg)
+            
         self._cpp_model = None
         self.optimizers = None
         self.feature_mapping = None

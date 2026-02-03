@@ -1,5 +1,5 @@
 //////////////////////////////////////////////////////////////////////////////
-// Copyright (c) 2024-2025, NVIDIA Corporation. All rights reserved.
+// Copyright (c) 2024-2026, NVIDIA Corporation. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
 // copy of this software and associated documentation files (the "Software"),
@@ -39,6 +39,6 @@
 
 /** @brief Minor version number - incremented for backward compatible new features */
 #define MINOR_VERSION 1
-#define PATCH_VERSION 6
+#define PATCH_VERSION 7
 
 #endif // VERSION_CONFIG_H

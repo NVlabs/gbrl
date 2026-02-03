@@ -1,5 +1,5 @@
 ##############################################################################
-# Copyright (c) 2024-2025, NVIDIA Corporation. All rights reserved.
+# Copyright (c) 2024-2026, NVIDIA Corporation. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a
 # copy of this software and associated documentation files (the "Software"),
@@ -28,12 +28,13 @@ architectures with separate models.
 """
 import json
 import os
-from typing import Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import torch as th
 
 from gbrl import GBRL_CPP
+from gbrl.common.compression import ParametricActorCompression, TreeCompression
 from gbrl.common.utils import (NumericalData, ensure_leaf_tensor_or_array,
                                get_poly_vectors, get_tensor_info,
                                normalize_vector_input, numerical_dtype,
@@ -825,6 +826,176 @@ class MultiGBTLearner(BaseLearner):
             self.student_models.append(student_model)
         self.reset()
         return tr_losses, distil_params
+
+    def get_matrix_representation(self, features: NumericalData, model_idx: Optional[int] = None) -> \
+            Tuple[Union[np.ndarray, List[np.ndarray]], Union[np.ndarray, List[np.ndarray]],
+                  Union[np.ndarray, List[np.ndarray]], Union[int, List[int]],
+                  Union[int, List[int]]]:
+        """
+        Converts input features into matrix representations required for compression.
+
+        Args:
+            features (NumericalData): Input feature batch of shape (n_samples, n_features),
+                either as a NumPy array or a PyTorch tensor.
+            model_idx (int, optional): The index of the model.
+
+        Returns:
+            Tuple[np.ndarray, np.ndarray, np.ndarray, int, int]: A tuple containing:
+                - A (Union[np.ndarray, List[np.ndarray]]): Feature-to-leaf assignment matrix.
+                - V (Union[np.ndarray, List[np.ndarray]]): Leaf value matrix.
+                - n_leaves_per_tree (Union[np.ndarray, List[np.ndarray]]): Number of leaves in each tree.
+                - n_leaves (Union[int, List[int]]): Total number of leaves.
+                - n_trees (Union[int, List[int]]): Total number of trees.
+        """
+        assert self._cpp_models is not None and isinstance(self._cpp_models, list), \
+            "Model not initialized."
+        if isinstance(features, th.Tensor):
+            features = features.detach().cpu().numpy().astype(np.single)
+        
+        num_features, cat_features = preprocess_features(features)
+        if model_idx is None:
+            A, V, n_leaves_per_tree, n_leaves, n_trees = [], [], [], [], []
+            for i in range(self.n_learners):
+                representation = self._cpp_models[i].get_matrix_representation(num_features, cat_features)
+                A.append(representation[0])
+                V.append(representation[1])
+                n_leaves_per_tree.append(representation[2])
+                n_leaves.append(representation[3])
+                n_trees.append(representation[4])
+        else:
+            A, V, n_leaves_per_tree, n_leaves, n_trees = \
+                self._cpp_models[model_idx].get_matrix_representation(num_features, cat_features)
+        return A, V, n_leaves_per_tree, n_leaves, n_trees
+
+    def compress(self, trees_to_keep: int, gradient_steps: int, features: NumericalData,
+                 actions: Optional[th.Tensor] = None, log_std: Optional[th.Tensor] = None,
+                 method: str = 'first_k', dist_type: str = 'supervised_learning',
+                 optimizer_kwargs: Optional[Dict[str, Any]] = None,
+                 least_squares_W: bool = True, temperature: float = 1.0, lambda_reg: float = 1.0,
+                 model_idx: Optional[int] = None, **kwargs) -> Union[float, List[float]]:
+        """
+        Compresses the tree ensemble by selecting and retraining a subset of trees.
+
+        Args:
+            trees_to_keep (int): Number of trees to retain in the compressed model.
+            gradient_steps (int): Number of optimization steps during compression.
+            features (NumericalData): Input feature matrix (n_samples, n_features).
+            actions (th.Tensor, optional): Target actions (for policy compression). Required if dist_type
+                is not 'supervised_learning'.
+            log_std (th.Tensor, optional): Log standard deviation (only used for certain policy types).
+            method (str): Tree selection method. Defaults to 'first_k'.
+            dist_type (str): Compression type ('supervised_learning', 'actor', etc.).
+            optimizer_kwargs (dict, optional): Optimizer configuration.
+            least_squares_W (bool): Whether to use least-squares to estimate weights (for supervised compression).
+            temperature (float): Temperature parameter for soft selection.
+            lambda_reg (float): L2 regularization coefficient on weights.
+            model_idx (int, optional): The index of the model.
+            **kwargs: Additional keyword arguments passed to the compressor.
+
+        Returns:
+            Union[float, list[float]]: Final loss value after compression.
+        """
+
+        def _compress(A, V, n_leaves_per_tree, compression_params, cpp_model, idx):
+            # Convert to tensors with explicit dtypes
+            A = th.tensor(A, dtype=th.float32, device=self.device)
+            V = th.tensor(V, dtype=th.float32, device=self.device)
+            n_leaves_per_tree = th.tensor(n_leaves_per_tree, dtype=th.int64, device=self.device)
+
+            if actions is not None:
+                # Only require log_std for Gaussian-like distributions
+                if dist_type in ('gaussian', 'normal', 'diag_gaussian'):
+                    assert log_std is not None, "log_std must be provided for Gaussian policy compression"
+                compression_params['dist_type'] = dist_type
+                compressor = ParametricActorCompression(**compression_params)
+                parameters, losses = compressor.compress(A, V, actions, log_std)
+            else:
+                compression_params['least_squares_W'] = least_squares_W
+                compressor = TreeCompression(**compression_params)
+                parameters, losses = compressor.compress(A, V)
+            leaves_selection, tree_selection, W, n_compressed_trees, n_compressed_leaves = parameters
+            
+            # Get indices using nonzero (more efficient than where)
+            compressed_leaf_indices = leaves_selection.nonzero()[0].astype(np.int32)
+            compressed_tree_indices = tree_selection.nonzero()[0].astype(np.int32)
+            
+            # Reorder W from original leaf order to compressed leaf order
+            # W has shape (n_leaves+1, output_dim): row 0 is bias, rows 1+ are leaves
+            W_indices = np.concatenate([[0], compressed_leaf_indices + 1])
+            W_compressed = W[W_indices].astype(np.single)
+            
+            # Compute new tree indices for compressed model
+            new_tree_indices = np.zeros(n_compressed_trees, dtype=np.int32)
+            if n_compressed_trees > 1:
+                # Convert tensor to CPU numpy before indexing with numpy array
+                n_leaves_per_tree_np = n_leaves_per_tree.cpu().numpy()
+                new_tree_indices[1:] = np.cumsum(
+                    n_leaves_per_tree_np[compressed_tree_indices]
+                )[:-1].astype(np.int32)
+
+            cpp_model.compress(n_compressed_leaves, n_compressed_trees, compressed_leaf_indices,
+                               compressed_tree_indices, new_tree_indices, W_compressed)
+            if self.verbose > 0:
+                print(f"Finished compressing model {idx} - compressed model has {self.get_num_trees(model_idx=idx)} trees")
+            
+            # Defensive check for empty losses
+            if not losses:
+                raise RuntimeError("No losses computed by compressor during compression operation")
+            return losses[-1]
+
+        A, V, n_leaves_per_tree, n_leaves, n_trees = self.get_matrix_representation(features, model_idx)
+        if model_idx is None:
+            # Validate trees_to_keep for all learners before performing any compression
+            for i in range(self.n_learners):
+                current_trees = self.get_num_trees(model_idx=i)
+                if trees_to_keep <= 0:
+                    raise ValueError(f"trees_to_keep must be > 0, got {trees_to_keep}")
+                if trees_to_keep >= current_trees:
+                    raise ValueError(f"trees_to_keep ({trees_to_keep}) must be < current tree count ({current_trees}) for model {i}")
+            
+            # All validations passed, proceed with compression
+            losses = []
+            for i in range(self.n_learners):
+                current_trees = self.get_num_trees(model_idx=i)
+                trees_to_remove = current_trees - trees_to_keep
+                learner_output_dim = self.output_dim[i] if isinstance(self.output_dim, list) else self.output_dim
+                compression_params = {'k': trees_to_remove, 'gradient_steps': gradient_steps, 'method': method,
+                                      'optimizer_kwargs': optimizer_kwargs,
+                                      'temperature': temperature, 'n_leaves': n_leaves[i],
+                                      'n_trees': n_trees[i],
+                                      'n_leaves_per_tree': n_leaves_per_tree[i],
+                                      'lambda_reg': lambda_reg,
+                                      'output_dim': learner_output_dim,
+                                      'device': self.device}
+                compression_params.update(kwargs)
+                loss = _compress(A[i], V[i], n_leaves_per_tree[i], compression_params,
+                                 self._cpp_models[i], i)
+                losses.append(loss)
+        else:
+            current_trees = self.get_num_trees(model_idx=model_idx)
+            if trees_to_keep <= 0:
+                raise ValueError(f"trees_to_keep must be > 0, got {trees_to_keep}")
+            if trees_to_keep >= current_trees:
+                raise ValueError(f"trees_to_keep ({trees_to_keep}) must be < current tree count ({current_trees})")
+            trees_to_remove = current_trees - trees_to_keep
+            learner_output_dim = self.output_dim[model_idx] if isinstance(self.output_dim, list) else self.output_dim
+            compression_params = {'k': trees_to_remove, 'gradient_steps': gradient_steps, 'method': method,
+                                  'optimizer_kwargs': optimizer_kwargs,
+                                  'temperature': temperature, 'n_leaves': n_leaves,
+                                  'n_trees': n_trees,
+                                  'n_leaves_per_tree': n_leaves_per_tree,
+                                  'lambda_reg': lambda_reg,
+                                  'output_dim': learner_output_dim,
+                                  'device': self.device}
+            compression_params.update(kwargs)
+            losses = _compress(A, V, n_leaves_per_tree, compression_params,
+                               self._cpp_models[model_idx], model_idx)
+
+        # Clean up large matrices
+        del A
+        del V
+        del n_leaves_per_tree
+        return losses
 
     def print_ensemble_metadata(self, model_idx: Optional[int] = None) -> None:
         """

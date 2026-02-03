@@ -1,5 +1,5 @@
 //////////////////////////////////////////////////////////////////////////////
-// Copyright (c) 2024-2025, NVIDIA Corporation. All rights reserved.
+// Copyright (c) 2024-2026, NVIDIA Corporation. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
 // copy of this software and associated documentation files (the "Software"),
@@ -73,7 +73,6 @@ struct splitCondition {
     float edge_weight;              /**< Weight associated with this split edge */
     char *categorical_value;        /**< Value for categorical feature comparison */
 };
-
 /**
  * @brief Candidate split point to be evaluated during tree growing
  * 
@@ -239,6 +238,7 @@ struct ensembleMetaData {
     int n_num_features;             /**< Number of numerical features */
     int n_cat_features;             /**< Number of categorical features */
     int iteration;                  /**< Current training iteration */
+    int n_mono_constraints;        /**< Number of monotonic constraints */
 };
 
 /**
@@ -269,6 +269,39 @@ struct dataSet {
     int n_samples;                          /**< Number of data samples */
 };
 
+struct monotonicConstraints {
+    int* feature_idx;          /**< Index of the feature with constraint */
+    int* output_idx;           /**< Index of the output dimension */
+    int* constraint;           /**< Constraint type: -1 (decreasing), 1 (increasing) */
+    int n_constraints;         /**< Number of monotonic constraints */
+};
+
+struct featureMapping {
+    int* feature_mapping;           /**< Maps original feature indices to internal indices */
+    int* reverse_num_feature_mapping;  /**< Maps internal numerical feature indices back to original */
+    int* reverse_cat_feature_mapping;  /**< Maps internal categorical feature indices back to original */
+    bool* mapping_numerics;         /**< Indicates if each original feature is numerical (true) or categorical (false) */
+};
+
+struct ensembleInfo {
+    int* tree_indices;              /**< Starting leaf indices for each tree */
+    int* depths;                    /**< Depth of each leaf in tree structure */
+};
+
+struct leafData {
+    float* values;                  /**< Prediction values for the leaf */
+    float* edge_weights;            /**< Weights for edges leading to the leaf */
+};
+
+struct featureData {
+    int* feature_indices;           /**< Feature indices used at each split */
+    float* feature_values;          /**< Threshold values for numerical splits */
+    float* feature_weights;         /**< Importance weights for each feature */
+    bool* is_numerics;              /**< Whether each split is numerical */
+    bool* inequality_directions;    /**< Direction of inequality tests */
+    char* categorical_values;       /**< Values for categorical splits */
+};
+
 /**
  * @brief Data storage for the entire ensemble of trees
  * 
@@ -278,29 +311,17 @@ struct dataSet {
  */
 struct ensembleData {
     float *bias;                    /**< Global bias terms for each output */
-    float *feature_weights;         /**< Per-feature importance weights */
 #ifdef DEBUG
     int *n_samples;                 /**< Sample counts per leaf (debug only) */
 #endif 
-    int *tree_indices;              /**< Starting leaf indices for each tree */
-    int *depths;                    /**< Depth of each leaf in tree structure */
-    float *values;                  /**< Leaf prediction values */
-    
-    // These arrays support reordering of features for mixed categorical/numerical inputs
-    int *feature_mapping;           /**< Maps original feature indices to internal indices (stored for documentation/export) */
-    int *reverse_num_feature_mapping;  /**< Maps internal numerical feature indices back to original feature indices (used in computation) */
-    int *reverse_cat_feature_mapping;  /**< Maps internal categorical feature indices back to original feature indices (used in computation) */
-    // Leaf split condition data
-    int* feature_indices;           /**< Feature used at each internal node */
-    float* feature_values;          /**< Threshold values for numerical splits */
-    float *edge_weights;            /**< Weights for split edges */
-    bool* is_numerics;              /**< Whether split is numerical (vs categorical) */
-    bool* inequality_directions;    /**< Direction of inequality tests */
-    char* categorical_values;       /**< Values for categorical splits */
+    struct ensembleInfo *ensemble_info;              /**< Ensemble structure information */
+    struct leafData *leaf_data;                        /**< Leaf data information */
+    struct featureData *feature_data;                  /**< Feature split condition data */
+    // Monotonic Constraints
+    struct monotonicConstraints *mono_constraints;  /**< Monotonic constraints information */
+    struct featureMapping *feature_mappings;       /**< Feature mapping information */
 
-    bool *mapping_numerics;         /**< Indicates if each original feature is numerical (true) or categorical (false) (stored for documentation/export) */
-    
-    size_t alloc_data_size;         /**< Total allocated memory size */
+    size_t alloc_data_size;                         /**< Total allocated memory size */
 };
 
 /**
@@ -329,6 +350,14 @@ struct nodeInfo {
     int depth;                      /**< Depth level in tree (root = 0) */
     bool is_left;                   /**< True if this is a left child */
     bool is_right;                  /**< True if this is a right child */
+};
+
+struct matrixRepresentation {
+    bool *A;
+    float *V;
+    int n_leaves;
+    int n_trees;
+    int *n_leaves_per_tree;
 };
 
 // ============================================================================
@@ -414,6 +443,7 @@ std::string schedulerTypeToString(schedulerFunc func);
  * @param split_score_func Function for scoring splits
  * @param generator_type Method for generating split candidates
  * @param grow_policy Tree growing strategy
+ * @param n_mono_constraints Number of monotonic constraints
  * @return Pointer to allocated ensembleMetaData structure
  */
 ensembleMetaData* ensemble_metadata_alloc(
@@ -421,7 +451,7 @@ ensembleMetaData* ensemble_metadata_alloc(
     int input_dim, int output_dim, int policy_dim, int max_depth,
     int min_data_in_leaf, int n_bins, int par_th, float cv_beta,
     int verbose, int batch_size, bool use_cv, scoreFunc split_score_func,
-    generatorType generator_type, growPolicy grow_policy
+    generatorType generator_type, growPolicy grow_policy, int n_mono_constraints
 );
 
 /**
@@ -441,22 +471,34 @@ ensembleData* ensemble_data_alloc(ensembleMetaData *metadata);
 ensembleData* ensemble_copy_data_alloc(ensembleMetaData *metadata);
 
 /**
- * @brief Deep copy ensemble data
+ * @brief Create a full copy of ensemble data
+ * 
+ * Copies all ensemble parameters including tree structures, leaf values,
+ * feature mappings, and metadata from source to destination.
  * 
  * @param other_edata Source ensemble data to copy from
- * @param metadata Metadata describing the structure
- * @return Pointer to new ensembleData with copied values
+ * @param metadata Ensemble metadata defining structure
+ * @return Pointer to newly allocated ensemble data copy
  */
-ensembleData* copy_ensemble_data(
-    ensembleData *other_edata,
-    ensembleMetaData *metadata
-);
+ensembleData* copy_ensemble_data(ensembleData *other_edata, ensembleMetaData *metadata);
 
 /**
- * @brief Deallocate ensemble data and free memory
+ * @brief Create a compressed copy of ensemble data with selected trees/leaves
  * 
- * @param edata Ensemble data to deallocate
+ * Creates a new ensemble containing only the specified subset of trees and leaves.
+ * Copies all associated metadata including feature mappings, categorical values,
+ * and tree structure information for the selected subset.
+ * 
+ * @param other_edata Source ensemble data to copy from
+ * @param metadata Ensemble metadata defining structure
+ * @param leaf_indices Indices of leaves to include in compressed ensemble
+ * @param tree_indices Indices of trees to include in compressed ensemble
+ * @param n_compressed_leaves Number of leaves in compressed ensemble
+ * @param n_compressed_trees Number of trees in compressed ensemble
+ * @param new_tree_indices New starting leaf indices for each tree in compressed ensemble
+ * @return Pointer to newly allocated compressed ensemble data
  */
+ensembleData* copy_compressed_ensemble_data(ensembleData *other_edata, ensembleMetaData *metadata, const int *leaf_indices, const int *tree_indices, const int n_compressed_leaves, const int n_compressed_trees, const int *new_tree_indices);
 void ensemble_data_dealloc(ensembleData *edata);
 
 /**

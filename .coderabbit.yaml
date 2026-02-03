@@ -1,0 +1,10 @@
+# Repository-specific override
+reviews:
+  profile: "assertive"
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    drafts: false
+    ignore_title_keywords:
+      - "WIP"
+      - "DO NOT MERGE"

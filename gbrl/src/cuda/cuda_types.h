@@ -1,10 +1,23 @@
 //////////////////////////////////////////////////////////////////////////////
-// Copyright (c) 2024-2025, NVIDIA Corporation. All rights reserved.
+// Copyright (c) 2024-2026, NVIDIA Corporation. All rights reserved.
 //
-// This work is made available under the Nvidia Source Code License-NC.
-// To view a copy of this license, visit
-// https://nvlabs.github.io/gbrl/license.html
+// Permission is hereby granted, free of charge, to any person obtaining a
+// copy of this software and associated documentation files (the "Software"),
+// to deal in the Software without restriction, including without limitation
+// the rights to use, copy, modify, merge, publish, distribute, sublicense,
+// and/or sell copies of the Software, and to permit persons to whom the
+// Software is furnished to do so, subject to the following conditions:
 //
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+// THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+// DEALINGS IN THE SOFTWARE.
 //////////////////////////////////////////////////////////////////////////////
 /**
  * @file cuda_types.h
@@ -49,6 +62,8 @@ struct SGDOptimizerGPU {
     int start_idx;            /**< Starting tree index */
     int stop_idx;             /**< Stopping tree index */
     float init_lr;            /**< Initial learning rate */
+    float stop_lr;            /**< Final learning rate (for Linear scheduler) */
+    int T;                    /**< Total iterations (for Linear scheduler) */
     schedulerFunc scheduler;  /**< Scheduler type */
 };
 
@@ -162,6 +177,19 @@ ensembleData* ensemble_data_copy_gpu_gpu(
 );
 
 /**
+ * @brief Allocate GPU memory for compressed ensemble data
+ * 
+ * Allocates device memory for a compressed ensemble with specified number
+ * of trees and leaves. Memory layout optimized for GPU access patterns.
+ * 
+ * @param metadata Ensemble metadata specifying structure and dimensions
+ * @param n_compressed_leaves Number of leaves in compressed ensemble
+ * @param n_compressed_trees Number of trees in compressed ensemble
+ * @return Pointer to allocated ensembleData structure on GPU
+ */
+ensembleData* ensemble_compressed_data_alloc_cuda(ensembleMetaData *metadata, const int n_compressed_leaves, const int n_compressed_trees);
+
+/**
  * @brief Copy ensemble data from CPU to GPU
  * 
  * @param metadata Ensemble configuration
@@ -188,6 +216,26 @@ ensembleData* ensemble_data_copy_gpu_cpu(
     ensembleData *other_edata,
     ensembleData* edata
 );
+
+
+/**
+ * @brief Copy compressed ensemble data between GPU memory locations
+ * 
+ * Performs GPU-to-GPU copy of selected trees and leaves for ensemble compression.
+ * Uses CUDA kernels for efficient parallel copying. Copies all associated metadata
+ * including feature mappings, categorical values, and tree structures.
+ * 
+ * @param metadata Ensemble metadata defining structure
+ * @param other_edata Source ensemble data on GPU
+ * @param edata Target ensemble data structure on GPU (pre-allocated)
+ * @param n_compressed_leaves Number of leaves in compressed ensemble
+ * @param n_compressed_trees Number of trees in compressed ensemble
+ * @param leaf_indices Device pointer to leaf indices to copy
+ * @param tree_indices Device pointer to tree indices to copy
+ * @param new_tree_indices Device pointer to new tree starting indices
+ * @return Pointer to updated target ensemble data
+ */
+ensembleData* ensemble_compressed_data_copy_gpu_gpu(ensembleMetaData *metadata, ensembleData *other_edata, ensembleData* edata, const int n_compressed_leaves, const int n_compressed_trees, const int *leaf_indices, const int *tree_indices, const int *new_tree_indices);
 
 /**
  * @brief Allocate GPU memory for ensemble

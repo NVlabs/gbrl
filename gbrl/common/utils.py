@@ -1,5 +1,5 @@
 ##############################################################################
-# Copyright (c) 2024-2025, NVIDIA Corporation. All rights reserved.
+# Copyright (c) 2024-2026, NVIDIA Corporation. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a
 # copy of this software and associated documentation files (the "Software"),
@@ -251,15 +251,33 @@ def setup_optimizer(optimizer: Dict, prefix: str = '') -> Dict:
         optimizer = {k.replace(prefix, ''): v for k, v in optimizer.items()}
     lr = optimizer.get('lr', 1.0) if 'init_lr' not in optimizer else \
         optimizer['init_lr']
-    # setup scheduler
-    optimizer['scheduler'] = 'Const'
+    # setup scheduler - check if explicitly set, otherwise default to Const
+    if 'scheduler' not in optimizer:
+        optimizer['scheduler'] = 'Const'
     assert isinstance(lr, (int, float, str)), "lr must be a float or string"
     if isinstance(lr, str) and 'lin_' in lr:
-        assert 'T' in optimizer, "Linear optimizer must contain T the total"
-        "   number of iterations used for scheduling"
+        if 'T' not in optimizer:
+            raise ValueError("Linear scheduler requires 'T' (total number of iterations) to be specified.")
         lr = lr.replace('lin_', '')
         optimizer['scheduler'] = 'Linear'
+    # Validate scheduler type before normalization
+    sched_value = optimizer.get('scheduler', 'Const')
+    if not isinstance(sched_value, str):
+        raise ValueError("scheduler must be a string ('linear', 'const', or 'constant')")
+    # Normalize scheduler name (linear -> Linear, const/constant -> Const)
+    sched = sched_value.lower()
+    if sched == 'linear':
+        optimizer['scheduler'] = 'Linear'
+    elif sched in ('const', 'constant'):
+        optimizer['scheduler'] = 'Const'
+    else:
+        raise ValueError(f"Unknown scheduler '{sched}'. Must be 'linear', 'const', or 'constant'.")
+    # Validate 'T' is present for Linear scheduler
+    if optimizer['scheduler'] == 'Linear' and 'T' not in optimizer:
+        raise ValueError("Linear scheduler requires 'T' (total number of iterations) to be specified.")
     optimizer['init_lr'] = float(lr)
+    if optimizer['init_lr'] <= 0:
+        raise ValueError("init_lr must be > 0")
     optimizer['algo'] = optimizer.get('algo', 'SGD')
     assert optimizer['algo'] in APPROVED_OPTIMIZERS, \
         f"optimization algo has to be in {APPROVED_OPTIMIZERS}"
@@ -594,3 +612,118 @@ def ensure_leaf_tensor_or_array(array: NumericalData,
         array = array.detach().cpu().numpy()
 
     return array
+
+
+def process_monotonic_constraints(
+    constraints: Dict[int, Tuple[str, Union[int, Sequence[int]]]],
+    policy_dim: int,
+    input_dim: int
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Process user-friendly monotonic constraint specification into C++ format.
+
+    Converts a dictionary mapping feature indices to constraint specifications
+    into three C-contiguous numpy arrays that can be passed to the C++ backend.
+
+    The input format is designed to be user-friendly:
+    ```python
+    constraints = {
+        0: ("increasing", [0, 1]),    # Feature 0 increases actions 0 and 1
+        3: ("decreasing", 0),         # Feature 3 decreases action 0
+        5: (1, [0, 1, 2]),            # Feature 5 increases all actions (numeric)
+    }
+    ```
+
+    Args:
+        constraints: Dictionary mapping feature indices to constraint specs.
+            Keys are feature indices (int).
+            Values are tuples of (direction, output_dims) where:
+                - direction: "increasing"/"+"/1 or "decreasing"/"-"/-1
+                - output_dims: Single int or list of output dimension indices
+        policy_dim: Number of policy dimensions (constraints must be < policy_dim)
+        input_dim: Number of input features (for validation)
+
+    Returns:
+        Tuple of three C-contiguous int32 numpy arrays:
+            - feature_indices: Expanded feature indices for each constraint
+            - output_indices: Output dimension for each constraint
+            - constraint_dirs: Direction for each constraint (+1 or -1)
+
+    Raises:
+        ValueError: If constraints are invalid (bad feature index, output index,
+            or direction specification)
+
+    Example:
+        >>> constraints = {0: ("increasing", [0, 1]), 3: ("decreasing", 0)}
+        >>> feat, out, dirs = process_monotonic_constraints(constraints, 2, 10)
+        >>> feat  # array([0, 0, 3], dtype=int32)
+        >>> out   # array([0, 1, 0], dtype=int32)
+        >>> dirs  # array([1, 1, -1], dtype=int32)
+    """
+    # Type check for constraints parameter
+    if constraints is not None and not isinstance(constraints, dict):
+        raise ValueError(
+            f"constraints must be a dict mapping feature_index->(direction, output_dims), "
+            f"got {type(constraints).__name__}"
+        )
+    
+    if not constraints:
+        return (np.array([], dtype=np.int32),
+                np.array([], dtype=np.int32),
+                np.array([], dtype=np.int32))
+
+    feature_indices = []
+    output_indices = []
+    constraint_dirs = []
+
+    direction_map = {
+        "increasing": 1, "inc": 1, "+": 1, 1: 1,
+        "decreasing": -1, "dec": -1, "-": -1, -1: -1
+    }
+
+    for feat_idx, (direction, output_dims) in constraints.items():
+        # Validate feature index
+        if not isinstance(feat_idx, (int, np.integer)) or feat_idx < 0 or feat_idx >= input_dim:
+            raise ValueError(
+                f"Invalid feature index {feat_idx}. "
+                f"Must be an integer in [0, {input_dim})"
+            )
+
+        # Parse direction
+        if direction not in direction_map:
+            raise ValueError(
+                f"Invalid constraint direction '{direction}' for feature {feat_idx}. "
+                f"Use 'increasing'/'+'/1 or 'decreasing'/'-'/-1"
+            )
+        dir_val = direction_map[direction]
+
+        # Normalize output_dims to list (handle numpy arrays, scalars and integers)
+        if isinstance(output_dims, np.ndarray):
+            # Use atleast_1d to handle 0-D arrays (e.g., np.array(3))
+            output_dims = np.atleast_1d(output_dims).tolist()
+        elif isinstance(output_dims, (int, np.integer)) or np.isscalar(output_dims):
+            output_dims = np.atleast_1d(output_dims).tolist()
+
+        # Check for empty output_dims after normalization
+        if len(output_dims) == 0:
+            raise ValueError(
+                f"No output indices provided for feature {feat_idx}. "
+                f"output_dims cannot be empty."
+            )
+
+        # Validate and add each output dimension
+        for out_idx in output_dims:
+            if not isinstance(out_idx, (int, np.integer)) or out_idx < 0 or out_idx >= policy_dim:
+                raise ValueError(
+                    f"Invalid output index {out_idx} for feature {feat_idx}. "
+                    f"Must be an integer in [0, {policy_dim})"
+                )
+            feature_indices.append(feat_idx)
+            output_indices.append(out_idx)
+            constraint_dirs.append(dir_val)
+
+    return (
+        np.ascontiguousarray(feature_indices, dtype=np.int32),
+        np.ascontiguousarray(output_indices, dtype=np.int32),
+        np.ascontiguousarray(constraint_dirs, dtype=np.int32)
+    )

@@ -1,5 +1,5 @@
 //////////////////////////////////////////////////////////////////////////////
-// Copyright (c) 2024-2025, NVIDIA Corporation. All rights reserved.
+// Copyright (c) 2024-2026, NVIDIA Corporation. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
 // copy of this software and associated documentation files (the "Software"),
@@ -334,50 +334,50 @@ py::dict ensembleDataToDict(const ensembleData* data, const ensembleMetaData* me
         auto bias_capsule = py::capsule(data->bias, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
         d["bias"] = py::array_t<float>({metadata->output_dim}, data->bias, bias_capsule);
 
-        auto feature_mapping_capsule = py::capsule(data->feature_mapping, [](void* ptr) { delete[] reinterpret_cast<int*>(ptr); });
-        d["feature_mapping"] = py::array_t<int>({metadata->input_dim}, data->feature_mapping, feature_mapping_capsule);
+        auto feature_mapping_capsule = py::capsule(data->feature_mappings->feature_mapping, [](void* ptr) { delete[] reinterpret_cast<int*>(ptr); });
+        d["feature_mapping"] = py::array_t<int>({metadata->input_dim}, data->feature_mappings->feature_mapping, feature_mapping_capsule);
         
-        auto reverse_num_feature_mapping_capsule = py::capsule(data->reverse_num_feature_mapping, [](void* ptr) { delete[] reinterpret_cast<int*>(ptr); });
-        d["reverse_num_feature_mapping"] = py::array_t<int>({metadata->input_dim}, data->reverse_num_feature_mapping, reverse_num_feature_mapping_capsule);
+        auto reverse_num_feature_mapping_capsule = py::capsule(data->feature_mappings->reverse_num_feature_mapping, [](void* ptr) { delete[] reinterpret_cast<int*>(ptr); });
+        d["reverse_num_feature_mapping"] = py::array_t<int>({metadata->input_dim}, data->feature_mappings->reverse_num_feature_mapping, reverse_num_feature_mapping_capsule);
         
-        auto reverse_cat_feature_mapping_capsule = py::capsule(data->reverse_cat_feature_mapping, [](void* ptr) { delete[] reinterpret_cast<int*>(ptr); });
-        d["reverse_cat_feature_mapping"] = py::array_t<int>({metadata->input_dim}, data->reverse_cat_feature_mapping, reverse_cat_feature_mapping_capsule);
+        auto reverse_cat_feature_mapping_capsule = py::capsule(data->feature_mappings->reverse_cat_feature_mapping, [](void* ptr) { delete[] reinterpret_cast<int*>(ptr); });
+        d["reverse_cat_feature_mapping"] = py::array_t<int>({metadata->input_dim}, data->feature_mappings->reverse_cat_feature_mapping, reverse_cat_feature_mapping_capsule);
         
-        auto feature_weights_capsule = py::capsule(data->feature_weights, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
-        d["feature_weights"] = py::array_t<float>({metadata->input_dim}, data->feature_weights, feature_weights_capsule);
+        auto feature_weights_capsule = py::capsule(data->feature_data->feature_weights, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
+        d["feature_weights"] = py::array_t<float>({metadata->input_dim}, data->feature_data->feature_weights, feature_weights_capsule);
 
-        auto tree_indices_capsule = py::capsule(data->tree_indices, [](void* ptr) { delete[] reinterpret_cast<int*>(ptr); });
-        d["tree_indices"] = py::array_t<int>({metadata->n_trees}, data->tree_indices, tree_indices_capsule);
+        auto tree_indices_capsule = py::capsule(data->ensemble_info->tree_indices, [](void* ptr) { delete[] reinterpret_cast<int*>(ptr); });
+        d["tree_indices"] = py::array_t<int>({metadata->n_trees}, data->ensemble_info->tree_indices, tree_indices_capsule);
 
         int split_sizes = (metadata->grow_policy == OBLIVIOUS) ? metadata->n_trees : metadata->n_leaves;
 
-        auto depths_capsule = py::capsule(data->depths, [](void* ptr) { delete[] reinterpret_cast<int*>(ptr); });
-        d["depths"] = py::array_t<int>({split_sizes}, data->depths, depths_capsule);
+        auto depths_capsule = py::capsule(data->ensemble_info->depths, [](void* ptr) { delete[] reinterpret_cast<int*>(ptr); });
+        d["depths"] = py::array_t<int>({split_sizes}, data->ensemble_info->depths, depths_capsule);
 
-        auto values_capsule = py::capsule(data->values, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
-        d["values"] = py::array_t<float>({metadata->n_leaves, metadata->output_dim}, data->values, values_capsule);
+        auto values_capsule = py::capsule(data->leaf_data->values, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
+        d["values"] = py::array_t<float>({metadata->n_leaves, metadata->output_dim}, data->leaf_data->values, values_capsule);
 
-        auto feature_indices_capsule = py::capsule(data->feature_indices, [](void* ptr) { delete[] reinterpret_cast<int*>(ptr); });
-        d["feature_indices"] = py::array_t<int>({split_sizes, metadata->max_depth}, data->feature_indices, feature_indices_capsule);
+        auto feature_indices_capsule = py::capsule(data->feature_data->feature_indices, [](void* ptr) { delete[] reinterpret_cast<int*>(ptr); });
+        d["feature_indices"] = py::array_t<int>({split_sizes, metadata->max_depth}, data->feature_data->feature_indices, feature_indices_capsule);
 
-        auto feature_values_capsule = py::capsule(data->feature_values, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
-        d["feature_values"] = py::array_t<float>({split_sizes, metadata->max_depth}, data->feature_values, feature_values_capsule);
+        auto feature_values_capsule = py::capsule(data->feature_data->feature_values, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
+        d["feature_values"] = py::array_t<float>({split_sizes, metadata->max_depth}, data->feature_data->feature_values, feature_values_capsule);
 
-        auto edge_weights_capsule = py::capsule(data->edge_weights, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
-        d["edge_weights"] = py::array_t<float>({metadata->n_leaves, metadata->max_depth}, data->edge_weights, edge_weights_capsule);
+        auto edge_weights_capsule = py::capsule(data->leaf_data->edge_weights, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
+        d["edge_weights"] = py::array_t<float>({metadata->n_leaves, metadata->max_depth}, data->leaf_data->edge_weights, edge_weights_capsule);
 
-        auto is_numerics_capsule = py::capsule(data->is_numerics, [](void* ptr) { delete[] reinterpret_cast<bool*>(ptr); });
-        d["is_numerics"] = py::array_t<bool>({split_sizes, metadata->max_depth}, data->is_numerics, is_numerics_capsule);
+        auto is_numerics_capsule = py::capsule(data->feature_data->is_numerics, [](void* ptr) { delete[] reinterpret_cast<bool*>(ptr); });
+        d["is_numerics"] = py::array_t<bool>({split_sizes, metadata->max_depth}, data->feature_data->is_numerics, is_numerics_capsule);
 
-        auto inequality_directions_capsule = py::capsule(data->inequality_directions, [](void* ptr) { delete[] reinterpret_cast<bool*>(ptr); });
-        d["inequality_directions"] = py::array_t<bool>({metadata->n_leaves, metadata->max_depth}, data->inequality_directions, inequality_directions_capsule);
+        auto inequality_directions_capsule = py::capsule(data->feature_data->inequality_directions, [](void* ptr) { delete[] reinterpret_cast<bool*>(ptr); });
+        d["inequality_directions"] = py::array_t<bool>({metadata->n_leaves, metadata->max_depth}, data->feature_data->inequality_directions, inequality_directions_capsule);
         
-        auto mapping_numerics_capsule = py::capsule(data->mapping_numerics, [](void* ptr) { delete[] reinterpret_cast<bool*>(ptr); });
-        d["mapping_numerics"] = py::array_t<bool>({metadata->input_dim}, data->mapping_numerics, mapping_numerics_capsule);
+        auto mapping_numerics_capsule = py::capsule(data->feature_mappings->mapping_numerics, [](void* ptr) { delete[] reinterpret_cast<bool*>(ptr); });
+        d["mapping_numerics"] = py::array_t<bool>({metadata->input_dim}, data->feature_mappings->mapping_numerics, mapping_numerics_capsule);
 
         // Convert char* categorical_values to NumPy string array (S128)
-        auto categorical_capsule = py::capsule(data->categorical_values, [](void* ptr) { delete[] reinterpret_cast<char*>(ptr); });
-        d["categorical_values"] = py::array(py::dtype("S128"), {split_sizes, metadata->max_depth}, data->categorical_values, categorical_capsule);
+        auto categorical_capsule = py::capsule(data->feature_data->categorical_values, [](void* ptr) { delete[] reinterpret_cast<char*>(ptr); });
+        d["categorical_values"] = py::array(py::dtype("S128"), {split_sizes, metadata->max_depth}, data->feature_data->categorical_values, categorical_capsule);
         
         d["alloc_data_size"] = data->alloc_data_size;
 
@@ -420,7 +420,7 @@ py::list getOptimizerConfigs(const std::vector<Optimizer*>& opts) {
 
 PYBIND11_MODULE(gbrl_cpp, m) {
     py::class_<GBRL> gbrl(m, "GBRL");
-    gbrl.def(py::init<int, int, int, int, int, int, int, float, std::string, std::string, bool, int, std::string, int, std::string, std::string>(),
+    gbrl.def(py::init<int, int, int, int, int, int, int, float, std::string, std::string, bool, int, std::string, int, std::string, std::string, int>(),
          py::arg("input_dim")=1, 
          py::arg("output_dim")=1, 
          py::arg("policy_dim")=1, 
@@ -437,6 +437,7 @@ PYBIND11_MODULE(gbrl_cpp, m) {
          py::arg("verbose")=0,
          py::arg("device")="cpu",
          py::arg("learner_name")="GBRL",
+         py::arg("n_mono_constraints")=0,
          "Constructor of the GBRL class");
     gbrl.def(py::init<GBRL&>(), py::arg("model"), "Copy constructor"); // This exposes the filename constructor
     gbrl.def_static("load", [](const std::string& filename) {
@@ -715,6 +716,51 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         self.set_feature_weights(&feature_weights_holder, input_dim);
     }, "Set GBRL model feature weights");
     
+    // Set monotonic constraints for model outputs
+    // Configures per-feature monotonicity constraints: each feature can be constrained
+    // to be monotonically increasing (+1) or decreasing (-1) for specific output dimensions.
+    // Populates internal constraint arrays used during tree fitting and prediction.
+    gbrl.def("set_monotonic_constraints", [](GBRL &self, const py::array_t<int> &feature_indices, const py::array_t<int> &output_indices, const py::array_t<int>& constraints) {
+        if (!feature_indices.attr("flags").attr("c_contiguous").cast<bool>()) {
+            throw std::runtime_error("feature_indices must be C-contiguous");
+        }
+        if (!output_indices.attr("flags").attr("c_contiguous").cast<bool>()) {
+            throw std::runtime_error("output_indices must be C-contiguous");
+        }
+        if (!constraints.attr("flags").attr("c_contiguous").cast<bool>()) {
+            throw std::runtime_error("constraints must be C-contiguous");
+        }
+
+        // Get buffer info while holding GIL and validate 1D arrays
+        py::buffer_info feature_info = feature_indices.request();
+        if (feature_info.ndim != 1) {
+            throw std::runtime_error("feature_indices must be a 1D array");
+        }
+        int* feature_indices_ptr = static_cast<int*>(feature_info.ptr);
+        int n_constraints = static_cast<int>(feature_info.size);
+
+        py::buffer_info output_info = output_indices.request();
+        if (output_info.ndim != 1) {
+            throw std::runtime_error("output_indices must be a 1D array");
+        }
+        int* output_indices_ptr = static_cast<int*>(output_info.ptr);
+        if (static_cast<int>(output_info.size) != n_constraints) {
+            throw std::runtime_error("feature_indices and output_indices must have the same length");
+        }
+
+        py::buffer_info constraints_info = constraints.request();
+        if (constraints_info.ndim != 1) {
+            throw std::runtime_error("constraints must be a 1D array");
+        }
+        int* constraints_ptr = static_cast<int*>(constraints_info.ptr);
+        if (static_cast<int>(constraints_info.size) != n_constraints) {
+            throw std::runtime_error("feature_indices and constraints must have the same length");
+        }
+        
+        py::gil_scoped_release release; 
+        self.set_monotonic_constraints(feature_indices_ptr, output_indices_ptr, constraints_ptr, n_constraints); 
+    }, "Set GBRL model monotonic constraints");
+    
     // Set feature mapping for mixed categorical/numerical inputs
     // Creates 4 arrays: feature_mapping, mapping_numerics (stored for export),
     // reverse_num_feature_mapping, reverse_cat_feature_mapping (used in computation)
@@ -983,6 +1029,219 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         py::gil_scoped_release release; 
         self.print_tree(tree_idx); 
     }, py::arg("tree_idx") = -1, "Print specified tree index");
+gbrl.def("get_matrix_representation", [](GBRL &self, py::object &obs, py::object &categorical_obs){
+        const float* obs_ptr = nullptr;
+        int n_num_features = 0;
+        int n_samples = 0;
+        int n_obs_samples = 0;
+        
+        if (!obs.is_none()) {
+            py::array_t<float> obs_array = py::cast<py::array_t<float>>(obs);
+            if (!obs_array.attr("flags").attr("c_contiguous").cast<bool>())
+                throw std::runtime_error("Observation arrays must be C-contiguous");
+            py::buffer_info info_obs = obs_array.request();
+            obs_ptr = static_cast<const float*>(info_obs.ptr);
+            
+            if (info_obs.shape.size() == 1) {
+                // 1D array - could be single sample with multiple features or multiple samples with 1 feature
+                if (static_cast<int>(info_obs.shape[0]) == self.metadata->input_dim) {
+                    n_samples = 1;
+                    n_num_features = static_cast<int>(info_obs.shape[0]);
+                } else {
+                    n_samples = static_cast<int>(info_obs.shape[0]);
+                    n_num_features = 1;
+                }
+                n_obs_samples = n_samples;
+            } else {
+                n_obs_samples = static_cast<int>(info_obs.shape[0]);
+                n_num_features = static_cast<int>(info_obs.shape[1]);
+                n_samples = n_obs_samples;
+            }
+        }
+        
+        int n_cat_features = 0;
+        const char *cat_obs_ptr = nullptr;
+        if (!categorical_obs.is_none()) {
+            py::array py_array = py::cast<py::array>(categorical_obs);
+            if (!py_array.attr("flags").attr("c_contiguous").cast<bool>())
+                throw std::runtime_error("Categorical observation arrays must be C-contiguous");
+            py::buffer_info info_categorical_obs = py_array.request();
+            cat_obs_ptr = static_cast<const char*>(info_categorical_obs.ptr);
+            
+            if (info_categorical_obs.shape.size() == 1) {
+                // 1D array - could be single sample or multiple samples with 1 feature
+                int cat_size = static_cast<int>(info_categorical_obs.shape[0]);
+                if (obs_ptr == nullptr) {
+                    // Only categorical features
+                    if (cat_size == self.metadata->input_dim) {
+                        n_samples = 1;
+                        n_cat_features = cat_size;
+                    } else {
+                        n_samples = cat_size;
+                        n_cat_features = 1;
+                    }
+                } else {
+                    // Have both numerical and categorical
+                    if (cat_size == n_obs_samples) {
+                        n_cat_features = 1;
+                    } else if (n_obs_samples == 1) {
+                        n_cat_features = cat_size;
+                        n_samples = 1;
+                    } else {
+                        std::stringstream ss;
+                        ss << "Categorical observation dimension mismatch: got " << cat_size 
+                           << " but expected " << n_obs_samples << " samples";
+                        throw std::runtime_error(ss.str());
+                    }
+                }
+            } else {
+                int n_cat_samples = static_cast<int>(info_categorical_obs.shape[0]);
+                n_cat_features = static_cast<int>(info_categorical_obs.shape[1]);
+                
+                if (obs_ptr != nullptr && n_cat_samples != n_obs_samples) {
+                    std::stringstream ss;
+                    ss << "Number of categorical observation samples (" << n_cat_samples 
+                       << ") != number of numerical observation samples (" << n_obs_samples << ")";
+                    throw std::runtime_error(ss.str());
+                }
+                if (obs_ptr == nullptr) {
+                    n_samples = n_cat_samples;
+                }
+            }
+        }
+        
+        // Validate total feature count
+        if (obs_ptr == nullptr && cat_obs_ptr == nullptr) {
+            throw std::runtime_error("Cannot call get_matrix_representation without observations!");
+        }
+        
+        if (n_cat_features + n_num_features != self.metadata->input_dim) {
+            std::stringstream ss;
+            ss << "Total number of features (" << n_cat_features + n_num_features 
+               << ") != model input_dim (" << self.metadata->input_dim << ")";
+            throw std::runtime_error(ss.str());
+        }
+        
+        py::gil_scoped_release release; 
+        matrixRepresentation *matrix = self.get_matrix_representation(obs_ptr, cat_obs_ptr, n_samples, n_num_features, n_cat_features);  
+        py::gil_scoped_acquire acquire;
+       
+        auto capsule_A = py::capsule(matrix->A, [](void* ptr) {
+            delete[] reinterpret_cast<bool*>(ptr);
+        });
+        auto capsule_V = py::capsule(matrix->V, [](void* ptr) {
+            delete[] reinterpret_cast<float*>(ptr);
+        });
+        auto capsule_n_leaves_per_tree = py::capsule(matrix->n_leaves_per_tree, [](void* ptr) {
+            delete[] reinterpret_cast<int*>(ptr);
+        });
+        auto np_array_A = py::array_t<bool>({n_samples, matrix->n_leaves + 1}, matrix->A, capsule_A);
+        auto np_array_V = py::array_t<float>({matrix->n_leaves + 1, self.metadata->output_dim}, matrix->V, capsule_V);
+        auto np_array_n_leaves_per_tree = py::array_t<int>({matrix->n_trees}, matrix->n_leaves_per_tree, capsule_n_leaves_per_tree);
+        auto matrix_tuple = py::make_tuple(np_array_A, np_array_V, np_array_n_leaves_per_tree, matrix->n_leaves, matrix->n_trees);
+        delete matrix;
+        return matrix_tuple;
+    }, py::arg("obs"), py::arg("categorical_obs"), "Get matrix representation of model given an input");
+    gbrl.def("compress", [](GBRL &self, const int n_compressed_leaves, const int n_compressed_trees, py::object &leaf_indices, py::object &tree_indices, py::object &new_tree_indices, py::object &W){
+        // Validate input parameters
+        if (n_compressed_leaves <= 0) {
+            throw std::runtime_error("n_compressed_leaves must be positive");
+        }
+        if (n_compressed_trees <= 0) {
+            throw std::runtime_error("n_compressed_trees must be positive");
+        }
+        if (n_compressed_trees > self.metadata->n_trees) {
+            std::stringstream ss;
+            ss << "n_compressed_trees (" << n_compressed_trees 
+               << ") cannot exceed current number of trees (" << self.metadata->n_trees << ")";
+            throw std::runtime_error(ss.str());
+        }
+        
+        const int* leaf_indices_ptr = nullptr;
+        if (!leaf_indices.is_none()) {
+            py::array_t<int> leaf_indices_array = py::cast<py::array_t<int>>(leaf_indices);
+            if (!leaf_indices_array.attr("flags").attr("c_contiguous").cast<bool>())
+                throw std::runtime_error("leaf_indices array must be C-contiguous");
+            py::buffer_info leaf_info = leaf_indices_array.request();
+            leaf_indices_ptr = static_cast<const int*>(leaf_info.ptr);
+            
+            // Validate size
+            if (leaf_info.size != n_compressed_leaves) {
+                std::stringstream ss;
+                ss << "leaf_indices size (" << leaf_info.size 
+                   << ") does not match n_compressed_leaves (" << n_compressed_leaves << ")";
+                throw std::runtime_error(ss.str());
+            }
+        } else {
+            throw std::runtime_error("leaf_indices cannot be None");
+        }
+        
+        const int* tree_indices_ptr = nullptr;
+        if (!tree_indices.is_none()) {
+            py::array_t<int> tree_indices_array = py::cast<py::array_t<int>>(tree_indices);
+            if (!tree_indices_array.attr("flags").attr("c_contiguous").cast<bool>())
+                throw std::runtime_error("tree_indices array must be C-contiguous");
+            py::buffer_info tree_info = tree_indices_array.request();
+            tree_indices_ptr = static_cast<const int*>(tree_info.ptr);
+            
+            // Validate size
+            if (tree_info.size != n_compressed_trees) {
+                std::stringstream ss;
+                ss << "tree_indices size (" << tree_info.size 
+                   << ") does not match n_compressed_trees (" << n_compressed_trees << ")";
+                throw std::runtime_error(ss.str());
+            }
+        } else {
+            throw std::runtime_error("tree_indices cannot be None");
+        }
+        
+        const int* new_tree_indices_ptr = nullptr;
+        if (!new_tree_indices.is_none()) {
+            py::array_t<int> new_tree_indices_array = py::cast<py::array_t<int>>(new_tree_indices);
+            if (!new_tree_indices_array.attr("flags").attr("c_contiguous").cast<bool>())
+                throw std::runtime_error("new_tree_indices array must be C-contiguous");
+            py::buffer_info indices_info = new_tree_indices_array.request();
+            new_tree_indices_ptr = static_cast<const int*>(indices_info.ptr);
+            
+            // Validate size
+            if (indices_info.size != n_compressed_trees) {
+                std::stringstream ss;
+                ss << "new_tree_indices size (" << indices_info.size 
+                   << ") does not match n_compressed_trees (" << n_compressed_trees << ")";
+                throw std::runtime_error(ss.str());
+            }
+        } else {
+            throw std::runtime_error("new_tree_indices cannot be None");
+        }
+        
+        const float* W_ptr = nullptr;
+        if (!W.is_none()) {
+            py::array_t<float> W_array = py::cast<py::array_t<float>>(W);
+            if (!W_array.attr("flags").attr("c_contiguous").cast<bool>())
+                throw std::runtime_error("W array must be C-contiguous");
+            py::buffer_info w_info = W_array.request();
+            W_ptr = static_cast<const float*>(w_info.ptr);
+            
+            // Validate shape (should be n_compressed_leaves+1 x output_dim)
+            if (w_info.ndim != 2) {
+                throw std::runtime_error("W must be a 2D array");
+            }
+            if (static_cast<int>(w_info.shape[0]) != n_compressed_leaves + 1 || 
+                static_cast<int>(w_info.shape[1]) != self.metadata->output_dim) {
+                std::stringstream ss;
+                ss << "W shape (" << w_info.shape[0] << ", " << w_info.shape[1] 
+                   << ") does not match expected (" << n_compressed_leaves + 1 
+                   << ", " << self.metadata->output_dim << ")";
+                throw std::runtime_error(ss.str());
+            }
+        } else {
+            throw std::runtime_error("W correction matrix cannot be None");
+        }
+        
+        py::gil_scoped_release release; 
+        self.compress_ensemble(n_compressed_leaves, n_compressed_trees, leaf_indices_ptr, tree_indices_ptr, new_tree_indices_ptr, W_ptr);  
+
+    }, py::arg("n_compressed_leaves"), py::arg("n_compressed_trees"), py::arg("leaf_indices"), py::arg("tree_indices"), py::arg("new_tree_indices"), py::arg("W") , "Compress ensemble");
     gbrl.def("tree_shap", [](GBRL &self, const int tree_idx, py::object &obs, py::object &categorical_obs, 
                             py::object &norm_values, py::object &base_poly, py::object &offset) -> py::array_t<float> {
         const float* obs_ptr = nullptr;
