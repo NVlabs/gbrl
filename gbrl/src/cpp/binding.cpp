@@ -1213,15 +1213,15 @@ gbrl.def("get_matrix_representation", [](GBRL &self, py::object &obs, py::object
             py::buffer_info w_info = W_array.request();
             W_ptr = static_cast<const float*>(w_info.ptr);
             
-            // Validate shape (should be n_leaves+1 x output_dim - original ensemble size)
+            // Validate shape (should be n_compressed_leaves+1 x output_dim)
             if (w_info.ndim != 2) {
                 throw std::runtime_error("W must be a 2D array");
             }
-            if (static_cast<int>(w_info.shape[0]) != self.metadata->n_leaves + 1 || 
+            if (static_cast<int>(w_info.shape[0]) != n_compressed_leaves + 1 || 
                 static_cast<int>(w_info.shape[1]) != self.metadata->output_dim) {
                 std::stringstream ss;
                 ss << "W shape (" << w_info.shape[0] << ", " << w_info.shape[1] 
-                   << ") does not match expected (" << self.metadata->n_leaves + 1 
+                   << ") does not match expected (" << n_compressed_leaves + 1 
                    << ", " << self.metadata->output_dim << ")";
                 throw std::runtime_error(ss.str());
             }

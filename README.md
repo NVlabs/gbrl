@@ -55,7 +55,9 @@ For a detailed usage example, see `tutorial.ipynb`
 - Categorical inputs
 - Input feature weights - (CPU/GPU)
 - Monotonic constraints - (CPU/GPU, policy only)
+
 ### GBT Inference
+
 - SGD optimizer - (CPU/GPU)
 - ADAM optimizer - (CPU only)
 - Control Variates (gradient variance reduction technique) - (CPU only)

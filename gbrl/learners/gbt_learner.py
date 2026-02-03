@@ -669,6 +669,12 @@ class GBTLearner(BaseLearner):
         compressed_leaf_indices = leaves_selection.nonzero()[0].astype(np.int32)
         compressed_tree_indices = tree_selection.nonzero()[0].astype(np.int32)
         
+        # Reorder W from original leaf order to compressed leaf order
+        # W has shape (n_leaves+1, output_dim): row 0 is bias, rows 1+ are leaves
+        # Select bias row (0) plus rows for compressed leaves (indices+1)
+        W_indices = np.concatenate([[0], compressed_leaf_indices + 1])
+        W_compressed = W[W_indices].astype(np.single)
+        
         # Compute new tree indices for compressed model
         new_tree_indices = np.zeros(n_compressed_trees, dtype=np.int32)
         if n_compressed_trees > 1:
@@ -679,7 +685,7 @@ class GBTLearner(BaseLearner):
             )[:-1].astype(np.int32)
 
         self._cpp_model.compress(n_compressed_leaves, n_compressed_trees, compressed_leaf_indices,
-                                 compressed_tree_indices, new_tree_indices, W)
+                                 compressed_tree_indices, new_tree_indices, W_compressed)
         if self.verbose > 0:
             print(f"Finished compressing - compressed model has {self.get_num_trees()} trees")
         
@@ -692,7 +698,7 @@ class GBTLearner(BaseLearner):
         final_loss = losses[-1]
         # Clean up large tensors
         del compressor, A, V, n_leaves_per_tree
-        del leaves_selection, tree_selection, W, parameters, losses
+        del leaves_selection, tree_selection, W, W_compressed, parameters, losses
         
         return final_loss
 

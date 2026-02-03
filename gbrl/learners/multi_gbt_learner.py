@@ -919,6 +919,11 @@ class MultiGBTLearner(BaseLearner):
             compressed_leaf_indices = leaves_selection.nonzero()[0].astype(np.int32)
             compressed_tree_indices = tree_selection.nonzero()[0].astype(np.int32)
             
+            # Reorder W from original leaf order to compressed leaf order
+            # W has shape (n_leaves+1, output_dim): row 0 is bias, rows 1+ are leaves
+            W_indices = np.concatenate([[0], compressed_leaf_indices + 1])
+            W_compressed = W[W_indices].astype(np.single)
+            
             # Compute new tree indices for compressed model
             new_tree_indices = np.zeros(n_compressed_trees, dtype=np.int32)
             if n_compressed_trees > 1:
@@ -929,9 +934,13 @@ class MultiGBTLearner(BaseLearner):
                 )[:-1].astype(np.int32)
 
             cpp_model.compress(n_compressed_leaves, n_compressed_trees, compressed_leaf_indices,
-                               compressed_tree_indices, new_tree_indices, W)
+                               compressed_tree_indices, new_tree_indices, W_compressed)
             if self.verbose > 0:
                 print(f"Finished compressing model {idx} - compressed model has {self.get_num_trees(model_idx=idx)} trees")
+            
+            # Defensive check for empty losses
+            if not losses:
+                raise RuntimeError("No losses computed by compressor during compression operation")
             return losses[-1]
 
         A, V, n_leaves_per_tree, n_leaves, n_trees = self.get_matrix_representation(features, model_idx)

@@ -697,12 +697,14 @@ def process_monotonic_constraints(
             )
         dir_val = direction_map[direction]
 
-        # Normalize output_dims to list (handle numpy scalars and integers)
-        if isinstance(output_dims, (int, np.integer)) or np.isscalar(output_dims):
+        # Normalize output_dims to list (handle numpy arrays, scalars and integers)
+        if isinstance(output_dims, np.ndarray):
+            output_dims = output_dims.tolist()
+        elif isinstance(output_dims, (int, np.integer)) or np.isscalar(output_dims):
             output_dims = np.atleast_1d(output_dims).tolist()
 
         # Check for empty output_dims after normalization
-        if not output_dims:
+        if len(output_dims) == 0:
             raise ValueError(
                 f"No output indices provided for feature {feat_idx}. "
                 f"output_dims cannot be empty."

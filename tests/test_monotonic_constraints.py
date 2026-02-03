@@ -48,10 +48,10 @@ def create_monotonic_data(n_samples=1000, seed=42):
     - Feature 0 should have increasing relationship with output
     - Feature 1 should have decreasing relationship with output
     """
-    np.random.seed(seed)
-    X = np.random.randn(n_samples, 5).astype(np.float32)
+    rng = np.random.default_rng(seed)
+    X = rng.standard_normal((n_samples, 5)).astype(np.float32)
     # y = 2*x0 - 3*x1 + noise (increasing in x0, decreasing in x1)
-    y = 2 * X[:, 0] - 3 * X[:, 1] + 0.1 * np.random.randn(n_samples)
+    y = 2 * X[:, 0] - 3 * X[:, 1] + 0.1 * rng.standard_normal(n_samples)
     y = y.astype(np.float32)[:, np.newaxis]
     return th.tensor(X), th.tensor(y)
 
