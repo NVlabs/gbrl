@@ -216,13 +216,13 @@ class TestGBTSingle(unittest.TestCase):
         new_tree_indices = np.zeros(n_compressed_trees)
         new_tree_indices[1:] = np.cumsum(n_leaves_per_tree[compressed_tree_indices])[:-1]
         
-        # Create zero correction matrix W with shape (n_leaves + 1, output_dim)
-        # W is sized for original ensemble - corrections are applied before copying
-        W = np.zeros((n_leaves + 1, self.out_dim), dtype=np.single)
+        # Create zero correction matrix W_compressed with shape (n_compressed_leaves + 1, output_dim)
+        # Row 0 is bias, remaining rows are for compressed leaves only
+        W_compressed = np.zeros((n_compressed_leaves + 1, self.out_dim), dtype=np.single)
         
         model.learner._cpp_model.compress(
             n_compressed_leaves, n_compressed_trees, compressed_leaf_indices,
-            compressed_tree_indices, new_tree_indices.astype(np.int32), W)
+            compressed_tree_indices, new_tree_indices.astype(np.int32), W_compressed)
         
         compressed_y = model(X, tensor=False)
         self.assertTrue(np.allclose(compressed_y, y_pred_k),
@@ -295,13 +295,13 @@ class TestGBTSingle(unittest.TestCase):
         new_tree_indices = np.zeros(n_compressed_trees)
         new_tree_indices[1:] = np.cumsum(n_leaves_per_tree[compressed_tree_indices])[:-1]
         
-        # Create zero correction matrix W with shape (n_leaves + 1, output_dim)
-        # W is sized for original ensemble - corrections are applied before copying
-        W = np.zeros((n_leaves + 1, self.out_dim), dtype=np.single)
+        # Create zero correction matrix W_compressed with shape (n_compressed_leaves + 1, output_dim)
+        # Row 0 is bias, remaining rows are for compressed leaves only
+        W_compressed = np.zeros((n_compressed_leaves + 1, self.out_dim), dtype=np.single)
         
         model.learner._cpp_model.compress(
             n_compressed_leaves, n_compressed_trees, compressed_leaf_indices,
-            compressed_tree_indices, new_tree_indices.astype(np.int32), W)
+            compressed_tree_indices, new_tree_indices.astype(np.int32), W_compressed)
         
         compressed_y = model(X, tensor=False)
         self.assertTrue(np.allclose(compressed_y, y_pred_k),
