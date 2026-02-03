@@ -165,7 +165,7 @@ class TestMonotonicConstraints(unittest.TestCase):
         model.set_bias_from_targets(self.y)
         
         # Train using step() to apply constraints per tree
-        for epoch in range(self.n_epochs):
+        for _ in range(self.n_epochs):
             y_pred = model(self.X, requires_grad=True)
             loss = 0.5 * mse_loss(y_pred, self.y.squeeze())
             loss.backward()
