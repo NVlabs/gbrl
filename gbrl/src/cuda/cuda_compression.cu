@@ -231,8 +231,14 @@ void get_matrix_representation_cuda(dataSet *dataset, ensembleMetaData *metadata
     if (copy_error != cudaSuccess) {
         std::cerr << "ERROR: Failed to copy tree_indices: " << cudaGetErrorString(copy_error) << std::endl;
         delete[] tree_indices;
+        // Clean up previously allocated memory to avoid leaks
+        delete[] matrix->A;
+        delete[] matrix->V;
+        matrix->A = nullptr;
+        matrix->V = nullptr;
         matrix->n_trees = 0;
         matrix->n_leaves_per_tree = nullptr;
+        matrix->n_leaves = 0;
         return;
     }
     matrix->n_leaves_per_tree = new int[metadata->n_trees];

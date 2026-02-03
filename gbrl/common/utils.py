@@ -256,13 +256,18 @@ def setup_optimizer(optimizer: Dict, prefix: str = '') -> Dict:
         optimizer['scheduler'] = 'Const'
     assert isinstance(lr, (int, float, str)), "lr must be a float or string"
     if isinstance(lr, str) and 'lin_' in lr:
-        assert 'T' in optimizer, "Linear optimizer must contain T the total"
-        "   number of iterations used for scheduling"
+        assert 'T' in optimizer, ("Linear optimizer must contain T the total "
+                                   "number of iterations used for scheduling")
         lr = lr.replace('lin_', '')
         optimizer['scheduler'] = 'Linear'
-    # Normalize scheduler name (linear -> Linear, const -> Const)
+    # Normalize scheduler name (linear -> Linear, const/constant -> Const)
     sched = optimizer.get('scheduler', 'Const').lower()
-    optimizer['scheduler'] = 'Linear' if sched == 'linear' else 'Const'
+    if sched == 'linear':
+        optimizer['scheduler'] = 'Linear'
+    elif sched in ('const', 'constant'):
+        optimizer['scheduler'] = 'Const'
+    else:
+        raise ValueError(f"Unknown scheduler '{sched}'. Must be 'linear', 'const', or 'constant'.")
     optimizer['init_lr'] = float(lr)
     if optimizer['init_lr'] <= 0:
         raise ValueError("init_lr must be > 0")
@@ -648,6 +653,13 @@ def process_monotonic_constraints(
         >>> out   # array([0, 1, 0], dtype=int32)
         >>> dirs  # array([1, 1, -1], dtype=int32)
     """
+    # Type check for constraints parameter
+    if constraints is not None and not isinstance(constraints, dict):
+        raise ValueError(
+            f"constraints must be a dict mapping feature_index->(direction, output_dims), "
+            f"got {type(constraints).__name__}"
+        )
+    
     if not constraints:
         return (np.array([], dtype=np.int32),
                 np.array([], dtype=np.int32),
