@@ -699,7 +699,8 @@ def process_monotonic_constraints(
 
         # Normalize output_dims to list (handle numpy arrays, scalars and integers)
         if isinstance(output_dims, np.ndarray):
-            output_dims = output_dims.tolist()
+            # Use atleast_1d to handle 0-D arrays (e.g., np.array(3))
+            output_dims = np.atleast_1d(output_dims).tolist()
         elif isinstance(output_dims, (int, np.integer)) or np.isscalar(output_dims):
             output_dims = np.atleast_1d(output_dims).tolist()
 

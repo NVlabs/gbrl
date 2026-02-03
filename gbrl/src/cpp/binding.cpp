@@ -731,20 +731,29 @@ PYBIND11_MODULE(gbrl_cpp, m) {
             throw std::runtime_error("constraints must be C-contiguous");
         }
 
-        // Get buffer info while holding GIL
-        py::buffer_info info = feature_indices.request();
-        int* feature_indices_ptr = static_cast<int*>(info.ptr);
-        int n_constraints = static_cast<int>(len(feature_indices));
+        // Get buffer info while holding GIL and validate 1D arrays
+        py::buffer_info feature_info = feature_indices.request();
+        if (feature_info.ndim != 1) {
+            throw std::runtime_error("feature_indices must be a 1D array");
+        }
+        int* feature_indices_ptr = static_cast<int*>(feature_info.ptr);
+        int n_constraints = static_cast<int>(feature_info.size);
 
-        info = output_indices.request();
-        int* output_indices_ptr = static_cast<int*>(info.ptr);
-        if (static_cast<int>(len(output_indices)) != n_constraints){
+        py::buffer_info output_info = output_indices.request();
+        if (output_info.ndim != 1) {
+            throw std::runtime_error("output_indices must be a 1D array");
+        }
+        int* output_indices_ptr = static_cast<int*>(output_info.ptr);
+        if (static_cast<int>(output_info.size) != n_constraints) {
             throw std::runtime_error("feature_indices and output_indices must have the same length");
         }
 
-        info = constraints.request();
-        int* constraints_ptr = static_cast<int*>(info.ptr);
-        if (static_cast<int>(len(constraints)) != n_constraints){
+        py::buffer_info constraints_info = constraints.request();
+        if (constraints_info.ndim != 1) {
+            throw std::runtime_error("constraints must be a 1D array");
+        }
+        int* constraints_ptr = static_cast<int*>(constraints_info.ptr);
+        if (static_cast<int>(constraints_info.size) != n_constraints) {
             throw std::runtime_error("feature_indices and constraints must have the same length");
         }
         
