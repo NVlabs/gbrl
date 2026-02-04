@@ -1,5 +1,5 @@
 //////////////////////////////////////////////////////////////////////////////
-// Copyright (c) 2024-2025, NVIDIA Corporation. All rights reserved.
+// Copyright (c) 2024-2026, NVIDIA Corporation. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
 // copy of this software and associated documentation files (the "Software"),
@@ -210,6 +210,28 @@ class Fitter {
             dataSet *dataset,
             ensembleData *edata,
             ensembleMetaData *metadata
+        );
+        
+        /**
+         * @brief Apply monotonic constraints to oblivious tree leaves
+         * 
+         * Enforces monotonic constraints by iteratively pooling adjacent violating
+         * leaf pairs. For oblivious trees, leaves differing only in one constrained
+         * feature bit are checked and their values are pooled if they violate the
+         * monotonicity constraint.
+         * 
+         * @param edata Ensemble data (leaf values modified in-place)
+         * @param metadata Ensemble metadata
+         * @param tree_idx Index of tree in ensemble
+         * @param tree_depth Depth of the tree
+         * @param start_leaf_idx Starting leaf index for this tree
+         */
+        static void apply_monotonic_constraints_cpu(
+            ensembleData *edata,
+            ensembleMetaData *metadata,
+            int tree_idx,
+            int tree_depth,
+            int start_leaf_idx
         );
 };
 

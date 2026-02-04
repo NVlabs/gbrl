@@ -1,5 +1,5 @@
 ##############################################################################
-# Copyright (c) 2024-2025, NVIDIA Corporation. All rights reserved.
+# Copyright (c) 2024-2026, NVIDIA Corporation. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a
 # copy of this software and associated documentation files (the "Software"),
@@ -27,5 +27,5 @@ and parameter settings used throughout the GBRL library.
 """
 # shrinkage is not implemented yet
 VALID_OPTIMIZER_ARGS = ['init_lr', 'scheduler', 'shrinkage', 'algo', 'beta_1',
-                        'beta_2', 'eps', 'T', 'start_idx', 'stop_idx']
+                        'beta_2', 'eps', 'T', 'start_idx', 'stop_idx', 'stop_lr']
 APPROVED_OPTIMIZERS = ["Adam", "SGD"]

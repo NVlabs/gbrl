@@ -1,10 +1,23 @@
 //////////////////////////////////////////////////////////////////////////////
-// Copyright (c) 2024-2025, NVIDIA Corporation. All rights reserved.
+// Copyright (c) 2024-2026, NVIDIA Corporation. All rights reserved.
 //
-// This work is made available under the Nvidia Source Code License-NC.
-// To view a copy of this license, visit
-// https://nvlabs.github.io/gbrl/license.html
+// Permission is hereby granted, free of charge, to any person obtaining a
+// copy of this software and associated documentation files (the "Software"),
+// to deal in the Software without restriction, including without limitation
+// the rights to use, copy, modify, merge, publish, distribute, sublicense,
+// and/or sell copies of the Software, and to permit persons to whom the
+// Software is furnished to do so, subject to the following conditions:
 //
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+// THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+// DEALINGS IN THE SOFTWARE.
 //////////////////////////////////////////////////////////////////////////////
 /**
  * @file optimizer.cpp
@@ -92,6 +105,35 @@ Optimizer* Optimizer::loadFromFile(std::ifstream& file){
             std::cerr << "Unknown Optimizer algo." << std::endl;
             return nullptr;  // Or handle the error as appropriate
     }
+}
+
+void Optimizer::copy_and_scale(float *scaled_grad_theta, const float *raw_grad_theta, int t){
+    /*Copy and scale gradient of theta (leaf values) according to learning rate
+    */
+
+    int start_idx = this->start_idx, stop_idx = this->stop_idx;
+    float lr = this->scheduler->get_lr(t);
+#ifndef _MSC_VER
+    #pragma omp simd
+#endif
+    for (int i = start_idx; i < stop_idx; i++){
+        scaled_grad_theta[i] = -lr * raw_grad_theta[i];
+    }
+    
+}
+
+void Optimizer::add_scaled(float *raw_grad_theta, const float *scaled_grad_theta, int t){
+    /*Copy and scale gradient of theta (leaf values) according to learning rate
+    */
+    int start_idx = this->start_idx, stop_idx = this->stop_idx;
+    float lr = this->scheduler->get_lr(t);
+#ifndef _MSC_VER
+    #pragma omp simd
+#endif
+    for (int i = start_idx; i < stop_idx; i++){
+        raw_grad_theta[i] -= scaled_grad_theta[i] / lr;
+    }
+    
 }
 
 SGDOptimizer::SGDOptimizer(): Optimizer(){

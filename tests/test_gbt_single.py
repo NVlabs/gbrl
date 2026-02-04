@@ -1,5 +1,5 @@
 ##############################################################################
-# Copyright (c) 2024-2025, NVIDIA Corporation. All rights reserved.
+# Copyright (c) 2024-2026, NVIDIA Corporation. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a
 # copy of this software and associated documentation files (the "Software"),
@@ -150,6 +150,187 @@ class TestGBTSingle(unittest.TestCase):
         value = 5000
         self.assertTrue(loss < value, f'Expected Categorical loss = '
                         f'{loss} < {value}')
+
+    def test_matrix_representation_cpu(self):
+        """Test matrix representation (A, V) generation on CPU."""
+        print("Running test_matrix_representation_cpu")
+        X, y = self.single_data
+        params = dict({"control_variates": False,
+                       "split_score_func": "Cosine",
+                       "generator_type": "Quantile"})
+        model = GBTModel(input_dim=self.input_dim,
+                         output_dim=self.out_dim,
+                         tree_struct=self.tree_struct,
+                         optimizers=self.sgd_optimizer,
+                         params=params,
+                         verbose=0,
+                         device='cpu')
+        model.set_bias_from_targets(y)
+        _ = rmse_model(model, X, y, self.n_epochs)
+        
+        A, V, n_leaves_per_tree, n_leaves, n_trees = model.learner.get_matrix_representation(X)
+        preds_representation = (A @ V).squeeze()
+        self.assertTrue(np.allclose(preds_representation, model(X, tensor=False)),
+                        "Matrix representation A @ V should equal model predictions")
+
+    def test_compress_cpu(self):
+        """Test tree ensemble compression on CPU."""
+        print("Running test_compress_cpu")
+        X, y = self.single_data
+        k = 50  # Number of trees to discard (keep trees from k onwards)
+        params = dict({"control_variates": False,
+                       "split_score_func": "Cosine",
+                       "generator_type": "Quantile"})
+        model = GBTModel(input_dim=self.input_dim,
+                         output_dim=self.out_dim,
+                         tree_struct=self.tree_struct,
+                         optimizers=self.sgd_optimizer,
+                         params=params,
+                         verbose=0,
+                         device='cpu')
+        model.set_bias_from_targets(y)
+        _ = rmse_model(model, X, y, self.n_epochs)
+        
+        A, V, n_leaves_per_tree, n_leaves, n_trees = model.learner.get_matrix_representation(X)
+        
+        # Get predictions starting from tree k (what compressed model should produce)
+        y_pred_k = model(X, tensor=False, start_idx=k)
+        
+        # Select trees k onwards
+        tree_selection = th.zeros(n_trees, dtype=th.float32, device='cpu')
+        tree_selection[k:] = 1.0
+        n_compressed_trees = int(tree_selection.sum())
+        
+        # Map tree selection to leaf selection
+        selection_mask = th.repeat_interleave(
+            tree_selection, th.tensor(n_leaves_per_tree, device='cpu'))
+        n_compressed_leaves = int(selection_mask.sum())
+        
+        selection_mask = selection_mask.detach().cpu().numpy()
+        tree_selection = tree_selection.detach().cpu().numpy()
+        
+        compressed_leaf_indices = np.where(selection_mask > 0)[0].astype(np.int32)
+        compressed_tree_indices = np.where(tree_selection > 0)[0].astype(np.int32)
+        
+        # Calculate new tree indices for compressed model
+        new_tree_indices = np.zeros(n_compressed_trees)
+        new_tree_indices[1:] = np.cumsum(n_leaves_per_tree[compressed_tree_indices])[:-1]
+        
+        # Create zero correction matrix W_compressed with shape (n_compressed_leaves + 1, output_dim)
+        # Row 0 is bias, remaining rows are for compressed leaves only
+        W_compressed = np.zeros((n_compressed_leaves + 1, self.out_dim), dtype=np.single)
+        
+        model.learner._cpp_model.compress(
+            n_compressed_leaves, n_compressed_trees, compressed_leaf_indices,
+            compressed_tree_indices, new_tree_indices.astype(np.int32), W_compressed)
+        
+        compressed_y = model(X, tensor=False)
+        self.assertTrue(np.allclose(compressed_y, y_pred_k),
+                        "Discarding trees should be equal to prediction without them")
+
+    @unittest.skipIf(not cuda_available(), "cuda not available skipping over "
+                     "gpu tests")
+    def test_matrix_representation_gpu(self):
+        """Test matrix representation (A, V) generation on GPU."""
+        print("Running test_matrix_representation_gpu")
+        X, y = self.single_data
+        params = dict({"control_variates": False,
+                       "split_score_func": "Cosine"})
+        model = GBTModel(input_dim=self.input_dim,
+                         output_dim=self.out_dim,
+                         tree_struct=self.tree_struct,
+                         optimizers=self.sgd_optimizer,
+                         params=params,
+                         verbose=0,
+                         device='cuda')
+        model.set_bias_from_targets(y)
+        _ = rmse_model(model, X, y, self.n_epochs, device='cuda')
+        
+        A, V, n_leaves_per_tree, n_leaves, n_trees = model.learner.get_matrix_representation(X)
+        preds_representation = (A @ V).squeeze()
+        self.assertTrue(np.allclose(preds_representation, model(X, tensor=False)),
+                        "Matrix representation A @ V should equal model predictions")
+
+    @unittest.skipIf(not cuda_available(), "cuda not available skipping over "
+                     "gpu tests")
+    def test_compress_gpu(self):
+        """Test tree ensemble compression on GPU."""
+        print("Running test_compress_gpu")
+        X, y = self.single_data
+        k = 50  # Number of trees to discard (keep trees from k onwards)
+        params = dict({"control_variates": False,
+                       "split_score_func": "Cosine"})
+        model = GBTModel(input_dim=self.input_dim,
+                         output_dim=self.out_dim,
+                         tree_struct=self.tree_struct,
+                         optimizers=self.sgd_optimizer,
+                         params=params,
+                         verbose=0,
+                         device='cuda')
+        model.set_bias_from_targets(y)
+        _ = rmse_model(model, X, y, self.n_epochs, device='cuda')
+        
+        A, V, n_leaves_per_tree, n_leaves, n_trees = model.learner.get_matrix_representation(X)
+        
+        # Get predictions starting from tree k (what compressed model should produce)
+        y_pred_k = model(X, tensor=False, start_idx=k)
+        
+        # Select trees k onwards
+        tree_selection = th.zeros(n_trees, dtype=th.float32, device='cuda')
+        tree_selection[k:] = 1.0
+        n_compressed_trees = int(tree_selection.sum())
+        
+        # Map tree selection to leaf selection
+        selection_mask = th.repeat_interleave(
+            tree_selection, th.tensor(n_leaves_per_tree, device='cuda'))
+        n_compressed_leaves = int(selection_mask.sum())
+        
+        selection_mask = selection_mask.detach().cpu().numpy()
+        tree_selection = tree_selection.detach().cpu().numpy()
+        
+        compressed_leaf_indices = np.where(selection_mask > 0)[0].astype(np.int32)
+        compressed_tree_indices = np.where(tree_selection > 0)[0].astype(np.int32)
+        
+        # Calculate new tree indices for compressed model
+        new_tree_indices = np.zeros(n_compressed_trees)
+        new_tree_indices[1:] = np.cumsum(n_leaves_per_tree[compressed_tree_indices])[:-1]
+        
+        # Create zero correction matrix W_compressed with shape (n_compressed_leaves + 1, output_dim)
+        # Row 0 is bias, remaining rows are for compressed leaves only
+        W_compressed = np.zeros((n_compressed_leaves + 1, self.out_dim), dtype=np.single)
+        
+        model.learner._cpp_model.compress(
+            n_compressed_leaves, n_compressed_trees, compressed_leaf_indices,
+            compressed_tree_indices, new_tree_indices.astype(np.int32), W_compressed)
+        
+        compressed_y = model(X, tensor=False)
+        self.assertTrue(np.allclose(compressed_y, y_pred_k),
+                        "Discarding trees should be equal to prediction without them")
+
+    def test_matrix_representation_oblivious_cpu(self):
+        """Test matrix representation for oblivious trees on CPU."""
+        print("Running test_matrix_representation_oblivious_cpu")
+        X, y = self.single_data
+        tree_struct = {'max_depth': 4,
+                       'n_bins': 256, 'min_data_in_leaf': 0,
+                       'par_th': 2,
+                       'grow_policy': 'oblivious'}
+        params = dict({"control_variates": False,
+                       "split_score_func": "Cosine"})
+        model = GBTModel(input_dim=self.input_dim,
+                         output_dim=self.out_dim,
+                         tree_struct=tree_struct,
+                         optimizers=self.sgd_optimizer,
+                         params=params,
+                         verbose=0,
+                         device='cpu')
+        model.set_bias_from_targets(y)
+        _ = rmse_model(model, X, y, self.n_epochs)
+        
+        A, V, _, _, _ = model.learner.get_matrix_representation(X)
+        preds_representation = (A @ V).squeeze()
+        self.assertTrue(np.allclose(preds_representation, model(X, tensor=False)),
+                        "Matrix representation A @ V should equal model predictions for oblivious trees")
 
     def test_copy_cpu(self):
         print("Running test_copy_cpu")

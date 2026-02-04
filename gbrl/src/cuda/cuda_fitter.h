@@ -1,10 +1,23 @@
 //////////////////////////////////////////////////////////////////////////////
-// Copyright (c) 2024-2025, NVIDIA Corporation. All rights reserved.
+// Copyright (c) 2024-2026, NVIDIA Corporation. All rights reserved.
 //
-// This work is made available under the Nvidia Source Code License-NC.
-// To view a copy of this license, visit
-// https://nvlabs.github.io/gbrl/license.html
+// Permission is hereby granted, free of charge, to any person obtaining a
+// copy of this software and associated documentation files (the "Software"),
+// to deal in the Software without restriction, including without limitation
+// the rights to use, copy, modify, merge, publish, distribute, sublicense,
+// and/or sell copies of the Software, and to permit persons to whom the
+// Software is furnished to do so, subject to the following conditions:
 //
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+// THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+// DEALINGS IN THE SOFTWARE.
 //////////////////////////////////////////////////////////////////////////////
 /**
  * @file cuda_fitter.h
@@ -213,12 +226,43 @@ void add_leaf_node(
     dataSet *dataset
 );
 
+/**
+ * @brief Apply monotonic constraints to leaf values using PAVA algorithm
+ * 
+ * For oblivious trees only. Iteratively adjusts leaf values to satisfy
+ * monotonic constraints on specified feature-output pairs. Uses Pool Adjacent
+ * Violators Algorithm (PAVA) to ensure monotonicity while minimizing changes.
+ * 
+ * For each constraint (feature_idx, output_idx, direction):
+ * - Identifies the depth level where the constrained feature is used
+ * - For leaf pairs differing only at that depth, enforces:
+ *   - Increasing (+1): right leaf value >= left leaf value
+ *   - Decreasing (-1): right leaf value <= left leaf value
+ * - Violations are resolved by averaging the pair values
+ * 
+ * @param edata Ensemble data containing leaf values and tree structure
+ * @param metadata Ensemble configuration including constraint info
+ * @param tree_idx Index of the tree to apply constraints to
+ * @param tree_depth Actual depth of the tree
+ * @param start_leaf_idx Starting leaf index for this tree
+ */
+void apply_monotonic_constraints_cuda(
+    ensembleData *edata,
+    ensembleMetaData *metadata,
+    int tree_idx,
+    int tree_depth,
+    int start_leaf_idx
+);
+
 #ifdef __CUDACC__
 
 /**
- * @brief CUDA kernel for cosine split scoring
+ * @brief CUDA kernel for cosine split scoring with monotonic constraint support
  * 
- * Evaluates split quality using cosine similarity.
+ * Evaluates split quality using cosine similarity. When monotonic constraints
+ * are specified, splits that would violate the constraint have their scores
+ * adjusted to reflect what would happen after PAVA correction, effectively
+ * penalizing constraint-violating splits during tree construction.
  * 
  * @param obs Numerical observations
  * @param categorical_obs Categorical observations
@@ -229,10 +273,16 @@ void add_leaf_node(
  * @param candidate_values Candidate threshold values
  * @param candidate_categories Candidate categorical values
  * @param candidate_numeric Feature type indicators
+ * @param r_num_mapping Reverse numerical feature mapping
+ * @param r_cat_mapping Reverse categorical feature mapping
  * @param min_data_in_leaf Minimum samples per leaf
  * @param split_scores Output split scores
  * @param global_n_samples Total number of samples
  * @param n_num_features Number of numerical features
+ * @param mono_feature_idx Feature indices with monotonic constraints (may be nullptr)
+ * @param mono_output_idx Output dimensions for each constraint (may be nullptr)
+ * @param mono_constraint Constraint directions: +1 (increasing), -1 (decreasing) (may be nullptr)
+ * @param n_mono_constraints Number of monotonic constraints (0 if none)
  */
 __global__ void split_score_cosine_cuda(
     const float* __restrict__ obs,
@@ -253,13 +303,20 @@ __global__ void split_score_cosine_cuda(
     const int global_n_samples,
     const int n_num_features,
     const int n_objs,
-    const float lambda_penalty
+    const float lambda_penalty,
+    const int* __restrict__ mono_feature_idx,
+    const int* __restrict__ mono_output_idx,
+    const int* __restrict__ mono_constraint,
+    const int n_mono_constraints
 );
 
 /**
- * @brief CUDA kernel for L2 split scoring
+ * @brief CUDA kernel for L2 split scoring with monotonic constraint support
  * 
- * Evaluates split quality using L2 variance reduction.
+ * Evaluates split quality using L2 variance reduction. When monotonic constraints
+ * are specified, splits that would violate the constraint have their scores
+ * adjusted to reflect what would happen after PAVA correction, effectively
+ * penalizing constraint-violating splits during tree construction.
  * 
  * @param obs Numerical observations
  * @param categorical_obs Categorical observations
@@ -270,10 +327,16 @@ __global__ void split_score_cosine_cuda(
  * @param candidate_values Candidate threshold values
  * @param candidate_categories Candidate categorical values
  * @param candidate_numeric Feature type indicators
+ * @param r_num_mapping Reverse numerical feature mapping
+ * @param r_cat_mapping Reverse categorical feature mapping
  * @param min_data_in_leaf Minimum samples per leaf
  * @param split_scores Output split scores
  * @param global_n_samples Total number of samples
  * @param n_num_features Number of numerical features
+ * @param mono_feature_idx Feature indices with monotonic constraints (may be nullptr)
+ * @param mono_output_idx Output dimensions for each constraint (may be nullptr)
+ * @param mono_constraint Constraint directions: +1 (increasing), -1 (decreasing) (may be nullptr)
+ * @param n_mono_constraints Number of monotonic constraints (0 if none)
  */
 __global__ void split_score_l2_cuda(
     const float* __restrict__ obs,
@@ -294,7 +357,11 @@ __global__ void split_score_l2_cuda(
     const int global_n_samples,
     const int n_num_features,
     const int n_objs,
-    const float lambda_penalty
+    const float lambda_penalty,
+    const int* __restrict__ mono_feature_idx,
+    const int* __restrict__ mono_output_idx,
+    const int* __restrict__ mono_constraint,
+    const int n_mono_constraints
 );
 
 /**
@@ -310,6 +377,22 @@ __global__ void update_best_candidate_cuda(
     int n_candidates,
     int* __restrict__ best_idx,
     float* __restrict__ best_score
+);
+
+__global__ void enforce_oblivious_pava_kernel(
+    float* __restrict__ values,
+    const int* __restrict__ tree_constraints,
+    const int leaf_start_idx,
+    const int output_dim,
+    const int depth
+);
+
+__global__ void enforce_oblivious_pava_kernel(
+    float* __restrict__ values,
+    const int* __restrict__ tree_constraints,
+    const int leaf_start_idx,
+    const int output_dim,
+    const int depth
 );
 
 /**

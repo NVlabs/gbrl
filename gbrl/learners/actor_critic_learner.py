@@ -1,5 +1,5 @@
 ##############################################################################
-# Copyright (c) 2024-2025, NVIDIA Corporation. All rights reserved.
+# Copyright (c) 2024-2026, NVIDIA Corporation. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a
 # copy of this software and associated documentation files (the "Software"),
@@ -26,11 +26,14 @@ This module provides learner classes for actor-critic architectures,
 supporting both shared and separate tree structures for policy and value
 function learning.
 """
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
+import torch as th
 
 from gbrl import GBRL_CPP
+from gbrl.common.compression import (SharedActorCriticCompression,
+                                     TreeCompression)
 from gbrl.common.utils import NumericalData, ensure_leaf_tensor_or_array
 from gbrl.learners.gbt_learner import GBTLearner
 from gbrl.learners.multi_gbt_learner import MultiGBTLearner
@@ -187,6 +190,115 @@ class SharedActorCriticLearner(GBTLearner):
         _, pred_values = self.predict(obs, requires_grad, start_idx, stop_idx,
                                       tensor)
         return pred_values
+
+    def compress(self, trees_to_keep: int, gradient_steps: int, features: NumericalData,
+                 actions: Optional[th.Tensor] = None, log_std: Optional[th.Tensor] = None,
+                 method: str = 'first_k', dist_type: str = 'deterministic',
+                 optimizer_kwargs: Optional[Dict[str, Any]] = None,
+                 temperature: float = 1.0, lambda_reg: float = 1.0, **kwargs) -> float:
+        """
+        Compresses the tree ensemble by selecting and retraining a subset of trees.
+
+        Args:
+            trees_to_keep (int): Number of trees to retain in the compressed model.
+            gradient_steps (int): Number of optimization steps during compression.
+            features (NumericalData): Input feature matrix (n_samples, n_features).
+            actions (th.Tensor, optional): Target actions (for policy compression). Required
+                unless dist_type is 'deterministic' or 'supervised_learning'.
+            log_std (th.Tensor, optional): Log standard deviation (only used for certain policy types).
+            method (str): Tree selection method. Defaults to 'first_k'.
+            dist_type (str): Compression type. Supported: 'deterministic', 'supervised_learning',
+                'categorical', 'gaussian'. For 'deterministic' and 'supervised_learning', actions
+                are not required.
+            optimizer_kwargs (dict, optional): Optimizer configuration.
+            temperature (float): Temperature parameter for soft selection.
+            lambda_reg (float): L2 regularization coefficient on weights.
+            **kwargs: Additional keyword arguments passed to the compressor.
+
+        Returns:
+            float: Final loss value after compression.
+        """
+        # Actions are only required for probabilistic policy compression
+        if dist_type not in {'deterministic', 'supervised_learning'}:
+            assert actions is not None, \
+                f"Cannot compress with dist_type='{dist_type}' without actions. " \
+                "Actions are required for probabilistic policy compression (categorical, gaussian)."
+        
+        # Validate dist_type is one of the allowed values
+        allowed_dist_types = {'deterministic', 'supervised_learning', 'categorical', 'gaussian'}
+        if dist_type not in allowed_dist_types:
+            raise ValueError(
+                f"Invalid dist_type '{dist_type}'. "
+                f"Allowed values are: {sorted(allowed_dist_types)}"
+            )
+        
+        # Validate trees_to_keep before expensive matrix representation call
+        total_trees = self.get_num_trees()
+        if trees_to_keep <= 0:
+            raise ValueError(f"trees_to_keep must be > 0, got {trees_to_keep}")
+        if trees_to_keep >= total_trees:
+            raise ValueError(f"trees_to_keep must be < total number of trees ({total_trees}), got {trees_to_keep}")
+        
+        A, V, n_leaves_per_tree, n_leaves, n_trees = self.get_matrix_representation(features)
+        trees_to_remove = total_trees - trees_to_keep
+        
+        # Convert to tensors with explicit dtypes
+        A = th.tensor(A, dtype=th.float32, device=self.device)
+        V = th.tensor(V, dtype=th.float32, device=self.device)
+        n_leaves_per_tree = th.tensor(n_leaves_per_tree, dtype=th.int64, device=self.device)
+        compression_params = {'k': trees_to_remove, 'gradient_steps': gradient_steps,
+                              'method': method,
+                              'optimizer_kwargs': optimizer_kwargs,
+                              'temperature': temperature, 'n_leaves': n_leaves, 'n_trees': n_trees,
+                              'n_leaves_per_tree': n_leaves_per_tree,
+                              'lambda_reg': lambda_reg,
+                              'output_dim': self.output_dim,
+                              'device': self.device}
+        # Remove policy_only from kwargs if present (not used by compressor)
+        kwargs.pop('policy_only', None)
+        compression_params.update(kwargs)
+
+        compression_params['dist_type'] = dist_type
+        if dist_type == 'deterministic':
+            compressor = TreeCompression(**compression_params)
+            parameters, losses = compressor.compress(A, V)
+        else:
+            compressor = SharedActorCriticCompression(**compression_params)
+            parameters, losses = compressor.compress(A, V, actions, log_std)
+        
+        leaves_selection, tree_selection, W, n_compressed_trees, n_compressed_leaves = parameters
+        
+        # Get indices using nonzero (more efficient than where)
+        compressed_leaf_indices = leaves_selection.nonzero()[0].astype(np.int32)
+        compressed_tree_indices = tree_selection.nonzero()[0].astype(np.int32)
+        
+        # Compute new tree indices for compressed model
+        new_tree_indices = np.zeros(n_compressed_trees, dtype=np.int32)
+        if n_compressed_trees > 1:
+            # Convert tensor to CPU numpy before indexing with numpy array
+            n_leaves_per_tree_np = n_leaves_per_tree.cpu().numpy()
+            new_tree_indices[1:] = np.cumsum(
+                n_leaves_per_tree_np[compressed_tree_indices]
+            )[:-1].astype(np.int32)
+        
+        self._cpp_model.compress(n_compressed_leaves, n_compressed_trees, compressed_leaf_indices,
+                                 compressed_tree_indices, new_tree_indices, W)
+        if self.verbose > 0:
+            print(f"Finished compressing - compressed model has {self.get_num_trees()} trees")
+        
+        # Defensive check for empty losses
+        if not losses:
+            # Clean up resources before raising
+            del compressor, A, V, n_leaves_per_tree
+            del leaves_selection, tree_selection, W, parameters
+            raise RuntimeError("No losses computed by compressor during compression operation")
+        
+        final_loss = losses[-1]
+        # Clean up large tensors
+        del compressor, A, V, n_leaves_per_tree
+        del leaves_selection, tree_selection, W, parameters, losses
+        
+        return final_loss
 
     def __copy__(self) -> "SharedActorCriticLearner":
         """

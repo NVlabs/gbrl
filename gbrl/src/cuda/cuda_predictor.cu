@@ -1,10 +1,23 @@
 //////////////////////////////////////////////////////////////////////////////
-// Copyright (c) 2024-2025, NVIDIA Corporation. All rights reserved.
+// Copyright (c) 2024-2026, NVIDIA Corporation. All rights reserved.
 //
-// This work is made available under the Nvidia Source Code License-NC.
-// To view a copy of this license, visit
-// https://nvlabs.github.io/gbrl/license.html
+// Permission is hereby granted, free of charge, to any person obtaining a
+// copy of this software and associated documentation files (the "Software"),
+// to deal in the Software without restriction, including without limitation
+// the rights to use, copy, modify, merge, publish, distribute, sublicense,
+// and/or sell copies of the Software, and to permit persons to whom the
+// Software is furnished to do so, subject to the following conditions:
 //
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+// THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+// DEALINGS IN THE SOFTWARE.
 //////////////////////////////////////////////////////////////////////////////
 /**
  * @file cuda_predictor.cu
@@ -20,6 +33,26 @@
 #include "cuda_predictor.h"
 #include "cuda_fitter.h"
 #include "cuda_utils.h"
+
+/**
+ * @brief Device function to compute learning rate based on scheduler type
+ * 
+ * @param opt Optimizer containing scheduler parameters
+ * @param tree_idx Current tree index (used as iteration t for linear scheduler)
+ * @return Learning rate for this tree
+ */
+__device__ __forceinline__ float get_lr_device(const SGDOptimizerGPU* opt, int tree_idx) {
+    if (opt->scheduler == Const) {
+        return opt->init_lr;
+    } else if (opt->scheduler == Linear) {
+        float T_ = static_cast<float>(opt->T);
+        float t_ = static_cast<float>(tree_idx) + 1.0f;
+        float progress_remaining = (T_ - t_) / T_;
+        float lr = opt->init_lr + (1.0f - progress_remaining) * (opt->stop_lr - opt->init_lr);
+        return (lr < opt->stop_lr) ? opt->stop_lr : lr;
+    }
+    return opt->init_lr;
+}
 
 SGDOptimizerGPU** deepCopySGDOptimizerVectorToGPU(const std::vector<Optimizer*>& host_opts) {
     // Allocate memory for array of SGDOptimizerGPU pointers
@@ -51,6 +84,16 @@ SGDOptimizerGPU** deepCopySGDOptimizerVectorToGPU(const std::vector<Optimizer*>&
         
         schedulerFunc scheduler = host_opts[i]->scheduler->getType();
         cudaMemcpy(&(device_opt->scheduler), &scheduler, sizeof(schedulerFunc), cudaMemcpyHostToDevice);
+        
+        // Copy linear scheduler parameters if applicable
+        if (scheduler == Linear) {
+            LinearScheduler* lin_sched = dynamic_cast<LinearScheduler*>(host_opts[i]->scheduler);
+            if (lin_sched) {
+                cudaMemcpy(&(device_opt->stop_lr), &(lin_sched->stop_lr), sizeof(float), cudaMemcpyHostToDevice);
+                cudaMemcpy(&(device_opt->T), &(lin_sched->T), sizeof(int), cudaMemcpyHostToDevice);
+            }
+        }
+        
         cudaMemcpy(&(device_opts[i]), &device_opt, sizeof(SGDOptimizerGPU*), cudaMemcpyHostToDevice);
     }
     // Return the pointer to the array of SGDOptimizerGPU pointers
@@ -194,20 +237,20 @@ void predict_cuda(dataSet *dataset, float *&preds, ensembleMetaData *metadata, e
     if (metadata->grow_policy == GREEDY){
         int start_leaf_idx = 0, stop_leaf_idx = metadata->n_leaves;
         if (start_tree_idx > 0)
-            cudaMemcpy(&start_leaf_idx, edata->tree_indices + start_tree_idx, sizeof(int), cudaMemcpyDeviceToHost);
+            cudaMemcpy(&start_leaf_idx, edata->ensemble_info->tree_indices + start_tree_idx, sizeof(int), cudaMemcpyDeviceToHost);
         if (stop_tree_idx < metadata->n_trees)
-            cudaMemcpy(&stop_leaf_idx, edata->tree_indices + stop_tree_idx, sizeof(int), cudaMemcpyDeviceToHost);
+            cudaMemcpy(&stop_leaf_idx, edata->ensemble_info->tree_indices + stop_tree_idx, sizeof(int), cudaMemcpyDeviceToHost);
         int n_leaves = stop_leaf_idx - start_leaf_idx;
         if (metadata->n_cat_features == 0)
-            predict_kernel_numerical_only<<<n_leaves, threads_per_block>>>(device_batch_obs, device_preds, dataset->n_samples, metadata->n_num_features, edata->feature_indices, edata->depths, edata->feature_values, edata->inequality_directions, edata->values, opts, n_opts, metadata->output_dim, metadata->max_depth, start_leaf_idx);
+            predict_kernel_numerical_only<<<n_leaves, threads_per_block>>>(device_batch_obs, device_preds, dataset->n_samples, metadata->n_num_features, edata->feature_data->feature_indices, edata->ensemble_info->depths, edata->feature_data->feature_values, edata->feature_data->inequality_directions, edata->leaf_data->values, opts, n_opts, metadata->output_dim, metadata->max_depth, start_leaf_idx);
         else
-            predict_kernel_tree_wise<<<n_leaves, threads_per_block>>>(device_batch_obs, device_batch_cat_obs, device_preds, dataset->n_samples, metadata->n_num_features, metadata->n_cat_features, edata->feature_indices, edata->depths, edata->feature_values, edata->inequality_directions, edata->values, edata->categorical_values, edata->is_numerics, opts, n_opts, metadata->output_dim, metadata->max_depth, start_leaf_idx);
+            predict_kernel_tree_wise<<<n_leaves, threads_per_block>>>(device_batch_obs, device_batch_cat_obs, device_preds, dataset->n_samples, metadata->n_num_features, metadata->n_cat_features, edata->feature_data->feature_indices, edata->ensemble_info->depths, edata->feature_data->feature_values, edata->feature_data->inequality_directions, edata->leaf_data->values, edata->feature_data->categorical_values, edata->feature_data->is_numerics, opts, n_opts, metadata->output_dim, metadata->max_depth, start_leaf_idx);
     } else{
         int n_trees = stop_tree_idx - start_tree_idx;
         if (metadata->n_cat_features == 0)
-            predict_oblivious_kernel_numerical_only<<<n_trees, threads_per_block>>>(device_batch_obs, device_preds, dataset->n_samples, metadata->n_num_features, edata->feature_indices, edata->depths, edata->feature_values, edata->inequality_directions, edata->values, edata->tree_indices, opts, n_opts, metadata->output_dim, metadata->max_depth, start_tree_idx);
+            predict_oblivious_kernel_numerical_only<<<n_trees, threads_per_block>>>(device_batch_obs, device_preds, dataset->n_samples, metadata->n_num_features, edata->feature_data->feature_indices, edata->ensemble_info->depths, edata->feature_data->feature_values, edata->feature_data->inequality_directions, edata->leaf_data->values, edata->ensemble_info->tree_indices, opts, n_opts, metadata->output_dim, metadata->max_depth, start_tree_idx);
         else
-            predict_oblivious_kernel_tree_wise<<<n_trees, threads_per_block>>>(device_batch_obs, device_batch_cat_obs, device_preds, dataset->n_samples, metadata->n_num_features, metadata->n_cat_features, edata->feature_indices, edata->depths, edata->feature_values, edata->inequality_directions, edata->values, edata->tree_indices, edata->categorical_values, edata->is_numerics, opts, n_opts, metadata->output_dim, metadata->max_depth, start_tree_idx);
+            predict_oblivious_kernel_tree_wise<<<n_trees, threads_per_block>>>(device_batch_obs, device_batch_cat_obs, device_preds, dataset->n_samples, metadata->n_num_features, metadata->n_cat_features, edata->feature_data->feature_indices, edata->ensemble_info->depths, edata->feature_data->feature_values, edata->feature_data->inequality_directions, edata->leaf_data->values, edata->ensemble_info->tree_indices, edata->feature_data->categorical_values, edata->feature_data->is_numerics, opts, n_opts, metadata->output_dim, metadata->max_depth, start_tree_idx);
     }
     cudaDeviceSynchronize();
 
@@ -262,24 +305,24 @@ void predict_cuda_no_host(
     if (metadata->grow_policy == GREEDY){
         int start_leaf_idx = 0, stop_leaf_idx = metadata->n_leaves;
         if (start_tree_idx > 0)
-            cudaMemcpy(&start_leaf_idx, edata->tree_indices + start_tree_idx, sizeof(int), cudaMemcpyDeviceToHost);
+            cudaMemcpy(&start_leaf_idx, edata->ensemble_info->tree_indices + start_tree_idx, sizeof(int), cudaMemcpyDeviceToHost);
         if (stop_tree_idx < metadata->n_trees)
-            cudaMemcpy(&stop_leaf_idx, edata->tree_indices + stop_tree_idx, sizeof(int), cudaMemcpyDeviceToHost);
+            cudaMemcpy(&stop_leaf_idx, edata->ensemble_info->tree_indices + stop_tree_idx, sizeof(int), cudaMemcpyDeviceToHost);
         
         int n_leaves = stop_leaf_idx - start_leaf_idx;
         if (dataset->n_samples > n_leaves)
-            predict_sample_wise_kernel_tree_wise<<<dataset->n_samples, threads_per_block>>>(dataset->obs->data, dataset->categorical_obs->data, device_preds, dataset->n_samples, metadata->n_num_features, metadata->n_cat_features, edata->feature_indices, edata->depths, edata->feature_values, edata->inequality_directions, edata->values, edata->categorical_values, edata->is_numerics, opts, n_opts, metadata->output_dim, metadata->max_depth, start_leaf_idx, n_leaves);
+            predict_sample_wise_kernel_tree_wise<<<dataset->n_samples, threads_per_block>>>(dataset->obs->data, dataset->categorical_obs->data, device_preds, dataset->n_samples, metadata->n_num_features, metadata->n_cat_features, edata->feature_data->feature_indices, edata->ensemble_info->depths, edata->feature_data->feature_values, edata->feature_data->inequality_directions, edata->leaf_data->values, edata->feature_data->categorical_values, edata->feature_data->is_numerics, opts, n_opts, metadata->output_dim, metadata->max_depth, start_leaf_idx, n_leaves);
         else if (metadata->n_cat_features == 0){
-            predict_kernel_numerical_only<<<n_leaves, threads_per_block>>>(dataset->obs->data, device_preds, dataset->n_samples, metadata->n_num_features, edata->feature_indices, edata->depths, edata->feature_values, edata->inequality_directions, edata->values, opts, n_opts, metadata->output_dim, metadata->max_depth, start_leaf_idx);
+            predict_kernel_numerical_only<<<n_leaves, threads_per_block>>>(dataset->obs->data, device_preds, dataset->n_samples, metadata->n_num_features, edata->feature_data->feature_indices, edata->ensemble_info->depths, edata->feature_data->feature_values, edata->feature_data->inequality_directions, edata->leaf_data->values, opts, n_opts, metadata->output_dim, metadata->max_depth, start_leaf_idx);
         }
         else
-            predict_kernel_tree_wise<<<n_leaves, threads_per_block>>>(dataset->obs->data, dataset->categorical_obs->data, device_preds, dataset->n_samples, metadata->n_num_features, metadata->n_cat_features, edata->feature_indices, edata->depths, edata->feature_values, edata->inequality_directions, edata->values, edata->categorical_values, edata->is_numerics, opts, n_opts, metadata->output_dim, metadata->max_depth, start_leaf_idx);
+            predict_kernel_tree_wise<<<n_leaves, threads_per_block>>>(dataset->obs->data, dataset->categorical_obs->data, device_preds, dataset->n_samples, metadata->n_num_features, metadata->n_cat_features, edata->feature_data->feature_indices, edata->ensemble_info->depths, edata->feature_data->feature_values, edata->feature_data->inequality_directions, edata->leaf_data->values, edata->feature_data->categorical_values, edata->feature_data->is_numerics, opts, n_opts, metadata->output_dim, metadata->max_depth, start_leaf_idx);
     } else {
         int n_trees = stop_tree_idx - start_tree_idx;
         if (metadata->n_cat_features == 0)
-            predict_oblivious_kernel_numerical_only<<<n_trees, threads_per_block>>>(dataset->obs->data, device_preds, dataset->n_samples, metadata->n_num_features, edata->feature_indices, edata->depths, edata->feature_values, edata->inequality_directions, edata->values, edata->tree_indices, opts, n_opts, metadata->output_dim, metadata->max_depth, start_tree_idx);
+            predict_oblivious_kernel_numerical_only<<<n_trees, threads_per_block>>>(dataset->obs->data, device_preds, dataset->n_samples, metadata->n_num_features, edata->feature_data->feature_indices, edata->ensemble_info->depths, edata->feature_data->feature_values, edata->feature_data->inequality_directions, edata->leaf_data->values, edata->ensemble_info->tree_indices, opts, n_opts, metadata->output_dim, metadata->max_depth, start_tree_idx);
         else
-            predict_oblivious_kernel_tree_wise<<<n_trees, threads_per_block>>>(dataset->obs->data, dataset->categorical_obs->data, device_preds, dataset->n_samples, metadata->n_num_features, metadata->n_cat_features, edata->feature_indices, edata->depths, edata->feature_values, edata->inequality_directions, edata->values, edata->tree_indices, edata->categorical_values, edata->is_numerics, opts, n_opts, metadata->output_dim, metadata->max_depth, start_tree_idx);
+            predict_oblivious_kernel_tree_wise<<<n_trees, threads_per_block>>>(dataset->obs->data, dataset->categorical_obs->data, device_preds, dataset->n_samples, metadata->n_num_features, metadata->n_cat_features, edata->feature_data->feature_indices, edata->ensemble_info->depths, edata->feature_data->feature_values, edata->feature_data->inequality_directions, edata->leaf_data->values, edata->ensemble_info->tree_indices, edata->feature_data->categorical_values, edata->feature_data->is_numerics, opts, n_opts, metadata->output_dim, metadata->max_depth, start_tree_idx);
     }
     cudaDeviceSynchronize();
 }
@@ -421,28 +464,33 @@ __global__ void predict_kernel_numerical_only(const float* __restrict__ obs, flo
 __global__ void predict_oblivious_kernel_numerical_only(const float* __restrict__ obs, float* __restrict__ preds, const int n_samples, const int n_num_features, 
                                                         const int* __restrict__ feature_indices, const int* __restrict__ depths, const float* __restrict__ feature_values, const bool* __restrict__ inequality_directions, const float* __restrict__ leaf_values,
                                                         const int* __restrict__ tree_indices, SGDOptimizerGPU** opts, const int n_opts, const int output_dim, const int max_depth, const int tree_offset){
-    int leaf_idx, initial_leaf_idx = __ldg(tree_indices + blockIdx.x + tree_offset);
+    int tree_idx = blockIdx.x + tree_offset;
+    int leaf_idx, initial_leaf_idx = __ldg(tree_indices + tree_idx);
     for (int sample_idx = threadIdx.x; sample_idx < n_samples; sample_idx += blockDim.x){
         leaf_idx = 0;
-        for (int depth_idx = 0; depth_idx < __ldg(depths + blockIdx.x + tree_offset); depth_idx++){ 
-            bool decision = (__ldg(&obs[sample_idx*n_num_features + __ldg(feature_indices + (blockIdx.x + tree_offset) * max_depth + depth_idx)])) > (__ldg(feature_values + (blockIdx.x + tree_offset) * max_depth + depth_idx));
-            leaf_idx |= (decision <<  (__ldg(depths + blockIdx.x + tree_offset) - 1 - depth_idx));
+        for (int depth_idx = 0; depth_idx < __ldg(depths + tree_idx); depth_idx++){ 
+            bool decision = (__ldg(&obs[sample_idx*n_num_features + __ldg(feature_indices + tree_idx * max_depth + depth_idx)])) > (__ldg(feature_values + tree_idx * max_depth + depth_idx));
+            leaf_idx |= (decision <<  (__ldg(depths + tree_idx) - 1 - depth_idx));
         }
         if (n_opts == 1){
+            float lr = get_lr_device(opts[0], tree_idx);
             for (int i = opts[0]->start_idx; i < opts[0]->stop_idx; ++i){
-                atomicAdd(&preds[sample_idx*output_dim + i], -__ldg(&opts[0]->init_lr) * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
+                atomicAdd(&preds[sample_idx*output_dim + i], -lr * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
             }
         } else if (n_opts == 2){
+            float lr0 = get_lr_device(opts[0], tree_idx);
+            float lr1 = get_lr_device(opts[1], tree_idx);
             for (int i = opts[0]->start_idx; i < opts[0]->stop_idx; ++i){
-                atomicAdd(&preds[sample_idx*output_dim + i], -__ldg(&opts[0]->init_lr) * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
+                atomicAdd(&preds[sample_idx*output_dim + i], -lr0 * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
             }
             for (int i = opts[1]->start_idx; i < opts[1]->stop_idx; ++i){
-                atomicAdd(&preds[sample_idx*output_dim + i], -__ldg(&opts[1]->init_lr) * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
+                atomicAdd(&preds[sample_idx*output_dim + i], -lr1 * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
             }
         } else {
             for (int opt_idx=0; opt_idx < n_opts; ++opt_idx){
+                float lr = get_lr_device(opts[opt_idx], tree_idx);
                 for (int i = opts[opt_idx]->start_idx; i < opts[opt_idx]->stop_idx; ++i)
-                    atomicAdd(&preds[sample_idx*output_dim + i], -__ldg(&opts[opt_idx]->init_lr) * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
+                    atomicAdd(&preds[sample_idx*output_dim + i], -lr * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
             }
         }
     }
@@ -474,20 +522,24 @@ __global__ void predict_oblivious_kernel_tree_wise(const float* __restrict__ obs
         }
 
         if (n_opts == 1){
+            float lr = get_lr_device(opts[0], tree_idx);
             for (int i = opts[0]->start_idx; i < opts[0]->stop_idx; ++i){
-                atomicAdd(&preds[sample_idx*output_dim + i], -__ldg(&opts[0]->init_lr) * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
+                atomicAdd(&preds[sample_idx*output_dim + i], -lr * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
             }
         } else if (n_opts == 2) {
+            float lr0 = get_lr_device(opts[0], tree_idx);
+            float lr1 = get_lr_device(opts[1], tree_idx);
             for (int i = opts[0]->start_idx; i < opts[0]->stop_idx; ++i){
-                atomicAdd(&preds[sample_idx*output_dim + i], -__ldg(&opts[0]->init_lr) * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
+                atomicAdd(&preds[sample_idx*output_dim + i], -lr0 * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
             }
             for (int i = opts[1]->start_idx; i < opts[1]->stop_idx; ++i){
-                atomicAdd(&preds[sample_idx*output_dim + i], -__ldg(&opts[1]->init_lr) * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
+                atomicAdd(&preds[sample_idx*output_dim + i], -lr1 * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
             }
         } else {
             for (int opt_idx = 0; opt_idx < n_opts; ++opt_idx){
+                float lr = get_lr_device(opts[opt_idx], tree_idx);
                 for (int i = opts[opt_idx]->start_idx; i < opts[opt_idx]->stop_idx; ++i)
-                    atomicAdd(&preds[sample_idx*output_dim + i], -__ldg(&opts[opt_idx]->init_lr) * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
+                    atomicAdd(&preds[sample_idx*output_dim + i], -lr * __ldg(leaf_values + (initial_leaf_idx + leaf_idx)*output_dim + i));
             }
         }
     }

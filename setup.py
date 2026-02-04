@@ -119,7 +119,7 @@ setup(
     version="1.2.0",
     description="Gradient Boosted Trees for RL",
     author="Benjamin Fuhrer, Chen Tessler, Gal Dalal",
-    author_email="bfuhrer@nvidia.com, ctessler@nvidia.com. gdalal@nvidia.com",
+    author_email="bfuhrer@nvidia.com, ctessler@nvidia.com, gdalal@nvidia.com",
     license="MIT",
     ext_modules=[CMakeExtension('gbrl/gbrl_cpp', sourcedir='.')],
     cmdclass=dict(build_ext=CMakeBuild),
