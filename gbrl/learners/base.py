@@ -176,7 +176,9 @@ class BaseLearner(ABC):
         """
         pass
 
-    def export(self, filename: str, modelname: Optional[str] = None) -> None:
+    def export(self, filename: str, modelname: Optional[str] = None,
+                export_format: str = 'float', export_type: str = 'full',
+                prefix: str = '') -> None:
         # exports model to C
         filename = filename.rstrip('.')
         filename += '.h'
@@ -184,7 +186,7 @@ class BaseLearner(ABC):
         if modelname is None:
             modelname = ""
         try:
-            status = self._cpp_model.export(filename, modelname)
+            status = self._cpp_model.export(filename, modelname, export_format, export_type, prefix)
             assert status == 0, "Failed to export model"
         except RuntimeError as e:
             print(f"Caught an exception in GBRL: {e}")

@@ -260,7 +260,9 @@ class BaseGBT(ABC):
 
         self.learner.save(save_path)
 
-    def export_learner(self, filename: str, modelname: Optional[str] = None) -> None:
+    def export_learner(self, filename: str, modelname: Optional[str] = None,
+                       export_format: str = 'float', export_type: str = 'full',
+                       prefix: str = '') -> None:
         """
         Exports the model as a C header file for embedded deployment.
 
@@ -269,13 +271,67 @@ class BaseGBT(ABC):
                 The .h extension will be added automatically.
             modelname (Optional[str], optional): Name to use for the model in
                 the C code. Defaults to None (empty string).
+            export_format (str, optional): Format for exported values
+                ('float', 'fxp8', etc.). Defaults to 'float'.
+            export_type (str, optional): Export type ('full', 'compact').
+                Defaults to 'full'.
+            prefix (str, optional): Prefix for exported symbols. Defaults to ''.
 
         Raises:
             AssertionError: If learner is not initialized.
         """
         assert self.learner is not None, "learner must be initialized first"
 
-        self.learner.export(filename, modelname)
+        self.learner.export(filename, modelname, export_format, export_type, prefix)
+
+    def compress(self, trees_to_keep: int, gradient_steps: int, features: NumericalData,
+                 actions: Optional[th.Tensor] = None, log_std: Optional[th.Tensor] = None,
+                 method: str = 'first_k', dist_type: str = 'supervised_learning',
+                 optimizer_kwargs: Optional[dict] = None,
+                 least_squares_W: bool = True, temperature: float = 1.0,
+                 lambda_reg: float = 1.0, **kwargs) -> float:
+        """
+        Compresses the tree ensemble by selecting and retraining a subset of trees.
+
+        Args:
+            trees_to_keep (int): Number of trees to retain in the compressed model.
+            gradient_steps (int): Number of optimization steps during compression.
+            features (NumericalData): Input feature matrix (n_samples, n_features).
+            actions (th.Tensor, optional): Target actions (for policy compression).
+                Required if dist_type is not 'supervised_learning'.
+            log_std (th.Tensor, optional): Log standard deviation (only used for
+                certain policy types).
+            method (str): Tree selection method. Defaults to 'first_k'.
+            dist_type (str): Compression type ('supervised_learning', 'actor', etc.).
+            optimizer_kwargs (dict, optional): Optimizer configuration.
+            least_squares_W (bool): Whether to use least-squares to estimate weights
+                (for supervised compression).
+            temperature (float): Temperature parameter for soft selection.
+            lambda_reg (float): L2 regularization coefficient on weights.
+            **kwargs: Additional keyword arguments passed to the compressor.
+
+        Returns:
+            float: Final loss value after compression.
+
+        Raises:
+            AssertionError: If learner is not initialized.
+        """
+        assert self.learner is not None, "learner must be initialized first"
+
+        return self.learner.compress(
+            trees_to_keep=trees_to_keep,
+            gradient_steps=gradient_steps,
+            features=features,
+            actions=actions,
+            log_std=log_std,
+            method=method,
+            dist_type=dist_type,
+            optimizer_kwargs=optimizer_kwargs,
+            least_squares_W=least_squares_W,
+            temperature=temperature,
+            lambda_reg=lambda_reg,
+            **kwargs
+        )
 
     @classmethod
     def load_learner(cls, load_name: str, device: str) -> "BaseGBT":

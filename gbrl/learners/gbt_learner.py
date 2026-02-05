@@ -223,13 +223,18 @@ class GBTLearner(BaseLearner):
         status = self._cpp_model.save(filename)
         assert status == 0, "Failed to save model"
 
-    def export(self, filename: str, modelname: Optional[str] = None) -> None:
+    def export(self, filename: str, modelname: Optional[str] = None,
+                export_format: str = 'float', export_type: str = 'full',
+                prefix: str = '') -> None:
         """
         Exports the model to a C header file.
 
         Args:
             filename (str): The filename to export the model to.
             modelname (str, optional): The name of the model in the C code. Defaults to None.
+            export_format (str, optional): Format for exported values ('float', 'fxp8', etc.). Defaults to 'float'.
+            export_type (str, optional): Export type ('full', 'compact'). Defaults to 'full'.
+            prefix (str, optional): Prefix for exported symbols. Defaults to ''.
         """
         filename = filename.rstrip('.')
         filename += '.h'
@@ -237,7 +242,7 @@ class GBTLearner(BaseLearner):
         if modelname is None:
             modelname = ""
         try:
-            status = self._cpp_model.export(filename, modelname)
+            status = self._cpp_model.export(filename, modelname, export_format, export_type, prefix)
             assert status == 0, "Failed to export model"
         except RuntimeError as e:
             print(f"Caught an exception in GBRL: {e}")
