@@ -1479,6 +1479,14 @@ exportData* GBRL::get_ensemble_export_data(){
     return get_export_data(this->metadata, this->edata, this->device, this->opts);
 }
 
+treeData* GBRL::get_tree(int tree_idx){
+    return get_tree_data(tree_idx, this->metadata, this->edata, this->device);
+}
+
+void GBRL::add_tree(const treeData *tdata){
+    add_tree_data(tdata, this->metadata, this->edata, this->device);
+}
+
 ensembleData* GBRL::get_ensemble_data(){
     ensembleData *edata_copy = nullptr;
 #ifdef USE_CUDA

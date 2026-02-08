@@ -615,6 +615,69 @@ class MultiGBTLearner(BaseLearner):
             return tuple(cpp_model.get_export_data() for cpp_model in self._cpp_models)  # type: ignore
         return self._cpp_models[model_idx].get_export_data()  # type: ignore
 
+    def get_tree(self, tree_idx: int,
+                 model_idx: Optional[int] = None) -> Union[Dict, Tuple[Dict, ...]]:
+        """Extract a single tree from the ensemble(s).
+
+        Returns a dictionary (or tuple of dictionaries) containing all arrays
+        that define the structure and predictions of one tree. The dict is
+        suitable for serialization (e.g. via MPI) and can be inserted into
+        another ensemble using :meth:`add_tree`.
+
+        Parameters:
+            tree_idx (int): 0-based index of the tree to extract.
+            model_idx (int, optional): Index of a specific sub-model.
+                If ``None``, extracts the tree from all sub-models.
+
+        Returns:
+            Union[Dict, Tuple[Dict, ...]]: Tree data dictionary (or tuple
+            of dictionaries when ``model_idx`` is ``None``). See
+            :meth:`~gbrl.learners.gbt_learner.GBTLearner.get_tree`
+            for the dictionary schema.
+
+        Raises:
+            AssertionError: If the C++ models are not initialized.
+            RuntimeError: If ``tree_idx`` is out of range.
+        """
+        assert self._cpp_models is not None, "Model not initialized."
+        if model_idx is None:
+            return tuple(cpp_model.get_tree(tree_idx) for cpp_model in self._cpp_models)  # type: ignore
+        return self._cpp_models[model_idx].get_tree(tree_idx)  # type: ignore
+
+    def add_tree(self, tree_dict: Union[Dict, Tuple[Dict, ...]],
+                 model_idx: Optional[int] = None) -> None:
+        """Add a tree to the ensemble(s) from a dictionary.
+
+        Appends the tree described by ``tree_dict`` to the end of the
+        ensemble. This is the counterpart to :meth:`get_tree` for
+        distributed ensemble synchronization (e.g. MPI broadcast).
+
+        Parameters:
+            tree_dict (Union[Dict, Tuple[Dict, ...]]): Tree data dictionary
+                as returned by :meth:`get_tree`. When ``model_idx`` is ``None``,
+                must be a tuple with one dict per sub-model.
+            model_idx (int, optional): Index of a specific sub-model.
+                If ``None``, adds the tree to all sub-models (``tree_dict``
+                must be a tuple).
+
+        Raises:
+            AssertionError: If the C++ models are not initialized.
+            RuntimeError: If the tree data is incompatible.
+
+        .. note::
+            Only CPU ensembles are currently supported for ``add_tree``.
+        """
+        assert self._cpp_models is not None, "Model not initialized."
+        if model_idx is None:
+            assert isinstance(tree_dict, tuple), \
+                "tree_dict must be a tuple when model_idx is None"
+            assert len(tree_dict) == len(self._cpp_models), \
+                "tree_dict tuple length must match number of sub-models"
+            for cpp_model, td in zip(self._cpp_models, tree_dict):
+                cpp_model.add_tree(td)  # type: ignore
+        else:
+            self._cpp_models[model_idx].add_tree(tree_dict)  # type: ignore
+
     def print_tree(self, tree_idx: int,
                    model_idx: Optional[int] = None) -> None:
         """

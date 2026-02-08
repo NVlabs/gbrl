@@ -560,7 +560,29 @@ class GBRL {
 
         exportData* get_ensemble_export_data();
 
-        
+        /**
+         * @brief Extract a single tree from the ensemble
+         * 
+         * Returns a treeData struct containing copies of all arrays
+         * for the specified tree. Caller owns all memory.
+         * 
+         * @param tree_idx 0-based index of the tree to extract
+         * @return Pointer to treeData struct
+         */
+        treeData* get_tree(int tree_idx);
+
+        /**
+         * @brief Add a tree to the ensemble
+         * 
+         * Appends tree data to the end of the ensemble. This is the
+         * counterpart to get_tree() for distributed ensemble synchronization.
+         * Updates n_trees, n_leaves, and iteration.
+         * 
+         * @param tdata Tree data to append (arrays are copied, caller retains ownership)
+         */
+        void add_tree(const treeData *tdata);
+
+
         ensembleData *edata;                /**< Ensemble parameter data */
         ensembleMetaData *metadata;         /**< Ensemble metadata */
         serializationHeader sheader;        /**< Serialization header */

@@ -23,6 +23,7 @@
 set(CPP_SOURCES
     gbrl.cpp
     types.cpp
+    ensemble_io.cpp
     optimizer.cpp
     scheduler.cpp
     compression.cpp

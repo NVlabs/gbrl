@@ -36,6 +36,7 @@
 
 #include "gbrl.h"
 #include "types.h"
+#include "ensemble_io.h"
 #include "dlpack/dlpack.h"
 
 namespace py = pybind11;
@@ -494,6 +495,131 @@ py::list getOptimizerConfigs(const std::vector<Optimizer*>& opts) {
         configs.append(optimizerToDict(conf));  // conf is deleted within optimizerConfigToDict
     }
     return configs;
+}
+
+/**
+ * @brief Convert a treeData struct to a Python dictionary of NumPy arrays
+ * 
+ * Transfers ownership of all treeData arrays to NumPy via capsules.
+ * After this call the treeData struct shell can be deleted, but not
+ * the arrays (they are now owned by NumPy).
+ * 
+ * @param tdata Tree data to convert (must not be nullptr)
+ * @return Python dict with scalar metadata and NumPy array values
+ */
+py::dict treeDataToDict(treeData* tdata) {
+    py::dict d;
+    if (tdata == nullptr) return d;
+
+    d["n_leaves"] = tdata->n_leaves;
+    d["tree_depth"] = tdata->tree_depth;
+    d["output_dim"] = tdata->output_dim;
+    d["max_depth"] = tdata->max_depth;
+    d["n_objs"] = tdata->n_objs;
+    d["split_count"] = tdata->split_count;
+    d["is_oblivious"] = tdata->is_oblivious;
+
+    int n_leaves = tdata->n_leaves;
+    int max_depth = tdata->max_depth;
+    int output_dim = tdata->output_dim;
+    int split_count = tdata->split_count;
+    int n_objs = tdata->n_objs;
+    int depth_count = tdata->is_oblivious ? 1 : n_leaves;
+
+    auto depths_cap = py::capsule(tdata->depths, [](void* p){ delete[] reinterpret_cast<int*>(p); });
+    d["depths"] = py::array_t<int>({depth_count}, tdata->depths, depths_cap);
+
+    auto values_cap = py::capsule(tdata->values, [](void* p){ delete[] reinterpret_cast<float*>(p); });
+    d["values"] = py::array_t<float>({n_leaves, output_dim}, tdata->values, values_cap);
+
+    auto ew_cap = py::capsule(tdata->edge_weights, [](void* p){ delete[] reinterpret_cast<float*>(p); });
+    d["edge_weights"] = py::array_t<float>({n_leaves, max_depth}, tdata->edge_weights, ew_cap);
+
+    auto fi_cap = py::capsule(tdata->feature_indices, [](void* p){ delete[] reinterpret_cast<int*>(p); });
+    d["feature_indices"] = py::array_t<int>({split_count, max_depth}, tdata->feature_indices, fi_cap);
+
+    auto fv_cap = py::capsule(tdata->feature_values, [](void* p){ delete[] reinterpret_cast<float*>(p); });
+    d["feature_values"] = py::array_t<float>({split_count, max_depth}, tdata->feature_values, fv_cap);
+
+    auto in_cap = py::capsule(tdata->is_numerics, [](void* p){ delete[] reinterpret_cast<bool*>(p); });
+    d["is_numerics"] = py::array_t<bool>({split_count, max_depth}, tdata->is_numerics, in_cap);
+
+    auto id_cap = py::capsule(tdata->inequality_directions, [](void* p){ delete[] reinterpret_cast<bool*>(p); });
+    d["inequality_directions"] = py::array_t<bool>({n_leaves, max_depth}, tdata->inequality_directions, id_cap);
+
+    auto cv_cap = py::capsule(tdata->categorical_values, [](void* p){ delete[] reinterpret_cast<char*>(p); });
+    d["categorical_values"] = py::array_t<char>({split_count * max_depth * MAX_CHAR_SIZE}, tdata->categorical_values, cv_cap);
+
+    auto dens_cap = py::capsule(tdata->densities, [](void* p){ delete[] reinterpret_cast<float*>(p); });
+    d["densities"] = py::array_t<float>({n_leaves, n_objs}, tdata->densities, dens_cap);
+
+    return d;
+}
+
+/**
+ * @brief Convert a Python dictionary back to a treeData struct
+ * 
+ * Allocates a new treeData and copies all array data from the dict's
+ * NumPy arrays. The caller owns all memory and must free via tree_data_dealloc().
+ * 
+ * @param d Python dict as returned by treeDataToDict or constructed by the user
+ * @return Newly allocated treeData with copies of all arrays
+ */
+treeData* dictToTreeData(const py::dict& d) {
+    treeData *tdata = new treeData;
+
+    tdata->n_leaves = d["n_leaves"].cast<int>();
+    tdata->tree_depth = d["tree_depth"].cast<int>();
+    tdata->output_dim = d["output_dim"].cast<int>();
+    tdata->max_depth = d["max_depth"].cast<int>();
+    tdata->n_objs = d["n_objs"].cast<int>();
+    tdata->split_count = d["split_count"].cast<int>();
+    tdata->is_oblivious = d["is_oblivious"].cast<bool>();
+
+    int n_leaves = tdata->n_leaves;
+    int max_depth = tdata->max_depth;
+    int output_dim = tdata->output_dim;
+    int split_count = tdata->split_count;
+    int n_objs = tdata->n_objs;
+    int depth_count = tdata->is_oblivious ? 1 : n_leaves;
+
+    py::array_t<int> depths_arr = d["depths"].cast<py::array_t<int>>();
+    tdata->depths = new int[depth_count];
+    memcpy(tdata->depths, depths_arr.data(), depth_count * sizeof(int));
+
+    py::array_t<float> values_arr = d["values"].cast<py::array_t<float>>();
+    tdata->values = new float[n_leaves * output_dim];
+    memcpy(tdata->values, values_arr.data(), n_leaves * output_dim * sizeof(float));
+
+    py::array_t<float> ew_arr = d["edge_weights"].cast<py::array_t<float>>();
+    tdata->edge_weights = new float[n_leaves * max_depth];
+    memcpy(tdata->edge_weights, ew_arr.data(), n_leaves * max_depth * sizeof(float));
+
+    py::array_t<int> fi_arr = d["feature_indices"].cast<py::array_t<int>>();
+    tdata->feature_indices = new int[split_count * max_depth];
+    memcpy(tdata->feature_indices, fi_arr.data(), split_count * max_depth * sizeof(int));
+
+    py::array_t<float> fv_arr = d["feature_values"].cast<py::array_t<float>>();
+    tdata->feature_values = new float[split_count * max_depth];
+    memcpy(tdata->feature_values, fv_arr.data(), split_count * max_depth * sizeof(float));
+
+    py::array_t<bool> in_arr = d["is_numerics"].cast<py::array_t<bool>>();
+    tdata->is_numerics = new bool[split_count * max_depth];
+    memcpy(tdata->is_numerics, in_arr.data(), split_count * max_depth * sizeof(bool));
+
+    py::array_t<bool> id_arr = d["inequality_directions"].cast<py::array_t<bool>>();
+    tdata->inequality_directions = new bool[n_leaves * max_depth];
+    memcpy(tdata->inequality_directions, id_arr.data(), n_leaves * max_depth * sizeof(bool));
+
+    py::array_t<char> cv_arr = d["categorical_values"].cast<py::array_t<char>>();
+    tdata->categorical_values = new char[split_count * max_depth * MAX_CHAR_SIZE];
+    memcpy(tdata->categorical_values, cv_arr.data(), split_count * max_depth * MAX_CHAR_SIZE * sizeof(char));
+
+    py::array_t<float> dens_arr = d["densities"].cast<py::array_t<float>>();
+    tdata->densities = new float[n_leaves * n_objs];
+    memcpy(tdata->densities, dens_arr.data(), n_leaves * n_objs * sizeof(float));
+
+    return tdata;
 }
 
 PYBIND11_MODULE(gbrl_cpp, m) {
@@ -1198,6 +1324,36 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         delete exp_data;
         return result;
     }, "Return export data with optimizer-scaled leaf values for inference");
+    gbrl.def("get_tree", [](GBRL &self, int tree_idx) -> py::dict {
+        py::gil_scoped_release release;
+        treeData *tdata = self.get_tree(tree_idx);
+        py::gil_scoped_acquire acquire;
+        py::dict result = treeDataToDict(tdata);
+        // Arrays are now owned by NumPy capsules; only delete the struct shell
+        delete tdata;
+        return result;
+    }, py::arg("tree_idx"),
+       "Extract a single tree from the ensemble as a dict of NumPy arrays.\n\n"
+       "Parameters\n----------\n"
+       "tree_idx : int\n    0-based index of the tree to extract.\n\n"
+       "Returns\n-------\n"
+       "dict\n    Dictionary with tree structure arrays (feature_indices, feature_values,\n"
+       "    values, edge_weights, etc.) and scalar metadata.");
+    gbrl.def("add_tree", [](GBRL &self, const py::dict& tree_dict) {
+        treeData *tdata = dictToTreeData(tree_dict);
+        {
+            py::gil_scoped_release release;
+            self.add_tree(tdata);
+        }
+        tree_data_dealloc(tdata);
+    }, py::arg("tree_dict"),
+       "Add a tree to the ensemble from a dict of NumPy arrays.\n\n"
+       "Parameters\n----------\n"
+       "tree_dict : dict\n    Dictionary as returned by get_tree(), containing tree structure\n"
+       "    arrays and scalar metadata. Arrays are copied into the ensemble.\n\n"
+       "Notes\n-----\n"
+       "This is the counterpart to get_tree() for distributed (e.g. MPI)\n"
+       "ensemble synchronization. Updates n_trees, n_leaves, and iteration.");
     gbrl.def("get_device", [](GBRL &self) ->  std::string {
         py::gil_scoped_release release; 
         return self.get_device(); 

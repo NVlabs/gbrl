@@ -320,6 +320,51 @@ class BaseGBT(ABC):
 
         return self.learner.get_export_data()
 
+    def get_tree(self, tree_idx: int) -> Union[dict, Tuple[dict, ...]]:
+        """Extract a single tree from the ensemble.
+
+        Returns a dictionary containing all arrays that define the structure
+        and predictions of one tree. The dict is suitable for serialization
+        (e.g. via MPI, pickle) and can be inserted into another ensemble
+        using :meth:`add_tree`.
+
+        Parameters:
+            tree_idx (int): 0-based index of the tree to extract.
+
+        Returns:
+            Union[dict, Tuple[dict, ...]]: Tree data dictionary. See
+            :meth:`~gbrl.learners.gbt_learner.GBTLearner.get_tree`
+            for the dictionary schema.
+
+        Raises:
+            AssertionError: If learner is not initialized.
+            RuntimeError: If ``tree_idx`` is out of range.
+        """
+        assert self.learner is not None, "learner must be initialized first"
+        return self.learner.get_tree(tree_idx)
+
+    def add_tree(self, tree_dict: Union[dict, Tuple[dict, ...]]) -> None:
+        """Add a tree to the ensemble from a dictionary.
+
+        Appends the tree described by ``tree_dict`` to the end of the
+        ensemble. This is the counterpart to :meth:`get_tree` for
+        distributed ensemble synchronization (e.g. MPI broadcast).
+
+        Parameters:
+            tree_dict (Union[dict, Tuple[dict, ...]]): Dictionary as returned
+                by :meth:`get_tree`. Must be compatible with the ensemble
+                (same ``output_dim``, ``max_depth``, and grow policy).
+
+        Raises:
+            AssertionError: If learner is not initialized.
+            RuntimeError: If the tree data is incompatible.
+
+        .. note::
+            Only CPU ensembles are currently supported for ``add_tree``.
+        """
+        assert self.learner is not None, "learner must be initialized first"
+        self.learner.add_tree(tree_dict)
+
     def compress(self, trees_to_keep: int, gradient_steps: int, features: NumericalData,
                  actions: Optional[th.Tensor] = None, log_std: Optional[th.Tensor] = None,
                  method: str = 'first_k', dist_type: str = 'supervised_learning',

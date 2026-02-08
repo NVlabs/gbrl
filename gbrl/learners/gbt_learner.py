@@ -436,6 +436,76 @@ class GBTLearner(BaseLearner):
         assert self._cpp_model is not None, "Model not initialized!"
         return self._cpp_model.get_export_data()
 
+    def get_tree(self, tree_idx: int) -> Dict[str, Any]:
+        """Extract a single tree from the ensemble.
+
+        Returns a dictionary containing all arrays that define the structure
+        and predictions of one tree. The dict is suitable for serialization
+        (e.g. via MPI, pickle, or JSON) and can be inserted into another
+        ensemble using :meth:`add_tree`.
+
+        For **OBLIVIOUS** trees ``split_count=1`` (one shared set of splits).
+        For **GREEDY** trees ``split_count=n_leaves`` (per-leaf split paths).
+
+        Parameters:
+            tree_idx (int): 0-based index of the tree to extract.
+
+        Returns:
+            Dict[str, Any]: Dictionary with scalar metadata and NumPy arrays:
+
+            - ``n_leaves`` (int): Number of leaves in the tree.
+            - ``tree_depth`` (int): Depth of the tree.
+            - ``output_dim`` (int): Dimensionality of leaf values.
+            - ``max_depth`` (int): Ensemble max depth parameter.
+            - ``n_objs`` (int): Number of multi-objective objectives.
+            - ``split_count`` (int): Number of split-indexed entries.
+            - ``is_oblivious`` (bool): Whether the tree uses oblivious grow policy.
+            - ``depths`` (np.ndarray): Depth(s), shape ``(1,)`` or ``(n_leaves,)``.
+            - ``values`` (np.ndarray): Leaf predictions, shape ``(n_leaves, output_dim)``.
+            - ``edge_weights`` (np.ndarray): Edge weights, shape ``(n_leaves, max_depth)``.
+            - ``feature_indices`` (np.ndarray): Split feature indices,
+              shape ``(split_count, max_depth)``.
+            - ``feature_values`` (np.ndarray): Split thresholds,
+              shape ``(split_count, max_depth)``.
+            - ``is_numerics`` (np.ndarray): Numeric flags,
+              shape ``(split_count, max_depth)``.
+            - ``inequality_directions`` (np.ndarray): Inequality directions,
+              shape ``(n_leaves, max_depth)``.
+            - ``categorical_values`` (np.ndarray): Categorical split values (flat char array).
+            - ``densities`` (np.ndarray): Multi-objective densities,
+              shape ``(n_leaves, n_objs)``.
+
+        Raises:
+            AssertionError: If the C++ model is not initialized.
+            RuntimeError: If ``tree_idx`` is out of range.
+        """
+        assert self._cpp_model is not None, "Model not initialized!"
+        return self._cpp_model.get_tree(tree_idx)
+
+    def add_tree(self, tree_dict: Dict[str, Any]) -> None:
+        """Add a tree to the ensemble from a dictionary.
+
+        Appends the tree described by ``tree_dict`` to the end of the
+        ensemble. This is the counterpart to :meth:`get_tree` for
+        distributed ensemble synchronization (e.g. MPI broadcast).
+
+        The tree dict must have the same ``output_dim``, ``max_depth``,
+        and ``is_oblivious`` as the target ensemble.
+
+        Parameters:
+            tree_dict (Dict[str, Any]): Dictionary as returned by
+                :meth:`get_tree`.
+
+        Raises:
+            AssertionError: If the C++ model is not initialized.
+            RuntimeError: If the tree data is incompatible with the ensemble.
+
+        .. note::
+            Only CPU ensembles are currently supported for ``add_tree``.
+        """
+        assert self._cpp_model is not None, "Model not initialized!"
+        self._cpp_model.add_tree(tree_dict)
+
     def print_tree(self, tree_idx: int) -> None:
         """
         Prints the tree at the given index.
