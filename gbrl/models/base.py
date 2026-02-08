@@ -284,6 +284,42 @@ class BaseGBT(ABC):
 
         self.learner.export(filename, modelname, export_format, export_type, prefix)
 
+    def get_export_data(self) -> Union[dict, Tuple[dict, ...]]:
+        """Returns the export data for the ensemble, suitable for inference.
+
+        Extracts a simplified representation of the trained ensemble that
+        contains only the data needed for inference: split feature indices,
+        split thresholds, optimizer-scaled leaf values, and bias. This is
+        the same data that :meth:`export_learner` writes to a C header file,
+        but returned as a Python dictionary of NumPy arrays.
+
+        .. note::
+            Only numerical features are supported. Models trained with
+            categorical features are not supported by this method.
+
+        Returns:
+            Union[dict, Tuple[dict, ...]]: Dictionary (or tuple of dicts for
+            multi-learner models) with keys:
+
+            - ``n_trees`` (int): Number of trees.
+            - ``n_leaves`` (int): Total leaves across all trees.
+            - ``input_dim`` (int): Number of input features.
+            - ``output_dim`` (int): Output dimensionality.
+            - ``max_depth`` (int): Maximum tree depth.
+            - ``num_features`` (int): Number of numerical features.
+            - ``binary_features`` (int): Total binary split nodes.
+            - ``bias`` (np.ndarray): Model bias ``(output_dim,)``.
+            - ``feature_indices`` (np.ndarray): Split feature per node ``(binary_features,)``.
+            - ``feature_values`` (np.ndarray): Split threshold per node ``(binary_features,)``.
+            - ``leaf_values`` (np.ndarray): Scaled leaf values ``(n_leaves, output_dim)``.
+
+        Raises:
+            AssertionError: If learner is not initialized.
+        """
+        assert self.learner is not None, "learner must be initialized first"
+
+        return self.learner.get_export_data()
+
     def compress(self, trees_to_keep: int, gradient_steps: int, features: NumericalData,
                  actions: Optional[th.Tensor] = None, log_std: Optional[th.Tensor] = None,
                  method: str = 'first_k', dist_type: str = 'supervised_learning',

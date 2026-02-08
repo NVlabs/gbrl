@@ -1474,6 +1474,11 @@ float* GBRL::ensemble_shap(const float *obs, const char *categorical_obs, const 
     return shap_values;
 }
 
+exportData* GBRL::get_ensemble_export_data(){
+
+    return get_export_data(this->metadata, this->edata, this->device, this->opts);
+}
+
 ensembleData* GBRL::get_ensemble_data(){
     ensembleData *edata_copy = nullptr;
 #ifdef USE_CUDA

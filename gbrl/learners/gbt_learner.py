@@ -399,6 +399,43 @@ class GBTLearner(BaseLearner):
         """
         return self._cpp_model.get_device()
 
+    def get_export_data(self) -> Dict[str, Any]:
+        """Returns the export data for the ensemble, suitable for inference.
+
+        Extracts a simplified representation of the trained ensemble that
+        contains only the data needed for inference: split feature indices,
+        split thresholds, optimizer-scaled leaf values, and bias. This is
+        the same data that :meth:`export` writes to a C header file, but
+        returned as a Python dictionary of NumPy arrays.
+
+        .. note::
+            Only numerical features are supported. Models trained with
+            categorical features are not supported by this method.
+
+        Returns:
+            Dict[str, Any]: Dictionary with the following keys:
+
+            - ``n_trees`` (int): Number of trees in the ensemble.
+            - ``n_leaves`` (int): Total number of leaves across all trees.
+            - ``input_dim`` (int): Number of input features.
+            - ``output_dim`` (int): Dimensionality of output predictions.
+            - ``max_depth`` (int): Maximum depth of any tree.
+            - ``num_features`` (int): Number of numerical features.
+            - ``binary_features`` (int): Total binary split nodes (sum of tree depths).
+            - ``bias`` (np.ndarray): Model bias, shape ``(output_dim,)``.
+            - ``feature_indices`` (np.ndarray): Split feature index per node,
+              shape ``(binary_features,)``.
+            - ``feature_values`` (np.ndarray): Split threshold per node,
+              shape ``(binary_features,)``.
+            - ``leaf_values`` (np.ndarray): Optimizer-scaled leaf predictions,
+              shape ``(n_leaves, output_dim)``.
+
+        Raises:
+            AssertionError: If the C++ model is not initialized.
+        """
+        assert self._cpp_model is not None, "Model not initialized!"
+        return self._cpp_model.get_export_data()
+
     def print_tree(self, tree_idx: int) -> None:
         """
         Prints the tree at the given index.

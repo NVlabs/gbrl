@@ -347,6 +347,29 @@ struct ensembleData {
 };
 
 /**
+ * @brief Simplified export data for model deployment and inference
+ * 
+ * Contains the minimal set of arrays needed to perform inference:
+ * split feature indices/values, optimizer-scaled leaf values, and bias.
+ * Produced by get_export_data() which flattens the full ensemble
+ * representation and bakes in the optimizer learning rates.
+ */
+struct exportData {
+    int n_trees;              /**< Number of trees in the ensemble */
+    int n_leaves;             /**< Total number of leaves across all trees */
+    int input_dim;            /**< Number of input features */
+    int output_dim;           /**< Dimensionality of output predictions */
+    int max_depth;            /**< Maximum depth of any tree */
+    int num_features;         /**< Number of numerical features */
+    int binary_features;      /**< Total number of binary split nodes (sum of depths) */
+
+    int *feature_indices;     /**< Split feature index per binary node [binary_features] */
+    float *feature_values;    /**< Split threshold per binary node [binary_features] */
+    float *leaf_values;       /**< Optimizer-scaled leaf predictions [n_leaves * output_dim] */
+    float *bias;              /**< Model bias term [output_dim] */
+};
+
+/**
  * @brief Header for model serialization with version tracking
  * 
  * Ensures compatibility when loading saved models by storing
@@ -378,12 +401,19 @@ struct nodeInfo {
     bool is_right;                  /**< True if this is a right child */
 };
 
+/**
+ * @brief Matrix representation of the ensemble for a given input
+ * 
+ * Encodes the ensemble as a linear system A * V where A is a binary
+ * activation matrix indicating which leaves are active per sample,
+ * and V contains the corresponding leaf values.
+ */
 struct matrixRepresentation {
-    bool *A;
-    float *V;
-    int n_leaves;
-    int n_trees;
-    int *n_leaves_per_tree;
+    bool *A;                  /**< Binary activation matrix [n_samples x (n_leaves + 1)] */
+    float *V;                 /**< Leaf value matrix [(n_leaves + 1) x output_dim] */
+    int n_leaves;             /**< Total number of leaves */
+    int n_trees;              /**< Total number of trees */
+    int *n_leaves_per_tree;   /**< Number of leaves in each tree [n_trees] */
 };
 
 // ============================================================================
@@ -525,6 +555,16 @@ ensembleData* copy_ensemble_data(ensembleData *other_edata, ensembleMetaData *me
  * @return Pointer to newly allocated compressed ensemble data
  */
 ensembleData* copy_compressed_ensemble_data(ensembleData *other_edata, ensembleMetaData *metadata, const int *leaf_indices, const int *tree_indices, const int n_compressed_leaves, const int n_compressed_trees, const int *new_tree_indices);
+
+/**
+ * @brief Deallocate all memory associated with ensemble data
+ * 
+ * Frees all sub-structures (ensemble_info, leaf_data, feature_data,
+ * feature_mappings, mono_constraints, multi_objective_data) and their
+ * internal arrays, then frees the ensembleData struct itself.
+ * 
+ * @param edata Ensemble data to deallocate (must not be nullptr)
+ */
 void ensemble_data_dealloc(ensembleData *edata);
 
 /**
@@ -592,5 +632,21 @@ void allocate_ensemble_memory(
     ensembleMetaData *metadata,
     ensembleData *edata
 );
+
+/**
+ * @brief Extract simplified export data from the ensemble for inference
+ * 
+ * Creates an exportData struct containing the minimal arrays needed for
+ * model inference. Flattens tree split information into contiguous arrays
+ * and bakes optimizer learning rates into leaf values. If data resides on
+ * GPU, a temporary CPU copy is made and freed after extraction.
+ * 
+ * @param metadata Ensemble metadata describing structure
+ * @param edata Full ensemble data arrays
+ * @param device Device where edata currently resides
+ * @param opts Vector of optimizers (used to scale leaf values by learning rate)
+ * @return Pointer to newly allocated exportData; caller owns all memory
+ */
+exportData* get_export_data(ensembleMetaData *metadata, ensembleData *edata, deviceType device, std::vector<Optimizer*> opts);
 
 #endif // TYPES_H 

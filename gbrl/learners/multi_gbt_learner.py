@@ -584,6 +584,37 @@ class MultiGBTLearner(BaseLearner):
             return (cpp_model.get_device() for cpp_model in self._cpp_models)  # type: ignore
         return self._cpp_models[model_idx].get_device()  # type: ignore
 
+    def get_export_data(self, model_idx: Optional[int] = None) -> Union[Dict, Tuple[Dict, ...]]:
+        """Returns the export data for the ensemble(s), suitable for inference.
+
+        Extracts a simplified representation of the trained ensemble that
+        contains only the data needed for inference: split feature indices,
+        split thresholds, optimizer-scaled leaf values, and bias. This is
+        the same data that :meth:`export` writes to a C header file, but
+        returned as a Python dictionary of NumPy arrays.
+
+        .. note::
+            Only numerical features are supported. Models trained with
+            categorical features are not supported by this method.
+
+        Args:
+            model_idx (int, optional): Index of a specific sub-model to
+                query. If ``None``, returns data for all sub-models.
+
+        Returns:
+            Union[Dict, Tuple[Dict, ...]]: Export data dictionary (or tuple
+            of dictionaries when ``model_idx`` is ``None``). See
+            :meth:`~gbrl.learners.gbt_learner.GBTLearner.get_export_data`
+            for the dictionary schema.
+
+        Raises:
+            AssertionError: If the C++ models are not initialized.
+        """
+        assert self._cpp_models is not None, "Model not initialized."
+        if model_idx is None:
+            return tuple(cpp_model.get_export_data() for cpp_model in self._cpp_models)  # type: ignore
+        return self._cpp_models[model_idx].get_export_data()  # type: ignore
+
     def print_tree(self, tree_idx: int,
                    model_idx: Optional[int] = None) -> None:
         """

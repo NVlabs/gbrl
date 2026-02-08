@@ -307,6 +307,12 @@ py::object return_tensor_info(
     }
 }
 
+/**
+ * @brief Convert ensemble metadata to a Python dictionary
+ * 
+ * @param metadata Pointer to ensembleMetaData (may be nullptr, returns empty dict)
+ * @return Python dict with all hyperparameters and configuration values
+ */
 py::dict metadataToDict(const ensembleMetaData* metadata){
     py::dict d;
     if (metadata != nullptr){
@@ -330,6 +336,17 @@ py::dict metadataToDict(const ensembleMetaData* metadata){
     return d;
 }
 
+/**
+ * @brief Convert full ensemble data to a Python dictionary of NumPy arrays
+ * 
+ * Transfers ownership of all dynamically allocated arrays in ensembleData
+ * (and its sub-structs) to NumPy via pybind11 capsules. After calling this
+ * function, the arrays are managed by Python's garbage collector.
+ * 
+ * @param data Pointer to ensembleData (may be nullptr, returns empty dict)
+ * @param metadata Pointer to ensembleMetaData describing array dimensions
+ * @return Python dict with tree structure, leaf values, feature data, and mappings
+ */
 py::dict ensembleDataToDict(const ensembleData* data, const ensembleMetaData* metadata) {
     py::dict d;
     if (data != nullptr) {
@@ -392,7 +409,59 @@ py::dict ensembleDataToDict(const ensembleData* data, const ensembleMetaData* me
     return d;
 }
 
+/**
+ * @brief Convert exportData struct to a Python dictionary of NumPy arrays
+ * 
+ * Transfers ownership of all dynamically allocated arrays in exportData
+ * to NumPy via pybind11 capsules. After calling this function, the arrays
+ * are managed by Python's garbage collector. The caller must still delete
+ * the exportData struct itself (but NOT its array members).
+ * 
+ * @param data Pointer to exportData (may be nullptr, returns empty dict)
+ * @return Python dict with keys: n_trees, n_leaves, input_dim, output_dim,
+ *         max_depth, num_features, binary_features, bias, feature_indices,
+ *         feature_values, leaf_values
+ */
+py::dict ensembleExportDataToDict(const exportData* data) {
+    py::dict d;
+    if (data != nullptr) {
+        // Scalar metadata
+        d["n_trees"] = data->n_trees;
+        d["n_leaves"] = data->n_leaves;
+        d["input_dim"] = data->input_dim;
+        d["output_dim"] = data->output_dim;
+        d["max_depth"] = data->max_depth;
+        d["num_features"] = data->num_features;
+        d["binary_features"] = data->binary_features;
 
+        // Array data with ownership transfer via capsules
+        auto bias_capsule = py::capsule(data->bias, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
+        d["bias"] = py::array_t<float>({data->output_dim}, data->bias, bias_capsule);
+
+        auto feature_indices_capsule = py::capsule(data->feature_indices, [](void* ptr) { delete[] reinterpret_cast<int*>(ptr); });
+        d["feature_indices"] = py::array_t<int>({data->binary_features}, data->feature_indices, feature_indices_capsule);
+
+        auto feature_values_capsule = py::capsule(data->feature_values, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
+        d["feature_values"] = py::array_t<float>({data->binary_features}, data->feature_values, feature_values_capsule);
+
+        auto leaf_values_capsule = py::capsule(data->leaf_values, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
+        d["leaf_values"] = py::array_t<float>({data->n_leaves, data->output_dim}, data->leaf_values, leaf_values_capsule);
+    }
+    return d;
+}
+
+
+/**
+ * @brief Convert optimizer configuration to a Python dictionary
+ * 
+ * Extracts all optimizer parameters (algorithm, learning rate, scheduler,
+ * Adam betas, etc.) into a dict. Deletes the optimizerConfig struct
+ * after conversion since it was allocated by getConfig().
+ * 
+ * @param conf Pointer to optimizerConfig (may be nullptr, returns empty dict).
+ *             Deleted after conversion.
+ * @return Python dict with optimizer configuration parameters
+ */
 py::dict optimizerToDict(const optimizerConfig* conf){
     py::dict d;
     if (conf != nullptr){
@@ -412,6 +481,12 @@ py::dict optimizerToDict(const optimizerConfig* conf){
     return d;
 }
 
+/**
+ * @brief Convert all optimizer configurations to a Python list of dicts
+ * 
+ * @param opts Vector of Optimizer pointers to extract configurations from
+ * @return Python list where each element is a dict of optimizer parameters
+ */
 py::list getOptimizerConfigs(const std::vector<Optimizer*>& opts) {
     py::list configs;
     for (auto& opt : opts) {
@@ -1114,6 +1189,15 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         py::gil_scoped_acquire acquire;
         return ensembleDataToDict(edata, self.metadata);
     }, "Return ensemble data");
+    gbrl.def("get_export_data", [](GBRL &self) -> py::dict {
+        py::gil_scoped_release release; 
+        exportData *exp_data = self.get_ensemble_export_data(); 
+        py::gil_scoped_acquire acquire;
+        py::dict result = ensembleExportDataToDict(exp_data);
+        // Arrays are now owned by NumPy capsules; only delete the struct shell
+        delete exp_data;
+        return result;
+    }, "Return export data with optimizer-scaled leaf values for inference");
     gbrl.def("get_device", [](GBRL &self) ->  std::string {
         py::gil_scoped_release release; 
         return self.get_device(); 

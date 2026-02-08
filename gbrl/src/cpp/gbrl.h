@@ -558,6 +558,9 @@ class GBRL {
          */
         void compress_ensemble(const int n_compressed_leaves, const int n_compressed_trees, const int *leaf_indices, const int *tree_indices, const int *new_tree_indices, const float *W);
 
+        exportData* get_ensemble_export_data();
+
+        
         ensembleData *edata;                /**< Ensemble parameter data */
         ensembleMetaData *metadata;         /**< Ensemble metadata */
         serializationHeader sheader;        /**< Serialization header */

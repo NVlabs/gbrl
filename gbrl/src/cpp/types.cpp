@@ -689,6 +689,77 @@ void ensemble_data_dealloc(ensembleData *edata){
     delete edata;
 }
 
+/**
+ * @brief Extract simplified export data from the ensemble for inference
+ * 
+ * Copies tree structure (split feature indices and thresholds) and computes
+ * optimizer-scaled leaf values suitable for direct inference. The total
+ * number of binary split nodes (binary_features) is the sum of tree depths.
+ * Leaf values are negated and multiplied by each optimizer's per-tree
+ * learning rate to produce final inference-ready predictions.
+ */
+exportData* get_export_data(ensembleMetaData *metadata, ensembleData *edata, deviceType device, std::vector<Optimizer*> opts){
+    exportData *exp_data = new exportData;
+
+    ensembleData *edata_cpu = nullptr;
+#ifdef USE_CUDA
+    if (device == gpu){
+        edata_cpu = ensemble_data_copy_gpu_cpu(metadata, edata, nullptr);
+    }
+#endif 
+    if (device == cpu)
+        edata_cpu = edata;
+    
+    int binary_features = 0;
+    for (int i  = 0; i < metadata->n_trees; ++i){
+        binary_features += edata_cpu->ensemble_info->depths[i];
+    }
+
+    exp_data->input_dim = metadata->input_dim;
+    exp_data->output_dim = metadata->output_dim;
+    exp_data->n_trees = metadata->n_trees;
+    exp_data->n_leaves = metadata->n_leaves;
+    exp_data->max_depth = metadata->max_depth;
+    exp_data->num_features = metadata->n_num_features;
+    exp_data->binary_features = binary_features;
+
+    exp_data->feature_indices = new int[binary_features];
+    exp_data->feature_values = new float[binary_features];
+    exp_data->leaf_values = new float[metadata->n_leaves * metadata->output_dim];
+    exp_data->bias = new float[metadata->output_dim];
+    memcpy(exp_data->bias, edata_cpu->bias, metadata->output_dim * sizeof(float));
+
+    for (int i  = 0; i < binary_features; ++i){
+        exp_data->feature_indices[i] = edata_cpu->feature_data->feature_indices[i];
+        exp_data->feature_values[i] = edata_cpu->feature_data->feature_values[i];
+    }
+
+    int tree_idx = 0;
+    int limit_leaf_idx = edata_cpu->ensemble_info->tree_indices[tree_idx];
+    float value;
+    for (int i  = 0; i < metadata->n_leaves; ++i){
+        if (i > limit_leaf_idx){
+            tree_idx += 1;
+            limit_leaf_idx = edata_cpu->ensemble_info->tree_indices[tree_idx];
+        }
+        int value_idx = i*metadata->output_dim;
+        for (size_t opt_idx = 0; opt_idx < opts.size(); ++opt_idx){
+            for (int j=opts[opt_idx]->start_idx; j < opts[opt_idx]->stop_idx; ++j){
+                value = -edata_cpu->leaf_data->values[value_idx + j] * opts[opt_idx]->scheduler->get_lr(tree_idx);
+                exp_data->leaf_values[value_idx + j] = value;
+            }
+        }
+    }
+
+#ifdef USE_CUDA
+    if (device == gpu){
+        ensemble_data_dealloc(edata_cpu);
+    }
+#endif 
+
+    return exp_data;
+}
+
 void export_ensemble_data(std::ofstream& header_file, const std::string& model_name, ensembleData *edata, ensembleMetaData *metadata, deviceType device, std::vector<Optimizer*> opts, exportFormat export_format, exportType export_type, const std::string &prefix)
 {
     std::string type_name;
@@ -786,7 +857,7 @@ void export_ensemble_data(std::ofstream& header_file, const std::string& model_n
     header_file << "#define " << prefix << "BINARY_FEATURES " << binary_splits << "\n";
     header_file << "#define N_INPUTS " << metadata->input_dim << "\n";
     header_file << "#define " << prefix << "N_OUTPUTS " << metadata->output_dim << "\n";
-    header_file << "#define " << prefix << "N_FEATURES " << metadata->n_num_features  << "\n\n";
+    header_file << "#define " << prefix << "NUM_FEATURES " << metadata->n_num_features  << "\n\n";
     if (metadata->output_dim > 1){
         header_file << "static inline void gbrl_predict(" << type_name << " *results, const " << type_name << " *features){\n\n";
     } else {
