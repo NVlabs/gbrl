@@ -102,8 +102,8 @@ class BaseLearner(ABC):
 
         self.n_objs = self.params['n_objs']
 
-        if 'lamba_objs' in params:
-            lambda_objs = params['lamba_objs']
+        if 'lambda_objs' in params:
+            lambda_objs = params['lambda_objs']
             assert len(lambda_objs) == self.n_objs, \
                 "Length of lambda_objs must match number of objectives"
             self.lambda_objs = np.ascontiguousarray(np.array(lambda_objs,

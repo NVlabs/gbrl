@@ -40,6 +40,7 @@
 #include "loss.h"
 #include "split_candidate_generator.h"
 #include "types.h"
+#include "ensemble_io.h"
 
 #ifdef USE_CUDA
 #include "cuda_types.h"

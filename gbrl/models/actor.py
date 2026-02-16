@@ -143,7 +143,8 @@ class ParametricActor(BaseGBT):
         self.grads = policy_grads
         self.input = None
 
-    def __call__(self, observations: NumericalData,
+    def __call__(self,
+                 observations: NumericalData,
                  requires_grad: bool = True, start_idx: Optional[int] = None,
                  stop_idx: Optional[int] = None, tensor: bool = True) -> NumericalData:
         """
