@@ -123,14 +123,23 @@ class MultiGBTLearner(BaseLearner):
 
         self._cpp_models = []
         params = self.params.copy()
+        self.n_objs_per_model = []
         for i in range(self.n_learners):
             params['input_dim'] = self.input_dim   # type: ignore
             if isinstance(self.output_dim, list):
                 params['output_dim'] = self.output_dim[i]   # type: ignore
                 params['policy_dim'] = self.policy_dim[i]   # type: ignore
+            # Non-policy models (critic) use n_objs=1 since they only
+            # learn from a single objective (e.g. value returns).
+            if i > 0 and self.n_objs > 1:
+                params['n_objs'] = 1
+            else:
+                params['n_objs'] = self.n_objs
+            self.n_objs_per_model.append(params['n_objs'])
             cpp_model = GBRL_CPP(**params, learner_name=self.learner_names[i])
             cpp_model.set_feature_weights(self.feature_weights)
-            cpp_model.set_lambda_objs(self.lambda_objs)
+            model_lambda = self.lambda_objs[:params['n_objs']]
+            cpp_model.set_lambda_objs(model_lambda)
             if self.student_models is not None:
                 self.optimizers[i]['T'] -= self.total_iterations
             try:
@@ -178,7 +187,8 @@ class MultiGBTLearner(BaseLearner):
 
         if model_idx is not None:
             assert not isinstance(grads, list), "When model_idx is specified, grads should not be a list"
-            grads = grads.reshape((self.n_objs, len(inputs), self.output_dim[model_idx]))  # type: ignore
+            model_n_objs = self.n_objs_per_model[model_idx] if hasattr(self, 'n_objs_per_model') else self.n_objs
+            grads = grads.reshape((model_n_objs, len(inputs), self.output_dim[model_idx]))  # type: ignore
 
             self._memory = []
             self._cpp_models[model_idx].step(obs=self.transform_data(num_inputs),
@@ -196,9 +206,10 @@ class MultiGBTLearner(BaseLearner):
                 "When obj_labels is provided, obj_idx must also be provided"
             self._memory = []
             for i in range(self.n_learners):
+                model_n_objs = self.n_objs_per_model[i] if hasattr(self, 'n_objs_per_model') else self.n_objs
                 if i == obj_idx:
                     model_labels = obj_labels
-                    model_grads = grads[i].reshape((self.n_objs, len(inputs), self.output_dim[i]))  # type: ignore
+                    model_grads = grads[i].reshape((model_n_objs, len(inputs), self.output_dim[i]))  # type: ignore
                 else:
                     model_labels = None
                     model_grads = grads[i]
