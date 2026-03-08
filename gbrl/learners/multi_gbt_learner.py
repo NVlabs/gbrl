@@ -425,8 +425,14 @@ class MultiGBTLearner(BaseLearner):
                                metadata['use_control_variates'],
                                }
 
-            instance.iteration = metadata['iteration']
+            instance.iteration = [metadata['iteration']] * n_learners
             instance.total_iterations = metadata['iteration']
+            # Restore per-model n_objs: actor uses n_objs, critic uses 1
+            # (matches __init__ logic for separate actor-critic learners)
+            instance.n_objs_per_model = [
+                instance.n_objs if i == 0 else min(1, instance.n_objs)
+                for i in range(n_learners)
+            ]
             instance.student_models = None
             instance.feature_weights = instance._cpp_models[0].get_feature_weights()
             instance.feature_mapping = instance._cpp_models[0].get_feature_mapping()
