@@ -416,7 +416,8 @@ __global__ void reduce_leaf_sum(
     const TreeNodeGPU* __restrict__ node,
     const int n_samples,                   // Global sample count (loop limit)
     const int global_idx,                  // Offset into 'values' array
-    const int n_objs
+    const int n_objs,
+    const int policy_dim                   // Dims < policy_dim get weighted mixture; dims >= policy_dim use plain mean from obj 0
 );
 
 /**

@@ -1563,7 +1563,8 @@ __global__ void reduce_leaf_sum(
     const TreeNodeGPU* __restrict__ node,
     const int n_samples,                   // Global sample count (loop limit)
     const int global_idx,                  // Offset into 'values' array
-    const int n_objs
+    const int n_objs,
+    const int policy_dim                   // Dims < policy_dim get weighted mixture; dims >= policy_dim use plain mean from obj 0
 ) {
     // Dynamic Shared Memory Layout:
     // 1. Sums for each objective: [n_objs * blockDim.x]
@@ -1658,20 +1659,24 @@ __global__ void reduce_leaf_sum(
             float total_count = s_count[0];
             
             if (total_count > 0.0f) {
-                float weighted_value = 0.0f;
+                float leaf_value;
 
-                // Weighted Mixture of Means
-                // V = Sum( c_k * (Sum_G_k / N) )
-                for (int k = 0; k < n_objs; ++k) {
-                    float total_sum_k = s_sums[k * blockDim.x];
-                    float mean_k = total_sum_k / total_count;
-                    
-                    weighted_value += mean_k * node->densities[k] * lambda_objs[k];
-    // #ifdef DEBUG
-    //             printf("N_objectives: %d, k: %d, Leaf Dim %d: Count = %f, Weighted Value = %f, total_sum_k: %f mean_k: %f, node->densities[%d]: %f\n", n_objs, k, d, total_count, weighted_value, total_sum_k, mean_k, k, node->densities[k]);
-    // #endif 
+                if (d < policy_dim) {
+                    // Policy dimensions: weighted mixture across objectives
+                    // V = Sum( density_k * lambda_k * (Sum_G_k / N) )
+                    leaf_value = 0.0f;
+                    for (int k = 0; k < n_objs; ++k) {
+                        float total_sum_k = s_sums[k * blockDim.x];
+                        float mean_k = total_sum_k / total_count;
+                        leaf_value += mean_k * node->densities[k] * lambda_objs[k];
+                    }
+                } else {
+                    // Critic dimensions (d >= policy_dim): plain mean from objective 0 only.
+                    // Other objectives have zero-padded grads here, so the weighted
+                    // mixture would incorrectly attenuate the real critic gradients.
+                    leaf_value = s_sums[0] / total_count;
                 }
-                values[global_idx + d] = weighted_value;
+                values[global_idx + d] = leaf_value;
             }
         }
 }
@@ -2046,7 +2051,7 @@ void add_leaf_node(
         return;
     }
     
-    reduce_leaf_sum<<<metadata->output_dim, threads_per_block, shared_mem>>>(dataset->obs->data, dataset->categorical_obs->data, dataset->grads->data, edata->leaf_data->values, edata->multi_objective_data->lambda_objs, node, dataset->n_samples, leaf_idx*metadata->output_dim, metadata->n_objs);
+    reduce_leaf_sum<<<metadata->output_dim, threads_per_block, shared_mem>>>(dataset->obs->data, dataset->categorical_obs->data, dataset->grads->data, edata->leaf_data->values, edata->multi_objective_data->lambda_objs, node, dataset->n_samples, leaf_idx*metadata->output_dim, metadata->n_objs, metadata->policy_dim);
     cudaDeviceSynchronize();
        
     metadata->n_leaves += 1;
