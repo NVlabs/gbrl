@@ -74,7 +74,7 @@ shap = ">=0.40.0"
 matplotlib = ">=3.5.0"
 jinja2 = ">=3.1.6"
 setuptools = ">=78.1.1"
-Pillow = ">=11.3.0"
+Pillow = ">=10.3.0, !=12.1.1"
 fonttools = ">=4.60.2"
 filelock = ">=3.20.1"
 
