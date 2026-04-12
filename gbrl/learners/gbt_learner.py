@@ -81,6 +81,20 @@ class GBTLearner(BaseLearner):
         self.student_model = None
         self.learner_name = name
 
+        # Validate: Linear LR scheduler is not supported with greedy trees on GPU
+        grow_policy = tree_struct.get('grow_policy', 'greedy').lower()
+        if device == 'cuda' and grow_policy != 'oblivious':
+            for opt in self.optimizers:
+                sched = opt.get('scheduler', 'Const')
+                init_lr = opt.get('init_lr', opt.get('lr', 1.0))
+                is_linear = (isinstance(sched, str) and sched.lower() == 'linear') or \
+                            (isinstance(init_lr, str) and 'lin_' in init_lr)
+                if is_linear:
+                    raise ValueError(
+                        f"Linear LR scheduler is not supported with grow_policy='{grow_policy}' on GPU. "
+                        "Use scheduler='Const' or switch to grow_policy='oblivious'."
+                    )
+
     def reset(self) -> None:
         """
         Resets the learner to its initial state,
@@ -123,7 +137,7 @@ class GBTLearner(BaseLearner):
             for opt in self.optimizers:
                 self._cpp_model.set_optimizer(**opt)
         except RuntimeError as e:
-            print(f"Caught an exception in GBRL: {e}")
+            raise RuntimeError(f"Failed to set optimizer in GBRL C++ backend: {e}") from e
 
     def step(self,
              inputs: NumericalData,
