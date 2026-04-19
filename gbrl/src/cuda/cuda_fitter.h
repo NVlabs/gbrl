@@ -508,12 +508,14 @@ __global__ void lexicographic_guidance_impurity(
  * 
  * @param node Child node to update (guidance_percent written here)
  * @param parent_node Parent node containing sample indices
- * @param obj_labels Guidance label array for all samples
+ * @param obj_labels Guidance label bitmask array for all samples
+ * @param n_objs Number of objectives (used for popcount weighting)
  */
 __global__ void calc_node_densities_kernel(
     TreeNodeGPU* __restrict__ node,
     const TreeNodeGPU* __restrict__ parent_node,
-    const float* __restrict__ obj_labels);
+    const float* __restrict__ obj_labels,
+    const int n_objs);
 /**
  * @brief CUDA kernel to compute cosine-based node score
  * 

@@ -170,6 +170,53 @@ def to_numpy(arr: NumericalData) -> np.ndarray:
     return np.ascontiguousarray(arr, dtype=numerical_dtype)
 
 
+def labels_to_bitmask(obj_labels: Union[NumericalData, list]) -> NumericalData:
+    """Convert objective labels to bitmask encoding.
+
+    Supports three input formats:
+      1. Flat (N,) array of integer labels (single label per sample):
+         [0, 1, 0] -> bitmask [1, 2, 1]   (label k -> bit k set)
+      2. Binary matrix (N, n_objs) (multi-hot):
+         [[1,1], [0,1], [1,0]] -> bitmask [3, 2, 1]
+      3. List of lists (ragged, multi-label):
+         [[0,1], [1], [0]] -> bitmask [3, 2, 1]
+
+    Returns the same type as input (np.ndarray or th.Tensor), shape (N,), dtype float32.
+    Each value is an integer-valued float whose bits indicate objective membership.
+    """
+    is_tensor = isinstance(obj_labels, th.Tensor)
+
+    # Case 3: ragged list of lists -> convert to numpy bitmask
+    if isinstance(obj_labels, list) and len(obj_labels) > 0 and isinstance(obj_labels[0], (list, tuple, np.ndarray)):
+        n_samples = len(obj_labels)
+        bitmask = np.zeros(n_samples, dtype=np.float32)
+        for i, label_set in enumerate(obj_labels):
+            for k in label_set:
+                bitmask[i] += float(1 << int(k))
+        return th.tensor(bitmask, dtype=th.float32) if is_tensor else bitmask
+
+    # Convert to numpy for uniform handling
+    if is_tensor:
+        arr = obj_labels.detach().cpu().numpy()
+    else:
+        arr = np.asarray(obj_labels)
+
+    if arr.ndim == 1:
+        # Case 1: flat array of single integer labels
+        bitmask = (1 << arr.astype(np.int32)).astype(np.float32)
+    elif arr.ndim == 2:
+        # Case 2: (N, n_objs) binary matrix
+        n_samples, n_objs = arr.shape
+        powers = (1 << np.arange(n_objs, dtype=np.int32))  # [1, 2, 4, ...]
+        bitmask = (arr.astype(np.int32) @ powers).astype(np.float32)
+    else:
+        raise ValueError(f"obj_labels must be 1D or 2D, got {arr.ndim}D")
+
+    if is_tensor:
+        return th.tensor(bitmask, dtype=th.float32, device=obj_labels.device)
+    return bitmask
+
+
 def normalize_vector_input(data: Union[float, NumericalData]) -> Union[np.ndarray, TensorInfo]:
     """
     Normalizes scalar, numpy array, or torch tensor input to a 1D vector for C++ pybind.

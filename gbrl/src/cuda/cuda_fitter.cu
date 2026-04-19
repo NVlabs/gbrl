@@ -1857,7 +1857,7 @@ TreeNodeGPU* allocate_root_tree_node(
         int threads_per_block;
         get_tpb_dimensions(dataset->n_samples, metadata->n_objs, threads_per_block);
         size_t shared_mem_size = threads_per_block * sizeof(float);
-        calc_node_densities_kernel<<<metadata->n_objs, threads_per_block, shared_mem_size, stream>>>(node, nullptr, dataset->obj_labels->data);
+        calc_node_densities_kernel<<<metadata->n_objs, threads_per_block, shared_mem_size, stream>>>(node, nullptr, dataset->obj_labels->data, metadata->n_objs);
     }
 
     const dim3 n_threads_per_blockdim3(BLOCK_COLS, BLOCK_ROWS);
@@ -1984,8 +1984,8 @@ void allocate_child_tree_nodes(
     if (dataset->obj_labels->data != nullptr){
         get_tpb_dimensions(n_samples, metadata->n_objs, threads_per_block);
         size_t shared_mem_size = threads_per_block * sizeof(float);
-        calc_node_densities_kernel<<<metadata->n_objs, threads_per_block, shared_mem_size, stream>>>(*left_child, parent_node, dataset->obj_labels->data);
-        calc_node_densities_kernel<<<metadata->n_objs, threads_per_block, shared_mem_size, stream>>>(*right_child, parent_node, dataset->obj_labels->data);
+        calc_node_densities_kernel<<<metadata->n_objs, threads_per_block, shared_mem_size, stream>>>(*left_child, parent_node, dataset->obj_labels->data, metadata->n_objs);
+        calc_node_densities_kernel<<<metadata->n_objs, threads_per_block, shared_mem_size, stream>>>(*right_child, parent_node, dataset->obj_labels->data, metadata->n_objs);
     }
 
     const dim3 n_threads_per_blockdim3(BLOCK_COLS, BLOCK_ROWS);
@@ -2298,7 +2298,8 @@ __global__ void update_child_nodes_kernel(
 __global__ void calc_node_densities_kernel(
     TreeNodeGPU* __restrict__ node,
     const TreeNodeGPU* __restrict__ parent_node,
-    const float* __restrict__ obj_labels){
+    const float* __restrict__ obj_labels,
+    const int n_objs){
 
     int obj_idx = blockIdx.x;
 
@@ -2311,8 +2312,10 @@ __global__ void calc_node_densities_kernel(
 
     for (int idx = threadIdx.x; idx < node->n_samples; idx += blockDim.x) {
         int sample_idx = node->sample_indices[idx];
-        if (static_cast<int>(obj_labels[sample_idx]) == obj_idx)
-            s_label_count[threadIdx.x] += 1;
+        int label_bits = static_cast<int>(obj_labels[sample_idx]);
+        int n_bits = __popc(label_bits);
+        if (n_bits > 0 && ((label_bits >> obj_idx) & 1))
+            s_label_count[threadIdx.x] += 1.0f / static_cast<float>(n_bits);
     }
     __syncthreads();
     // tree reduction

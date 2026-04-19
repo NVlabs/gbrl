@@ -36,9 +36,9 @@ from gbrl import GBRL_CPP
 from gbrl.common.compression import ParametricActorCompression, TreeCompression
 from gbrl.common.utils import (NumericalData, concatenate_arrays,
                                ensure_leaf_tensor_or_array, get_poly_vectors,
-                               normalize_vector_input, numerical_dtype,
-                               preprocess_features, process_monotonic_constraints,
-                               to_numpy)
+                               labels_to_bitmask, normalize_vector_input,
+                               numerical_dtype, preprocess_features,
+                               process_monotonic_constraints, to_numpy)
 from gbrl.learners.base import BaseLearner
 
 
@@ -168,6 +168,9 @@ class GBTLearner(BaseLearner):
 
         if obj_labels is not None and (obj_labels == 0).all():
             obj_labels = None
+
+        if obj_labels is not None:
+            obj_labels = labels_to_bitmask(obj_labels)
 
         if isinstance(grads, tuple):
             grads = concatenate_arrays(grads, axis=-1)
