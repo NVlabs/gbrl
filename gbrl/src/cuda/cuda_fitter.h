@@ -875,7 +875,8 @@ __global__ void split_impurity_penalty_kernel(
     const bool* __restrict__ candidate_numeric,
     const int n_candidates,
     const int global_n_samples,
-    const float lambda_penalty
+    const float lambda_penalty,
+    const int n_objs
 );
 
 #endif

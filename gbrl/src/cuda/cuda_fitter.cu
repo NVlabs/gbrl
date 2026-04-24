@@ -86,14 +86,14 @@ void calc_oblivious_parallelism(
     size_t floats_per_thread = 0;
 
     if (split_score_func == Cosine) {
-        // [Mean L/R (Vector)] + [Count L/R, Dot L/R (Scalar)] + [Label Stats (6)]
-        // 2 * n_objs * dim + 4 * n_objs + 6
-        floats_per_thread = 2 * n_objs * (output_dim + 2) + 6;
+        // [Mean L/R (Vector)] + [Count L/R, Dot L/R (Scalar)] + [Label Counts (2*n_objs)]
+        // 2 * n_objs * dim + 4 * n_objs + 2 * n_objs
+        floats_per_thread = 2 * n_objs * (output_dim + 3);
     } 
     else if (split_score_func == L2) {
-        // [Sum L/R (Vector)] + [Count L/R (Scalar)] + [Label Stats (6)]
-        // 2 * n_objs * dim + 2 * n_objs + 6
-        floats_per_thread = 2 * n_objs * (output_dim + 1) + 6;
+        // [Sum L/R (Vector)] + [Count L/R (Scalar)] + [Label Counts (2*n_objs)]
+        // 2 * n_objs * dim + 2 * n_objs + 2 * n_objs
+        floats_per_thread = 2 * n_objs * (output_dim + 2);
     }
 
     shared_mem = floats_per_thread * sizeof(float);
@@ -335,7 +335,7 @@ void evaluate_greedy_splits(
         );
 
         get_tpb_dimensions(candidata->n_candidates * parent_n_samples, candidata->n_candidates, tpb);
-        size_t shared_mem = sizeof(float) * 6 * tpb;
+        size_t shared_mem = sizeof(float) * 2 * metadata->n_objs * tpb;
         split_impurity_penalty_kernel<<<candidata->n_candidates, tpb, shared_mem, stream>>>(
             dataset->obj_labels->data,
             dataset->obs->data,
@@ -348,7 +348,8 @@ void evaluate_greedy_splits(
             candidata->candidate_numeric,
             candidata->n_candidates,
             dataset->n_samples,
-            metadata->lambda_penalty
+            metadata->lambda_penalty,
+            metadata->n_objs
         );
     }
 
@@ -561,8 +562,9 @@ __global__ void split_score_cosine_cuda(
         }
     }
 
-    // Layout: [L_c, L_s, L_sq, R_c, R_s, R_sq]
-    for(int i=0; i<6; ++i) s_labels[threadIdx.x*6 + i] = 0.0f;
+    // Layout: [L_0..L_{K-1}, R_0..R_{K-1}] — per-label counts for categorical impurity
+    int label_stride = 2 * n_objs;
+    for(int i=0; i<label_stride; ++i) s_labels[threadIdx.x*label_stride + i] = 0.0f;
 
     
     // Accumulate per thread partial sum
@@ -571,10 +573,10 @@ __global__ void split_score_cosine_cuda(
         bool passed = candidate_numeric[cand_idx] && __ldg(&obs[sample_idx +  global_n_samples * __ldg(&candidate_indices[cand_idx])]) > __ldg(&candidate_values[cand_idx]);
         passed = passed || (!candidate_numeric[cand_idx] && strcmpCuda(&categorical_obs[(sample_idx*node->n_cat_features + __ldg(&candidate_indices[cand_idx]))* MAX_CHAR_SIZE], candidate_categories + cand_idx * MAX_CHAR_SIZE) == 0);
         
-        float lbl = (obj_labels) ? __ldg(&obj_labels[sample_idx]) : 0.0f;
+        int lbl = obj_labels ? static_cast<int>(__ldg(&obj_labels[sample_idx])) : 0;
         if (passed){
-            // Label Stats
-            s_labels[threadIdx.x*6 + 3] += 1.0f; s_labels[threadIdx.x*6 + 4] += lbl; s_labels[threadIdx.x*6 + 5] += lbl*lbl;
+            // Per-label count (Right)
+            s_labels[threadIdx.x*label_stride + n_objs + lbl] += 1.0f;
             for (int k = 0; k < n_objs; ++k){
                 size_t g_base = (size_t)k * global_n_samples * n_cols + (size_t)sample_idx * n_cols;
                 int s_base = threadIdx.x * vec_stride + k * n_cols;
@@ -587,7 +589,8 @@ __global__ void split_score_cosine_cuda(
         } 
         else {
 
-            s_labels[threadIdx.x*6 + 0] += 1.0f; s_labels[threadIdx.x*6 + 1] += lbl; s_labels[threadIdx.x*6 + 2] += lbl*lbl;
+            // Per-label count (Left)
+            s_labels[threadIdx.x*label_stride + lbl] += 1.0f;
             for (int k = 0; k < n_objs; ++k){
                 size_t g_base = (size_t)k * global_n_samples * n_cols + (size_t)sample_idx * n_cols;
                 int s_base = threadIdx.x * vec_stride + k * n_cols;
@@ -605,7 +608,7 @@ __global__ void split_score_cosine_cuda(
         if(threadIdx.x < offset) {
 
             // Reduce Labels
-            for(int j=0; j<6; ++j) s_labels[threadIdx.x*6 + j] += s_labels[(threadIdx.x+offset)*6 + j];
+            for(int j=0; j<label_stride; ++j) s_labels[threadIdx.x*label_stride + j] += s_labels[(threadIdx.x+offset)*label_stride + j];
             
             for (int k = 0; k < n_objs; ++k){
 
@@ -729,16 +732,25 @@ __global__ void split_score_cosine_cuda(
 
         float penalty = 0.0f;
         if (obj_labels != nullptr && node->conflict_rho > 1e-6f) {
-            float lc = s_labels[0], ls = s_labels[1], lsq = s_labels[2];
-            float rc = s_labels[3], rs = s_labels[4], rsq = s_labels[5];
-            
-            float l_sse = (lc > 0) ? (lsq - (ls*ls)/lc) : 0.0f;
-            float r_sse = (rc > 0) ? (rsq - (rs*rs)/rc) : 0.0f;
-            float pc = lc+rc, ps = ls+rs, psq = lsq+rsq;
-            float p_sse = (pc > 0) ? (psq - (ps*ps)/pc) : 0.0f;
+            float lc = 0.0f, rc = 0.0f, l_sq_cnt = 0.0f, r_sq_cnt = 0.0f, p_sq_cnt = 0.0f;
+            for (int k = 0; k < n_objs; ++k) {
+                float lk = s_labels[k];
+                float rk = s_labels[n_objs + k];
+                lc += lk;
+                rc += rk;
+                l_sq_cnt += lk * lk;
+                r_sq_cnt += rk * rk;
+                float pk = lk + rk;
+                p_sq_cnt += pk * pk;
+            }
+            float pc = lc + rc;
+
+            float l_sse = (lc > 1e-6f) ? (lc - l_sq_cnt / lc) : 0.0f;
+            float r_sse = (rc > 1e-6f) ? (rc - r_sq_cnt / rc) : 0.0f;
+            float p_sse = (pc > 1e-6f) ? (pc - p_sq_cnt / pc) : 0.0f;
 
             float H = (p_sse > 1e-10f) ? (l_sse + r_sse) / p_sse : 0.0f;
-            if (H > 1.0f) H = 1.0f;
+            H = fminf(1.0f, fmaxf(0.0f, H));
 
             penalty = lambda_penalty * node->conflict_rho * H;
             if (penalty > 1.0f) penalty = 1.0f;
@@ -816,8 +828,9 @@ __global__ void split_score_l2_cuda(
     float* r_count = &sdata[thread_offset]; // Assuming each part is n_cols floats long
     thread_offset += threads_per_block * n_objs;
 
-    // Label Stats (L_c, L_s, L_sq, R_c, R_s, R_sq)
+    // Label Stats (per-label counts): [L_0..L_{K-1}, R_0..R_{K-1}]
     float *s_labels = &sdata[thread_offset];
+    int label_stride = 2 * n_objs;
 
 for (int k = 0; k < n_objs; ++k){
         l_count[threadIdx.x * n_objs + k] = 0.0f;
@@ -827,21 +840,20 @@ for (int k = 0; k < n_objs; ++k){
             left_sum[threadIdx.x*vec_stride + k * n_cols + d] = 0.0f;
         }
     }
-    // Init Labels
-    for(int i=0; i<6; ++i) s_labels[threadIdx.x*6 + i] = 0.0f;
+    // Init Labels: per-label counts [L_0..L_{K-1}, R_0..R_{K-1}]
+    for(int i=0; i<label_stride; ++i) s_labels[threadIdx.x*label_stride + i] = 0.0f;
 
     __syncthreads();
     // Accumulate per thread partial sum
     for(int i=threadIdx.x; i < n_samples; i += blockDim.x) {
         int sample_idx = __ldg(&node->sample_indices[i]); // Access the spec
 
-        float lbl = (obj_labels) ? __ldg(&obj_labels[sample_idx]) : 0.0f;
+        int lbl = obj_labels ? static_cast<int>(__ldg(&obj_labels[sample_idx])) : 0;
 
         if ((candidate_numeric[cand_idx] && __ldg(&obs[__ldg(&candidate_indices[cand_idx])*global_n_samples + sample_idx]) > __ldg(&candidate_values[cand_idx])) || (!candidate_numeric[cand_idx] && strcmpCuda(&categorical_obs[(sample_idx*node->n_cat_features + __ldg(&candidate_indices[cand_idx]))* MAX_CHAR_SIZE], candidate_categories + cand_idx * MAX_CHAR_SIZE) == 0)){
             
-            s_labels[threadIdx.x*6 + 3] += 1.0f; 
-            s_labels[threadIdx.x*6 + 4] += lbl; 
-            s_labels[threadIdx.x*6 + 5] += lbl*lbl;
+            // Per-label count (Right)
+            s_labels[threadIdx.x*label_stride + n_objs + lbl] += 1.0f;
 
             for (int k = 0; k < n_objs; ++k){
                 size_t g_base = (size_t)k * global_n_samples * n_cols + (size_t)sample_idx * n_cols;
@@ -853,10 +865,8 @@ for (int k = 0; k < n_objs; ++k){
                 }
             }
         } else {
-            // Label Stats (Left)
-            s_labels[threadIdx.x*6 + 0] += 1.0f; 
-            s_labels[threadIdx.x*6 + 1] += lbl; 
-            s_labels[threadIdx.x*6 + 2] += lbl*lbl;
+            // Per-label count (Left)
+            s_labels[threadIdx.x*label_stride + lbl] += 1.0f;
 
             for (int k = 0; k < n_objs; ++k){
                 size_t g_base = (size_t)k * global_n_samples * n_cols + (size_t)sample_idx * n_cols;
@@ -875,7 +885,7 @@ for (int k = 0; k < n_objs; ++k){
     for(int offset = blockDim.x / 2; offset > 0; offset >>= 1) {
         if(threadIdx.x < offset) {
             // Reduce Labels
-            for(int j=0; j<6; ++j) s_labels[threadIdx.x*6 + j] += s_labels[(threadIdx.x + offset)*6 + j];
+            for(int j=0; j<label_stride; ++j) s_labels[threadIdx.x*label_stride + j] += s_labels[(threadIdx.x + offset)*label_stride + j];
 
             // Reduce Sums and Counts
             for (int k = 0; k < n_objs; ++k){
@@ -950,19 +960,28 @@ for (int k = 0; k < n_objs; ++k){
             // Weighted Sum
             total_gain += (l_gain + r_gain) * node->densities[k] * lambda_objs[k];
         }
-        // --- SPLIT-RL Penalty (Impurity H) ---
+        // --- SPLIT-RL Penalty (Categorical Impurity H) ---
         float penalty = 0.0f;
         if (obj_labels != nullptr && node->conflict_rho > 1e-6f) {
-            float lc = s_labels[0], ls = s_labels[1], lsq = s_labels[2];
-            float rc = s_labels[3], rs = s_labels[4], rsq = s_labels[5];
-            
-            float l_sse = (lc > 0) ? (lsq - (ls*ls)/lc) : 0.0f;
-            float r_sse = (rc > 0) ? (rsq - (rs*rs)/rc) : 0.0f;
-            float pc = lc+rc, ps = ls+rs, psq = lsq+rsq;
-            float p_sse = (pc > 0) ? (psq - (ps*ps)/pc) : 0.0f;
+            float lc = 0.0f, rc = 0.0f, l_sq_cnt = 0.0f, r_sq_cnt = 0.0f, p_sq_cnt = 0.0f;
+            for (int k = 0; k < n_objs; ++k) {
+                float lk = s_labels[k];
+                float rk = s_labels[n_objs + k];
+                lc += lk;
+                rc += rk;
+                l_sq_cnt += lk * lk;
+                r_sq_cnt += rk * rk;
+                float pk = lk + rk;
+                p_sq_cnt += pk * pk;
+            }
+            float pc = lc + rc;
+
+            float l_sse = (lc > 1e-6f) ? (lc - l_sq_cnt / lc) : 0.0f;
+            float r_sse = (rc > 1e-6f) ? (rc - r_sq_cnt / rc) : 0.0f;
+            float p_sse = (pc > 1e-6f) ? (pc - p_sq_cnt / pc) : 0.0f;
 
             float H = (p_sse > 1e-10f) ? (l_sse + r_sse) / p_sse : 0.0f;
-            if (H > 1.0f) H = 1.0f;
+            H = fminf(1.0f, fmaxf(0.0f, H));
 
             penalty = lambda_penalty * node->conflict_rho * H;
             if (penalty > 1.0f) penalty = 1.0f;
@@ -986,7 +1005,8 @@ __global__ void split_impurity_penalty_kernel(
     const bool* __restrict__ candidate_numeric,
     const int n_candidates,
     const int global_n_samples,
-    const float lambda_penalty)
+    const float lambda_penalty,
+    const int n_objs)
 {
     // One block per candidate
     int cand_idx = blockIdx.x;
@@ -1004,20 +1024,16 @@ __global__ void split_impurity_penalty_kernel(
     // --- SHARED MEMORY SETUP ---
     extern __shared__ float sdata[];
     
-    // Layout: 6 arrays of size [blockDim.x]
-    // 0:L_Count, 1:L_Sum, 2:L_SqSum, 3:R_Count, 4:R_Sum, 5:R_SqSum
+    // Layout: 2*n_objs arrays of size [blockDim.x]
+    // [L_0, L_1, ..., L_{K-1}, R_0, R_1, ..., R_{K-1}]  — per-label counts
     int bdim = blockDim.x;
-    
-    float* l_count  = &sdata[0];
-    float* l_sum    = &sdata[bdim];
-    float* l_sq     = &sdata[bdim * 2];
-    float* r_count  = &sdata[bdim * 3];
-    float* r_sum    = &sdata[bdim * 4];
-    float* r_sq     = &sdata[bdim * 5];
+    // s_labels[k * bdim + threadIdx.x] = left count for label k
+    // s_labels[(n_objs + k) * bdim + threadIdx.x] = right count for label k
+    float* s_labels = sdata;
 
-    // Initialize Local Registers
-    l_count[threadIdx.x] = 0.0f; l_sum[threadIdx.x] = 0.0f; l_sq[threadIdx.x] = 0.0f;
-    r_count[threadIdx.x] = 0.0f; r_sum[threadIdx.x] = 0.0f; r_sq[threadIdx.x] = 0.0f;
+    // Initialize
+    for (int k = 0; k < 2 * n_objs; ++k)
+        s_labels[k * bdim + threadIdx.x] = 0.0f;
 
     __syncthreads();
 
@@ -1025,7 +1041,7 @@ __global__ void split_impurity_penalty_kernel(
     int n_samples = node->n_samples;
     for(int i = threadIdx.x; i < n_samples; i += bdim) {
         int sample_idx = __ldg(&node->sample_indices[i]);
-        float val = __ldg(&obj_labels[sample_idx]); // Renamed access
+        int lbl = static_cast<int>(__ldg(&obj_labels[sample_idx]));
         
         // Check Split
         bool is_greater = false;
@@ -1039,13 +1055,9 @@ __global__ void split_impurity_penalty_kernel(
         }
 
         if (is_greater) {
-            r_count[threadIdx.x] += 1.0f;
-            r_sum[threadIdx.x]   += val;
-            r_sq[threadIdx.x]    += val * val;
+            s_labels[(n_objs + lbl) * bdim + threadIdx.x] += 1.0f;
         } else {
-            l_count[threadIdx.x] += 1.0f;
-            l_sum[threadIdx.x]   += val;
-            l_sq[threadIdx.x]    += val * val;
+            s_labels[lbl * bdim + threadIdx.x] += 1.0f;
         }
     }
     __syncthreads();
@@ -1053,48 +1065,35 @@ __global__ void split_impurity_penalty_kernel(
     // 3. TREE REDUCTION
     for(int offset = bdim / 2; offset > 0; offset >>= 1) {
         if(threadIdx.x < offset) {
-            l_count[threadIdx.x] += l_count[threadIdx.x + offset];
-            l_sum[threadIdx.x]   += l_sum[threadIdx.x + offset];
-            l_sq[threadIdx.x]    += l_sq[threadIdx.x + offset];
-            
-            r_count[threadIdx.x] += r_count[threadIdx.x + offset];
-            r_sum[threadIdx.x]   += r_sum[threadIdx.x + offset];
-            r_sq[threadIdx.x]    += r_sq[threadIdx.x + offset];
+            for (int k = 0; k < 2 * n_objs; ++k)
+                s_labels[k * bdim + threadIdx.x] += s_labels[k * bdim + threadIdx.x + offset];
         }
         __syncthreads();
     }
 
     // 4. FINAL CALCULATION (Thread 0)
     if (threadIdx.x == 0) {
-        float lc = l_count[0];
-        float rc = r_count[0];
-        float ls = l_sum[0];
-        float rs = r_sum[0];
-        float lsq = l_sq[0];
-        float rsq = r_sq[0];
-
-        // SSE = Sum(x^2) - (Sum x)^2 / N
-        float l_sse = (lc > 1e-6f) ? (lsq - (ls * ls) / lc) : 0.0f;
-        float r_sse = (rc > 1e-6f) ? (rsq - (rs * rs) / rc) : 0.0f;
-        
-        // Parent SSE
-        float pc = lc + rc;
-        float ps = ls + rs;
-        float psq = lsq + rsq;
-        float p_sse = (pc > 1e-6f) ? (psq - (ps * ps) / pc) : 0.0f;
-
-        // H: Relative Impurity (Remaining Variance / Original Variance)
-        // Range: [0, 1]
-        float H_impurity = 1.0f; 
-        if (p_sse > 1e-10f) {
-            H_impurity = (l_sse + r_sse) / p_sse;
-        } else {
-            H_impurity = 0.0f;
+        float lc = 0.0f, rc = 0.0f, l_sq_cnt = 0.0f, r_sq_cnt = 0.0f, p_sq_cnt = 0.0f;
+        for (int k = 0; k < n_objs; ++k) {
+            float lk = s_labels[k * bdim];
+            float rk = s_labels[(n_objs + k) * bdim];
+            lc += lk;
+            rc += rk;
+            l_sq_cnt += lk * lk;
+            r_sq_cnt += rk * rk;
+            float pk = lk + rk;
+            p_sq_cnt += pk * pk;
         }
-        
-        // Clamp H
-        if (H_impurity > 1.0f) H_impurity = 1.0f;
-        if (H_impurity < 0.0f) H_impurity = 0.0f;
+        float pc = lc + rc;
+
+        // Categorical SSE = N - (sum count_k^2) / N
+        float l_sse = (lc > 1e-6f) ? (lc - l_sq_cnt / lc) : 0.0f;
+        float r_sse = (rc > 1e-6f) ? (rc - r_sq_cnt / rc) : 0.0f;
+        float p_sse = (pc > 1e-6f) ? (pc - p_sq_cnt / pc) : 0.0f;
+
+        // H: Relative Impurity (Remaining / Original)
+        float H_impurity = (p_sse > 1e-10f) ? (l_sse + r_sse) / p_sse : 0.0f;
+        H_impurity = fminf(1.0f, fmaxf(0.0f, H_impurity));
 
         // --- APPLY PENALTY ---
         // Score *= (1 - lambda * rho * H)
@@ -2312,10 +2311,9 @@ __global__ void calc_node_densities_kernel(
 
     for (int idx = threadIdx.x; idx < node->n_samples; idx += blockDim.x) {
         int sample_idx = node->sample_indices[idx];
-        int label_bits = static_cast<int>(obj_labels[sample_idx]);
-        int n_bits = __popc(label_bits);
-        if (n_bits > 0 && ((label_bits >> obj_idx) & 1))
-            s_label_count[threadIdx.x] += 1.0f / static_cast<float>(n_bits);
+        int lbl = static_cast<int>(obj_labels[sample_idx]);
+        if (lbl == obj_idx)
+            s_label_count[threadIdx.x] += 1.0f;
     }
     __syncthreads();
     // tree reduction
