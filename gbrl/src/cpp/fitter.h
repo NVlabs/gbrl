@@ -233,6 +233,28 @@ class Fitter {
             int tree_depth,
             int start_leaf_idx
         );
+        
+        /**
+         * @brief Initialize multi-objective fields on a TreeNode
+         * 
+         * Computes per-objective densities from labels and conflict rho
+         * from per-objective mean gradients for the given node.
+         * 
+         * @param node TreeNode to initialize
+         * @param obj_labels Per-sample objective labels (or nullptr)
+         * @param grads Build gradients (stacked: [n_objs, n_samples, output_dim])
+         * @param n_objs Number of objectives
+         * @param global_n_samples Global sample count for stacked grad stride
+         * @param output_dim Output dimensionality
+         */
+        static void init_node_multi_obj(
+            TreeNode *node,
+            const float *obj_labels,
+            const float *grads,
+            int n_objs,
+            int global_n_samples,
+            int output_dim
+        );
 };
 
 #endif // FITTER_H

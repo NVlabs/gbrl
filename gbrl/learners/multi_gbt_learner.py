@@ -184,6 +184,18 @@ class MultiGBTLearner(BaseLearner):
         if obj_labels is not None and (obj_labels == 0).all():
             obj_labels = None
 
+        if obj_labels is not None:
+            lbl_arr = obj_labels.detach().cpu().numpy() if isinstance(obj_labels, th.Tensor) else np.asarray(obj_labels)
+            max_lbl = int(lbl_arr.max())
+            min_lbl = int(lbl_arr.min())
+            assert min_lbl >= 0, (
+                f"obj_labels contains negative values (min={min_lbl}). "
+                f"Labels must be integers in [0, n_objs-1].")
+            assert max_lbl < self.n_objs, (
+                f"obj_labels contains label {max_lbl} but n_objs={self.n_objs}. "
+                f"Labels must be integers in [0, {self.n_objs - 1}]. "
+                f"Increase n_objs or fix the label assignment.")
+
         num_inputs, cat_inputs = preprocess_features(inputs)
 
         if model_idx is not None:

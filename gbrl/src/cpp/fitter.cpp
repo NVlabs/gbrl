@@ -50,17 +50,23 @@
 void Fitter::step_cpu(dataSet *dataset, ensembleData *edata, ensembleMetaData *metadata){
     const int output_dim = metadata->output_dim, par_th = metadata->par_th;
     const int n_trees = metadata->n_trees;
+    const int n_objs = metadata->n_objs;
     if (metadata->use_cv && n_trees > 0){
         Fitter::control_variates(dataset, edata, metadata);
     }
 
-    float *build_grads = copy_mat(dataset->grads->data, dataset->n_samples*output_dim, par_th);
+    // Copy all objectives' worth of gradients
+    float *build_grads = copy_mat(dataset->grads->data, dataset->n_samples*output_dim*n_objs, par_th);
     if (metadata->split_score_func == L2){
-        float *mean_grads = calculate_mean(build_grads, dataset->n_samples, output_dim, par_th);
-        float *std = calculate_std_and_center(build_grads, mean_grads, dataset->n_samples, output_dim, par_th);
-        divide_mat_by_vec_inplace(build_grads, std, dataset->n_samples, output_dim, par_th);
-        delete[] mean_grads;
-        delete[] std;
+        // Normalize each objective's gradient block independently
+        for (int k = 0; k < n_objs; ++k) {
+            float *obj_block = build_grads + (size_t)k * dataset->n_samples * output_dim;
+            float *mean_grads = calculate_mean(obj_block, dataset->n_samples, output_dim, par_th);
+            float *std = calculate_std_and_center(obj_block, mean_grads, dataset->n_samples, output_dim, par_th);
+            divide_mat_by_vec_inplace(obj_block, std, dataset->n_samples, output_dim, par_th);
+            delete[] mean_grads;
+            delete[] std;
+        }
     } 
 
     SplitCandidateGenerator generator = SplitCandidateGenerator(dataset->n_samples, metadata->n_num_features, metadata->n_cat_features, metadata->n_bins, metadata->par_th, metadata->generator_type);
@@ -271,6 +277,8 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
     int depth = 0, node_idx_cntr = 0, chosen_idx = 0;
     float best_score, parent_score = -INFINITY;
     int n_samples = dataset->n_samples;
+    const int n_objs = metadata->n_objs;
+    const bool multi_obj = (n_objs > 1);
 
     int added_leaves = 0;
 
@@ -279,6 +287,14 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
 
     std::vector<TreeNode*> tree_nodes; 
     TreeNode *rootNode = new TreeNode(root_sample_indices, n_samples, metadata->n_num_features, metadata->n_cat_features, metadata->output_dim, depth, 0);
+    
+    // Initialize multi-objective fields on root
+    if (multi_obj) {
+        Fitter::init_node_multi_obj(rootNode,
+            (dataset->obj_labels != nullptr) ? dataset->obj_labels->data : nullptr,
+            dataset->build_grads->data, n_objs, n_samples, metadata->output_dim);
+    }
+    
     tree_nodes.push_back(rootNode);
 
     int n_candidates = generator.n_candidates;
@@ -308,13 +324,17 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
 
         best_score = -INFINITY;
         if (to_split){
-            if (metadata->split_score_func == Cosine){
-                parent_score = scoreCosine(crnt_node->sample_indices, crnt_node->n_samples, dataset->build_grads->data, metadata->output_dim);
-            } else if (metadata->split_score_func == L2){
-                parent_score = scoreL2(crnt_node->sample_indices, crnt_node->n_samples, dataset->build_grads->data, metadata->output_dim);
-            } else{
-                std::cerr << "error invalid split score func!" << std::endl;
-                continue;
+            if (!multi_obj) {
+                if (metadata->split_score_func == Cosine){
+                    parent_score = scoreCosine(crnt_node->sample_indices, crnt_node->n_samples, dataset->build_grads->data, metadata->output_dim);
+                } else if (metadata->split_score_func == L2){
+                    parent_score = scoreL2(crnt_node->sample_indices, crnt_node->n_samples, dataset->build_grads->data, metadata->output_dim);
+                } else{
+                    std::cerr << "error invalid split score func!" << std::endl;
+                    continue;
+                }
+            } else {
+                parent_score = 0.0f;  // Multi-obj: gains are density-weighted, no parent subtraction needed
             }
 
             if (crnt_node->depth == 0)
@@ -332,7 +352,12 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
                 int end_idx = (thread_num == n_threads - 1) ? n_candidates : start_idx + batch_size;
                 // Process the batch of candidates
                 for (int j = start_idx; j < end_idx; ++j) {
-                    float score = crnt_node->getSplitScore(dataset, metadata->split_score_func, split_candidates[j], metadata->min_data_in_leaf);
+                    float score;
+                    if (multi_obj) {
+                        score = crnt_node->getSplitScoreMultiObj(dataset, metadata->split_score_func, split_candidates[j], metadata->min_data_in_leaf, metadata, edata);
+                    } else {
+                        score = crnt_node->getSplitScore(dataset, metadata->split_score_func, split_candidates[j], metadata->min_data_in_leaf);
+                    }
                     int feat_idx = (split_candidates[j].categorical_value == nullptr) ? split_candidates[j].feature_idx : split_candidates[j].feature_idx + metadata->n_num_features; 
                     score = score * edata->feature_data->feature_weights[feat_idx] - parent_score;
                     
@@ -366,6 +391,15 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
                 std::cerr << "ERROR couldn't split best score" << std::endl;
                 break;
             }
+            // Initialize multi-obj fields on children
+            if (multi_obj) {
+                Fitter::init_node_multi_obj(crnt_node->left_child,
+                    (dataset->obj_labels != nullptr) ? dataset->obj_labels->data : nullptr,
+                    dataset->build_grads->data, n_objs, n_samples, metadata->output_dim);
+                Fitter::init_node_multi_obj(crnt_node->right_child,
+                    (dataset->obj_labels != nullptr) ? dataset->obj_labels->data : nullptr,
+                    dataset->build_grads->data, n_objs, n_samples, metadata->output_dim);
+            }
             // assign node values
             tree_nodes.push_back(crnt_node->right_child);
             tree_nodes.push_back(crnt_node->left_child);
@@ -387,6 +421,8 @@ int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMe
     int depth = 0, node_idx_cntr = 0, chosen_idx = 0;
     float best_score;
     int n_samples = dataset->n_samples;
+    const int n_objs = metadata->n_objs;
+    const bool multi_obj = (n_objs > 1);
 
     int added_leaves = 0;
 
@@ -398,6 +434,14 @@ int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMe
     std::vector<TreeNode*> tree_nodes(max_n_leaves); 
     std::vector<TreeNode*> child_tree_nodes(max_n_leaves); 
     TreeNode *rootNode = new TreeNode(root_sample_indices, n_samples, metadata->n_num_features, metadata->n_cat_features, metadata->output_dim, depth, 0);
+    
+    // Initialize multi-objective fields on root
+    if (multi_obj) {
+        Fitter::init_node_multi_obj(rootNode,
+            (dataset->obj_labels != nullptr) ? dataset->obj_labels->data : nullptr,
+            dataset->build_grads->data, n_objs, n_samples, metadata->output_dim);
+    }
+    
     tree_nodes[0] = rootNode;
 
     int n_candidates = generator.n_candidates;
@@ -435,8 +479,9 @@ int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMe
                 
                 for (int node_idx = 0; node_idx < (1 << depth); ++node_idx){
                     TreeNode *crnt_node = tree_nodes[node_idx];
-                    // Use constraint-aware scoring if constraints exist
-                    if (metadata->n_mono_constraints > 0) {
+                    if (multi_obj) {
+                        score += crnt_node->getSplitScoreMultiObj(dataset, metadata->split_score_func, split_candidates[j], metadata->min_data_in_leaf, metadata, edata);
+                    } else if (metadata->n_mono_constraints > 0) {
                         score += crnt_node->getSplitScoreWithConstraints(
                             dataset, metadata->split_score_func, split_candidates[j], metadata->min_data_in_leaf,
                             global_feature_idx, edata->mono_constraints, metadata->n_mono_constraints
@@ -487,6 +532,12 @@ int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMe
         for (int node_idx = 0; node_idx < (1 << depth); ++node_idx){
             tree_nodes[node_idx] = child_tree_nodes[node_idx];
             child_tree_nodes[node_idx] = nullptr;
+            // Initialize multi-obj fields on new level nodes
+            if (multi_obj && tree_nodes[node_idx] != nullptr) {
+                Fitter::init_node_multi_obj(tree_nodes[node_idx],
+                    (dataset->obj_labels != nullptr) ? dataset->obj_labels->data : nullptr,
+                    dataset->build_grads->data, n_objs, n_samples, metadata->output_dim);
+            }
         }
     }
 
@@ -526,6 +577,10 @@ void Fitter::update_ensemble_per_leaf(ensembleData *edata, ensembleMetaData *met
             edata->leaf_data->edge_weights[row_idx + i] = node->split_conditions[i].edge_weight;
         }
     }
+    // Store per-leaf densities (computed during calc_leaf_value for multi-obj)
+    // Initialize to uniform for now; actual densities set in calc_leaf_value
+    for (int k = 0; k < metadata->n_objs; ++k)
+        edata->multi_objective_data->densities[idx * metadata->n_objs + k] = (k == 0) ? 1.0f : 0.0f;
     metadata->n_leaves += 1;
 }
 
@@ -552,6 +607,9 @@ void Fitter::update_ensemble_per_tree(ensembleData *edata, ensembleMetaData *met
                 edata->leaf_data->edge_weights[metadata->n_leaves*metadata->max_depth + i] = node->split_conditions[i].edge_weight;
             }
         }
+        // Initialize densities (actual values set in calc_leaf_value for multi-obj)
+        for (int k = 0; k < metadata->n_objs; ++k)
+            edata->multi_objective_data->densities[metadata->n_leaves * metadata->n_objs + k] = (k == 0) ? 1.0f : 0.0f;
         metadata->n_leaves += 1;
     }
 }
@@ -559,16 +617,39 @@ void Fitter::update_ensemble_per_tree(ensembleData *edata, ensembleMetaData *met
 
 void Fitter::calc_leaf_value(dataSet *dataset, ensembleData *edata, ensembleMetaData *metadata, const int leaf_idx, const int tree_idx){
     int output_dim = metadata->output_dim;
+    int policy_dim = metadata->policy_dim;
+    int n_objs = metadata->n_objs;
+    int n_samples = dataset->n_samples;
     const float *obs = dataset->obs->data, *grads = dataset->grads->data;
     const char *categorical_obs = dataset->categorical_obs->data;
+    const float *obj_labels = (dataset->obj_labels != nullptr) ? dataset->obj_labels->data : nullptr;
+    const float *lambda_objs = edata->multi_objective_data->lambda_objs;
     int depth = (metadata->grow_policy == OBLIVIOUS) ? edata->ensemble_info->depths[tree_idx] : edata->ensemble_info->depths[leaf_idx];
     int cond_idx = (metadata->grow_policy == OBLIVIOUS) ? tree_idx*metadata->max_depth : leaf_idx*metadata->max_depth;
     int ineq_cond = leaf_idx*metadata->max_depth;
     float count = 0;
     bool passed;
-    int idx, row_idx, cat_row_idx;
+    int row_idx, cat_row_idx;
 
-    for (int i = 0; i < dataset->n_samples; ++i){
+    bool multi_obj = (n_objs > 1);
+
+    // Per-objective gradient sums for density-weighted leaf values
+    float *obj_sums = nullptr;
+    float *leaf_densities = nullptr;
+    float *label_counts = nullptr;
+    if (multi_obj) {
+        obj_sums = new float[n_objs * output_dim];
+        leaf_densities = new float[n_objs];
+        label_counts = new float[n_objs];
+        for (int k = 0; k < n_objs; ++k) {
+            label_counts[k] = 0.0f;
+            leaf_densities[k] = 0.0f;
+            for (int d = 0; d < output_dim; ++d)
+                obj_sums[k * output_dim + d] = 0.0f;
+        }
+    }
+
+    for (int i = 0; i < n_samples; ++i){
         row_idx = i*metadata->n_num_features;
         cat_row_idx = i*metadata->n_cat_features;
         passed = false;
@@ -578,22 +659,136 @@ void Fitter::calc_leaf_value(dataSet *dataset, ensembleData *edata, ensembleMeta
                 break;
         }
         if (passed){
-            idx = i*output_dim;
-
-            #pragma omp simd
-            for (int d = 0; d < output_dim; ++d)
-                edata->leaf_data->values[leaf_idx*output_dim + d] += grads[idx + d];
             count += 1;
+            if (multi_obj) {
+                // Count labels for density computation
+                int lbl = (obj_labels != nullptr) ? static_cast<int>(obj_labels[i]) : 0;
+                if (lbl >= 0 && lbl < n_objs) label_counts[lbl] += 1.0f;
+                // Accumulate per-objective gradient sums
+                for (int k = 0; k < n_objs; ++k) {
+                    size_t g_base = (size_t)k * n_samples * output_dim + (size_t)i * output_dim;
+                    for (int d = 0; d < output_dim; ++d)
+                        obj_sums[k * output_dim + d] += grads[g_base + d];
+                }
+            } else {
+                int idx = i*output_dim;
+                #pragma omp simd
+                for (int d = 0; d < output_dim; ++d)
+                    edata->leaf_data->values[leaf_idx*output_dim + d] += grads[idx + d];
+            }
         }
     }
+
     if (count > 0){
-        for (int d = 0; d < output_dim; ++d){
-            edata->leaf_data->values[leaf_idx*output_dim + d] /= count;
+        if (multi_obj) {
+            // Compute leaf densities from label counts
+            for (int k = 0; k < n_objs; ++k)
+                leaf_densities[k] = label_counts[k] / count;
+
+            // Store densities in ensemble data
+            for (int k = 0; k < n_objs; ++k)
+                edata->multi_objective_data->densities[leaf_idx * n_objs + k] = leaf_densities[k];
+
+            // Compute density-weighted leaf values
+            for (int d = 0; d < output_dim; ++d) {
+                if (d < policy_dim) {
+                    // Policy dimensions: weighted mixture across objectives
+                    // V = Σ(density_k × λ_k × mean_grad_k)
+                    float leaf_value = 0.0f;
+                    for (int k = 0; k < n_objs; ++k) {
+                        float mean_k = obj_sums[k * output_dim + d] / count;
+                        leaf_value += mean_k * leaf_densities[k] * lambda_objs[k];
+                    }
+                    edata->leaf_data->values[leaf_idx * output_dim + d] = leaf_value;
+                } else {
+                    // Critic dimensions (d >= policy_dim): plain mean from objective 0 only
+                    edata->leaf_data->values[leaf_idx * output_dim + d] = obj_sums[0 * output_dim + d] / count;
+                }
+            }
+        } else {
+            for (int d = 0; d < output_dim; ++d){
+                edata->leaf_data->values[leaf_idx*output_dim + d] /= count;
+            }
         }
+    }
+
+    if (multi_obj) {
+        delete[] obj_sums;
+        delete[] leaf_densities;
+        delete[] label_counts;
     }
 #ifdef DEBUG
     edata->n_samples[leaf_idx] = static_cast<int>(count);
 #endif
+}
+
+
+void Fitter::init_node_multi_obj(
+    TreeNode *node,
+    const float *obj_labels,
+    const float *grads,
+    int n_objs,
+    int global_n_samples,
+    int output_dim
+) {
+    node->n_objs = n_objs;
+    node->global_n_samples = global_n_samples;
+
+    // Allocate and compute densities from labels
+    node->densities = new float[n_objs];
+    if (obj_labels == nullptr || n_objs <= 1) {
+        // No labels or single objective: all density on obj 0
+        for (int k = 0; k < n_objs; ++k)
+            node->densities[k] = (k == 0) ? 1.0f : 0.0f;
+    } else {
+        for (int k = 0; k < n_objs; ++k)
+            node->densities[k] = 0.0f;
+        for (int i = 0; i < node->n_samples; ++i) {
+            int sample_idx = node->sample_indices[i];
+            int lbl = static_cast<int>(obj_labels[sample_idx]);
+            if (lbl >= 0 && lbl < n_objs)
+                node->densities[lbl] += 1.0f;
+        }
+        if (node->n_samples > 0) {
+            float n_inv = 1.0f / static_cast<float>(node->n_samples);
+            for (int k = 0; k < n_objs; ++k)
+                node->densities[k] *= n_inv;
+        }
+    }
+
+    // Compute conflict rho from per-objective mean gradients
+    node->conflict_rho = 0.0f;
+    if (n_objs > 1 && node->n_samples > 0) {
+        // Compute per-obj mean gradients, then ρ = 1 - ||Σ_k μ_k||² / Σ_k ||μ_k||²
+        float numerator = 0.0f;   // ||Σ_k μ_k||²
+        float denominator = 0.0f; // Σ_k ||μ_k||²
+        float n_inv = 1.0f / static_cast<float>(node->n_samples);
+
+        for (int d = 0; d < output_dim; ++d) {
+            float sum_of_means = 0.0f;
+            float sum_of_sq = 0.0f;
+            for (int k = 0; k < n_objs; ++k) {
+                // Compute mean of obj k, dim d over samples in this node
+                float mean_kd = 0.0f;
+                for (int i = 0; i < node->n_samples; ++i) {
+                    int sample_idx = node->sample_indices[i];
+                    size_t g_idx = (size_t)k * global_n_samples * output_dim + (size_t)sample_idx * output_dim + d;
+                    mean_kd += grads[g_idx];
+                }
+                mean_kd *= n_inv;
+                sum_of_means += mean_kd;
+                sum_of_sq += mean_kd * mean_kd;
+            }
+            numerator += sum_of_means * sum_of_means;
+            denominator += sum_of_sq;
+        }
+
+        if (denominator > 1e-12f) {
+            float ratio = numerator / denominator;
+            if (ratio > 1.0f) ratio = 1.0f;
+            node->conflict_rho = 1.0f - ratio;
+        }
+    }
 }
 
 

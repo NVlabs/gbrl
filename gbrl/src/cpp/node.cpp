@@ -71,6 +71,11 @@ TreeNode::~TreeNode(){
     // Setting to nullptr is optional in the destructor
     this->left_child = nullptr;
     this->right_child = nullptr;
+    
+    if (this->densities != nullptr){
+        delete[] this->densities;
+        this->densities = nullptr;
+    }
 }
 
 
@@ -255,6 +260,218 @@ float TreeNode::getSplitScoreWithConstraints(
         // TODO: Implement constraint-aware Cosine scoring if needed
         return this->getSplitScore(dataset, split_score_func, split_candidate, min_data_in_leaf);
     }
+}
+
+float TreeNode::getSplitScoreMultiObj(
+    dataSet *dataset,
+    scoreFunc split_score_func,
+    const splitCandidate &split_candidate,
+    const int min_data_in_leaf,
+    const ensembleMetaData *metadata,
+    const ensembleData *edata
+) {
+    // Check for duplicate splits along the path
+    bool is_numeric = split_candidate.categorical_value == nullptr;
+    if (this->depth > 0) {
+        if (is_numeric) {
+            for (int i = 0; i < this->depth; ++i) {
+                if (this->split_conditions[i].categorical_value == nullptr &&
+                    this->split_conditions[i].feature_value == split_candidate.feature_value &&
+                    this->split_conditions[i].feature_idx == split_candidate.feature_idx)
+                    return -INFINITY;
+            }
+        } else {
+            for (int i = 0; i < this->depth; ++i) {
+                if (this->split_conditions[i].categorical_value != nullptr &&
+                    strcmp(this->split_conditions[i].categorical_value, split_candidate.categorical_value) == 0 &&
+                    this->split_conditions[i].feature_idx == split_candidate.feature_idx)
+                    return -INFINITY;
+            }
+        }
+    }
+
+    const int n_objs = this->n_objs;
+    const int n_cols = this->output_dim;
+    const int gs = this->global_n_samples;  // for stacked grad stride
+    const float *grads = dataset->build_grads->data;
+    const float *obs = dataset->obs->data;
+    const char *cat_obs = dataset->categorical_obs->data;
+    const float *obj_labels = (dataset->obj_labels != nullptr) ? dataset->obj_labels->data : nullptr;
+    const float *node_densities = this->densities;
+    const float *lambda_objs = edata->multi_objective_data->lambda_objs;
+    const float lambda_penalty = metadata->lambda_penalty;
+    const int n_features = is_numeric ? this->n_num_features : this->n_cat_features;
+    const int *_sample_indices = this->sample_indices;
+
+    int left_count = 0, right_count = 0;
+
+    // Per-objective gradient sums: [n_objs * n_cols]
+    float *left_sum = new float[n_objs * n_cols];
+    float *right_sum = new float[n_objs * n_cols];
+    // Per-label counts for impurity penalty: [n_objs] left + [n_objs] right
+    float *label_left = new float[n_objs];
+    float *label_right = new float[n_objs];
+
+    for (int k = 0; k < n_objs; ++k) {
+        label_left[k] = 0.0f;
+        label_right[k] = 0.0f;
+        for (int d = 0; d < n_cols; ++d) {
+            left_sum[k * n_cols + d] = 0.0f;
+            right_sum[k * n_cols + d] = 0.0f;
+        }
+    }
+
+    // Accumulate per-objective gradient sums and label counts
+    for (int n = 0; n < this->n_samples; ++n) {
+        int sample_idx = _sample_indices[n];
+        int lbl = (obj_labels != nullptr) ? static_cast<int>(obj_labels[sample_idx]) : 0;
+
+        bool goes_right = false;
+        if (is_numeric) {
+            goes_right = obs[sample_idx * n_features + split_candidate.feature_idx] > split_candidate.feature_value;
+        } else {
+            goes_right = (strcmp(&cat_obs[(sample_idx * n_features + split_candidate.feature_idx) * MAX_CHAR_SIZE],
+                                split_candidate.categorical_value) == 0);
+        }
+
+        if (goes_right) {
+            if (lbl >= 0 && lbl < n_objs) label_right[lbl] += 1.0f;
+            ++right_count;
+            for (int k = 0; k < n_objs; ++k) {
+                size_t g_base = (size_t)k * gs * n_cols + (size_t)sample_idx * n_cols;
+                for (int d = 0; d < n_cols; ++d)
+                    right_sum[k * n_cols + d] += grads[g_base + d];
+            }
+        } else {
+            if (lbl >= 0 && lbl < n_objs) label_left[lbl] += 1.0f;
+            ++left_count;
+            for (int k = 0; k < n_objs; ++k) {
+                size_t g_base = (size_t)k * gs * n_cols + (size_t)sample_idx * n_cols;
+                for (int d = 0; d < n_cols; ++d)
+                    left_sum[k * n_cols + d] += grads[g_base + d];
+            }
+        }
+    }
+
+    if (left_count < min_data_in_leaf || right_count < min_data_in_leaf) {
+        delete[] left_sum; delete[] right_sum;
+        delete[] label_left; delete[] label_right;
+        return -INFINITY;
+    }
+
+    float left_count_f = static_cast<float>(left_count);
+    float right_count_f = static_cast<float>(right_count);
+
+    float total_gain = 0.0f;
+
+    if (split_score_func == L2) {
+        // L2 gain: Σ_k (||left_sum_k||^2/N_L + ||right_sum_k||^2/N_R) * density_k * λ_k
+        for (int k = 0; k < n_objs; ++k) {
+            float l_sq = 0.0f, r_sq = 0.0f;
+            for (int d = 0; d < n_cols; ++d) {
+                l_sq += left_sum[k * n_cols + d] * left_sum[k * n_cols + d];
+                r_sq += right_sum[k * n_cols + d] * right_sum[k * n_cols + d];
+            }
+            float l_gain = (left_count > 0) ? l_sq / left_count_f : 0.0f;
+            float r_gain = (right_count > 0) ? r_sq / right_count_f : 0.0f;
+            total_gain += (l_gain + r_gain) * node_densities[k] * lambda_objs[k];
+        }
+    } else {
+        // Cosine gain: need dot products with means
+        // Compute means first
+        float *left_mean = new float[n_objs * n_cols];
+        float *right_mean = new float[n_objs * n_cols];
+        for (int k = 0; k < n_objs; ++k) {
+            for (int d = 0; d < n_cols; ++d) {
+                left_mean[k * n_cols + d] = (left_count > 0) ? left_sum[k * n_cols + d] / left_count_f : 0.0f;
+                right_mean[k * n_cols + d] = (right_count > 0) ? right_sum[k * n_cols + d] / right_count_f : 0.0f;
+            }
+        }
+
+        // Compute dot(sample, mean) sums per objective
+        float *l_dot_sum = new float[n_objs];
+        float *r_dot_sum = new float[n_objs];
+        for (int k = 0; k < n_objs; ++k) {
+            l_dot_sum[k] = 0.0f;
+            r_dot_sum[k] = 0.0f;
+        }
+
+        for (int n = 0; n < this->n_samples; ++n) {
+            int sample_idx = _sample_indices[n];
+            bool goes_right = false;
+            if (is_numeric) {
+                goes_right = obs[sample_idx * n_features + split_candidate.feature_idx] > split_candidate.feature_value;
+            } else {
+                goes_right = (strcmp(&cat_obs[(sample_idx * n_features + split_candidate.feature_idx) * MAX_CHAR_SIZE],
+                                    split_candidate.categorical_value) == 0);
+            }
+            for (int k = 0; k < n_objs; ++k) {
+                size_t g_base = (size_t)k * gs * n_cols + (size_t)sample_idx * n_cols;
+                if (goes_right) {
+                    for (int d = 0; d < n_cols; ++d)
+                        r_dot_sum[k] += grads[g_base + d] * right_mean[k * n_cols + d];
+                } else {
+                    for (int d = 0; d < n_cols; ++d)
+                        l_dot_sum[k] += grads[g_base + d] * left_mean[k * n_cols + d];
+                }
+            }
+        }
+
+        for (int k = 0; k < n_objs; ++k) {
+            float l_mean_norm = 0.0f, r_mean_norm = 0.0f;
+            for (int d = 0; d < n_cols; ++d) {
+                l_mean_norm += left_mean[k * n_cols + d] * left_mean[k * n_cols + d];
+                r_mean_norm += right_mean[k * n_cols + d] * right_mean[k * n_cols + d];
+            }
+            float denominator = left_count_f * l_mean_norm + right_count_f * r_mean_norm;
+            float cosine = 0.0f;
+            if (denominator > 0.0f) {
+                l_dot_sum[k] = (left_count > 0) ? l_dot_sum[k] / left_count_f : 0.0f;
+                r_dot_sum[k] = (right_count > 0) ? r_dot_sum[k] / right_count_f : 0.0f;
+                cosine = (l_dot_sum[k] + r_dot_sum[k]) / sqrtf(denominator);
+            }
+            total_gain += cosine * node_densities[k] * lambda_objs[k];
+        }
+
+        delete[] left_mean;
+        delete[] right_mean;
+        delete[] l_dot_sum;
+        delete[] r_dot_sum;
+    }
+
+    // Label-impurity penalty
+    if (obj_labels != nullptr && this->conflict_rho > 1e-6f) {
+        float lc = 0.0f, rc = 0.0f, l_sq_cnt = 0.0f, r_sq_cnt = 0.0f, p_sq_cnt = 0.0f;
+        for (int k = 0; k < n_objs; ++k) {
+            float lk = label_left[k];
+            float rk = label_right[k];
+            lc += lk;
+            rc += rk;
+            l_sq_cnt += lk * lk;
+            r_sq_cnt += rk * rk;
+            float pk = lk + rk;
+            p_sq_cnt += pk * pk;
+        }
+        float pc = lc + rc;
+
+        float l_sse = (lc > 1e-6f) ? (lc - l_sq_cnt / lc) : 0.0f;
+        float r_sse = (rc > 1e-6f) ? (rc - r_sq_cnt / rc) : 0.0f;
+        float p_sse = (pc > 1e-6f) ? (pc - p_sq_cnt / pc) : 0.0f;
+
+        float H = (p_sse > 1e-10f) ? (l_sse + r_sse) / p_sse : 0.0f;
+        if (H > 1.0f) H = 1.0f;
+        if (H < 0.0f) H = 0.0f;
+
+        float penalty = lambda_penalty * this->conflict_rho * H;
+        if (penalty > 1.0f) penalty = 1.0f;
+
+        total_gain *= (1.0f - penalty);
+    }
+
+    delete[] left_sum; delete[] right_sum;
+    delete[] label_left; delete[] label_right;
+
+    return total_gain;
 }
 
 float TreeNode::splitScoreL2WithConstraint(
