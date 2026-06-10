@@ -52,7 +52,7 @@ jobs:
 
     - name: Set up MSVC environment
       if: matrix.os == 'windows-latest'
-      uses: ilammy/msvc-dev-cmd@v1
+      uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756
 
     - name: Set environment variable for coverage
       if: matrix.os == 'ubuntu-latest'
