@@ -208,6 +208,7 @@ void GBRL::to_device(deviceType _device){
     } else {
         // gpu -> cpu: same exact-fit principle; batch sizes revert to CPU constants.
         ensembleData* edata_cpu = ensemble_data_copy_gpu_cpu(this->metadata, this->edata, nullptr);
+        ensemble_data_dealloc_cuda(this->edata);
         this->edata = edata_cpu;
         this->metadata->max_trees        = this->metadata->n_trees;
         this->metadata->max_leaves       = this->metadata->n_leaves;

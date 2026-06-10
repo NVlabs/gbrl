@@ -28,7 +28,9 @@ Scenarios covered:
   3. CPU-trained model loaded onto GPU then continues training on GPU.
   4. Model loaded onto CPU, moved to GPU via set_device, continues training.
   5. Metadata capacity invariant: max_trees == n_trees after load/transfer.
-  6. Large model: n_trees > INITIAL_MAX_TREES; load + one extra step still works.
+  6. Capacity expansion behavior: validated by test_cpu_load_capacity_expands_correctly,
+     which checks that the first new tree triggers a realloc sized at n_trees + batch,
+     not a reset to any default constant.
 """
 import os
 import shutil
@@ -47,10 +49,6 @@ sys.path.insert(0, str(ROOT_PATH))
 
 from gbrl import cuda_available
 from gbrl.models.gbt import GBTModel
-
-# CPU-side INITIAL_MAX_TREES constant (types.h).  Used to verify the
-# large-model edge-case without actually training 50k+ trees.
-_INITIAL_MAX_TREES_CPU = 50_000
 
 
 def _make_model(input_dim, out_dim, tree_struct, optimizer, device):
