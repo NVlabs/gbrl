@@ -39,6 +39,6 @@
 
 /** @brief Minor version number - incremented for backward compatible new features */
 #define MINOR_VERSION 1
-#define PATCH_VERSION 7
+#define PATCH_VERSION 8
 
 #endif // VERSION_CONFIG_H

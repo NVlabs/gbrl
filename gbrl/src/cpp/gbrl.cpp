@@ -193,14 +193,26 @@ void GBRL::to_device(deviceType _device){
             this->device = gpu;
         }
     } else if (this->device == cpu && _device == gpu){
+        // Allocate exactly n_trees/n_leaves on GPU; pre-allocation happens
+        // lazily via allocate_ensemble_memory_cuda on the first new tree write.
+        // max_trees/max_leaves must match the actual buffer size so the
+        // capacity check fires correctly; batch sizes use GPU constants.
         ensembleData* edata_gpu = ensemble_data_copy_cpu_gpu(this->metadata, this->edata, nullptr);
         ensemble_data_dealloc(this->edata);
         this->edata = edata_gpu;
+        this->metadata->max_trees        = this->metadata->n_trees;
+        this->metadata->max_leaves       = this->metadata->n_leaves;
+        this->metadata->max_trees_batch  = GPU_TREES_BATCH;
+        this->metadata->max_leaves_batch = GPU_TREES_BATCH * (1 << this->metadata->max_depth);
         this->device = gpu;
     } else {
-         printf("else\n");
+        // gpu -> cpu: same exact-fit principle; batch sizes revert to CPU constants.
         ensembleData* edata_cpu = ensemble_data_copy_gpu_cpu(this->metadata, this->edata, nullptr);
         this->edata = edata_cpu;
+        this->metadata->max_trees        = this->metadata->n_trees;
+        this->metadata->max_leaves       = this->metadata->n_leaves;
+        this->metadata->max_trees_batch  = TREES_BATCH;
+        this->metadata->max_leaves_batch = TREES_BATCH * (1 << this->metadata->max_depth);
         this->device = cpu;
     }
     if (this->device == gpu && this->metadata->use_cv){
@@ -1289,6 +1301,17 @@ int GBRL::loadFromFile(const std::string& filename){
         throw std::runtime_error("Reading file error");
         return -1;
     }
+
+    // Set capacity fields to the exact loaded size so load_ensemble_data
+    // allocates only what is needed.  Pre-allocation happens lazily via
+    // allocate_ensemble_memory* the first time a new tree is written.
+    // max_trees_batch / max_leaves_batch keep CPU defaults so that if
+    // training continues on CPU the expansion step is CPU-sized; to_device
+    // overwrites them with the target-device batch sizes.
+    this->metadata->max_trees        = this->metadata->n_trees;
+    this->metadata->max_leaves       = this->metadata->n_leaves;
+    this->metadata->max_trees_batch  = TREES_BATCH;
+    this->metadata->max_leaves_batch = TREES_BATCH * (1 << this->metadata->max_depth);
 
     this->edata = load_ensemble_data(file, this->metadata);
 

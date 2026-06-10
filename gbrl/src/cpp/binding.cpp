@@ -323,6 +323,12 @@ py::dict metadataToDict(const ensembleMetaData* metadata){
         d["batch_size"] = metadata->batch_size;
         d["grow_policy"] = growPolicyToString(metadata->grow_policy);
         d["iteration"] = metadata->iteration;
+        d["n_trees"] = metadata->n_trees;
+        d["n_leaves"] = metadata->n_leaves;
+        d["max_trees"] = metadata->max_trees;
+        d["max_leaves"] = metadata->max_leaves;
+        d["max_trees_batch"] = metadata->max_trees_batch;
+        d["max_leaves_batch"] = metadata->max_leaves_batch;
     }
     return d;
 }
