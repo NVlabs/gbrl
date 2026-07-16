@@ -27,10 +27,8 @@ import unittest
 from pathlib import Path
 
 import numpy as np
-import shap
 import torch as th
 from sklearn import datasets
-from sklearn.tree import DecisionTreeRegressor
 from torch.nn.functional import mse_loss
 
 ROOT_PATH = Path(__file__).parent.parent
@@ -405,6 +403,7 @@ class TestGBTSingle(unittest.TestCase):
         self.assertTrue(loss < value, f'Expected loss = {loss} < {value}')
 
     def test_shap_cpu(self):
+        """tree_shap completeness: bias + sum_f shap[f] == predict(x) for one tree."""
         print("Running test_shap_cpu")
         X, y = self.single_data
         X_cpu = X.detach().clone().cpu().numpy()
@@ -423,12 +422,55 @@ class TestGBTSingle(unittest.TestCase):
                          verbose=0,
                          device='cpu')
         model.learner.step(X, y)
-        gbrl_shap = model.tree_shap(0, X_cpu[0, :])[0].flatten()
-        clf = DecisionTreeRegressor(max_depth=3).fit(X_cpu, y)
+        # Verify completeness: bias + sum_features(tree_shap) == predict for every sample.
+        # After the SGD fix, tree_shap returns -lr-scaled contributions so this must hold.
+        pred = model(X_cpu).detach().cpu().numpy().reshape(len(X_cpu), -1)
+        shap_vals = model.tree_shap(0, X_cpu)                   # (n_samples, n_features, output_dim)
+        # SHAP local accuracy: E[predict] + sum_f shap_f(x) == predict(x).
+        # The base value is the mean prediction over the dataset, not model.bias.
+        mean_pred = pred.mean(axis=0, keepdims=True)             # (1, output_dim)
+        reconstructed = mean_pred + shap_vals.sum(axis=1)        # (n_samples, output_dim)
+        max_err = float(np.abs(reconstructed - pred).max())
+        self.assertLess(
+            max_err, 1e-3,
+            f'tree_shap completeness violated: max |E[pred]+sum(shap)-pred|={max_err:.4f}')
 
-        target_shap = shap.TreeExplainer(clf).shap_values(X_cpu[0])
-        self.assertTrue(np.allclose(gbrl_shap, target_shap, rtol=1e-3),
-                        'GBRL SHAP values are not close to target SHAP values')
+    def test_ensemble_shap_completeness_sgd(self):
+        """ensemble shap() completeness: bias + sum_f shap[f] == predict(x) for SGD."""
+        print("Running test_ensemble_shap_completeness_sgd")
+        rng = np.random.default_rng(42)
+        n, d = 200, 6
+        X = rng.normal(size=(n, d)).astype(np.float32)
+        Y = (2 * X[:, 0] - X[:, 1]).astype(np.float32)[:, np.newaxis]
+
+        for lr in (0.1, 0.05):
+            for output_dim, Y_use in [(1, Y), (2, np.hstack([Y, -Y]))]:
+                opt = {'algo': 'SGD', 'lr': lr, 'start_idx': 0, 'stop_idx': output_dim}
+                model = GBTModel(
+                    input_dim=d, output_dim=output_dim,
+                    tree_struct={'max_depth': 4, 'n_bins': 256, 'min_data_in_leaf': 1,
+                                 'grow_policy': 'oblivious'},
+                    optimizers=opt,
+                    params={'split_score_func': 'Cosine', 'generator_type': 'Quantile'},
+                    device='cpu', verbose=0,
+                )
+                model.set_bias_from_targets(Y_use)
+                target = th.as_tensor(Y_use)
+                for _ in range(30):
+                    pred_t = model(X, requires_grad=True)
+                    loss = ((pred_t.reshape(target.shape) - target) ** 2).mean()
+                    loss.backward()
+                    model.step(X)
+
+                bias = model.learner.get_bias()                    # (output_dim,)
+                pred = model(X).detach().cpu().numpy().reshape(n, output_dim)
+                shap_vals = model.shap(X)                         # (n, n_features, output_dim)
+                reconstructed = bias[np.newaxis, :] + shap_vals.sum(axis=1)
+                max_err = float(np.abs(reconstructed - pred).max())
+                self.assertLess(
+                    max_err, 1e-3,
+                    f'ensemble shap completeness violated for SGD lr={lr} '
+                    f'output_dim={output_dim}: max residual={max_err:.4f}')
 
     def test_cosine_adam_cpu(self):
         print("Running test_cosine_adam_cpu")

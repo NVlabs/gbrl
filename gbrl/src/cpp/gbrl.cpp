@@ -1388,8 +1388,25 @@ ensembleData *edata_cpu = nullptr;
     shap_data->offset_poly = offset;
     shap_data->base_poly = base_poly;
     shap_data->norm_values = norm;
+
+    // Scale leaf predictions by -lr so SHAP decomposes the actual optimizer
+    // contribution rather than the raw gradient stored in leaf_data->values.
+    // This is required for local accuracy: bias + sum_f shap[f] == predict(x).
+    const int out_dim = this->metadata->output_dim;
+    for (size_t opt_idx = 0; opt_idx < this->opts.size(); ++opt_idx) {
+        if (this->opts[opt_idx]->getAlgo() == SGD) {
+            float neg_lr = -this->opts[opt_idx]->scheduler->get_lr(tree_idx);
+            int d_start = this->opts[opt_idx]->start_idx;
+            int d_stop  = this->opts[opt_idx]->stop_idx;
+            for (int node = 0; node < shap_data->n_nodes; ++node) {
+                for (int d = d_start; d < d_stop; ++d)
+                    shap_data->predictions[node * out_dim + d] *= neg_lr;
+            }
+        }
+    }
+
     float *shap_values = init_zero_mat((this->metadata->n_num_features + this->metadata->n_cat_features)*this->metadata->output_dim * n_samples);
-    
+
     dataHolder<const float> obs_holder{obs, this->device};
     dataHolder<const char> cat_obs_holder{categorical_obs, this->device};
     dataSet dataset{
@@ -1432,11 +1449,27 @@ float* GBRL::ensemble_shap(const float *obs, const char *categorical_obs, const 
     if (this->device == cpu)
         edata_cpu = this->edata;
 
+    const int out_dim = this->metadata->output_dim;
     for (int tree_idx = 0; tree_idx < this->metadata->n_trees; ++tree_idx){
         shapData* shap_data = alloc_shap_data(this->metadata, edata_cpu, tree_idx);
         shap_data->offset_poly = offset;
         shap_data->base_poly = base_poly;
         shap_data->norm_values = norm;
+
+        // Scale leaf predictions by -lr so SHAP decomposes the actual
+        // optimizer contribution, satisfying local accuracy for SGD.
+        for (size_t opt_idx = 0; opt_idx < this->opts.size(); ++opt_idx) {
+            if (this->opts[opt_idx]->getAlgo() == SGD) {
+                float neg_lr = -this->opts[opt_idx]->scheduler->get_lr(tree_idx);
+                int d_start = this->opts[opt_idx]->start_idx;
+                int d_stop  = this->opts[opt_idx]->stop_idx;
+                for (int node = 0; node < shap_data->n_nodes; ++node) {
+                    for (int d = d_start; d < d_stop; ++d)
+                        shap_data->predictions[node * out_dim + d] *= neg_lr;
+                }
+            }
+        }
+
         get_shap_values(this->metadata, edata_cpu, shap_data, &dataset, shap_values);
         dealloc_shap_data(shap_data);
     }
