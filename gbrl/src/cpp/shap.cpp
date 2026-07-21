@@ -65,11 +65,15 @@ shapData* alloc_shap_data(const ensembleMetaData *metadata, const ensembleData *
         weights[i] = 1.0f;
         feature_values[i] = INFINITY;
     }
+    int *node_to_leaf_idx = new int[n_leaves * metadata->max_depth];
+    float *leaf_cond_probs = new float[n_leaves * metadata->max_depth];
     int *parents = new int[n_leaves * metadata->max_depth];
     int *max_unique_features = new int[n_leaves * metadata->max_depth];
-    
+
     memset(max_unique_features, 0, sizeof(int) * n_leaves * metadata->max_depth);
     memset(predictions, 0, sizeof(float) * n_leaves * metadata->max_depth * metadata->output_dim);
+    memset(node_to_leaf_idx, -1, sizeof(int) * n_leaves * metadata->max_depth);
+    memset(leaf_cond_probs, 0, sizeof(float) * n_leaves * metadata->max_depth);
     // Process the tree using DFS
     while (!node_stack.is_empty()) {
         nodeInfo crnt_node = node_stack.top();
@@ -118,6 +122,8 @@ shapData* alloc_shap_data(const ensembleMetaData *metadata, const ensembleData *
                 cond_prob *= edata->leaf_data->edge_weights[leaf_idx*metadata->max_depth + d];
             for (int d = 0; d < metadata->output_dim; ++d)
                 predictions[n_nodes*metadata->output_dim + d] = edata->leaf_data->values[leaf_idx*metadata->output_dim + d]*cond_prob;
+            node_to_leaf_idx[n_nodes] = leaf_idx;
+            leaf_cond_probs[n_nodes] = cond_prob;
             ++leaf_idx;
         }
 
@@ -144,8 +150,8 @@ shapData* alloc_shap_data(const ensembleMetaData *metadata, const ensembleData *
         ++n_nodes;
     }
     
-    delete[] parents;   
-    
+    delete[] parents;
+
     shapData *shap_data = new shapData;
     shap_data->left_children = left_children;
     shap_data->right_children = right_children;
@@ -159,6 +165,8 @@ shapData* alloc_shap_data(const ensembleMetaData *metadata, const ensembleData *
     shap_data->feature_indices = feature_indices;
     shap_data->feature_values = feature_values;
     shap_data->predictions = predictions;
+    shap_data->node_to_leaf_idx = node_to_leaf_idx;
+    shap_data->leaf_cond_probs = leaf_cond_probs;
 
     memset(shap_data->active_nodes, 0, sizeof(bool)*shap_data->n_nodes);
     int poly_size = (metadata->max_depth + 1) * metadata->max_depth * metadata->output_dim;
@@ -188,6 +196,8 @@ void dealloc_shap_data(shapData *shap_data){
     delete[] shap_data->weights;
     delete[] shap_data->max_unique_features;
     delete[] shap_data->categorical_values;
+    delete[] shap_data->node_to_leaf_idx;
+    delete[] shap_data->leaf_cond_probs;
     delete[] shap_data->C;
     delete[] shap_data->G;
     delete shap_data;

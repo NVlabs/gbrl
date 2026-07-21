@@ -27,7 +27,6 @@ for single gradient boosted tree models. It supports training, prediction,
 SHAP computation, and model serialization.
 """
 import os
-import warnings
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
@@ -409,21 +408,6 @@ class GBTLearner(BaseLearner):
         except RuntimeError as e:
             print(f"Caught an exception in GBRL: {e}")
 
-    def _check_shap_optimizer_support(self) -> None:
-        """Warn if any optimizer is Adam, whose SHAP support is pending."""
-        adam_opts = [o for o in self.optimizers if o.get('algo', '').lower() == 'adam']
-        if adam_opts:
-            warnings.warn(
-                "shap() was called on a model trained with the Adam optimizer. "
-                "GBRL's current SHAP implementation decomposes raw gradient leaf "
-                "values, which do not equal the optimizer-adjusted contributions "
-                "that predict() returns. Local accuracy (E[predict] + sum(shap) == "
-                "predict(x)) is therefore NOT guaranteed for Adam. "
-                "Full Adam-aware SHAP support is planned for a future release.",
-                RuntimeWarning,
-                stacklevel=3,
-            )
-
     def tree_shap(self, tree_idx: int, features:
                   NumericalData) -> np.ndarray:
         """
@@ -438,7 +422,6 @@ class GBTLearner(BaseLearner):
         Returns:
             np.ndarray: shap values
         """
-        self._check_shap_optimizer_support()
         if isinstance(features, th.Tensor):
             features = features.detach().cpu().numpy()
         num_features, cat_features = preprocess_features(features)
@@ -464,7 +447,6 @@ class GBTLearner(BaseLearner):
         Returns:
             np.ndarray: shap values
         """
-        self._check_shap_optimizer_support()
         if isinstance(features, th.Tensor):
             features = features.detach().cpu().numpy()
         num_features, cat_features = preprocess_features(features)

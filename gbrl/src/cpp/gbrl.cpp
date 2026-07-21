@@ -1374,56 +1374,223 @@ void GBRL::print_ensemble_metadata(){
     std::cout << "Model has: " << this->opts.size() << " optimizers " <<  std::endl;
 }
 
+// ---------------------------------------------------------------------------
+// Adam-aware SHAP helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * @brief Set shap_data->predictions for every leaf node using the
+ *        optimizer-appropriate effective value.
+ *
+ * For SGD:   prediction = -lr_t * raw_grad * cond_prob
+ * For Adam:  prediction = -alpha_t * m_l / (sqrt(v_l) + eps) * cond_prob
+ *            where m_l and v_l are the one-step moment estimates that would
+ *            result if the sample routed to this leaf.
+ *
+ * m_prev / v_prev are the per-output-dim Adam moments accumulated before
+ * tree_idx.  Pass nullptr to treat them as zero (start of sequence).
+ */
+static void apply_optimizer_shap_predictions(
+    shapData *shap_data,
+    const ensembleMetaData *metadata,
+    const ensembleData *edata,
+    const std::vector<Optimizer*> &opts,
+    int tree_idx,
+    const float *m_prev,
+    const float *v_prev)
+{
+    const int out_dim = metadata->output_dim;
+    for (int node = 0; node < shap_data->n_nodes; ++node) {
+        int leaf_idx = shap_data->node_to_leaf_idx[node];
+        if (leaf_idx < 0) continue;
+        float cond_prob = shap_data->leaf_cond_probs[node];
+        const float *g = edata->leaf_data->values + leaf_idx * out_dim;
+        for (size_t oi = 0; oi < opts.size(); ++oi) {
+            int d0 = opts[oi]->start_idx, d1 = opts[oi]->stop_idx;
+            if (opts[oi]->getAlgo() == SGD) {
+                float neg_lr = -opts[oi]->scheduler->get_lr(tree_idx);
+                for (int d = d0; d < d1; ++d)
+                    shap_data->predictions[node * out_dim + d] = neg_lr * g[d] * cond_prob;
+            } else {
+                // Adam
+                AdamOptimizer *adam = static_cast<AdamOptimizer*>(opts[oi]);
+                float lr = adam->scheduler->get_lr(tree_idx);
+                float tf = static_cast<float>(tree_idx) + 1.0f;
+                float alpha = lr * sqrtf(1.0f - powf(adam->beta_2, tf))
+                                 / (1.0f - powf(adam->beta_1, tf));
+                for (int d = d0; d < d1; ++d) {
+                    float mp = (m_prev != nullptr) ? m_prev[d] : 0.0f;
+                    float vp = (v_prev != nullptr) ? v_prev[d] : 0.0f;
+                    float m_l = adam->beta_1 * mp + (1.0f - adam->beta_1) * g[d];
+                    float v_l = adam->beta_2 * vp + (1.0f - adam->beta_2) * g[d] * g[d];
+                    shap_data->predictions[node * out_dim + d] =
+                        -alpha * m_l / (sqrtf(v_l) + adam->eps) * cond_prob;
+                }
+            }
+        }
+    }
+}
+
+/**
+ * @brief Return the absolute leaf index that sample sample_idx routes to in
+ *        tree tree_idx.  Handles both OBLIVIOUS and GREEDY grow policies.
+ */
+static int find_factual_leaf(
+    const ensembleMetaData *metadata,
+    const ensembleData *edata,
+    const float *obs,
+    const char *categorical_obs,
+    int tree_idx,
+    int sample_idx)
+{
+    int obs_row = sample_idx * metadata->n_num_features;
+    int cat_obs_row = sample_idx * metadata->n_cat_features;
+    const bool *numerics = edata->feature_data->is_numerics;
+    const float *feature_values = edata->feature_data->feature_values;
+    const int *feature_indices = edata->feature_data->feature_indices;
+    const int *tree_indices = edata->ensemble_info->tree_indices;
+    const int *depths = edata->ensemble_info->depths;
+    const char *categorical_values = edata->feature_data->categorical_values;
+    const bool *inequality_directions = edata->feature_data->inequality_directions;
+    const int max_depth = metadata->max_depth;
+
+    int initial_leaf_idx = tree_indices[tree_idx];
+
+    if (metadata->grow_policy == OBLIVIOUS) {
+        int cond_idx = tree_idx * max_depth;
+        int leaf_off = 0;
+        for (int depth_idx = 0; depth_idx < depths[tree_idx]; ++depth_idx) {
+            bool passed = (numerics[cond_idx + depth_idx])
+                ? (obs[obs_row + feature_indices[cond_idx + depth_idx]] > feature_values[cond_idx + depth_idx])
+                : (strcmp(&categorical_obs[(cat_obs_row + feature_indices[cond_idx + depth_idx]) * MAX_CHAR_SIZE],
+                           categorical_values + (cond_idx + depth_idx) * MAX_CHAR_SIZE) == 0);
+            leaf_off |= (static_cast<int>(passed) << (depths[tree_idx] - 1 - depth_idx));
+        }
+        return initial_leaf_idx + leaf_off;
+    } else {
+        // GREEDY
+        int stop_leaf_idx = (tree_idx == metadata->n_trees - 1)
+            ? metadata->n_leaves
+            : tree_indices[tree_idx + 1];
+        for (int leaf_idx = initial_leaf_idx; leaf_idx < stop_leaf_idx; ++leaf_idx) {
+            int depth = depths[leaf_idx];
+            int cond_idx = leaf_idx * max_depth;
+            bool passed = true;
+            for (int depth_idx = depth - 1; depth_idx >= 0; --depth_idx) {
+                bool cond = (numerics[cond_idx + depth_idx])
+                    ? ((obs[obs_row + feature_indices[cond_idx + depth_idx]] > feature_values[cond_idx + depth_idx]) == inequality_directions[cond_idx + depth_idx])
+                    : ((strcmp(&categorical_obs[(cat_obs_row + feature_indices[cond_idx + depth_idx]) * MAX_CHAR_SIZE],
+                               categorical_values + (cond_idx + depth_idx) * MAX_CHAR_SIZE) == 0) == inequality_directions[cond_idx + depth_idx]);
+                if (!cond) { passed = false; break; }
+            }
+            if (passed) return leaf_idx;
+        }
+        return initial_leaf_idx; // fallback (should not happen)
+    }
+}
+
+/**
+ * @brief Advance Adam moment state for one tree step given the raw gradient
+ *        stored in the leaf that sample x actually landed in.
+ */
+static void advance_adam_state(
+    const std::vector<Optimizer*> &opts,
+    float *m_state,
+    float *v_state,
+    const float *leaf_raw_grad,
+    int output_dim)
+{
+    (void)output_dim;
+    for (size_t oi = 0; oi < opts.size(); ++oi) {
+        if (opts[oi]->getAlgo() != Adam) continue;
+        AdamOptimizer *adam = static_cast<AdamOptimizer*>(opts[oi]);
+        for (int d = opts[oi]->start_idx; d < opts[oi]->stop_idx; ++d) {
+            m_state[d] = adam->beta_1 * m_state[d] + (1.0f - adam->beta_1) * leaf_raw_grad[d];
+            v_state[d] = adam->beta_2 * v_state[d] + (1.0f - adam->beta_2) * leaf_raw_grad[d] * leaf_raw_grad[d];
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+
 float* GBRL::tree_shap(const int tree_idx, const float *obs, const char *categorical_obs, const int n_samples, float *norm, float *base_poly, float *offset){
     valid_tree_idx(tree_idx, this->metadata);
-ensembleData *edata_cpu = nullptr;
+    ensembleData *edata_cpu = nullptr;
 #ifdef USE_CUDA
     if (this->device == gpu){
         edata_cpu = ensemble_data_copy_gpu_cpu(this->metadata, this->edata, nullptr);
     }
-#endif 
+#endif
     if (this->device == cpu)
         edata_cpu = this->edata;
-    shapData* shap_data = alloc_shap_data(this->metadata, edata_cpu, tree_idx);
-    shap_data->offset_poly = offset;
-    shap_data->base_poly = base_poly;
-    shap_data->norm_values = norm;
 
-    // Scale leaf predictions by -lr so SHAP decomposes the actual optimizer
-    // contribution rather than the raw gradient stored in leaf_data->values.
-    // This is required for local accuracy: bias + sum_f shap[f] == predict(x).
-    const int out_dim = this->metadata->output_dim;
-    for (size_t opt_idx = 0; opt_idx < this->opts.size(); ++opt_idx) {
-        if (this->opts[opt_idx]->getAlgo() == SGD) {
-            float neg_lr = -this->opts[opt_idx]->scheduler->get_lr(tree_idx);
-            int d_start = this->opts[opt_idx]->start_idx;
-            int d_stop  = this->opts[opt_idx]->stop_idx;
-            for (int node = 0; node < shap_data->n_nodes; ++node) {
-                for (int d = d_start; d < d_stop; ++d)
-                    shap_data->predictions[node * out_dim + d] *= neg_lr;
-            }
-        }
-    }
+    // Detect whether any optimizer is Adam
+    bool has_adam = false;
+    for (size_t oi = 0; oi < this->opts.size(); ++oi)
+        if (this->opts[oi]->getAlgo() == Adam) { has_adam = true; break; }
 
     float *shap_values = init_zero_mat((this->metadata->n_num_features + this->metadata->n_cat_features)*this->metadata->output_dim * n_samples);
 
-    dataHolder<const float> obs_holder{obs, this->device};
-    dataHolder<const char> cat_obs_holder{categorical_obs, this->device};
+    dataHolder<const float> obs_holder{obs, cpu};
+    dataHolder<const char> cat_obs_holder{categorical_obs, cpu};
     dataSet dataset{
-        &obs_holder,                // observations
-        &cat_obs_holder,            // categorical observations
-        nullptr,                   // grads (not used in tree_shap)
-        nullptr,                   // build_grads (not used in tree_shap)
-        n_samples,                 // number of samples
+        &obs_holder,
+        &cat_obs_holder,
+        nullptr,
+        nullptr,
+        n_samples,
     };
-    // print_shap_data(shap_data, this->metadata);
-    get_shap_values(this->metadata, edata_cpu, shap_data, &dataset, shap_values);
-    dealloc_shap_data(shap_data);
+
+    const int out_dim = this->metadata->output_dim;
+
+    if (!has_adam) {
+        // Pure-SGD path: predictions are the same for every sample.
+        shapData* shap_data = alloc_shap_data(this->metadata, edata_cpu, tree_idx);
+        shap_data->offset_poly = offset;
+        shap_data->base_poly = base_poly;
+        shap_data->norm_values = norm;
+        apply_optimizer_shap_predictions(shap_data, this->metadata, edata_cpu, this->opts, tree_idx, nullptr, nullptr);
+        get_shap_values(this->metadata, edata_cpu, shap_data, &dataset, shap_values);
+        dealloc_shap_data(shap_data);
+    } else {
+        // Adam path: replay trees 0..tree_idx-1 to build per-sample Adam state,
+        // then run TreeSHAP per sample with the correct moment estimates.
+        std::vector<float> m_state(n_samples * out_dim, 0.0f);
+        std::vector<float> v_state(n_samples * out_dim, 0.0f);
+
+        // Build Adam state by replaying all preceding trees.
+        for (int t = 0; t < tree_idx; ++t) {
+            for (int s = 0; s < n_samples; ++s) {
+                int factual = find_factual_leaf(this->metadata, edata_cpu, obs, categorical_obs, t, s);
+                advance_adam_state(this->opts,
+                                   m_state.data() + s * out_dim,
+                                   v_state.data() + s * out_dim,
+                                   edata_cpu->leaf_data->values + factual * out_dim,
+                                   out_dim);
+            }
+        }
+
+        // Run SHAP for tree_idx, one sample at a time.
+        shapData* shap_data = alloc_shap_data(this->metadata, edata_cpu, tree_idx);
+        shap_data->offset_poly = offset;
+        shap_data->base_poly = base_poly;
+        shap_data->norm_values = norm;
+
+        for (int s = 0; s < n_samples; ++s) {
+            apply_optimizer_shap_predictions(shap_data, this->metadata, edata_cpu, this->opts, tree_idx,
+                                             m_state.data() + s * out_dim,
+                                             v_state.data() + s * out_dim);
+            reset_shap_arrays(shap_data, this->metadata);
+            linear_tree_shap(this->metadata, edata_cpu, shap_data, &dataset, shap_values, 0, 0, -1, s);
+        }
+        dealloc_shap_data(shap_data);
+    }
+
 #ifdef USE_CUDA
     if (this->device == gpu){
         ensemble_data_dealloc(edata_cpu);
     }
-#endif 
+#endif
     return shap_values;
 }
 
@@ -1431,54 +1598,78 @@ float* GBRL::ensemble_shap(const float *obs, const char *categorical_obs, const 
     valid_tree_idx(0, this->metadata);
     float *shap_values = init_zero_mat((this->metadata->n_num_features + this->metadata->n_cat_features)*this->metadata->output_dim * n_samples);
 
-    dataHolder<const float> obs_holder{obs, this->device};
-    dataHolder<const char> cat_obs_holder{categorical_obs, this->device};
+    dataHolder<const float> obs_holder{obs, cpu};
+    dataHolder<const char> cat_obs_holder{categorical_obs, cpu};
     dataSet dataset{
-        &obs_holder,                // observations
-        &cat_obs_holder,            // categorical observations
-        nullptr,                   // grads (not used in ensemble_shap)
-        nullptr,           // build_grads (not used in ensemble_shap)
-        n_samples,         // number of samples
+        &obs_holder,
+        &cat_obs_holder,
+        nullptr,
+        nullptr,
+        n_samples,
     };
     ensembleData *edata_cpu = nullptr;
 #ifdef USE_CUDA
     if (this->device == gpu){
         edata_cpu = ensemble_data_copy_gpu_cpu(this->metadata, this->edata, nullptr);
     }
-#endif 
+#endif
     if (this->device == cpu)
         edata_cpu = this->edata;
 
+    // Detect whether any optimizer is Adam
+    bool has_adam = false;
+    for (size_t oi = 0; oi < this->opts.size(); ++oi)
+        if (this->opts[oi]->getAlgo() == Adam) { has_adam = true; break; }
+
     const int out_dim = this->metadata->output_dim;
-    for (int tree_idx = 0; tree_idx < this->metadata->n_trees; ++tree_idx){
-        shapData* shap_data = alloc_shap_data(this->metadata, edata_cpu, tree_idx);
-        shap_data->offset_poly = offset;
-        shap_data->base_poly = base_poly;
-        shap_data->norm_values = norm;
 
-        // Scale leaf predictions by -lr so SHAP decomposes the actual
-        // optimizer contribution, satisfying local accuracy for SGD.
-        for (size_t opt_idx = 0; opt_idx < this->opts.size(); ++opt_idx) {
-            if (this->opts[opt_idx]->getAlgo() == SGD) {
-                float neg_lr = -this->opts[opt_idx]->scheduler->get_lr(tree_idx);
-                int d_start = this->opts[opt_idx]->start_idx;
-                int d_stop  = this->opts[opt_idx]->stop_idx;
-                for (int node = 0; node < shap_data->n_nodes; ++node) {
-                    for (int d = d_start; d < d_stop; ++d)
-                        shap_data->predictions[node * out_dim + d] *= neg_lr;
-                }
-            }
+    if (!has_adam) {
+        // Pure-SGD path: predictions are sample-independent, use get_shap_values.
+        for (int tree_idx = 0; tree_idx < this->metadata->n_trees; ++tree_idx) {
+            shapData* shap_data = alloc_shap_data(this->metadata, edata_cpu, tree_idx);
+            shap_data->offset_poly = offset;
+            shap_data->base_poly = base_poly;
+            shap_data->norm_values = norm;
+            apply_optimizer_shap_predictions(shap_data, this->metadata, edata_cpu, this->opts, tree_idx, nullptr, nullptr);
+            get_shap_values(this->metadata, edata_cpu, shap_data, &dataset, shap_values);
+            dealloc_shap_data(shap_data);
         }
+    } else {
+        // Adam path: maintain per-sample moment state across trees.
+        std::vector<float> m_state(n_samples * out_dim, 0.0f);
+        std::vector<float> v_state(n_samples * out_dim, 0.0f);
 
-        get_shap_values(this->metadata, edata_cpu, shap_data, &dataset, shap_values);
-        dealloc_shap_data(shap_data);
+        for (int tree_idx = 0; tree_idx < this->metadata->n_trees; ++tree_idx) {
+            shapData* shap_data = alloc_shap_data(this->metadata, edata_cpu, tree_idx);
+            shap_data->offset_poly = offset;
+            shap_data->base_poly = base_poly;
+            shap_data->norm_values = norm;
+
+            for (int s = 0; s < n_samples; ++s) {
+                apply_optimizer_shap_predictions(shap_data, this->metadata, edata_cpu, this->opts, tree_idx,
+                                                 m_state.data() + s * out_dim,
+                                                 v_state.data() + s * out_dim);
+                reset_shap_arrays(shap_data, this->metadata);
+                linear_tree_shap(this->metadata, edata_cpu, shap_data, &dataset, shap_values, 0, 0, -1, s);
+
+                // Advance Adam state using the actual leaf this sample landed in.
+                int factual = find_factual_leaf(this->metadata, edata_cpu, obs, categorical_obs, tree_idx, s);
+                advance_adam_state(this->opts,
+                                   m_state.data() + s * out_dim,
+                                   v_state.data() + s * out_dim,
+                                   edata_cpu->leaf_data->values + factual * out_dim,
+                                   out_dim);
+            }
+            dealloc_shap_data(shap_data);
+        }
     }
+
 #ifdef USE_CUDA
     if (this->device == gpu){
         ensemble_data_dealloc(edata_cpu);
     }
-#endif 
-   
+#endif
+
     return shap_values;
 }
 

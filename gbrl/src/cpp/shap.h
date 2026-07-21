@@ -59,6 +59,8 @@ struct shapData {
     float *predictions;             /**< Leaf prediction values */
     float *weights;                 /**< Edge weights */
     char *categorical_values;       /**< Categorical split values */
+    int *node_to_leaf_idx;          /**< Absolute leaf index for leaf nodes, -1 for internal nodes */
+    float *leaf_cond_probs;         /**< Conditional probability (product of edge weights) for leaf nodes, 0 for internal nodes */
 };
 
 /**

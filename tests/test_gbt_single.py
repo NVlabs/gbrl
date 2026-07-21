@@ -472,6 +472,63 @@ class TestGBTSingle(unittest.TestCase):
                     f'ensemble shap completeness violated for SGD lr={lr} '
                     f'output_dim={output_dim}: max residual={max_err:.4f}')
 
+    def test_ensemble_shap_completeness_adam(self):
+        """Adam-aware SHAP: verify local accuracy for tree 0 (exact) and feature importance."""
+        print("Running test_ensemble_shap_completeness_adam")
+        rng = np.random.default_rng(7)
+        n, d = 200, 6
+        X = rng.normal(size=(n, d)).astype(np.float32)
+        Y = (2 * X[:, 0] - X[:, 1]).astype(np.float32)[:, np.newaxis]
+
+        from gbrl.common.utils import preprocess_features
+
+        for output_dim, Y_use in [(1, Y), (2, np.hstack([Y, -Y]))]:
+            opt = {'algo': 'Adam', 'lr': 0.01, 'start_idx': 0, 'stop_idx': output_dim}
+            model = GBTModel(
+                input_dim=d, output_dim=output_dim,
+                tree_struct={'max_depth': 4, 'n_bins': 256, 'min_data_in_leaf': 1,
+                             'grow_policy': 'oblivious'},
+                optimizers=opt,
+                params={'split_score_func': 'Cosine', 'generator_type': 'Quantile'},
+                device='cpu', verbose=0,
+            )
+            model.set_bias_from_targets(Y_use)
+            target = th.as_tensor(Y_use)
+            for _ in range(30):
+                pred_t = model(X, requires_grad=True)
+                loss = ((pred_t.reshape(target.shape) - target) ** 2).mean()
+                loss.backward()
+                model.step(X)
+
+            # --- Test 1: tree 0 exact completeness ---
+            # Before tree 0, all samples have m=v=0, so leaf values are sample-independent
+            # and TreeSHAP local accuracy gives: mean_pred_tree0 + shap0_sum == pred_tree0 exactly.
+            num_f, cat_f = preprocess_features(X)
+            pred_1tree = model.learner._cpp_model.predict(
+                obs=num_f, categorical_obs=cat_f, start_tree_idx=0, stop_tree_idx=1
+            ).reshape(n, output_dim)
+            mean_pred_1tree = pred_1tree.mean(axis=0, keepdims=True)
+            tree0_shap = model.tree_shap(0, X)               # (n, n_features, output_dim)
+            tree0_shap_sum = tree0_shap.sum(axis=1)          # (n, output_dim)
+            reconstructed_1tree = mean_pred_1tree + tree0_shap_sum
+            max_err_tree0 = float(np.abs(reconstructed_1tree - pred_1tree).max())
+            self.assertLess(
+                max_err_tree0, 1e-4,
+                f'Adam tree-0 SHAP completeness violated for output_dim={output_dim}: '
+                f'max |E[pred_t0]+sum(shap0)-pred_t0|={max_err_tree0:.4f}')
+
+            # --- Test 2: ensemble SHAP feature importance ordering ---
+            # Y = 2*X[:,0] - X[:,1]: feature 0 should dominate attribution.
+            shap_vals = model.shap(X)                         # (n, n_features, output_dim)
+            mean_abs_shap = np.abs(shap_vals).mean(axis=0)   # (n_features, output_dim)
+            # Average over output dimensions
+            feat_importance = mean_abs_shap.mean(axis=-1) if output_dim > 1 else mean_abs_shap.squeeze()
+            top_feat = int(feat_importance.argmax())
+            self.assertEqual(
+                top_feat, 0,
+                f'Adam ensemble SHAP: expected feature 0 to be most important '
+                f'for output_dim={output_dim}, got feature {top_feat}')
+
     def test_cosine_adam_cpu(self):
         print("Running test_cosine_adam_cpu")
         X, y = self.single_data
