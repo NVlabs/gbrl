@@ -588,21 +588,30 @@ class MultiGBTLearner(BaseLearner):
         except RuntimeError as e:
             print(f"Caught an exception in GBRL: {e}")
 
-    def tree_shap(self, tree_idx: int, features:
-                  NumericalData,
-                  model_idx: Optional[int] = None) -> Union[np.ndarray, Tuple[np.ndarray, ...]]:
+    def tree_shap(self, tree_idx: int, features: NumericalData,
+                  model_idx: Optional[int] = None,
+                  return_base: bool = False) -> Union[np.ndarray, Tuple[np.ndarray, ...]]:
         """
         Computes SHAP values for a single tree.
 
         Implementation based on - https://github.com/yupbank/linear_tree_shap
         See Linear TreeShap, Yu et al, 2023, https://arxiv.org/pdf/2209.08192
+
+        For Adam models, tree_shap(tree_idx, x) explains tree tree_idx under the
+        factual Adam moment state induced by all preceding trees in the ensemble,
+        not tree tree_idx in isolation.
+
         Args:
             tree_idx (int): tree index
-            features (NumericalData):
-            model_idx (int, optional): The index of the model to print.
+            features (NumericalData): input features
+            model_idx (int, optional): restrict to a single sub-model; returns
+                all sub-models when None.
+            return_base (bool): if True, return (phi, base) where base has shape
+                (n_samples, output_dim). base + phi.sum(axis=1) == predict(x).
 
         Returns:
-            Union[np.ndarray, Tuple[np.ndarray, ...]: shap values
+            phi array, or (phi, base) tuple when return_base=True.
+            When model_idx is None, returns a list (one entry per sub-model).
         """
         assert self._cpp_models is not None and isinstance(self._cpp_models, list), \
             "Model not initialized."
@@ -615,37 +624,44 @@ class MultiGBTLearner(BaseLearner):
         base_poly = np.ascontiguousarray(base_poly)
         norm_values = np.ascontiguousarray(norm_values)
         offset = np.ascontiguousarray(offset)
+        cpp_fn = '_cpp_models[i].tree_shap_and_base' if return_base else '_cpp_models[i].tree_shap'
         if model_idx is not None:
-            return self._cpp_models[model_idx].tree_shap(tree_idx,
-                                                         num_inputs,
-                                                         cat_inputs,
-                                                         norm_values,
-                                                         base_poly,
-                                                         offset)
-        shap_values = []
+            m = self._cpp_models[model_idx]
+            fn = m.tree_shap_and_base if return_base else m.tree_shap
+            return fn(tree_idx, num_inputs, cat_inputs, norm_values, base_poly, offset)
+        results = []
         for i in range(self.n_learners):
-            shap_values.append(self._cpp_models[i].tree_shap(tree_idx,
-                                                             num_inputs,
-                                                             cat_inputs,
-                                                             norm_values,
-                                                             base_poly,
-                                                             offset))
-        return shap_values  # type: ignore
+            fn = (self._cpp_models[i].tree_shap_and_base if return_base
+                  else self._cpp_models[i].tree_shap)
+            results.append(fn(tree_idx, num_inputs, cat_inputs, norm_values, base_poly, offset))
+        return results  # type: ignore
 
     def shap(self, features: NumericalData,
-             model_idx: Optional[int] = None) -> Union[np.ndarray, Tuple[np.ndarray, ...]]:
+             model_idx: Optional[int] = None,
+             return_base: bool = False) -> Union[np.ndarray, Tuple[np.ndarray, ...]]:
         """
         Computes SHAP values for the entire ensemble.
 
-        Uses Linear tree shap for each tree in the ensemble (sequentially)
+        Uses Linear tree shap for each tree in the ensemble (sequentially).
         Implementation based on - https://github.com/yupbank/linear_tree_shap
         See Linear TreeShap, Yu et al, 2023, https://arxiv.org/pdf/2209.08192
+
+        For Adam-optimized models, GBRL computes optimizer-aware local TreeSHAP:
+        the factual Adam moment state is replayed before each tree, and each tree
+        is explained using one-step Adam deltas under that frozen state. This is
+        locally prediction-aligned when used with return_base=True.
+
         Args:
-            features (NumericalData):
-            model_idx (int, optional): The index of the model to print.
+            features (NumericalData): input features
+            model_idx (int, optional): restrict to a single sub-model; returns
+                all sub-models when None.
+            return_base (bool): if True, return (phi, base) where base has shape
+                (n_samples, output_dim). base + phi.sum(axis=1) == predict(x).
+                For Adam the base is sample-specific; for SGD it is shared.
 
         Returns:
-            Union[np.ndarray, Tuple[np.ndarray, ...]: shap values
+            phi array, or (phi, base) tuple when return_base=True.
+            When model_idx is None, returns a list (one entry per sub-model).
         """
         assert self._cpp_models is not None and isinstance(self._cpp_models, list), \
             "Model not initialized."
@@ -659,19 +675,15 @@ class MultiGBTLearner(BaseLearner):
         norm_values = np.ascontiguousarray(norm_values)
         offset = np.ascontiguousarray(offset)
         if model_idx is not None:
-            return self._cpp_models[model_idx].ensemble_shap(num_inputs,
-                                                             cat_inputs,
-                                                             norm_values,
-                                                             base_poly,
-                                                             offset)
-        shap_values = []
+            m = self._cpp_models[model_idx]
+            fn = m.ensemble_shap_and_base if return_base else m.ensemble_shap
+            return fn(num_inputs, cat_inputs, norm_values, base_poly, offset)
+        results = []
         for i in range(self.n_learners):
-            shap_values.append(self._cpp_models[i].ensemble_shap(num_inputs,
-                                                                 cat_inputs,
-                                                                 norm_values,
-                                                                 base_poly,
-                                                                 offset))
-        return shap_values  # type: ignore
+            fn = (self._cpp_models[i].ensemble_shap_and_base if return_base
+                  else self._cpp_models[i].ensemble_shap)
+            results.append(fn(num_inputs, cat_inputs, norm_values, base_poly, offset))
+        return results  # type: ignore
 
     def set_device(self, device: Union[str, th.device],
                    model_idx: Optional[int] = None) -> None:

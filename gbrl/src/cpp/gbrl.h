@@ -146,7 +146,7 @@ class GBRL {
         
         /**
          * @brief Compute SHAP values for a single tree
-         * 
+         *
          * @param tree_idx Index of tree to explain
          * @param obs Numerical observations
          * @param categorical_obs Categorical observations
@@ -154,7 +154,12 @@ class GBRL {
          * @param norm Normalization values
          * @param base_poly Base polynomial coefficients
          * @param offset Offset polynomial coefficients
-         * @return Pointer to SHAP values array, caller must free
+         * @param base_values Optional out-parameter (n_samples × output_dim, zero-initialised
+         *        by caller). When non-null, accumulates the per-sample SHAP base value:
+         *        sum over leaf nodes of (effective_delta × cond_prob) for this tree.
+         *        For Adam, the base is sample-specific because effective_delta depends on
+         *        the frozen pre-tree moment state of each sample.
+         * @return Pointer to SHAP values array (n_samples × n_features × output_dim), caller must free
          */
         float* tree_shap(
             const int tree_idx,
@@ -166,17 +171,24 @@ class GBRL {
             float *offset,
             float *base_values = nullptr
         );
-        
+
         /**
          * @brief Compute SHAP values for entire ensemble
-         * 
+         *
          * @param obs Numerical observations
          * @param categorical_obs Categorical observations
          * @param n_samples Number of samples
          * @param norm Normalization values
          * @param base_poly Base polynomial coefficients
          * @param offset Offset polynomial coefficients
-         * @return Pointer to SHAP values array, caller must free
+         * @param base_values Optional out-parameter (n_samples × output_dim, zero-initialised
+         *        by caller). When non-null, accumulates the sample-specific SHAP base:
+         *        model bias plus the sum over all trees of each tree's expected effective
+         *        contribution under the path distribution. Satisfies:
+         *        base_values[s] + sum_f(phi_f(x_s)) == predict(x_s).
+         *        For SGD, base is identical across samples. For Adam, it is sample-specific
+         *        because each tree's effective leaf values depend on the sample's Adam state.
+         * @return Pointer to SHAP values array (n_samples × n_features × output_dim), caller must free
          */
         float* ensemble_shap(
             const float *obs,

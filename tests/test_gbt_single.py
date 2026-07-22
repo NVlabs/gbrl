@@ -403,7 +403,7 @@ class TestGBTSingle(unittest.TestCase):
         self.assertTrue(loss < value, f'Expected loss = {loss} < {value}')
 
     def test_shap_cpu(self):
-        """tree_shap completeness: bias + sum_f shap[f] == predict(x) for one tree."""
+        """tree_shap completeness: base + sum_f shap_f(x) == predict(x) for one SGD tree."""
         print("Running test_shap_cpu")
         X, y = self.single_data
         X_cpu = X.detach().clone().cpu().numpy()
@@ -422,12 +422,9 @@ class TestGBTSingle(unittest.TestCase):
                          verbose=0,
                          device='cpu')
         model.learner.step(X, y)
-        # SHAP local accuracy: base + sum_f shap_f(x) == predict(x), where
-        # base = E_x[predict(x)] (the explainer's expected value, not model.bias).
         pred = model(X_cpu).detach().cpu().numpy().reshape(len(X_cpu), -1)
-        shap_vals = model.tree_shap(0, X_cpu)                   # (n_samples, n_features, output_dim)
-        base = pred.mean(axis=0, keepdims=True)                  # (1, output_dim)
-        reconstructed = base + shap_vals.sum(axis=1)             # (n_samples, output_dim)
+        shap_vals, base = model.tree_shap(0, X_cpu, return_base=True)
+        reconstructed = base + shap_vals.sum(axis=1)
         max_err = float(np.abs(reconstructed - pred).max())
         self.assertLess(
             max_err, 1e-3,
@@ -463,8 +460,7 @@ class TestGBTSingle(unittest.TestCase):
                     model.step(X)
 
                 pred = model(X).detach().cpu().numpy().reshape(n, output_dim)
-                shap_vals = model.shap(X)
-                base = pred.mean(axis=0, keepdims=True)
+                shap_vals, base = model.shap(X, return_base=True)
                 max_err = float(np.abs(base + shap_vals.sum(axis=1) - pred).max())
                 self.assertLess(
                     max_err, 1e-3,
@@ -491,8 +487,7 @@ class TestGBTSingle(unittest.TestCase):
             model.step(X)
 
         pred = model(X).detach().cpu().numpy().reshape(n, output_dim)
-        shap_vals = model.shap(X)
-        base = pred.mean(axis=0, keepdims=True)
+        shap_vals, base = model.shap(X, return_base=True)
         max_err = float(np.abs(base + shap_vals.sum(axis=1) - pred).max())
         self.assertLess(
             max_err, 1e-3,

@@ -1387,6 +1387,26 @@ void GBRL::print_ensemble_metadata(){
 // ---------------------------------------------------------------------------
 
 /**
+ * @brief Accumulate per-sample SHAP base contribution from one tree.
+ *
+ * Adds sum_{leaf nodes} predictions[node * out_dim + d] into
+ * base_values[sample_offset * out_dim + d] for every output dimension.
+ * For a broadcast case (all samples share the same predictions, e.g. SGD),
+ * call with sample_offset iterating over all samples.
+ */
+static void accumulate_base_values(
+    const shapData *shap_data,
+    float *base_row,
+    int out_dim)
+{
+    for (int node = 0; node < shap_data->n_nodes; ++node) {
+        if (shap_data->node_to_leaf_idx[node] < 0) continue;
+        for (int d = 0; d < out_dim; ++d)
+            base_row[d] += shap_data->predictions[node * out_dim + d];
+    }
+}
+
+/**
  * @brief Set shap_data->predictions for every leaf node using the
  *        optimizer-appropriate effective value.
  *
@@ -1578,14 +1598,9 @@ float* GBRL::tree_shap(const int tree_idx, const float *obs, const char *categor
         shap_data->norm_values = norm;
         apply_optimizer_shap_predictions(shap_data, this->metadata, edata_cpu, this->opts, tree_idx, nullptr, nullptr);
         get_shap_values(this->metadata, edata_cpu, shap_data, &dataset, shap_values);
-        if (base_values != nullptr) {
+        if (base_values != nullptr)
             for (int s = 0; s < n_samples; ++s)
-                for (int node = 0; node < shap_data->n_nodes; ++node) {
-                    if (shap_data->node_to_leaf_idx[node] < 0) continue;
-                    for (int d = 0; d < out_dim; ++d)
-                        base_values[s * out_dim + d] += shap_data->predictions[node * out_dim + d];
-                }
-        }
+                accumulate_base_values(shap_data, base_values + s * out_dim, out_dim);
         dealloc_shap_data(shap_data);
     } else {
         // Adam path: replay trees 0..tree_idx-1 to build per-sample Adam state,
@@ -1617,13 +1632,8 @@ float* GBRL::tree_shap(const int tree_idx, const float *obs, const char *categor
                                              v_state.data() + s * out_dim);
             reset_shap_arrays(shap_data, this->metadata);
             linear_tree_shap(this->metadata, edata_cpu, shap_data, &dataset, shap_values, 0, 0, -1, s);
-            if (base_values != nullptr) {
-                for (int node = 0; node < shap_data->n_nodes; ++node) {
-                    if (shap_data->node_to_leaf_idx[node] < 0) continue;
-                    for (int d = 0; d < out_dim; ++d)
-                        base_values[s * out_dim + d] += shap_data->predictions[node * out_dim + d];
-                }
-            }
+            if (base_values != nullptr)
+                accumulate_base_values(shap_data, base_values + s * out_dim, out_dim);
         }
         dealloc_shap_data(shap_data);
     }
@@ -1674,14 +1684,9 @@ float* GBRL::ensemble_shap(const float *obs, const char *categorical_obs, const 
             shap_data->norm_values = norm;
             apply_optimizer_shap_predictions(shap_data, this->metadata, edata_cpu, this->opts, tree_idx, nullptr, nullptr);
             get_shap_values(this->metadata, edata_cpu, shap_data, &dataset, shap_values);
-            if (base_values != nullptr) {
+            if (base_values != nullptr)
                 for (int s = 0; s < n_samples; ++s)
-                    for (int node = 0; node < shap_data->n_nodes; ++node) {
-                        if (shap_data->node_to_leaf_idx[node] < 0) continue;
-                        for (int d = 0; d < out_dim; ++d)
-                            base_values[s * out_dim + d] += shap_data->predictions[node * out_dim + d];
-                    }
-            }
+                    accumulate_base_values(shap_data, base_values + s * out_dim, out_dim);
             dealloc_shap_data(shap_data);
         }
     } else {
@@ -1701,13 +1706,8 @@ float* GBRL::ensemble_shap(const float *obs, const char *categorical_obs, const 
                                                  v_state.data() + s * out_dim);
                 reset_shap_arrays(shap_data, this->metadata);
                 linear_tree_shap(this->metadata, edata_cpu, shap_data, &dataset, shap_values, 0, 0, -1, s);
-                if (base_values != nullptr) {
-                    for (int node = 0; node < shap_data->n_nodes; ++node) {
-                        if (shap_data->node_to_leaf_idx[node] < 0) continue;
-                        for (int d = 0; d < out_dim; ++d)
-                            base_values[s * out_dim + d] += shap_data->predictions[node * out_dim + d];
-                    }
-                }
+                if (base_values != nullptr)
+                    accumulate_base_values(shap_data, base_values + s * out_dim, out_dim);
 
                 // Advance Adam state using the actual leaf this sample landed in.
                 int factual = find_factual_leaf(this->metadata, edata_cpu, obs, categorical_obs, tree_idx, s);
