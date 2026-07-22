@@ -563,7 +563,15 @@ void GBRL::set_optimizer(optimizerAlgo algo, schedulerFunc scheduler_func, float
     if (start_idx < 0 || stop_idx <= 0 || start_idx >= this->metadata->output_dim || stop_idx > this->metadata->output_dim){
         std::cerr << "Invalid start index: "  << start_idx << " or stop index: " << stop_idx << " in range: [0, " << this->metadata->output_dim  <<  "]" << std::endl;
         throw std::runtime_error("invalid index ranges");
-        return; 
+        return;
+    }
+    for (const auto &existing : this->opts) {
+        if (start_idx < existing->stop_idx && stop_idx > existing->start_idx) {
+            std::cerr << "Optimizer output range [" << start_idx << ", " << stop_idx
+                      << ") overlaps with existing range ["
+                      << existing->start_idx << ", " << existing->stop_idx << ")." << std::endl;
+            throw std::runtime_error("Overlapping optimizer output ranges are not supported");
+        }
     }
 
     (void)shrinkage;
@@ -1532,7 +1540,7 @@ static void advance_adam_state(
 
 // ---------------------------------------------------------------------------
 
-float* GBRL::tree_shap(const int tree_idx, const float *obs, const char *categorical_obs, const int n_samples, float *norm, float *base_poly, float *offset){
+float* GBRL::tree_shap(const int tree_idx, const float *obs, const char *categorical_obs, const int n_samples, float *norm, float *base_poly, float *offset, float *base_values){
     valid_tree_idx(tree_idx, this->metadata);
     ensembleData *edata_cpu = nullptr;
 #ifdef USE_CUDA
@@ -1570,6 +1578,14 @@ float* GBRL::tree_shap(const int tree_idx, const float *obs, const char *categor
         shap_data->norm_values = norm;
         apply_optimizer_shap_predictions(shap_data, this->metadata, edata_cpu, this->opts, tree_idx, nullptr, nullptr);
         get_shap_values(this->metadata, edata_cpu, shap_data, &dataset, shap_values);
+        if (base_values != nullptr) {
+            for (int s = 0; s < n_samples; ++s)
+                for (int node = 0; node < shap_data->n_nodes; ++node) {
+                    if (shap_data->node_to_leaf_idx[node] < 0) continue;
+                    for (int d = 0; d < out_dim; ++d)
+                        base_values[s * out_dim + d] += shap_data->predictions[node * out_dim + d];
+                }
+        }
         dealloc_shap_data(shap_data);
     } else {
         // Adam path: replay trees 0..tree_idx-1 to build per-sample Adam state,
@@ -1601,6 +1617,13 @@ float* GBRL::tree_shap(const int tree_idx, const float *obs, const char *categor
                                              v_state.data() + s * out_dim);
             reset_shap_arrays(shap_data, this->metadata);
             linear_tree_shap(this->metadata, edata_cpu, shap_data, &dataset, shap_values, 0, 0, -1, s);
+            if (base_values != nullptr) {
+                for (int node = 0; node < shap_data->n_nodes; ++node) {
+                    if (shap_data->node_to_leaf_idx[node] < 0) continue;
+                    for (int d = 0; d < out_dim; ++d)
+                        base_values[s * out_dim + d] += shap_data->predictions[node * out_dim + d];
+                }
+            }
         }
         dealloc_shap_data(shap_data);
     }
@@ -1613,7 +1636,7 @@ float* GBRL::tree_shap(const int tree_idx, const float *obs, const char *categor
     return shap_values;
 }
 
-float* GBRL::ensemble_shap(const float *obs, const char *categorical_obs, const int n_samples, float *norm, float *base_poly, float *offset){
+float* GBRL::ensemble_shap(const float *obs, const char *categorical_obs, const int n_samples, float *norm, float *base_poly, float *offset, float *base_values){
     valid_tree_idx(0, this->metadata);
     float *shap_values = init_zero_mat((this->metadata->n_num_features + this->metadata->n_cat_features)*this->metadata->output_dim * n_samples);
 
@@ -1651,6 +1674,14 @@ float* GBRL::ensemble_shap(const float *obs, const char *categorical_obs, const 
             shap_data->norm_values = norm;
             apply_optimizer_shap_predictions(shap_data, this->metadata, edata_cpu, this->opts, tree_idx, nullptr, nullptr);
             get_shap_values(this->metadata, edata_cpu, shap_data, &dataset, shap_values);
+            if (base_values != nullptr) {
+                for (int s = 0; s < n_samples; ++s)
+                    for (int node = 0; node < shap_data->n_nodes; ++node) {
+                        if (shap_data->node_to_leaf_idx[node] < 0) continue;
+                        for (int d = 0; d < out_dim; ++d)
+                            base_values[s * out_dim + d] += shap_data->predictions[node * out_dim + d];
+                    }
+            }
             dealloc_shap_data(shap_data);
         }
     } else {
@@ -1670,6 +1701,13 @@ float* GBRL::ensemble_shap(const float *obs, const char *categorical_obs, const 
                                                  v_state.data() + s * out_dim);
                 reset_shap_arrays(shap_data, this->metadata);
                 linear_tree_shap(this->metadata, edata_cpu, shap_data, &dataset, shap_values, 0, 0, -1, s);
+                if (base_values != nullptr) {
+                    for (int node = 0; node < shap_data->n_nodes; ++node) {
+                        if (shap_data->node_to_leaf_idx[node] < 0) continue;
+                        for (int d = 0; d < out_dim; ++d)
+                            base_values[s * out_dim + d] += shap_data->predictions[node * out_dim + d];
+                    }
+                }
 
                 // Advance Adam state using the actual leaf this sample landed in.
                 int factual = find_factual_leaf(this->metadata, edata_cpu, obs, categorical_obs, tree_idx, s);
@@ -1681,6 +1719,13 @@ float* GBRL::ensemble_shap(const float *obs, const char *categorical_obs, const 
             }
             dealloc_shap_data(shap_data);
         }
+    }
+
+    // Add bias to base_values after all trees are processed.
+    if (base_values != nullptr) {
+        for (int s = 0; s < n_samples; ++s)
+            for (int d = 0; d < out_dim; ++d)
+                base_values[s * out_dim + d] += edata_cpu->bias[d];
     }
 
 #ifdef USE_CUDA

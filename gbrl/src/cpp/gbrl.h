@@ -163,7 +163,8 @@ class GBRL {
             const int n_samples,
             float *norm,
             float *base_poly,
-            float *offset
+            float *offset,
+            float *base_values = nullptr
         );
         
         /**
@@ -183,7 +184,8 @@ class GBRL {
             const int n_samples,
             float *norm,
             float *base_poly,
-            float *offset
+            float *offset,
+            float *base_values = nullptr
         );
         
         /**

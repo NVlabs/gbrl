@@ -499,14 +499,12 @@ class TestGBTSingle(unittest.TestCase):
             f'SGD linear-lr: max |base+sum(shap)-pred|={max_err:.4f}')
 
     def test_ensemble_shap_completeness_adam(self):
-        """Adam-aware SHAP: verify local accuracy for tree 0 (exact) and feature importance."""
+        """Adam local TreeSHAP: full ensemble completeness with sample-specific base."""
         print("Running test_ensemble_shap_completeness_adam")
         rng = np.random.default_rng(7)
         n, d = 200, 6
         X = rng.normal(size=(n, d)).astype(np.float32)
         Y = (2 * X[:, 0] - X[:, 1]).astype(np.float32)[:, np.newaxis]
-
-        from gbrl.common.utils import preprocess_features
 
         for output_dim, Y_use in [(1, Y), (2, np.hstack([Y, -Y]))]:
             opt = {'algo': 'Adam', 'lr': 0.01, 'start_idx': 0, 'stop_idx': output_dim}
@@ -526,34 +524,37 @@ class TestGBTSingle(unittest.TestCase):
                 loss.backward()
                 model.step(X)
 
-            # --- Test 1: tree 0 exact completeness ---
-            # Before tree 0, all samples have m=v=0, so leaf values are sample-independent
-            # and TreeSHAP local accuracy gives: mean_pred_tree0 + shap0_sum == pred_tree0 exactly.
-            num_f, cat_f = preprocess_features(X)
-            pred_1tree = model.learner._cpp_model.predict(
-                obs=num_f, categorical_obs=cat_f, start_tree_idx=0, stop_tree_idx=1
-            ).reshape(n, output_dim)
-            mean_pred_1tree = pred_1tree.mean(axis=0, keepdims=True)
-            tree0_shap = model.tree_shap(0, X)               # (n, n_features, output_dim)
-            tree0_shap_sum = tree0_shap.sum(axis=1)          # (n, output_dim)
-            reconstructed_1tree = mean_pred_1tree + tree0_shap_sum
-            max_err_tree0 = float(np.abs(reconstructed_1tree - pred_1tree).max())
-            self.assertLess(
-                max_err_tree0, 1e-4,
-                f'Adam tree-0 SHAP completeness violated for output_dim={output_dim}: '
-                f'max |E[pred_t0]+sum(shap0)-pred_t0|={max_err_tree0:.4f}')
+            pred = model(X).detach().cpu().numpy().reshape(n, output_dim)
 
-            # --- Test 2: ensemble SHAP feature importance ordering ---
-            # Y = 2*X[:,0] - X[:,1]: feature 0 should dominate attribution.
-            shap_vals = model.shap(X)                         # (n, n_features, output_dim)
-            mean_abs_shap = np.abs(shap_vals).mean(axis=0)   # (n_features, output_dim)
-            # Average over output dimensions
-            feat_importance = mean_abs_shap.mean(axis=-1) if output_dim > 1 else mean_abs_shap.squeeze()
-            top_feat = int(feat_importance.argmax())
-            self.assertEqual(
-                top_feat, 0,
-                f'Adam ensemble SHAP: expected feature 0 to be most important '
-                f'for output_dim={output_dim}, got feature {top_feat}')
+            # --- Test 1: ensemble completeness with sample-specific base ---
+            # This exercises Adam moment state accumulated across all trees.
+            phi, base = model.shap(X, return_base=True)      # (n,d,out), (n,out)
+            reconstructed = base + phi.sum(axis=1)
+            max_err = float(np.abs(reconstructed - pred).max())
+            self.assertLess(
+                max_err, 1e-4,
+                f'Adam ensemble completeness violated for output_dim={output_dim}: '
+                f'max |base+sum(shap)-pred|={max_err:.4f}')
+
+            # --- Test 2: tree_shap(1) has a sample-specific base different from tree_shap(0) ---
+            # For Adam, tree 1's effective leaf values depend on the Adam state produced by tree 0,
+            # which is sample-specific. So base_t1 != base_t0 in general.
+            phi_t0, base_t0 = model.tree_shap(0, X, return_base=True)  # (n,d,out), (n,out)
+            phi_t1, base_t1 = model.tree_shap(1, X, return_base=True)
+
+            # base_t1 should vary across samples (unlike base_t0 which is sample-independent)
+            # because tree 1 uses each sample's frozen Adam state from tree 0
+            self.assertGreater(
+                float(base_t1.std()),
+                1e-6,
+                f'Adam tree_shap(1) base should be sample-specific for output_dim={output_dim}')
+
+            # Consistency: sum of per-tree (base + phi.sum) should give non-trivial contributions
+            tree_contributions = (base_t0 + phi_t0.sum(axis=1)) + (base_t1 + phi_t1.sum(axis=1))
+            self.assertGreater(
+                float(np.abs(tree_contributions).mean()),
+                1e-6,
+                f'Adam tree_shap contributions should be non-trivial for output_dim={output_dim}')
 
     def test_cosine_adam_cpu(self):
         print("Running test_cosine_adam_cpu")

@@ -409,18 +409,28 @@ class GBTLearner(BaseLearner):
             print(f"Caught an exception in GBRL: {e}")
 
     def tree_shap(self, tree_idx: int, features:
-                  NumericalData) -> np.ndarray:
+                  NumericalData, return_base: bool = False):
         """
         Computes SHAP values for a single tree.
 
         Implementation based on - https://github.com/yupbank/linear_tree_shap
         See Linear TreeShap, Yu et al, 2023, https://arxiv.org/pdf/2209.08192
+
+        For Adam models, tree_shap(tree_idx, x) explains tree tree_idx under the
+        factual Adam moment state induced by all preceding trees in the ensemble,
+        NOT under tree tree_idx in isolation.
+
         Args:
             tree_idx (int): tree index
-            features (NumericalData):
+            features (NumericalData): input data
+            return_base (bool): if True, return (phi, base) where base has shape
+                (n_samples, output_dim). base[s] + phi[s].sum(axis=0) equals the
+                factual contribution of tree tree_idx for sample s. For Adam,
+                base is sample-specific.
 
         Returns:
-            np.ndarray: shap values
+            np.ndarray or tuple: shap values, or (shap_values, base_values) if
+                return_base=True
         """
         if isinstance(features, th.Tensor):
             features = features.detach().cpu().numpy()
@@ -431,21 +441,35 @@ class GBTLearner(BaseLearner):
         base_poly = np.ascontiguousarray(base_poly)
         norm_values = np.ascontiguousarray(norm_values)
         offset = np.ascontiguousarray(offset)
+        if return_base:
+            return self._cpp_model.tree_shap_and_base(tree_idx, num_features, cat_features,
+                                                      norm_values, base_poly, offset)
         return self._cpp_model.tree_shap(tree_idx, num_features, cat_features,
                                          norm_values, base_poly, offset)
 
-    def shap(self, features: NumericalData) -> np.ndarray:
+    def shap(self, features: NumericalData, return_base: bool = False):
         """
         Computes SHAP values for the entire ensemble.
 
         Uses Linear tree shap for each tree in the ensemble (sequentially)
         Implementation based on - https://github.com/yupbank/linear_tree_shap
         See Linear TreeShap, Yu et al, 2023, https://arxiv.org/pdf/2209.08192
+
+        For Adam-optimized models, GBRL computes optimizer-aware local TreeSHAP:
+        the factual Adam moment state is replayed before each tree, and each tree
+        is explained using one-step Adam deltas under that frozen state. This is
+        locally prediction-aligned when used with return_base=True, but it is
+        not exact Shapley attribution over all counterfactual optimizer histories.
+
         Args:
-            features (NumericalData):
+            features: input data
+            return_base: if True, return (phi, base) where base has shape
+                (n_samples, output_dim) and satisfies base[s] + phi[s].sum(axis=0) == predict(x_s).
+                For Adam, base is sample-specific. For SGD, it is approximately shared.
 
         Returns:
-            np.ndarray: shap values
+            np.ndarray or tuple: shap values, or (shap_values, base_values) if
+                return_base=True
         """
         if isinstance(features, th.Tensor):
             features = features.detach().cpu().numpy()
@@ -456,6 +480,9 @@ class GBTLearner(BaseLearner):
         base_poly = np.ascontiguousarray(base_poly)
         norm_values = np.ascontiguousarray(norm_values)
         offset = np.ascontiguousarray(offset)
+        if return_base:
+            return self._cpp_model.ensemble_shap_and_base(num_features, cat_features,
+                                                          norm_values, base_poly, offset)
         return self._cpp_model.ensemble_shap(num_features, cat_features,
                                              norm_values, base_poly, offset)
 
