@@ -1400,32 +1400,51 @@ static void apply_optimizer_shap_predictions(
     const float *v_prev)
 {
     const int out_dim = metadata->output_dim;
+
+    // Pre-compute per-output-dimension SGD scale so that overlapping optimizer
+    // ranges produce the correct additive -lr behaviour (matching predict()).
+    // Adam dimensions are flagged separately and handled per-leaf below.
+    std::vector<float> sgd_scale(out_dim, 0.0f);
+    std::vector<bool>  dim_is_adam(out_dim, false);
+    for (size_t oi = 0; oi < opts.size(); ++oi) {
+        int d0 = opts[oi]->start_idx, d1 = opts[oi]->stop_idx;
+        if (opts[oi]->getAlgo() == SGD) {
+            float neg_lr = -opts[oi]->scheduler->get_lr(tree_idx);
+            for (int d = d0; d < d1; ++d)
+                sgd_scale[d] += neg_lr;
+        } else {
+            for (int d = d0; d < d1; ++d)
+                dim_is_adam[d] = true;
+        }
+    }
+
     for (int node = 0; node < shap_data->n_nodes; ++node) {
         int leaf_idx = shap_data->node_to_leaf_idx[node];
         if (leaf_idx < 0) continue;
         float cond_prob = shap_data->leaf_cond_probs[node];
         const float *g = edata->leaf_data->values + leaf_idx * out_dim;
+
+        // SGD dimensions: single multiply with the accumulated scale.
+        for (int d = 0; d < out_dim; ++d) {
+            if (!dim_is_adam[d])
+                shap_data->predictions[node * out_dim + d] = sgd_scale[d] * g[d] * cond_prob;
+        }
+
+        // Adam dimensions: one-step delta under the frozen pre-tree moment state.
         for (size_t oi = 0; oi < opts.size(); ++oi) {
-            int d0 = opts[oi]->start_idx, d1 = opts[oi]->stop_idx;
-            if (opts[oi]->getAlgo() == SGD) {
-                float neg_lr = -opts[oi]->scheduler->get_lr(tree_idx);
-                for (int d = d0; d < d1; ++d)
-                    shap_data->predictions[node * out_dim + d] = neg_lr * g[d] * cond_prob;
-            } else {
-                // Adam
-                AdamOptimizer *adam = static_cast<AdamOptimizer*>(opts[oi]);
-                float lr = adam->scheduler->get_lr(tree_idx);
-                float tf = static_cast<float>(tree_idx) + 1.0f;
-                float alpha = lr * sqrtf(1.0f - powf(adam->beta_2, tf))
-                                 / (1.0f - powf(adam->beta_1, tf));
-                for (int d = d0; d < d1; ++d) {
-                    float mp = (m_prev != nullptr) ? m_prev[d] : 0.0f;
-                    float vp = (v_prev != nullptr) ? v_prev[d] : 0.0f;
-                    float m_l = adam->beta_1 * mp + (1.0f - adam->beta_1) * g[d];
-                    float v_l = adam->beta_2 * vp + (1.0f - adam->beta_2) * g[d] * g[d];
-                    shap_data->predictions[node * out_dim + d] =
-                        -alpha * m_l / (sqrtf(v_l) + adam->eps) * cond_prob;
-                }
+            if (opts[oi]->getAlgo() != Adam) continue;
+            AdamOptimizer *adam = static_cast<AdamOptimizer*>(opts[oi]);
+            float lr  = adam->scheduler->get_lr(tree_idx);
+            float tf  = static_cast<float>(tree_idx) + 1.0f;
+            float alpha = lr * sqrtf(1.0f - powf(adam->beta_2, tf))
+                             / (1.0f - powf(adam->beta_1, tf));
+            for (int d = opts[oi]->start_idx; d < opts[oi]->stop_idx; ++d) {
+                float mp  = (m_prev != nullptr) ? m_prev[d] : 0.0f;
+                float vp  = (v_prev != nullptr) ? v_prev[d] : 0.0f;
+                float m_l = adam->beta_1 * mp + (1.0f - adam->beta_1) * g[d];
+                float v_l = adam->beta_2 * vp + (1.0f - adam->beta_2) * g[d] * g[d];
+                shap_data->predictions[node * out_dim + d] =
+                    -alpha * m_l / (sqrtf(v_l) + adam->eps) * cond_prob;
             }
         }
     }

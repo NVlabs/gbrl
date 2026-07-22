@@ -422,27 +422,27 @@ class TestGBTSingle(unittest.TestCase):
                          verbose=0,
                          device='cpu')
         model.learner.step(X, y)
-        # Verify completeness: bias + sum_features(tree_shap) == predict for every sample.
-        # After the SGD fix, tree_shap returns -lr-scaled contributions so this must hold.
+        # SHAP local accuracy: base + sum_f shap_f(x) == predict(x), where
+        # base = E_x[predict(x)] (the explainer's expected value, not model.bias).
         pred = model(X_cpu).detach().cpu().numpy().reshape(len(X_cpu), -1)
         shap_vals = model.tree_shap(0, X_cpu)                   # (n_samples, n_features, output_dim)
-        # SHAP local accuracy: E[predict] + sum_f shap_f(x) == predict(x).
-        # The base value is the mean prediction over the dataset, not model.bias.
-        mean_pred = pred.mean(axis=0, keepdims=True)             # (1, output_dim)
-        reconstructed = mean_pred + shap_vals.sum(axis=1)        # (n_samples, output_dim)
+        base = pred.mean(axis=0, keepdims=True)                  # (1, output_dim)
+        reconstructed = base + shap_vals.sum(axis=1)             # (n_samples, output_dim)
         max_err = float(np.abs(reconstructed - pred).max())
         self.assertLess(
             max_err, 1e-3,
-            f'tree_shap completeness violated: max |E[pred]+sum(shap)-pred|={max_err:.4f}')
+            f'tree_shap completeness violated: max |base+sum(shap)-pred|={max_err:.4f}')
 
     def test_ensemble_shap_completeness_sgd(self):
-        """ensemble shap() completeness: bias + sum_f shap[f] == predict(x) for SGD."""
+        """ensemble shap(): base + sum_f shap[f] == predict(x) for SGD constant and linear lr."""
         print("Running test_ensemble_shap_completeness_sgd")
         rng = np.random.default_rng(42)
         n, d = 200, 6
         X = rng.normal(size=(n, d)).astype(np.float32)
         Y = (2 * X[:, 0] - X[:, 1]).astype(np.float32)[:, np.newaxis]
+        n_iters = 30
 
+        # Constant lr schedules.
         for lr in (0.1, 0.05):
             for output_dim, Y_use in [(1, Y), (2, np.hstack([Y, -Y]))]:
                 opt = {'algo': 'SGD', 'lr': lr, 'start_idx': 0, 'stop_idx': output_dim}
@@ -456,21 +456,47 @@ class TestGBTSingle(unittest.TestCase):
                 )
                 model.set_bias_from_targets(Y_use)
                 target = th.as_tensor(Y_use)
-                for _ in range(30):
+                for _ in range(n_iters):
                     pred_t = model(X, requires_grad=True)
                     loss = ((pred_t.reshape(target.shape) - target) ** 2).mean()
                     loss.backward()
                     model.step(X)
 
-                bias = model.learner.get_bias()                    # (output_dim,)
                 pred = model(X).detach().cpu().numpy().reshape(n, output_dim)
-                shap_vals = model.shap(X)                         # (n, n_features, output_dim)
-                reconstructed = bias[np.newaxis, :] + shap_vals.sum(axis=1)
-                max_err = float(np.abs(reconstructed - pred).max())
+                shap_vals = model.shap(X)
+                base = pred.mean(axis=0, keepdims=True)
+                max_err = float(np.abs(base + shap_vals.sum(axis=1) - pred).max())
                 self.assertLess(
                     max_err, 1e-3,
-                    f'ensemble shap completeness violated for SGD lr={lr} '
-                    f'output_dim={output_dim}: max residual={max_err:.4f}')
+                    f'SGD lr={lr} output_dim={output_dim}: max |base+sum(shap)-pred|={max_err:.4f}')
+
+        # Linear lr schedule: off-by-one in tree_idx would show up here.
+        output_dim = 1
+        opt_linear = {'algo': 'SGD', 'lr': 0.1, 'stop_lr': 0.01, 'T': n_iters,
+                      'start_idx': 0, 'stop_idx': output_dim}
+        model = GBTModel(
+            input_dim=d, output_dim=output_dim,
+            tree_struct={'max_depth': 4, 'n_bins': 256, 'min_data_in_leaf': 1,
+                         'grow_policy': 'oblivious'},
+            optimizers=opt_linear,
+            params={'split_score_func': 'Cosine', 'generator_type': 'Quantile'},
+            device='cpu', verbose=0,
+        )
+        model.set_bias_from_targets(Y)
+        target = th.as_tensor(Y)
+        for _ in range(n_iters):
+            pred_t = model(X, requires_grad=True)
+            loss = ((pred_t.reshape(target.shape) - target) ** 2).mean()
+            loss.backward()
+            model.step(X)
+
+        pred = model(X).detach().cpu().numpy().reshape(n, output_dim)
+        shap_vals = model.shap(X)
+        base = pred.mean(axis=0, keepdims=True)
+        max_err = float(np.abs(base + shap_vals.sum(axis=1) - pred).max())
+        self.assertLess(
+            max_err, 1e-3,
+            f'SGD linear-lr: max |base+sum(shap)-pred|={max_err:.4f}')
 
     def test_ensemble_shap_completeness_adam(self):
         """Adam-aware SHAP: verify local accuracy for tree 0 (exact) and feature importance."""
