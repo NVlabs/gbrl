@@ -1756,13 +1756,11 @@ __global__ void pava_kernel(
     
     // For increasing constraint (+1): leaf0 (bit=0) should have value <= leaf1 (bit=1)
     // For decreasing constraint (-1): leaf0 (bit=0) should have value >= leaf1 (bit=1)
-    // Use a small epsilon to avoid infinite oscillation when two values differ only
-    // at float32 precision after prior pooling passes.
+    // Strict comparison — no epsilon — so exactly-equal pairs are not pooled.
     bool violation = (constraint_dir == 1 && val0 > val1) ||
                      (constraint_dir == -1 && val0 < val1);
-    
+
     if (violation) {
-        // Pool the values (simple average for 2 points)
         float pooled = (val0 + val1) / 2.0f;
         values[global_leaf0 * output_dim + target_output] = pooled;
         values[global_leaf1 * output_dim + target_output] = pooled;
@@ -1843,12 +1841,11 @@ void apply_monotonic_constraints_cuda(
             }
         }
     }
-    
-    // Apply constraints using PAVA, repeating tree_depth times to ensure convergence.
+
+    // Apply constraints using PAVA, repeating 64 times to ensure convergence.
     // A single depth-ordered pass is not sufficient: pooling at one depth can
-    // re-introduce violations at a previously fixed depth.  Repeating tree_depth
-    // times guarantees all pair-wise constraints are satisfied (bounded by the
-    // depth of the cascade that can be created per iteration).
+    // re-introduce violations at a previously fixed depth when multiple features
+    // at different depths are both constrained.
     // Only iterate over policy_dim since monotonic constraints only apply to policy outputs.
     for (int out_idx = 0; out_idx < metadata->policy_dim; ++out_idx) {
         for (int pass = 0; pass < 64; ++pass) {
@@ -1856,16 +1853,15 @@ void apply_monotonic_constraints_cuda(
                 int constraint_dir = effective_constraints[d][out_idx];
                 if (constraint_dir == 0) continue;
 
-                // Apply PAVA for this depth and output
                 pava_kernel<<<n_planes, 1>>>(
                     edata->leaf_data->values,
-                    d,                    // constraint_depth
-                    constraint_dir,       // constraint_dir (+1 or -1)
+                    d,
+                    constraint_dir,
                     tree_depth,
                     start_leaf_idx,
                     n_leaves_in_tree,
                     metadata->output_dim,
-                    out_idx              // target_output
+                    out_idx
                 );
                 cudaError_t launch_err = cudaGetLastError();
                 if (launch_err != cudaSuccess) {

@@ -28,6 +28,7 @@ architectures with separate models.
 """
 import json
 import os
+import warnings
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
@@ -597,9 +598,11 @@ class MultiGBTLearner(BaseLearner):
         Implementation based on - https://github.com/yupbank/linear_tree_shap
         See Linear TreeShap, Yu et al, 2023, https://arxiv.org/pdf/2209.08192
 
+        For SGD-optimized models, base + phi.sum(axis=1) == predict(x) exactly.
         For Adam models, tree_shap(tree_idx, x) explains tree tree_idx under the
-        factual Adam moment state induced by all preceding trees in the ensemble,
-        not tree tree_idx in isolation.
+        factual Adam moment state induced by all preceding trees in the ensemble
+        (not tree tree_idx in isolation); this is an optimizer-aware local
+        approximation, not exact Shapley attribution.
 
         Args:
             tree_idx (int): tree index
@@ -607,7 +610,7 @@ class MultiGBTLearner(BaseLearner):
             model_idx (int, optional): restrict to a single sub-model; returns
                 all sub-models when None.
             return_base (bool): if True, return (phi, base) where base has shape
-                (n_samples, output_dim). base + phi.sum(axis=1) == predict(x).
+                (n_samples, output_dim). For SGD: base + phi.sum(axis=1) == predict(x).
 
         Returns:
             phi array, or (phi, base) tuple when return_base=True.
@@ -615,6 +618,18 @@ class MultiGBTLearner(BaseLearner):
         """
         assert self._cpp_models is not None and isinstance(self._cpp_models, list), \
             "Model not initialized."
+
+        # Warn once if any selected model uses Adam (unsupported for exact SHAP).
+        models_to_check = ([self._cpp_models[model_idx]] if model_idx is not None
+                           else self._cpp_models)
+        optimizers_flat = [o for m in models_to_check for o in m.get_optimizers()]
+        if any(o.get('algo', '').lower() == 'adam' for o in optimizers_flat):
+            warnings.warn(
+                "tree_shap() was called on a model with Adam optimizer(s). "
+                "Returned values are an optimizer-aware local approximation, "
+                "not exact Shapley attribution over all counterfactual optimizer histories.",
+                RuntimeWarning, stacklevel=2,
+            )
 
         if isinstance(features, th.Tensor):
             features = features.detach().cpu().numpy()
@@ -645,18 +660,17 @@ class MultiGBTLearner(BaseLearner):
         Implementation based on - https://github.com/yupbank/linear_tree_shap
         See Linear TreeShap, Yu et al, 2023, https://arxiv.org/pdf/2209.08192
 
-        For Adam-optimized models, GBRL computes optimizer-aware local TreeSHAP:
-        the factual Adam moment state is replayed before each tree, and each tree
-        is explained using one-step Adam deltas under that frozen state. This is
-        locally prediction-aligned when used with return_base=True.
+        For SGD-optimized models, base + phi.sum(axis=1) == predict(x) exactly.
+        For Adam models, GBRL computes an optimizer-aware local TreeSHAP
+        approximation (factual Adam state replayed before each tree); this is
+        not exact Shapley attribution over all counterfactual optimizer histories.
 
         Args:
             features (NumericalData): input features
             model_idx (int, optional): restrict to a single sub-model; returns
                 all sub-models when None.
             return_base (bool): if True, return (phi, base) where base has shape
-                (n_samples, output_dim). base + phi.sum(axis=1) == predict(x).
-                For Adam the base is sample-specific; for SGD it is shared.
+                (n_samples, output_dim). For SGD: base + phi.sum(axis=1) == predict(x).
 
         Returns:
             phi array, or (phi, base) tuple when return_base=True.
@@ -664,6 +678,18 @@ class MultiGBTLearner(BaseLearner):
         """
         assert self._cpp_models is not None and isinstance(self._cpp_models, list), \
             "Model not initialized."
+
+        # Warn once if any selected model uses Adam (unsupported for exact SHAP).
+        models_to_check = ([self._cpp_models[model_idx]] if model_idx is not None
+                           else self._cpp_models)
+        optimizers_flat = [o for m in models_to_check for o in m.get_optimizers()]
+        if any(o.get('algo', '').lower() == 'adam' for o in optimizers_flat):
+            warnings.warn(
+                "shap() was called on a model with Adam optimizer(s). "
+                "Returned values are an optimizer-aware local approximation, "
+                "not exact Shapley attribution over all counterfactual optimizer histories.",
+                RuntimeWarning, stacklevel=2,
+            )
 
         if isinstance(features, th.Tensor):
             features = features.detach().cpu().numpy()
