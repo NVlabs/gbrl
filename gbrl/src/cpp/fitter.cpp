@@ -717,36 +717,40 @@ void Fitter::apply_monotonic_constraints_cpu(
         }
     }
     
-    // Apply constraints using single-pass PAVA
-    // Only iterate over policy_dim since monotonic constraints only apply to policy outputs
+    // Apply constraints using PAVA, iterating until convergence.
+    // A single depth-ordered pass is not sufficient: pooling at one depth can
+    // re-introduce violations at a previously fixed depth.  Repeating until no
+    // changes are made guarantees all pair-wise constraints are satisfied.
     for (int out_idx = 0; out_idx < policy_dim; ++out_idx) {
-        for (int d = 0; d < tree_depth; ++d) {
-            int constraint_dir = effective_constraints[d][out_idx];
-            if (constraint_dir == 0) continue;
-            
-            // CRITICAL: Depth 0 (root) is MSB, depth (tree_depth-1) is LSB
-            int bit_mask = 1 << (tree_depth - 1 - d);
-            
-            // Process all leaf pairs that differ only in this bit
-            for (int i = 0; i < n_leaves; ++i) {
-                // Only process when this bit is 0 (avoid double counting)
-                if ((i & bit_mask) == 0) {
-                    int leaf0 = i;
-                    int leaf1 = i | bit_mask;
-                    
-                    int global_leaf0 = start_leaf_idx + leaf0;
-                    int global_leaf1 = start_leaf_idx + leaf1;
-                    
-                    float val0 = edata->leaf_data->values[global_leaf0 * output_dim + out_idx];
-                    float val1 = edata->leaf_data->values[global_leaf1 * output_dim + out_idx];
-                    
-                    // Check violation: constraint_dir=1 means val0 <= val1
-                    bool violation = (constraint_dir == 1) ? (val0 > val1) : (val0 < val1);
-                    
-                    if (violation) {
-                        float pooled = (val0 + val1) * 0.5f;
-                        edata->leaf_data->values[global_leaf0 * output_dim + out_idx] = pooled;
-                        edata->leaf_data->values[global_leaf1 * output_dim + out_idx] = pooled;
+        bool any_change = true;
+        while (any_change) {
+            any_change = false;
+            for (int d = 0; d < tree_depth; ++d) {
+                int constraint_dir = effective_constraints[d][out_idx];
+                if (constraint_dir == 0) continue;
+
+                // CRITICAL: Depth 0 (root) is MSB, depth (tree_depth-1) is LSB
+                int bit_mask = 1 << (tree_depth - 1 - d);
+
+                // Process all leaf pairs that differ only in this bit
+                for (int i = 0; i < n_leaves; ++i) {
+                    // Only process when this bit is 0 (avoid double counting)
+                    if ((i & bit_mask) == 0) {
+                        int global_leaf0 = start_leaf_idx + i;
+                        int global_leaf1 = start_leaf_idx + (i | bit_mask);
+
+                        float val0 = edata->leaf_data->values[global_leaf0 * output_dim + out_idx];
+                        float val1 = edata->leaf_data->values[global_leaf1 * output_dim + out_idx];
+
+                        // Check violation: constraint_dir=1 means val0 <= val1
+                        bool violation = (constraint_dir == 1) ? (val0 > val1) : (val0 < val1);
+
+                        if (violation) {
+                            float pooled = (val0 + val1) * 0.5f;
+                            edata->leaf_data->values[global_leaf0 * output_dim + out_idx] = pooled;
+                            edata->leaf_data->values[global_leaf1 * output_dim + out_idx] = pooled;
+                            any_change = true;
+                        }
                     }
                 }
             }

@@ -590,7 +590,7 @@ class MultiGBTLearner(BaseLearner):
 
     def tree_shap(self, tree_idx: int, features: NumericalData,
                   model_idx: Optional[int] = None,
-                  return_base: bool = False) -> Union[np.ndarray, Tuple[np.ndarray, ...]]:
+                  *, return_base: bool = False) -> Union[np.ndarray, Tuple[np.ndarray, ...]]:
         """
         Computes SHAP values for a single tree.
 
@@ -624,7 +624,6 @@ class MultiGBTLearner(BaseLearner):
         base_poly = np.ascontiguousarray(base_poly)
         norm_values = np.ascontiguousarray(norm_values)
         offset = np.ascontiguousarray(offset)
-        cpp_fn = '_cpp_models[i].tree_shap_and_base' if return_base else '_cpp_models[i].tree_shap'
         if model_idx is not None:
             m = self._cpp_models[model_idx]
             fn = m.tree_shap_and_base if return_base else m.tree_shap

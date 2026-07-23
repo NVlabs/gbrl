@@ -965,11 +965,14 @@ class TestMonotonicConstraintsGPU(unittest.TestCase):
         This ensures the reverse_num_feature_mapping works correctly on GPU.
         """
         print("Running test_monotonic_interleaved_features_gpu")
-        
+
         # Create data: 3 numerical features interleaved with 2 categorical
         # Layout: [num0, cat0, num1, cat1, num2]
         # Global indices: num0=0, cat0=1, num1=2, cat1=3, num2=4
         np.random.seed(42)
+        th.manual_seed(42)
+        if th.cuda.is_available():
+            th.cuda.manual_seed_all(42)
         n_samples = 300
         
         # Numerical features

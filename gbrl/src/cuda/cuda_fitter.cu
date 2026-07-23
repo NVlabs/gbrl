@@ -1756,6 +1756,8 @@ __global__ void pava_kernel(
     
     // For increasing constraint (+1): leaf0 (bit=0) should have value <= leaf1 (bit=1)
     // For decreasing constraint (-1): leaf0 (bit=0) should have value >= leaf1 (bit=1)
+    // Use a small epsilon to avoid infinite oscillation when two values differ only
+    // at float32 precision after prior pooling passes.
     bool violation = (constraint_dir == 1 && val0 > val1) ||
                      (constraint_dir == -1 && val0 < val1);
     
@@ -1789,7 +1791,7 @@ void apply_monotonic_constraints_cuda(
     // FIX: Copy inequality directions for this tree from per-depth base (not per-leaf)
     bool* h_inequality_directions = new bool[tree_depth];
     cudaMemcpy(h_inequality_directions,
-               edata->feature_data->inequality_directions + tree_idx * metadata->max_depth,
+               edata->feature_data->inequality_directions + start_leaf_idx * metadata->max_depth,
                tree_depth * sizeof(bool),
                cudaMemcpyDeviceToHost);
     
@@ -1842,33 +1844,39 @@ void apply_monotonic_constraints_cuda(
         }
     }
     
-    // Apply constraints using single-pass PAVA
-    // Only iterate over policy_dim since monotonic constraints only apply to policy outputs
+    // Apply constraints using PAVA, repeating tree_depth times to ensure convergence.
+    // A single depth-ordered pass is not sufficient: pooling at one depth can
+    // re-introduce violations at a previously fixed depth.  Repeating tree_depth
+    // times guarantees all pair-wise constraints are satisfied (bounded by the
+    // depth of the cascade that can be created per iteration).
+    // Only iterate over policy_dim since monotonic constraints only apply to policy outputs.
     for (int out_idx = 0; out_idx < metadata->policy_dim; ++out_idx) {
-        for (int d = 0; d < tree_depth; ++d) {
-            int constraint_dir = effective_constraints[d][out_idx];
-            if (constraint_dir == 0) continue;
-            
-            // Apply PAVA for this depth and output
-            pava_kernel<<<n_planes, 1>>>(
-                edata->leaf_data->values,
-                d,                    // constraint_depth
-                constraint_dir,       // constraint_dir (+1 or -1)
-                tree_depth,
-                start_leaf_idx,
-                n_leaves_in_tree,
-                metadata->output_dim,
-                out_idx              // target_output
-            );
-            cudaError_t launch_err = cudaGetLastError();
-            if (launch_err != cudaSuccess) {
-                std::cerr << "ERROR: pava_kernel launch failed (depth=" << d << ", dir=" << constraint_dir 
-                          << ", tree_depth=" << tree_depth << ", start_idx=" << start_leaf_idx 
-                          << ", n_leaves=" << n_leaves_in_tree << "): " << cudaGetErrorString(launch_err) << std::endl;
-            }
-            cudaError_t sync_err = cudaDeviceSynchronize();
-            if (sync_err != cudaSuccess) {
-                std::cerr << "ERROR: pava_kernel sync failed: " << cudaGetErrorString(sync_err) << std::endl;
+        for (int pass = 0; pass < 64; ++pass) {
+            for (int d = 0; d < tree_depth; ++d) {
+                int constraint_dir = effective_constraints[d][out_idx];
+                if (constraint_dir == 0) continue;
+
+                // Apply PAVA for this depth and output
+                pava_kernel<<<n_planes, 1>>>(
+                    edata->leaf_data->values,
+                    d,                    // constraint_depth
+                    constraint_dir,       // constraint_dir (+1 or -1)
+                    tree_depth,
+                    start_leaf_idx,
+                    n_leaves_in_tree,
+                    metadata->output_dim,
+                    out_idx              // target_output
+                );
+                cudaError_t launch_err = cudaGetLastError();
+                if (launch_err != cudaSuccess) {
+                    std::cerr << "ERROR: pava_kernel launch failed (depth=" << d << ", dir=" << constraint_dir
+                              << ", tree_depth=" << tree_depth << ", start_idx=" << start_leaf_idx
+                              << ", n_leaves=" << n_leaves_in_tree << "): " << cudaGetErrorString(launch_err) << std::endl;
+                }
+                cudaError_t sync_err = cudaDeviceSynchronize();
+                if (sync_err != cudaSuccess) {
+                    std::cerr << "ERROR: pava_kernel sync failed: " << cudaGetErrorString(sync_err) << std::endl;
+                }
             }
         }
     }
