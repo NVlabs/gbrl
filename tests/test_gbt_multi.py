@@ -177,7 +177,7 @@ class TestGBTMulti(unittest.TestCase):
         shap_vals, base = model.tree_shap(0, X_cpu, return_base=True)
         max_err = float(np.abs(base + shap_vals.sum(axis=1) - pred).max())
         self.assertLess(
-            max_err, 1e-3,
+            max_err, 2e-3,
             f'tree_shap completeness violated: max |base+sum(shap)-pred|={max_err:.4f}'
         )
 

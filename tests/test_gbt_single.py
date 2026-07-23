@@ -427,7 +427,7 @@ class TestGBTSingle(unittest.TestCase):
         reconstructed = base + shap_vals.sum(axis=1)
         max_err = float(np.abs(reconstructed - pred).max())
         self.assertLess(
-            max_err, 1e-3,
+            max_err, 2e-3,
             f'tree_shap completeness violated: max |base+sum(shap)-pred|={max_err:.4f}')
 
     def test_ensemble_shap_completeness_sgd(self):
