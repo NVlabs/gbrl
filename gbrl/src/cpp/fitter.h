@@ -253,7 +253,8 @@ class Fitter {
             const float *grads,
             int n_objs,
             int global_n_samples,
-            int output_dim
+            int output_dim,
+            int default_obj_idx = 0
         );
 };
 

@@ -292,7 +292,8 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
     if (multi_obj) {
         Fitter::init_node_multi_obj(rootNode,
             (dataset->obj_labels != nullptr) ? dataset->obj_labels->data : nullptr,
-            dataset->build_grads->data, n_objs, n_samples, metadata->output_dim);
+            dataset->build_grads->data, n_objs, n_samples, metadata->output_dim,
+            dataset->default_obj_idx);
     }
     
     tree_nodes.push_back(rootNode);
@@ -395,10 +396,12 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
             if (multi_obj) {
                 Fitter::init_node_multi_obj(crnt_node->left_child,
                     (dataset->obj_labels != nullptr) ? dataset->obj_labels->data : nullptr,
-                    dataset->build_grads->data, n_objs, n_samples, metadata->output_dim);
+                    dataset->build_grads->data, n_objs, n_samples, metadata->output_dim,
+            dataset->default_obj_idx);
                 Fitter::init_node_multi_obj(crnt_node->right_child,
                     (dataset->obj_labels != nullptr) ? dataset->obj_labels->data : nullptr,
-                    dataset->build_grads->data, n_objs, n_samples, metadata->output_dim);
+                    dataset->build_grads->data, n_objs, n_samples, metadata->output_dim,
+            dataset->default_obj_idx);
             }
             // assign node values
             tree_nodes.push_back(crnt_node->right_child);
@@ -439,7 +442,8 @@ int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMe
     if (multi_obj) {
         Fitter::init_node_multi_obj(rootNode,
             (dataset->obj_labels != nullptr) ? dataset->obj_labels->data : nullptr,
-            dataset->build_grads->data, n_objs, n_samples, metadata->output_dim);
+            dataset->build_grads->data, n_objs, n_samples, metadata->output_dim,
+            dataset->default_obj_idx);
     }
     
     tree_nodes[0] = rootNode;
@@ -536,7 +540,8 @@ int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMe
             if (multi_obj && tree_nodes[node_idx] != nullptr) {
                 Fitter::init_node_multi_obj(tree_nodes[node_idx],
                     (dataset->obj_labels != nullptr) ? dataset->obj_labels->data : nullptr,
-                    dataset->build_grads->data, n_objs, n_samples, metadata->output_dim);
+                    dataset->build_grads->data, n_objs, n_samples, metadata->output_dim,
+            dataset->default_obj_idx);
             }
         }
     }
@@ -662,7 +667,7 @@ void Fitter::calc_leaf_value(dataSet *dataset, ensembleData *edata, ensembleMeta
             count += 1;
             if (multi_obj) {
                 // Count labels for density computation
-                int lbl = (obj_labels != nullptr) ? static_cast<int>(obj_labels[i]) : 0;
+                int lbl = (obj_labels != nullptr) ? static_cast<int>(obj_labels[i]) : dataset->default_obj_idx;
                 if (lbl >= 0 && lbl < n_objs) label_counts[lbl] += 1.0f;
                 // Accumulate per-objective gradient sums
                 for (int k = 0; k < n_objs; ++k) {
@@ -729,7 +734,8 @@ void Fitter::init_node_multi_obj(
     const float *grads,
     int n_objs,
     int global_n_samples,
-    int output_dim
+    int output_dim,
+    int default_obj_idx
 ) {
     node->n_objs = n_objs;
     node->global_n_samples = global_n_samples;
@@ -737,9 +743,9 @@ void Fitter::init_node_multi_obj(
     // Allocate and compute densities from labels
     node->densities = new float[n_objs];
     if (obj_labels == nullptr || n_objs <= 1) {
-        // No labels or single objective: all density on obj 0
+        // No labels: all density on the default objective (caller-supplied label index).
         for (int k = 0; k < n_objs; ++k)
-            node->densities[k] = (k == 0) ? 1.0f : 0.0f;
+            node->densities[k] = (k == default_obj_idx) ? 1.0f : 0.0f;
     } else {
         for (int k = 0; k < n_objs; ++k)
             node->densities[k] = 0.0f;

@@ -61,7 +61,8 @@ void allocate_child_tree_node(
     TreeNodeGPU* host_parent,
     TreeNodeGPU** device_child,
     const int n_objs,
-    cudaStream_t stream
+    cudaStream_t stream,
+    const int default_obj_idx
 );
 
 /**
@@ -515,7 +516,8 @@ __global__ void calc_node_densities_kernel(
     TreeNodeGPU* __restrict__ node,
     const TreeNodeGPU* __restrict__ parent_node,
     const float* __restrict__ obj_labels,
-    const int n_objs);
+    const int n_objs,
+    const int default_obj_idx);
 /**
  * @brief CUDA kernel to compute cosine-based node score
  * 

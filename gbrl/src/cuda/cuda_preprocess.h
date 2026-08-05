@@ -224,6 +224,19 @@ __global__ void iota_kernel(int *arr, int size);
 __global__ void ones_kernel(float *arr, int size);
 
 /**
+ * @brief Initialize array as a one-hot vector for multi-objective density encoding.
+ *
+ * Sets arr[hot_idx] = 1.0 and arr[i] = 0.0 for all i != hot_idx.
+ * Used to initialize per-leaf density vectors; the default hot_idx=0 encodes
+ * "all samples belong to objective 0" when no label information is available.
+ *
+ * @param arr     Output array (length `size`)
+ * @param size    Array size (equals n_objs)
+ * @param hot_idx Index of the active objective (default 0)
+ */
+__global__ void one_hot_kernel(float *arr, int size, int hot_idx);
+
+/**
  * @brief CUDA kernel for bitonic sort of indices
  * 
  * @param input Values to sort by

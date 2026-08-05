@@ -282,6 +282,7 @@ struct dataSet {
     dataHolder<float> *build_grads;
     dataHolder<const float> *obj_labels;
     int n_samples;
+    int default_obj_idx = 0;  // Default objective index when obj_labels is nullptr; 0 = reward signal.
 };
 
 struct monotonicConstraints {

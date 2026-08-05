@@ -168,6 +168,84 @@ class Predictor {
             const int stop_tree_idx,
             std::vector<Optimizer*> opts
         );
+
+        /**
+         * @brief Average per-objective leaf densities on CPU
+         *
+         * For every sample, traverses the ensemble and accumulates the per-objective
+         * density vector of each leaf it lands in, then divides by the number of
+         * traversed trees. The result is a per-sample distribution over objectives
+         * (each row sums to 1, since every leaf density vector sums to 1).
+         *
+         * @param dataset Input dataset
+         * @param densities_out Output densities array (n_samples x n_objs), must be zero-initialized
+         * @param edata Ensemble data
+         * @param metadata Ensemble metadata
+         * @param start_tree_idx Starting tree index (inclusive)
+         * @param stop_tree_idx Stopping tree index (exclusive, 0 means all trees)
+         * @param parallel_predict Whether to parallelize over samples
+         */
+        static void predict_densities_cpu(
+            dataSet *dataset,
+            float *densities_out,
+            const ensembleData *edata,
+            const ensembleMetaData *metadata,
+            int start_tree_idx,
+            int stop_tree_idx,
+            const bool parallel_predict
+        );
+
+        /**
+         * @brief Accumulate leaf densities for a single sample traversing leaves
+         *
+         * Greedy (non-oblivious) tree traversal. Adds, not averages: normalization
+         * is done once by predict_densities_cpu().
+         *
+         * @param obs Numerical observations
+         * @param categorical_obs Categorical observations
+         * @param densities_out Output densities array (n_samples x n_objs)
+         * @param sample_idx Sample index
+         * @param edata Ensemble data
+         * @param metadata Ensemble metadata
+         * @param start_tree_idx Starting tree index
+         * @param stop_tree_idx Stopping tree index
+         */
+        static void predict_densities_over_leaves(
+            const float *obs,
+            const char *categorical_obs,
+            float *densities_out,
+            const int sample_idx,
+            const ensembleData *edata,
+            const ensembleMetaData *metadata,
+            const int start_tree_idx,
+            const int stop_tree_idx
+        );
+
+        /**
+         * @brief Accumulate leaf densities for a single sample traversing trees
+         *
+         * Oblivious tree traversal. Adds, not averages: normalization is done once
+         * by predict_densities_cpu().
+         *
+         * @param obs Numerical observations
+         * @param categorical_obs Categorical observations
+         * @param densities_out Output densities array (n_samples x n_objs)
+         * @param sample_idx Sample index
+         * @param edata Ensemble data
+         * @param metadata Ensemble metadata
+         * @param start_tree_idx Starting tree index
+         * @param stop_tree_idx Stopping tree index
+         */
+        static void predict_densities_over_trees(
+            const float *obs,
+            const char *categorical_obs,
+            float *densities_out,
+            const int sample_idx,
+            const ensembleData *edata,
+            const ensembleMetaData *metadata,
+            const int start_tree_idx,
+            const int stop_tree_idx
+        );
 };
 
 #endif // PREDICTOR_H 

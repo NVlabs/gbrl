@@ -279,7 +279,8 @@ class GBRL {
             dataHolder<const float> *obj_labels,
             const int n_samples,
             const int n_num_features,
-            const int n_cat_features
+            const int n_cat_features,
+            const int default_obj_idx = 0
         );
 
         /**
@@ -295,6 +296,35 @@ class GBRL {
          * @return Pointer to predictions (n_samples x output_dim), caller must free
          */
         float* predict(
+            dataHolder<const float> *obs,
+            dataHolder<const char> *categorical_obs,
+            const int n_samples,
+            const int n_num_features,
+            const int n_cat_features,
+            int start_tree_idx,
+            int stop_tree_idx
+        );
+
+        /**
+         * @brief Average per-objective leaf densities across the ensemble
+         *
+         * For each sample, accumulates the per-objective density vector of every
+         * leaf it lands in and divides by the number of traversed trees. Because
+         * each leaf's density vector sums to 1, every output row sums to 1 and can
+         * be read as a distribution over objectives/label classes.
+         *
+         * Unlike predict(), no bias, learning rate, or optimizer is applied.
+         *
+         * @param obs Numerical observations
+         * @param categorical_obs Categorical observations
+         * @param n_samples Number of samples
+         * @param n_num_features Number of numerical features
+         * @param n_cat_features Number of categorical features
+         * @param start_tree_idx Starting tree index (inclusive)
+         * @param stop_tree_idx Stopping tree index (exclusive, 0 means all trees)
+         * @return Pointer to densities (n_samples x n_objs), caller must free
+         */
+        float* predict_densities(
             dataHolder<const float> *obs,
             dataHolder<const char> *categorical_obs,
             const int n_samples,

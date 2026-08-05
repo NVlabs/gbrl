@@ -309,8 +309,150 @@ py::object return_tensor_info(
 }
 
 /**
+ * @brief Infer sample and per-type feature counts from observation shapes
+ *
+ * Shared by predict() and predict_densities(). Handles the 1D/2D and
+ * numerical/categorical/mixed combinations, and validates that the resulting
+ * feature counts match the ensemble's input dimension.
+ *
+ * @param obs_ptr Numerical observation pointer (may be null)
+ * @param obs_shape Numerical observation shape
+ * @param cat_obs_ptr Categorical observation pointer (may be null)
+ * @param cat_obs_shape Categorical observation shape
+ * @param input_dim Ensemble input dimensionality
+ * @param n_samples Output number of samples
+ * @param n_num_features Output number of numerical features
+ * @param n_cat_features Output number of categorical features
+ */
+static void infer_input_dims(
+    const float* obs_ptr,
+    const std::vector<size_t>& obs_shape,
+    const char* cat_obs_ptr,
+    const std::vector<size_t>& cat_obs_shape,
+    int input_dim,
+    int &n_samples,
+    int &n_num_features,
+    int &n_cat_features
+) {
+    n_samples = 0;
+    n_num_features = 0;
+    n_cat_features = 0;
+
+    if (obs_ptr != nullptr && cat_obs_ptr != nullptr) {
+        if (obs_shape.size() == 1 && cat_obs_shape.size() == 1) {
+            if (static_cast<int>(obs_shape[0]) + static_cast<int>(cat_obs_shape[0]) == input_dim) {
+                n_samples = 1;
+                n_num_features = static_cast<int>(obs_shape[0]);
+                n_cat_features = static_cast<int>(cat_obs_shape[0]);
+            } else {
+                if (static_cast<int>(obs_shape[0]) != static_cast<int>(cat_obs_shape[0])) {
+                    std::stringstream ss;
+                    ss << "Number of samples is not equal between obs and categorical obs "
+                       << obs_shape[0] << " != " << cat_obs_shape[0];
+                    throw std::runtime_error(ss.str());
+                }
+                n_samples = static_cast<int>(obs_shape[0]);
+                n_num_features = 1;
+                n_cat_features = 1;
+                if (n_num_features + n_cat_features != input_dim) {
+                    std::stringstream ss;
+                    ss << "Total number of features " << n_num_features + n_cat_features
+                       << " != input dim " << input_dim;
+                    throw std::runtime_error(ss.str());
+                }
+            }
+        } else if (obs_shape.size() == 1) {
+            if (static_cast<int>(obs_shape[0]) != static_cast<int>(cat_obs_shape[0])) {
+                std::stringstream ss;
+                ss << "Number of samples is not equal between obs and categorical obs "
+                   << obs_shape[0] << " != " << cat_obs_shape[0];
+                throw std::runtime_error(ss.str());
+            }
+            n_samples = static_cast<int>(obs_shape[0]);
+            n_num_features = 1;
+            n_cat_features = static_cast<int>(cat_obs_shape[1]);
+        } else if (cat_obs_shape.size() == 1) {
+            if (static_cast<int>(obs_shape[0]) != static_cast<int>(cat_obs_shape[0])) {
+                std::stringstream ss;
+                ss << "Number of samples is not equal between obs and categorical obs "
+                   << obs_shape[0] << " != " << cat_obs_shape[0];
+                throw std::runtime_error(ss.str());
+            }
+            n_samples = static_cast<int>(obs_shape[0]);
+            n_num_features = static_cast<int>(obs_shape[1]);
+            n_cat_features = 1;
+        } else {
+            if (static_cast<int>(obs_shape[0]) != static_cast<int>(cat_obs_shape[0])) {
+                std::stringstream ss;
+                ss << "Number of samples is not equal between obs and categorical obs "
+                   << obs_shape[0] << " != " << cat_obs_shape[0];
+                throw std::runtime_error(ss.str());
+            }
+            n_samples = static_cast<int>(obs_shape[0]);
+            n_num_features = static_cast<int>(obs_shape[1]);
+            n_cat_features = static_cast<int>(cat_obs_shape[1]);
+        }
+    } else if (obs_ptr != nullptr) {
+        if (obs_shape.size() == 1) {
+            if (static_cast<int>(obs_shape[0]) == input_dim) {
+                n_samples = 1;
+                n_num_features = static_cast<int>(obs_shape[0]);
+            } else {
+                n_samples = static_cast<int>(obs_shape[0]);
+                n_num_features = 1;
+                if (n_num_features != input_dim) {
+                    std::stringstream ss;
+                    ss << "Total number of features " << n_num_features
+                       << " != input dim " << input_dim;
+                    throw std::runtime_error(ss.str());
+                }
+            }
+        } else {
+            n_samples = static_cast<int>(obs_shape[0]);
+            n_num_features = static_cast<int>(obs_shape[1]);
+            if (n_num_features != input_dim) {
+                std::stringstream ss;
+                ss << "Total number of features " << n_num_features
+                   << " != input dim " << input_dim;
+                throw std::runtime_error(ss.str());
+            }
+        }
+    } else {
+        if (cat_obs_shape.size() == 1) {
+            if (static_cast<int>(cat_obs_shape[0]) == input_dim) {
+                n_samples = 1;
+                n_cat_features = static_cast<int>(cat_obs_shape[0]);
+            } else {
+                n_samples = static_cast<int>(cat_obs_shape[0]);
+                n_cat_features = 1;
+                if (n_cat_features != input_dim) {
+                    std::stringstream ss;
+                    ss << "Total number of features " << n_cat_features
+                       << " != input dim " << input_dim;
+                    throw std::runtime_error(ss.str());
+                }
+            }
+        } else {
+            n_samples = static_cast<int>(cat_obs_shape[0]);
+            n_cat_features = static_cast<int>(cat_obs_shape[1]);
+            if (n_cat_features != input_dim){
+                std::stringstream ss;
+                ss << "Total number of features " << n_cat_features << " != input dim " << input_dim;
+                throw std::runtime_error(ss.str());
+            }
+        }
+    }
+
+    if (n_cat_features + n_num_features != input_dim){
+        std::stringstream ss;
+        ss << "Total number of features " << n_cat_features + n_num_features << " != correct input dim " << input_dim;
+        throw std::runtime_error(ss.str());
+    }
+}
+
+/**
  * @brief Convert ensemble metadata to a Python dictionary
- * 
+ *
  * @param metadata Pointer to ensembleMetaData (may be nullptr, returns empty dict)
  * @return Python dict with all hyperparameters and configuration values
  */
@@ -656,7 +798,7 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         self.to_device(stringTodeviceType(str_device)); 
     },  py::arg("device"),
     "Set GBRL device ['cpu', 'cuda']");
-    gbrl.def("step", [](GBRL &self, py::object &obs, py::object &categorical_obs, py::object &grads, py::object &obj_labels) {
+    gbrl.def("step", [](GBRL &self, py::object &obs, py::object &categorical_obs, py::object &grads, py::object &obj_labels, int default_obj_idx) {
         const float* obs_ptr = nullptr;
         const char* cat_obs_ptr= nullptr;
         float* grads_ptr = nullptr;
@@ -776,11 +918,12 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         dataHolder<const float> obj_labels_handler{obj_labels_ptr, stringTodeviceType(obj_labels_device)};
 
         py::gil_scoped_release release;
-        self.step(&obs_handler, &cat_obs_handler, &grads_handler, &obj_labels_handler, n_samples, n_num_features, n_cat_features);
+        self.step(&obs_handler, &cat_obs_handler, &grads_handler, &obj_labels_handler, n_samples, n_num_features, n_cat_features, default_obj_idx);
     },  py::arg("obs"),
         py::arg("categorical_obs"),
         py::arg("grads"),
         py::arg("obj_labels")=py::none(),
+        py::arg("default_obj_idx")=0,
     "Fit a decision tree with the given observations and gradients");
     gbrl.def("fit", [](GBRL &self, py::object &obs, py::object &categorical_obs, py::object &targets, int iterations, bool shuffle, std::string loss_type) -> float {
         float* obs_ptr = nullptr;
@@ -1165,125 +1308,58 @@ PYBIND11_MODULE(gbrl_cpp, m) {
             throw std::runtime_error("Cannot call predict without observations!");
         }
 
-        if (obs_ptr != nullptr && cat_obs_ptr != nullptr) {
-            if (obs_shape.size() == 1 && cat_obs_shape.size() == 1) {
-                if (static_cast<int>(obs_shape[0]) + static_cast<int>(cat_obs_shape[0]) == self.metadata->input_dim) {
-                    n_samples = 1;
-                    n_num_features = static_cast<int>(obs_shape[0]);
-                    n_cat_features = static_cast<int>(cat_obs_shape[0]);
-                } else {
-                    if (static_cast<int>(obs_shape[0]) != static_cast<int>(cat_obs_shape[0])) {
-                        std::stringstream ss;
-                        ss << "Number of samples is not equal between obs and categorical obs " 
-                           << obs_shape[0] << " != " << cat_obs_shape[0];
-                        throw std::runtime_error(ss.str());
-                    }
-                    n_samples = static_cast<int>(obs_shape[0]);
-                    n_num_features = 1;
-                    n_cat_features = 1;
-                    if (n_num_features + n_cat_features != self.metadata->input_dim) {
-                        std::stringstream ss;
-                        ss << "Total number of features " << n_num_features + n_cat_features 
-                           << " != input dim " << self.metadata->input_dim;
-                        throw std::runtime_error(ss.str());
-                    }
-                }
-            } else if (obs_shape.size() == 1) {
-                if (static_cast<int>(obs_shape[0]) != static_cast<int>(cat_obs_shape[0])) {
-                    std::stringstream ss;
-                    ss << "Number of samples is not equal between obs and categorical obs " 
-                       << obs_shape[0] << " != " << cat_obs_shape[0];
-                    throw std::runtime_error(ss.str());
-                }
-                n_samples = static_cast<int>(obs_shape[0]);
-                n_num_features = 1;
-                n_cat_features = static_cast<int>(cat_obs_shape[1]);
-            } else if (cat_obs_shape.size() == 1) {
-                if (static_cast<int>(obs_shape[0]) != static_cast<int>(cat_obs_shape[0])) {
-                    std::stringstream ss;
-                    ss << "Number of samples is not equal between obs and categorical obs " 
-                       << obs_shape[0] << " != " << cat_obs_shape[0];
-                    throw std::runtime_error(ss.str());
-                }
-                n_samples = static_cast<int>(obs_shape[0]);
-                n_num_features = static_cast<int>(obs_shape[1]);
-                n_cat_features = 1;
-            } else {
-                if (static_cast<int>(obs_shape[0]) != static_cast<int>(cat_obs_shape[0])) {
-                    std::stringstream ss;
-                    ss << "Number of samples is not equal between obs and categorical obs " 
-                       << obs_shape[0] << " != " << cat_obs_shape[0];
-                    throw std::runtime_error(ss.str());
-                }
-                n_samples = static_cast<int>(obs_shape[0]);
-                n_num_features = static_cast<int>(obs_shape[1]);
-                n_cat_features = static_cast<int>(cat_obs_shape[1]);
-            }
-        } else if (obs_ptr != nullptr) {
-            if (obs_shape.size() == 1) {
-                if (static_cast<int>(obs_shape[0]) == self.metadata->input_dim) {
-                    n_samples = 1;
-                    n_num_features = static_cast<int>(obs_shape[0]);
-                } else {
-                    n_samples = static_cast<int>(obs_shape[0]);
-                    n_num_features = 1;
-                    if (n_num_features != self.metadata->input_dim) {
-                        std::stringstream ss;
-                        ss << "Total number of features " << n_num_features 
-                           << " != input dim " << self.metadata->input_dim;
-                        throw std::runtime_error(ss.str());
-                    }
-                }
-            } else {
-                n_samples = static_cast<int>(obs_shape[0]);
-                n_num_features = static_cast<int>(obs_shape[1]);
-                if (n_num_features != self.metadata->input_dim) {
-                    std::stringstream ss;
-                    ss << "Total number of features " << n_num_features 
-                       << " != input dim " << self.metadata->input_dim;
-                    throw std::runtime_error(ss.str());
-                }
-            }
-        } else {
-            if (cat_obs_shape.size() == 1) {
-                if (static_cast<int>(cat_obs_shape[0]) == self.metadata->input_dim) {
-                    n_samples = 1;
-                    n_cat_features = static_cast<int>(cat_obs_shape[0]);
-                } else {
-                    n_samples = static_cast<int>(cat_obs_shape[0]);
-                    n_cat_features = 1;
-                    if (n_cat_features != self.metadata->input_dim) {
-                        std::stringstream ss;
-                        ss << "Total number of features " << n_cat_features 
-                           << " != input dim " << self.metadata->input_dim;
-                        throw std::runtime_error(ss.str());
-                    }
-                }
-            } else {
-                n_samples = static_cast<int>(cat_obs_shape[0]);
-                n_cat_features = static_cast<int>(cat_obs_shape[1]);
-                if (n_cat_features != self.metadata->input_dim){
-                    std::stringstream ss;
-                    ss << "Total number of features " << n_cat_features << " != input dim " << self.metadata->input_dim;
-                    throw std::runtime_error(ss.str());
-                }
-            }
-        }
-        
+        infer_input_dims(obs_ptr, obs_shape, cat_obs_ptr, cat_obs_shape, self.metadata->input_dim, n_samples, n_num_features, n_cat_features);
+
         dataHolder<const float> obs_handler{obs_ptr, stringTodeviceType(obs_device)};
         dataHolder<const char> cat_obs_handler{cat_obs_ptr,stringTodeviceType(cat_obs_device)};
 
-        if (n_cat_features + n_num_features != self.metadata->input_dim){
-            std::stringstream ss;
-            ss << "Total number of features " << n_cat_features + n_num_features << " != correct input dim " << self.metadata->input_dim;
-            throw std::runtime_error(ss.str());
-        }
-
-        py::gil_scoped_release release; 
+        py::gil_scoped_release release;
         float* result_ptr = self.predict(&obs_handler, &cat_obs_handler, n_samples, n_num_features, n_cat_features, start_tree_idx, stop_tree_idx);
         py::gil_scoped_acquire acquire;
         return return_tensor_info(n_samples, self.metadata->output_dim, result_ptr, self.device, return_torch);
     }, py::arg("obs"), py::arg("categorical_obs"), py::arg("start_tree_idx")=0, py::arg("stop_tree_idx")=0, py::arg("return_torch")=false, "Predict using the model");
+    gbrl.def("predict_densities", [](GBRL &self, py::object &obs, py::object &categorical_obs, py::object start_tree_obj, py::object stop_tree_obj, bool return_torch) -> py::object {
+        const float* obs_ptr = nullptr;
+        const char* cat_obs_ptr = nullptr;
+        std::vector<size_t> obs_shape, cat_obs_shape;
+        std::string obs_device, cat_obs_device;
+        int n_samples = 0, n_num_features = 0, n_cat_features = 0;
+
+        // Handle start_tree_idx and stop_tree_idx - set to 0 if None
+        int start_tree_idx = start_tree_obj.is_none() ? 0 : start_tree_obj.cast<int>();
+        int stop_tree_idx = stop_tree_obj.is_none() ? 0 : stop_tree_obj.cast<int>();
+
+        if (start_tree_idx < 0 || (start_tree_idx >= self.metadata->n_trees) && (self.metadata->n_trees > 0)) {
+            std::stringstream ss;
+            ss << "start_tree_idx is out of bounds! Got " << start_tree_idx
+               << ", but valid range is [0, " << self.metadata->n_trees - 1 << "]";
+            throw std::runtime_error(ss.str());
+        }
+        if (stop_tree_idx < 0 || stop_tree_idx > self.metadata->n_trees) {
+            std::stringstream ss;
+            ss << "stop_tree_idx is out of bounds! Got " << stop_tree_idx
+               << ", but valid range is [0, " << self.metadata->n_trees << "]";
+            throw std::runtime_error(ss.str());
+        }
+
+        handle_input_info<const float>(obs, obs_ptr, obs_shape, obs_device, "obs", true, "predict_densities");
+        handle_input_info<const char>(categorical_obs, cat_obs_ptr, cat_obs_shape, cat_obs_device, "cat_obs", true, "predict_densities", CAT_TYPE);
+
+        if (cat_obs_ptr == nullptr && obs_ptr == nullptr) {
+            throw std::runtime_error("Cannot call predict_densities without observations!");
+        }
+
+        infer_input_dims(obs_ptr, obs_shape, cat_obs_ptr, cat_obs_shape, self.metadata->input_dim, n_samples, n_num_features, n_cat_features);
+
+        dataHolder<const float> obs_handler{obs_ptr, stringTodeviceType(obs_device)};
+        dataHolder<const char> cat_obs_handler{cat_obs_ptr, stringTodeviceType(cat_obs_device)};
+
+        py::gil_scoped_release release;
+        float* result_ptr = self.predict_densities(&obs_handler, &cat_obs_handler, n_samples, n_num_features, n_cat_features, start_tree_idx, stop_tree_idx);
+        py::gil_scoped_acquire acquire;
+        return return_tensor_info(n_samples, self.metadata->n_objs, result_ptr, self.device, return_torch);
+    }, py::arg("obs"), py::arg("categorical_obs"), py::arg("start_tree_idx")=0, py::arg("stop_tree_idx")=0, py::arg("return_torch")=false,
+       "Average per-objective leaf densities over the ensemble. Returns (n_samples, n_objs); each row sums to 1.");
         // saveToFile method
     gbrl.def("save", [](GBRL &self, const std::string& filename) -> int {
         py::gil_scoped_release release; 

@@ -476,6 +476,54 @@ float* GBRL::predict(dataHolder<const float> *obs,
 }
 
 
+float* GBRL::predict_densities(dataHolder<const float> *obs,
+                               dataHolder<const char> *categorical_obs,
+                               const int n_samples, const int n_num_features,
+                               const int n_cat_features,
+                               int start_tree_idx,
+                               int stop_tree_idx){
+    if (this->metadata->iteration == 0){
+        this->metadata->n_num_features = n_num_features;
+        this->metadata->n_cat_features = n_cat_features;
+    }
+    if (n_num_features + n_cat_features != metadata->input_dim){
+        int total_features = n_num_features + n_cat_features;
+        std::cerr << "Error. Cannot use ensemble with this dataset. Excepted input with " << metadata->input_dim <<  " received " << total_features << ".";
+        throw std::runtime_error("Incompatible dataset");
+    }
+    if (n_num_features != metadata->n_num_features || n_cat_features != metadata->n_cat_features){
+        std::cerr << "Error. Cannot use ensemble with this dataset. Excepted input with " << metadata->n_num_features << " numerical features followed by " << metadata->n_cat_features << " categorical features, but received " << n_num_features << " numerical features and " << n_cat_features << " categorical features.";
+        throw std::runtime_error("Incompatible dataset");
+    }
+#ifndef USE_CUDA
+    if (obs->device == deviceType::gpu || categorical_obs->device == deviceType::gpu){
+        throw std::runtime_error("GPU data detected! GBRL was compiled for CPU only!");
+        return nullptr;
+    }
+#endif
+
+    dataSet dataset{
+        obs,                // observations
+        categorical_obs,    // categorical observations
+        nullptr,           // grads (not used in predict)
+        nullptr,           // build_grads (not used in predict)
+        nullptr,           // obj_label (not used in predict)
+        n_samples,         // number of samples
+    };
+    float *densities = nullptr;
+#ifdef USE_CUDA
+    if (this->device == gpu){
+        predict_densities_cuda(&dataset, densities, this->metadata, this->edata, start_tree_idx, stop_tree_idx);
+    }
+#endif
+    if (this->device == cpu){
+        densities = init_zero_mat(n_samples*this->metadata->n_objs);
+        Predictor::predict_densities_cpu(&dataset, densities, this->edata, this->metadata, start_tree_idx, stop_tree_idx, this->parallel_predict);
+    }
+    return densities;
+}
+
+
 void GBRL::ensemble_check(){
     if (this->metadata->iteration == 0 || this->metadata->n_trees == 0){
         std::cerr << "Error! ensemble has no trees!";
@@ -776,11 +824,12 @@ void GBRL::_step_gpu(dataSet *dataset){
 
     dataSet cuda_dataset{
         &obs_holder,           // observations (transposed)
-        &cat_obs_holder, // categorical observations on GPU
+        &cat_obs_holder,       // categorical observations on GPU
         &grads_holder,         // gradients on GPU
-        &build_grads_holder,     // build gradients on GPU
-        &obj_labels_holder,  // objective labels
-        n_samples,           // number of samples
+        &build_grads_holder,   // build gradients on GPU
+        &obj_labels_holder,    // objective labels
+        n_samples,             // number of samples
+        dataset->default_obj_idx,
     };
     candidatesData candidata{n_candidates, candidate_indices, candidate_values, candidate_numerical, candidate_categories};
     splitDataGPU *split_data = allocate_split_data(this->metadata, candidata.n_candidates);  
@@ -1066,7 +1115,8 @@ void GBRL::step(dataHolder<const float> *obs,
                 dataHolder<const float> *obj_labels,
                 const int n_samples,
                 const int n_num_features,
-                const int n_cat_features){
+                const int n_cat_features,
+                const int default_obj_idx){
 
     if (this->metadata->iteration == 0){
         this->metadata->n_num_features = n_num_features;
@@ -1094,11 +1144,12 @@ void GBRL::step(dataHolder<const float> *obs,
 #endif
     dataSet dataset{
         obs,               // observations
-        categorical_obs,   // categorical observations  
+        categorical_obs,   // categorical observations
         grads,             // gradients
         nullptr,           // build_grads (not used in step)
         obj_labels,        // objective labels
         n_samples,         // number of samples
+        default_obj_idx,   // default objective index when obj_labels is nullptr
     };
 #ifdef USE_CUDA
     if (this->device == gpu)

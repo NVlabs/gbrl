@@ -1848,7 +1848,7 @@ TreeNodeGPU* allocate_root_tree_node(
     int n_blocks = dataset->n_samples / THREADS_PER_BLOCK + 1;
     iota_kernel<<<n_blocks, THREADS_PER_BLOCK, 0, stream>>>(tempNode.sample_indices, dataset->n_samples);
     n_blocks = metadata->n_objs / THREADS_PER_BLOCK + 1;
-    ones_kernel<<<n_blocks, THREADS_PER_BLOCK, 0, stream>>>(tempNode.densities, metadata->n_objs);
+    one_hot_kernel<<<n_blocks, THREADS_PER_BLOCK, 0, stream>>>(tempNode.densities, metadata->n_objs, dataset->default_obj_idx);
 
     cudaMemcpyAsync(node, &tempNode, sizeof(TreeNodeGPU), cudaMemcpyHostToDevice, stream);
 
@@ -1856,7 +1856,7 @@ TreeNodeGPU* allocate_root_tree_node(
         int threads_per_block;
         get_tpb_dimensions(dataset->n_samples, metadata->n_objs, threads_per_block);
         size_t shared_mem_size = threads_per_block * sizeof(float);
-        calc_node_densities_kernel<<<metadata->n_objs, threads_per_block, shared_mem_size, stream>>>(node, nullptr, dataset->obj_labels->data, metadata->n_objs);
+        calc_node_densities_kernel<<<metadata->n_objs, threads_per_block, shared_mem_size, stream>>>(node, nullptr, dataset->obj_labels->data, metadata->n_objs, dataset->default_obj_idx);
     }
 
     const dim3 n_threads_per_blockdim3(BLOCK_COLS, BLOCK_ROWS);
@@ -1876,7 +1876,8 @@ void allocate_child_tree_node(
     TreeNodeGPU* host_parent,
     TreeNodeGPU** device_child,
     const int n_objs,
-    cudaStream_t stream){
+    cudaStream_t stream,
+    const int default_obj_idx){
 
     TreeNodeGPU host_child;
     int n_samples = host_parent->n_samples;
@@ -1940,7 +1941,7 @@ void allocate_child_tree_node(
     host_child.categorical_values = (char*)(device_memory_block + trace);
 
     int n_blocks = n_objs / THREADS_PER_BLOCK + 1;
-    ones_kernel<<<n_blocks, THREADS_PER_BLOCK, 0, stream>>>(host_child.densities, n_objs);
+    one_hot_kernel<<<n_blocks, THREADS_PER_BLOCK, 0, stream>>>(host_child.densities, n_objs, default_obj_idx);
 
     // Synchronize stream to ensure kernel completes before copying to device
     cudaStreamSynchronize(stream);
@@ -1970,8 +1971,8 @@ void allocate_child_tree_nodes(
 
     int n_samples = host_parent->n_samples;
     int depth = host_parent->depth + 1;
-    allocate_child_tree_node(host_parent, left_child, metadata->n_objs, stream);
-    allocate_child_tree_node(host_parent, right_child, metadata->n_objs, stream);
+    allocate_child_tree_node(host_parent, left_child, metadata->n_objs, stream, dataset->default_obj_idx);
+    allocate_child_tree_node(host_parent, right_child, metadata->n_objs, stream, dataset->default_obj_idx);
 
     int n_blocks, threads_per_block;
     get_grid_dimensions(n_samples, n_blocks, threads_per_block);
@@ -1983,8 +1984,8 @@ void allocate_child_tree_nodes(
     if (dataset->obj_labels->data != nullptr){
         get_tpb_dimensions(n_samples, metadata->n_objs, threads_per_block);
         size_t shared_mem_size = threads_per_block * sizeof(float);
-        calc_node_densities_kernel<<<metadata->n_objs, threads_per_block, shared_mem_size, stream>>>(*left_child, parent_node, dataset->obj_labels->data, metadata->n_objs);
-        calc_node_densities_kernel<<<metadata->n_objs, threads_per_block, shared_mem_size, stream>>>(*right_child, parent_node, dataset->obj_labels->data, metadata->n_objs);
+        calc_node_densities_kernel<<<metadata->n_objs, threads_per_block, shared_mem_size, stream>>>(*left_child, parent_node, dataset->obj_labels->data, metadata->n_objs, dataset->default_obj_idx);
+        calc_node_densities_kernel<<<metadata->n_objs, threads_per_block, shared_mem_size, stream>>>(*right_child, parent_node, dataset->obj_labels->data, metadata->n_objs, dataset->default_obj_idx);
     }
 
     const dim3 n_threads_per_blockdim3(BLOCK_COLS, BLOCK_ROWS);
@@ -2298,13 +2299,18 @@ __global__ void calc_node_densities_kernel(
     TreeNodeGPU* __restrict__ node,
     const TreeNodeGPU* __restrict__ parent_node,
     const float* __restrict__ obj_labels,
-    const int n_objs){
+    const int n_objs,
+    const int default_obj_idx){
 
     int obj_idx = blockIdx.x;
 
     extern __shared__ float s_label_count[];
-    if (node->n_samples == 0)
+    if (node->n_samples == 0) {
+        if (threadIdx.x == 0)
+            node->densities[obj_idx] = (parent_node != nullptr) ? parent_node->densities[obj_idx]
+                                                                 : (obj_idx == default_obj_idx ? 1.0f : 0.0f);
         return;
+    }
 
     s_label_count[threadIdx.x] = 0.0f;
     __syncthreads();

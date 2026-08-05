@@ -328,7 +328,120 @@ void predict_cuda_no_host(
 }
 
 
-__global__ void predict_kernel_tree_wise(const float* __restrict__ obs, const char* __restrict__ categorical_obs, float* __restrict__ preds, const int n_samples, const int n_num_features, const int n_cat_features, 
+void predict_densities_cuda(dataSet *dataset, float *&densities_out, ensembleMetaData *metadata, ensembleData *edata, int start_tree_idx, int stop_tree_idx){
+    float *device_batch_obs = nullptr;
+    float *device_densities;
+    char *device_batch_cat_obs = nullptr;
+    char *device_data;
+    char *extra_data = nullptr;
+    // assuming row-major order
+    size_t densities_matrix_size = static_cast<size_t>(dataset->n_samples) * metadata->n_objs * sizeof(float);
+    size_t obs_matrix_size = static_cast<size_t>(dataset->n_samples) * metadata->n_num_features * sizeof(float);
+    size_t cat_obs_matrix_size = static_cast<size_t>(dataset->n_samples) * metadata->n_cat_features * sizeof(char) * MAX_CHAR_SIZE;
+
+    size_t extra_alloc_size = 0;
+    if (dataset->obs->data != nullptr && dataset->obs->device == cpu)
+        extra_alloc_size += obs_matrix_size;
+    if (dataset->categorical_obs->data != nullptr && dataset->categorical_obs->device == cpu)
+        extra_alloc_size += cat_obs_matrix_size;
+
+    cudaError_t alloc_error = allocateCudaMemory((void**)&device_data, densities_matrix_size, "when trying to allocate in predict_densities_cuda");
+    if (alloc_error != cudaSuccess) {
+        return;
+    }
+
+    if (extra_alloc_size > 0) {
+        cudaError_t extra_alloc_error = allocateCudaMemory((void**)&extra_data, extra_alloc_size, "when trying to allocate extra data in predict_densities_cuda");
+        if (extra_alloc_error != cudaSuccess) {
+            cudaFree(device_data);
+            return;
+        }
+    }
+
+    size_t extra_trace = 0;
+    cudaMemset(device_data, 0, densities_matrix_size);
+    device_densities = (float *)device_data;
+
+    if (dataset->obs->data != nullptr){
+        if (dataset->obs->device == cpu){
+            device_batch_obs = (float*)(extra_data + extra_trace);
+            extra_trace += obs_matrix_size;
+            cudaMemcpy(device_batch_obs, dataset->obs->data, obs_matrix_size, cudaMemcpyHostToDevice);
+        } else {
+            device_batch_obs = const_cast<float*>(dataset->obs->data);
+        }
+    }
+
+    if (dataset->categorical_obs->data != nullptr){
+        if (dataset->categorical_obs->device == cpu){
+            device_batch_cat_obs = (char *)(extra_data + extra_trace);
+            extra_trace += cat_obs_matrix_size;
+            cudaMemcpy(device_batch_cat_obs, dataset->categorical_obs->data, cat_obs_matrix_size, cudaMemcpyHostToDevice);
+        } else {
+            device_batch_cat_obs = const_cast<char*>(dataset->categorical_obs->data);
+        }
+    }
+
+    if (stop_tree_idx > metadata->n_trees){
+        std::cerr << "Given stop_tree_idx idx: " << stop_tree_idx << " greater than number of trees in model: " << metadata->n_trees << std::endl;
+        densities_out = device_densities;
+        if (extra_alloc_size > 0)
+            cudaFree(extra_data);
+        return;
+    }
+    if (metadata->n_trees == 0){
+        densities_out = device_densities;
+        if (extra_alloc_size > 0)
+            cudaFree(extra_data);
+        return;
+    }
+
+    if (stop_tree_idx == 0)
+        stop_tree_idx = metadata->n_trees;
+
+    const int n_used_trees = stop_tree_idx - start_tree_idx;
+    if (n_used_trees <= 0){
+        densities_out = device_densities;
+        if (extra_alloc_size > 0)
+            cudaFree(extra_data);
+        return;
+    }
+
+    cudaDeviceProp deviceProp;
+    cudaGetDeviceProperties(&deviceProp, 0);
+
+    int threads_per_block = WARP_SIZE*((dataset->n_samples + WARP_SIZE - 1) / WARP_SIZE);
+    if (threads_per_block > deviceProp.maxThreadsPerBlock)
+        threads_per_block = deviceProp.maxThreadsPerBlock;
+
+    if (metadata->grow_policy == GREEDY){
+        int start_leaf_idx = 0, stop_leaf_idx = metadata->n_leaves;
+        if (start_tree_idx > 0)
+            cudaMemcpy(&start_leaf_idx, edata->ensemble_info->tree_indices + start_tree_idx, sizeof(int), cudaMemcpyDeviceToHost);
+        if (stop_tree_idx < metadata->n_trees)
+            cudaMemcpy(&stop_leaf_idx, edata->ensemble_info->tree_indices + stop_tree_idx, sizeof(int), cudaMemcpyDeviceToHost);
+        int n_leaves = stop_leaf_idx - start_leaf_idx;
+        predict_densities_kernel_greedy<<<n_leaves, threads_per_block>>>(device_batch_obs, device_batch_cat_obs, device_densities, dataset->n_samples, metadata->n_num_features, metadata->n_cat_features, edata->feature_data->feature_indices, edata->ensemble_info->depths, edata->feature_data->feature_values, edata->feature_data->inequality_directions, edata->multi_objective_data->densities, edata->feature_data->categorical_values, edata->feature_data->is_numerics, metadata->n_objs, metadata->max_depth, start_leaf_idx);
+    } else {
+        predict_densities_oblivious_kernel<<<n_used_trees, threads_per_block>>>(device_batch_obs, device_batch_cat_obs, device_densities, dataset->n_samples, metadata->n_num_features, metadata->n_cat_features, edata->feature_data->feature_indices, edata->ensemble_info->depths, edata->feature_data->feature_values, edata->multi_objective_data->densities, edata->ensemble_info->tree_indices, edata->feature_data->categorical_values, edata->feature_data->is_numerics, metadata->n_objs, metadata->max_depth, start_tree_idx);
+    }
+    cudaDeviceSynchronize();
+
+    // Average over the traversed trees so each row is a proper distribution.
+    const int total = dataset->n_samples * metadata->n_objs;
+    int norm_blocks, norm_threads;
+    get_grid_dimensions(total, norm_blocks, norm_threads);
+    scale_mat_kernel<<<norm_blocks, norm_threads>>>(device_densities, 1.0f / static_cast<float>(n_used_trees), total);
+    cudaDeviceSynchronize();
+
+    densities_out = device_densities;
+
+    if (extra_alloc_size > 0)
+        cudaFree(extra_data);
+}
+
+
+__global__ void predict_kernel_tree_wise(const float* __restrict__ obs, const char* __restrict__ categorical_obs, float* __restrict__ preds, const int n_samples, const int n_num_features, const int n_cat_features,
                                          const int* __restrict__ feature_indices, const int* __restrict__ depths, const float* __restrict__ feature_values, const bool* __restrict__ inequality_directions, const float* __restrict__ leaf_values, 
                                          const char* __restrict__ categorical_values, const bool* __restrict__ is_numerics, SGDOptimizerGPU** opts, const int n_opts, const int output_dim, const int max_depth, const int leaf_offset){
     
@@ -543,4 +656,74 @@ __global__ void predict_oblivious_kernel_tree_wise(const float* __restrict__ obs
             }
         }
     }
+}
+
+
+__global__ void predict_densities_kernel_greedy(const float* __restrict__ obs, const char* __restrict__ categorical_obs, float* __restrict__ densities_out, const int n_samples, const int n_num_features, const int n_cat_features,
+                                                const int* __restrict__ feature_indices, const int* __restrict__ depths, const float* __restrict__ feature_values, const bool* __restrict__ inequality_directions,
+                                                const float* __restrict__ densities, const char* __restrict__ categorical_values, const bool* __restrict__ is_numerics, const int n_objs, const int max_depth, const int leaf_offset){
+    bool equal, passed;
+    int cond_idx = (blockIdx.x + leaf_offset) * max_depth, depth_idx;
+    int density_idx = (blockIdx.x + leaf_offset) * n_objs;
+    for (int sample_idx = threadIdx.x; sample_idx < n_samples; sample_idx += blockDim.x){
+        passed = true;
+        depth_idx = __ldg(depths + blockIdx.x + leaf_offset) - 1;
+        while(depth_idx >= 0 && passed){
+            if (is_numerics[cond_idx + depth_idx]){
+                passed = __ldg(&obs[sample_idx*n_num_features + __ldg(&feature_indices[cond_idx + depth_idx])]) > __ldg(&feature_values[cond_idx + depth_idx]) == inequality_directions[cond_idx + depth_idx];
+            } else {
+                equal = true;
+                for (int i = 0; i < MAX_CHAR_SIZE; ++i) {
+                    if (categorical_values[(cond_idx + depth_idx)*MAX_CHAR_SIZE + i] != categorical_obs[(sample_idx*n_cat_features + __ldg(&feature_indices[cond_idx + depth_idx]))*MAX_CHAR_SIZE + i]){
+                        equal = false;
+                        break;
+                    } else if (categorical_values[(cond_idx + depth_idx)*MAX_CHAR_SIZE + i] == '\0' || categorical_obs[(sample_idx*n_cat_features + __ldg(&feature_indices[cond_idx + depth_idx]))*MAX_CHAR_SIZE + i] == '\0')
+                        break;
+                }
+                passed = equal == inequality_directions[cond_idx + depth_idx];
+            }
+            depth_idx--;
+        }
+        if (passed){
+            for (int k = 0; k < n_objs; ++k)
+                atomicAdd(&densities_out[sample_idx*n_objs + k], __ldg(densities + density_idx + k));
+        }
+    }
+}
+
+
+__global__ void predict_densities_oblivious_kernel(const float* __restrict__ obs, const char* __restrict__ categorical_obs, float* __restrict__ densities_out, const int n_samples, const int n_num_features, const int n_cat_features,
+                                                   const int* __restrict__ feature_indices, const int* __restrict__ depths, const float* __restrict__ feature_values, const float* __restrict__ densities,
+                                                   const int* __restrict__ tree_indices, const char* __restrict__ categorical_values, const bool* __restrict__ is_numerics, const int n_objs, const int max_depth, const int tree_offset){
+    bool decision;
+    int tree_idx = blockIdx.x + tree_offset;
+    int leaf_idx, initial_leaf_idx = __ldg(tree_indices + tree_idx);
+    for (int sample_idx = threadIdx.x; sample_idx < n_samples; sample_idx += blockDim.x){
+        leaf_idx = 0;
+        for (int depth_idx = 0; depth_idx < __ldg(depths + tree_idx); depth_idx++){
+            if (is_numerics[tree_idx * max_depth + depth_idx])
+                decision = (__ldg(&obs[sample_idx*n_num_features + __ldg(feature_indices + tree_idx * max_depth + depth_idx)])) > (__ldg(feature_values + tree_idx * max_depth + depth_idx));
+            else{
+                decision = true;
+                for (int i = 0; i < MAX_CHAR_SIZE; ++i) {
+                    if (categorical_values[(tree_idx * max_depth + depth_idx)*MAX_CHAR_SIZE + i] != categorical_obs[(sample_idx*n_cat_features + __ldg(feature_indices + tree_idx * max_depth + depth_idx))*MAX_CHAR_SIZE + i]){
+                        decision = false;
+                        break;
+                    } else if (categorical_values[(tree_idx * max_depth + depth_idx)*MAX_CHAR_SIZE + i] == '\0' || categorical_obs[(sample_idx*n_cat_features + __ldg(feature_indices + tree_idx * max_depth + depth_idx))*MAX_CHAR_SIZE + i] == '\0')
+                        break;
+                }
+            }
+            leaf_idx |= (decision <<  (__ldg(depths + tree_idx) - 1 - depth_idx));
+        }
+
+        for (int k = 0; k < n_objs; ++k)
+            atomicAdd(&densities_out[sample_idx*n_objs + k], __ldg(densities + (initial_leaf_idx + leaf_idx)*n_objs + k));
+    }
+}
+
+
+__global__ void scale_mat_kernel(float* __restrict__ mat, const float scale, const int size){
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < size)
+        mat[idx] *= scale;
 }

@@ -51,6 +51,13 @@ __global__ void ones_kernel(float *arr, int size) {
     }
 }
 
+__global__ void one_hot_kernel(float *arr, int size, int hot_idx) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < size) {
+        arr[idx] = (idx == hot_idx) ? 1.0f : 0.0f;
+    }
+}
+
 void preprocess_matrices(float* __restrict__ grads, const int n_rows, const int n_cols, const scoreFunc split_score_func){
     size_t shared_mem;
     if (split_score_func == L2){

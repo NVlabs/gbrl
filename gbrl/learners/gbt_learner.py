@@ -166,8 +166,12 @@ class GBTLearner(BaseLearner):
             self._cpp_model.set_feature_mapping(np.ascontiguousarray(feature_mapping),
                                                 np.ascontiguousarray(numerical_mask))
 
-        if obj_labels is not None and (obj_labels == 0).all():
-            obj_labels = None
+        default_obj_idx = 0
+        if obj_labels is not None:
+            unique_lbls = th.unique(obj_labels) if isinstance(obj_labels, th.Tensor) else np.unique(obj_labels)
+            if len(unique_lbls) == 1:
+                default_obj_idx = int(unique_lbls[0])
+                obj_labels = None
 
         if obj_labels is not None:
             lbl_arr = obj_labels.detach().cpu().numpy() if isinstance(obj_labels, th.Tensor) else np.asarray(obj_labels)
@@ -194,7 +198,8 @@ class GBTLearner(BaseLearner):
         self._cpp_model.step(obs=self.transform_data(num_inputs),
                              categorical_obs=cat_inputs,
                              grads=self.transform_data(grads),  # type: ignore
-                             obj_labels=self.transform_data(obj_labels))
+                             obj_labels=self.transform_data(obj_labels),
+                             default_obj_idx=default_obj_idx)
 
         self._memory = []
 
@@ -667,6 +672,48 @@ class GBTLearner(BaseLearner):
 
         preds = ensure_leaf_tensor_or_array(preds, tensor, requires_grad, self.device)
         return preds
+
+    def predict_densities(self,
+                          inputs: NumericalData,
+                          start_idx: Optional[int] = None,
+                          stop_idx: Optional[int] = None,
+                          tensor: bool = False) -> NumericalData:
+        """
+        Predicts the per-objective density distribution for the given features.
+
+        For each sample, the per-objective density vector of every leaf it lands
+        in is accumulated and then divided by the number of traversed trees.
+        Since each leaf's density vector sums to 1, every output row sums to 1
+        and can be read as a distribution over objectives / label classes.
+
+        Unlike :meth:`predict`, no bias, learning rate, or optimizer is applied,
+        and the student model is not included.
+
+        Args:
+            inputs (NumericalData): Input features.
+            start_idx (int, optional): Start tree index. Defaults to 0.
+            stop_idx (int, optional): Stop tree index. Defaults to None (all trees).
+            tensor (bool, optional): Whether to return a tensor. Defaults to False.
+
+        Returns:
+            NumericalData: Densities of shape (n_samples, n_objs); each row sums to 1.
+        """
+        assert self._cpp_model is not None, "No model loaded!"
+        if stop_idx is None:
+            stop_idx = 0
+
+        num_inputs, cat_inputs = preprocess_features(inputs)
+
+        densities = self._cpp_model.predict_densities(
+            obs=self.transform_data(num_inputs),
+            categorical_obs=cat_inputs,
+            start_tree_idx=start_idx,
+            stop_tree_idx=stop_idx)
+
+        if not isinstance(densities, np.ndarray):
+            densities = th.from_dlpack(densities)  # type: ignore
+
+        return ensure_leaf_tensor_or_array(densities, tensor, False, self.device)
 
     def distil(self,
                obs: np.ndarray,
