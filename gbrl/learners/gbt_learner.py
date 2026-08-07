@@ -27,6 +27,7 @@ for single gradient boosted tree models. It supports training, prediction,
 SHAP computation, and model serialization.
 """
 import os
+import warnings
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
@@ -432,6 +433,13 @@ class GBTLearner(BaseLearner):
             np.ndarray or tuple: shap values, or (shap_values, base_values) if
                 return_base=True
         """
+        optimizers_flat = self._cpp_model.get_optimizers()
+        if any(o.get('algo', '').lower() == 'adam' for o in optimizers_flat):
+            warnings.warn(
+                "tree_shap() was called on a model with Adam optimizer(s). "
+                "Returned values are an approximation, not exact SHAP attribution.",
+                RuntimeWarning, stacklevel=2,
+            )
         if isinstance(features, th.Tensor):
             features = features.detach().cpu().numpy()
         num_features, cat_features = preprocess_features(features)
@@ -471,6 +479,13 @@ class GBTLearner(BaseLearner):
             np.ndarray or tuple: shap values, or (shap_values, base_values) if
                 return_base=True
         """
+        optimizers_flat = self._cpp_model.get_optimizers()
+        if any(o.get('algo', '').lower() == 'adam' for o in optimizers_flat):
+            warnings.warn(
+                "shap() was called on a model with Adam optimizer(s). "
+                "Returned values are an approximation, not exact SHAP attribution.",
+                RuntimeWarning, stacklevel=2,
+            )
         if isinstance(features, th.Tensor):
             features = features.detach().cpu().numpy()
         num_features, cat_features = preprocess_features(features)

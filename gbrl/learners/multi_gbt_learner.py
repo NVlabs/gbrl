@@ -313,7 +313,7 @@ class MultiGBTLearner(BaseLearner):
             device (str): The device to load the model onto.
 
         Returns:
-            GBTLearner: The loaded GBTLearner instance.
+            MultiGBTLearner: The loaded MultiGBTLearner instance.
         """
         filename = filename.rstrip('.')
 
@@ -400,7 +400,7 @@ class MultiGBTLearner(BaseLearner):
             model_idx (int, optional): The index of the model.
 
         Returns:
-            Union[int, Tuple[int, int]]: The learning rates.
+            Union[np.ndarray, Tuple[np.ndarray, ...]]: The learning rates.
         """
         assert self._cpp_models is not None and isinstance(self._cpp_models, list), \
             "Model not initialized."
@@ -519,7 +519,7 @@ class MultiGBTLearner(BaseLearner):
             Union[np.ndarray, Tuple[np.ndarray, ...]]: The bias.
         """
         if model_idx is None:
-            return (cpp_model.get_bias() for cpp_model in self._cpp_models)  # type: ignore
+            return tuple(cpp_model.get_bias() for cpp_model in self._cpp_models)
         return self._cpp_models[model_idx].get_bias()  # type: ignore
 
     def get_feature_weights(self, model_idx: Optional[int] = None) -> Union[np.ndarray, Tuple[np.ndarray, ...]]:
@@ -533,7 +533,7 @@ class MultiGBTLearner(BaseLearner):
             Union[np.ndarray, Tuple[np.ndarray, ...]]: The feature weights.
         """
         if model_idx is None:
-            return (cpp_model.get_feature_weights() for cpp_model in self._cpp_models)  # type: ignore
+            return tuple(cpp_model.get_feature_weights() for cpp_model in self._cpp_models)
         return self._cpp_models[model_idx].get_feature_weights()  # type: ignore
 
     def get_device(self, model_idx: Optional[int] = None) -> Union[str, Tuple[str, ...]]:
@@ -547,7 +547,7 @@ class MultiGBTLearner(BaseLearner):
             Union[str, Tuple[str, ...]]: The device.
         """
         if model_idx is None:
-            return (cpp_model.get_device() for cpp_model in self._cpp_models)  # type: ignore
+            return tuple(cpp_model.get_device() for cpp_model in self._cpp_models)
         return self._cpp_models[model_idx].get_device()  # type: ignore
 
     def print_tree(self, tree_idx: int,
@@ -591,30 +591,25 @@ class MultiGBTLearner(BaseLearner):
 
     def tree_shap(self, tree_idx: int, features: NumericalData,
                   model_idx: Optional[int] = None,
-                  *, return_base: bool = False) -> Union[np.ndarray, Tuple[np.ndarray, ...]]:
+                  *, return_base: bool = False) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray], List]:
         """
-        Computes SHAP values for a single tree.
+        Computes SHAP values for a single tree (tree_idx).
 
-        Implementation based on - https://github.com/yupbank/linear_tree_shap
-        See Linear TreeShap, Yu et al, 2023, https://arxiv.org/pdf/2209.08192
+        Based on Linear TreeSHAP (Yu et al., 2023): https://arxiv.org/pdf/2209.08192
 
-        For SGD-optimized models, base + phi.sum(axis=1) == predict(x) exactly.
-        For Adam models, tree_shap(tree_idx, x) explains tree tree_idx under the
-        factual Adam moment state induced by all preceding trees in the ensemble
-        (not tree tree_idx in isolation); this is an optimizer-aware local
-        approximation, not exact Shapley attribution.
+        For SGD models: base + phi.sum(axis=1) == predict(x) exactly.
+        For Adam models: result is an approximation, not exact SHAP attribution.
 
         Args:
-            tree_idx (int): tree index
-            features (NumericalData): input features
-            model_idx (int, optional): restrict to a single sub-model; returns
-                all sub-models when None.
-            return_base (bool): if True, return (phi, base) where base has shape
-                (n_samples, output_dim). For SGD: base + phi.sum(axis=1) == predict(x).
+            tree_idx (int): index of the tree to explain.
+            features (NumericalData): input samples.
+            model_idx (int, optional): which sub-model to use. Returns all sub-models when None.
+            return_base (bool): if True, also return the per-sample base value.
 
         Returns:
-            phi array, or (phi, base) tuple when return_base=True.
-            When model_idx is None, returns a list (one entry per sub-model).
+            phi (np.ndarray) of shape (n_samples, n_features, output_dim).
+            If return_base=True, returns (phi, base) where base is (n_samples, output_dim).
+            If model_idx is None, returns a list with one entry per sub-model.
         """
         assert self._cpp_models is not None and isinstance(self._cpp_models, list), \
             "Model not initialized."
@@ -626,8 +621,7 @@ class MultiGBTLearner(BaseLearner):
         if any(o.get('algo', '').lower() == 'adam' for o in optimizers_flat):
             warnings.warn(
                 "tree_shap() was called on a model with Adam optimizer(s). "
-                "Returned values are an optimizer-aware local approximation, "
-                "not exact Shapley attribution over all counterfactual optimizer histories.",
+                "Returned values are an approximation, not exact SHAP attribution.",
                 RuntimeWarning, stacklevel=2,
             )
 
@@ -652,29 +646,24 @@ class MultiGBTLearner(BaseLearner):
 
     def shap(self, features: NumericalData,
              model_idx: Optional[int] = None,
-             return_base: bool = False) -> Union[np.ndarray, Tuple[np.ndarray, ...]]:
+             return_base: bool = False) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray], List]:
         """
-        Computes SHAP values for the entire ensemble.
+        Computes SHAP values for the entire ensemble (all trees summed).
 
-        Uses Linear tree shap for each tree in the ensemble (sequentially).
-        Implementation based on - https://github.com/yupbank/linear_tree_shap
-        See Linear TreeShap, Yu et al, 2023, https://arxiv.org/pdf/2209.08192
+        Based on Linear TreeSHAP (Yu et al., 2023): https://arxiv.org/pdf/2209.08192
 
-        For SGD-optimized models, base + phi.sum(axis=1) == predict(x) exactly.
-        For Adam models, GBRL computes an optimizer-aware local TreeSHAP
-        approximation (factual Adam state replayed before each tree); this is
-        not exact Shapley attribution over all counterfactual optimizer histories.
+        For SGD models: base + phi.sum(axis=1) == predict(x) exactly.
+        For Adam models: result is an approximation, not exact SHAP attribution.
 
         Args:
-            features (NumericalData): input features
-            model_idx (int, optional): restrict to a single sub-model; returns
-                all sub-models when None.
-            return_base (bool): if True, return (phi, base) where base has shape
-                (n_samples, output_dim). For SGD: base + phi.sum(axis=1) == predict(x).
+            features (NumericalData): input samples.
+            model_idx (int, optional): which sub-model to use. Returns all sub-models when None.
+            return_base (bool): if True, also return the per-sample base value.
 
         Returns:
-            phi array, or (phi, base) tuple when return_base=True.
-            When model_idx is None, returns a list (one entry per sub-model).
+            phi (np.ndarray) of shape (n_samples, n_features, output_dim).
+            If return_base=True, returns (phi, base) where base is (n_samples, output_dim).
+            If model_idx is None, returns a list with one entry per sub-model.
         """
         assert self._cpp_models is not None and isinstance(self._cpp_models, list), \
             "Model not initialized."
@@ -686,8 +675,7 @@ class MultiGBTLearner(BaseLearner):
         if any(o.get('algo', '').lower() == 'adam' for o in optimizers_flat):
             warnings.warn(
                 "shap() was called on a model with Adam optimizer(s). "
-                "Returned values are an optimizer-aware local approximation, "
-                "not exact Shapley attribution over all counterfactual optimizer histories.",
+                "Returned values are an approximation, not exact SHAP attribution.",
                 RuntimeWarning, stacklevel=2,
             )
 

@@ -1331,8 +1331,14 @@ gbrl.def("get_matrix_representation", [](GBRL &self, py::object &obs, py::object
                             py::object &offset) -> py::tuple {
         auto a = parse_shap_args(obs, categorical_obs, norm_values, base_poly, offset);
         float *base_values = new float[a.n_samples * self.metadata->output_dim]();
-        py::gil_scoped_release release;
-        float* shap_values = self.ensemble_shap(a.obs_ptr, a.cat_obs_ptr, a.n_samples, a.norm_ptr, a.base_poly_ptr, a.offset_ptr, base_values);
+        float* shap_values = nullptr;
+        try {
+            py::gil_scoped_release release;
+            shap_values = self.ensemble_shap(a.obs_ptr, a.cat_obs_ptr, a.n_samples, a.norm_ptr, a.base_poly_ptr, a.offset_ptr, base_values);
+        } catch (...) {
+            delete[] base_values;
+            throw;
+        }
         py::gil_scoped_acquire acquire;
         auto capsule_shap = py::capsule(shap_values, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
         auto capsule_base = py::capsule(base_values, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
@@ -1348,8 +1354,14 @@ gbrl.def("get_matrix_representation", [](GBRL &self, py::object &obs, py::object
                             py::object &offset) -> py::tuple {
         auto a = parse_shap_args(obs, categorical_obs, norm_values, base_poly, offset);
         float *base_values = new float[a.n_samples * self.metadata->output_dim]();
-        py::gil_scoped_release release;
-        float* shap_values = self.tree_shap(tree_idx, a.obs_ptr, a.cat_obs_ptr, a.n_samples, a.norm_ptr, a.base_poly_ptr, a.offset_ptr, base_values);
+        float* shap_values = nullptr;
+        try {
+            py::gil_scoped_release release;
+            shap_values = self.tree_shap(tree_idx, a.obs_ptr, a.cat_obs_ptr, a.n_samples, a.norm_ptr, a.base_poly_ptr, a.offset_ptr, base_values);
+        } catch (...) {
+            delete[] base_values;
+            throw;
+        }
         py::gil_scoped_acquire acquire;
         auto capsule_shap = py::capsule(shap_values, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
         auto capsule_base = py::capsule(base_values, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });

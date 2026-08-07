@@ -340,6 +340,28 @@ SHAP values are calculated internally and can be plotted using the `SHAP library
 
     plt.show()
 
+GBRL's SHAP values are **optimizer-aware** and satisfy the completeness property:
+``base + phi.sum(axis=1) == predict(x)`` exactly for SGD, and as a per-sample
+approximation for Adam. Pass ``return_base=True`` to retrieve the base value alongside
+the SHAP values:
+
+.. code-block:: python
+
+    # ensemble SHAP with base value — completeness holds exactly for SGD
+    phi, base = agent.shap(obs, return_base=True)
+    # base.shape == (n_samples, output_dim)
+    # base + phi.sum(axis=1) == predict(obs)
+
+    # single-tree SHAP with base
+    phi_t, base_t = agent.tree_shap(0, obs, return_base=True)
+
+.. note::
+
+   For **Adam**-optimized models, ``shap()`` and ``tree_shap()`` emit a
+   ``RuntimeWarning``. The returned values reconstruct the prediction via a
+   per-sample moment-state replay, but are not exact Shapley attributions over
+   all counterfactual optimizer histories.
+
 Learning Rate Schedulers
 ------------------------
 GBRL supports learning rate scheduling to control the learning rate throughout training. Two schedulers are available:
