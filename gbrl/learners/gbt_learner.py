@@ -410,7 +410,7 @@ class GBTLearner(BaseLearner):
             print(f"Caught an exception in GBRL: {e}")
 
     def tree_shap(self, tree_idx: int, features:
-                  NumericalData, return_base: bool = False):
+                  NumericalData, return_base: bool = False) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
         """
         Computes SHAP values for a single tree.
 
@@ -455,7 +455,7 @@ class GBTLearner(BaseLearner):
         return self._cpp_model.tree_shap(tree_idx, num_features, cat_features,
                                          norm_values, base_poly, offset)
 
-    def shap(self, features: NumericalData, return_base: bool = False):
+    def shap(self, features: NumericalData, return_base: bool = False) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
         """
         Computes SHAP values for the entire ensemble.
 
