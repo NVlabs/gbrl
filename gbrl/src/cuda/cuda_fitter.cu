@@ -1712,7 +1712,8 @@ __global__ void pava_kernel(
     const int start_leaf_idx,
     const int n_leaves_in_tree,
     const int output_dim,
-    const int target_output        // Which output dimension to process
+    const int target_output,       // Which output dimension to process
+    int* d_changed                 // Set to 1 when any pair is pooled this pass
 ) {
     // Each block handles one "plane" of leaves where all other depths are fixed
     // and only the constraint_depth varies
@@ -1764,6 +1765,7 @@ __global__ void pava_kernel(
         float pooled = (val0 + val1) / 2.0f;
         values[global_leaf0 * output_dim + target_output] = pooled;
         values[global_leaf1 * output_dim + target_output] = pooled;
+        atomicOr(d_changed, 1);
     }
 }
 
@@ -1842,13 +1844,17 @@ void apply_monotonic_constraints_cuda(
         }
     }
 
-    // Apply constraints using PAVA, repeating 64 times to ensure convergence.
+    // Apply constraints using PAVA, iterating until convergence (up to 64 passes).
     // A single depth-ordered pass is not sufficient: pooling at one depth can
     // re-introduce violations at a previously fixed depth when multiple features
     // at different depths are both constrained.
     // Only iterate over policy_dim since monotonic constraints only apply to policy outputs.
+    int* d_any_change;
+    cudaMalloc(&d_any_change, sizeof(int));
     for (int out_idx = 0; out_idx < metadata->policy_dim; ++out_idx) {
-        for (int pass = 0; pass < 64; ++pass) {
+        bool converged = false;
+        for (int pass = 0; pass < PAVA_MAX_PASSES; ++pass) {
+            cudaMemset(d_any_change, 0, sizeof(int));
             for (int d = 0; d < tree_depth; ++d) {
                 int constraint_dir = effective_constraints[d][out_idx];
                 if (constraint_dir == 0) continue;
@@ -1861,7 +1867,8 @@ void apply_monotonic_constraints_cuda(
                     start_leaf_idx,
                     n_leaves_in_tree,
                     metadata->output_dim,
-                    out_idx
+                    out_idx,
+                    d_any_change
                 );
                 cudaError_t launch_err = cudaGetLastError();
                 if (launch_err != cudaSuccess) {
@@ -1869,13 +1876,23 @@ void apply_monotonic_constraints_cuda(
                               << ", tree_depth=" << tree_depth << ", start_idx=" << start_leaf_idx
                               << ", n_leaves=" << n_leaves_in_tree << "): " << cudaGetErrorString(launch_err) << std::endl;
                 }
-                cudaError_t sync_err = cudaDeviceSynchronize();
-                if (sync_err != cudaSuccess) {
-                    std::cerr << "ERROR: pava_kernel sync failed: " << cudaGetErrorString(sync_err) << std::endl;
-                }
+            }
+            cudaError_t sync_err = cudaDeviceSynchronize();
+            if (sync_err != cudaSuccess) {
+                std::cerr << "ERROR: pava_kernel sync failed: " << cudaGetErrorString(sync_err) << std::endl;
+            }
+            int h_any_change = 0;
+            cudaMemcpy(&h_any_change, d_any_change, sizeof(int), cudaMemcpyDeviceToHost);
+            if (!h_any_change) {
+                converged = true;
+                break;
             }
         }
+        if (!converged) {
+            std::cerr << "WARNING: monotonic constraint PAVA did not converge in " << PAVA_MAX_PASSES << " passes for output " << out_idx << std::endl;
+        }
     }
+    cudaFree(d_any_change);
     
     delete[] h_feature_indices;
     delete[] h_inequality_directions;

@@ -717,13 +717,14 @@ void Fitter::apply_monotonic_constraints_cpu(
         }
     }
     
-    // Apply constraints using PAVA, iterating until convergence.
+    // Apply constraints using PAVA, iterating until convergence (up to 64 passes).
     // A single depth-ordered pass is not sufficient: pooling at one depth can
     // re-introduce violations at a previously fixed depth.  Repeating until no
     // changes are made guarantees all pair-wise constraints are satisfied.
     for (int out_idx = 0; out_idx < policy_dim; ++out_idx) {
         bool any_change = true;
-        while (any_change) {
+        int pass = 0;
+        while (any_change && pass < PAVA_MAX_PASSES) {
             any_change = false;
             for (int d = 0; d < tree_depth; ++d) {
                 int constraint_dir = effective_constraints[d][out_idx];
@@ -754,6 +755,10 @@ void Fitter::apply_monotonic_constraints_cpu(
                     }
                 }
             }
+            ++pass;
+        }
+        if (any_change) {
+            std::cerr << "WARNING: monotonic constraint PAVA did not converge in " << PAVA_MAX_PASSES << " passes for output " << out_idx << std::endl;
         }
     }
     

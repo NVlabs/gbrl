@@ -57,6 +57,9 @@
 /** @brief Format specifier for categorical type based on MAX_CHAR_SIZE */
 #define CAT_TYPE TOSTRING(MAX_CHAR_SIZE) "s"
 
+/** @brief Maximum PAVA passes per output when applying monotonic constraints */
+#define PAVA_MAX_PASSES 64
+
 /** @brief Forward declaration of Optimizer class */
 class Optimizer;
 
