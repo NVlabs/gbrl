@@ -35,6 +35,7 @@ ROOT_PATH = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT_PATH))
 
 from gbrl import cuda_available
+from gbrl.common.utils import get_poly_vectors, numerical_dtype, preprocess_features
 from gbrl.models.gbt import GBTModel
 from tests import CATEGORICAL_INPUTS, CATEGORICAL_OUTPUTS
 
@@ -926,10 +927,7 @@ class TestGBTSingle(unittest.TestCase):
 
 
     def test_shap_rejects_student_model(self):
-        """shap() and tree_shap() must raise when a student model is attached."""
-        rng = np.random.default_rng(0)
-        X = rng.normal(size=(50, self.input_dim)).astype(np.float32)
-        Y = rng.normal(size=(50, self.out_dim)).astype(np.float32)
+        """shap() and tree_shap() must raise as soon as a student model is attached."""
         model = GBTModel(
             input_dim=self.input_dim, output_dim=self.out_dim,
             tree_struct={'max_depth': 3, 'n_bins': 64, 'min_data_in_leaf': 1,
@@ -938,17 +936,16 @@ class TestGBTSingle(unittest.TestCase):
             params={'split_score_func': 'Cosine', 'generator_type': 'Quantile'},
             device='cpu', verbose=0,
         )
-        target = th.as_tensor(Y)
-        for _ in range(5):
-            pred_t = model(X, requires_grad=True)
-            loss = ((pred_t.reshape(target.shape) - target) ** 2).mean()
-            loss.backward()
-            model.step(X)
-        model.learner.distil(X, [Y], params={'min_steps': 3, 'limit_steps': 5, 'min_distillation_loss': 0.0})
-        with self.assertRaises(RuntimeError, msg="shap() should raise with student model"):
-            model.shap(X, return_base=True)
-        with self.assertRaises(RuntimeError, msg="tree_shap() should raise with student model"):
-            model.tree_shap(0, X, return_base=True)
+        # Attach a sentinel student model — no training or distillation needed
+        # because the guard fires before any C++ call.
+        model.learner.student_model = object()
+        self.addCleanup(setattr, model.learner, 'student_model', None)
+
+        obs = np.zeros((1, self.input_dim), dtype=np.float32)
+        with self.assertRaisesRegex(RuntimeError, 'student model'):
+            model.shap(obs, return_base=True)
+        with self.assertRaisesRegex(RuntimeError, 'student model'):
+            model.tree_shap(0, obs, return_base=True)
 
     def test_overlapping_optimizer_raises(self):
         """Overlapping optimizer output ranges must raise RuntimeError to the caller."""
@@ -967,7 +964,13 @@ class TestGBTSingle(unittest.TestCase):
             )
 
     def test_shap_float64_input(self):
-        """Low-level SHAP binding must not dangle when obs requires float32 conversion."""
+        """Low-level pybind binding must not dangle when obs requires float32 conversion.
+
+        The high-level API pre-converts inputs before calling the binding, so it never
+        triggers the temporary py::array_t<float> lifetime. This test calls the C++
+        binding directly with a float64 array, forcing the conversion inside parse_shap_args,
+        and checks that the result matches the float32 baseline.
+        """
         rng = np.random.default_rng(1)
         X = rng.normal(size=(20, self.input_dim)).astype(np.float32)
         Y = rng.normal(size=(20, self.out_dim)).astype(np.float32)
@@ -985,12 +988,27 @@ class TestGBTSingle(unittest.TestCase):
             loss = ((pred_t.reshape(target.shape) - target) ** 2).mean()
             loss.backward()
             model.step(X)
-        phi32, base32 = model.shap(X, return_base=True)
-        phi64, base64 = model.shap(X.astype(np.float64), return_base=True)
+
+        cpp_model = model.learner._cpp_model
+        num_inputs, cat_inputs = preprocess_features(X)
+        base_poly, norm_values, offset = get_poly_vectors(model.learner.params['max_depth'], numerical_dtype)
+        base_poly   = np.ascontiguousarray(base_poly)
+        norm_values = np.ascontiguousarray(norm_values)
+        offset      = np.ascontiguousarray(offset)
+
+        phi32, base32 = cpp_model.ensemble_shap_and_base(
+            num_inputs, cat_inputs, norm_values, base_poly, offset)
+
+        # float64 observation forces py::cast<py::array_t<float>> to create a
+        # temporary float32 copy inside parse_shap_args.  The fix stores that
+        # copy as an owner in ShapArgs so the pointer cannot dangle.
+        phi64, base64 = cpp_model.ensemble_shap_and_base(
+            num_inputs.astype(np.float64), cat_inputs, norm_values, base_poly, offset)
+
         np.testing.assert_allclose(phi32, phi64, rtol=1e-5,
-                                   err_msg="float64 input gives different SHAP values than float32")
+                                   err_msg="float64 obs gives different SHAP values than float32")
         np.testing.assert_allclose(base32, base64, rtol=1e-5,
-                                   err_msg="float64 input gives different base values than float32")
+                                   err_msg="float64 obs gives different base values than float32")
 
 
 if __name__ == '__main__':

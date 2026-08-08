@@ -340,31 +340,40 @@ SHAP values are calculated internally and can be plotted using the `SHAP library
 
     plt.show()
 
-GBRL's SHAP values are **optimizer-aware**. Pass ``return_base=True`` to get both
-the SHAP values and a base value. The meaning of that base differs between the two calls:
+GBRL's SHAP values are **optimizer-aware**. Pass ``return_base=True`` to receive
+both the feature attributions and a base value alongside them.
 
-- ``agent.shap(obs, return_base=True)`` — explains the **full ensemble**.
-  The identity ``base + phi.sum(axis=1) == predict(obs)`` holds exactly.
-- ``agent.tree_shap(t, obs, return_base=True)`` — explains **one tree**.
-  ``base + phi.sum(axis=1)`` equals that tree's contribution to the prediction,
-  not the full prediction.
+``shap()`` explains the **entire ensemble**:
 
 .. code-block:: python
 
-    # Ensemble SHAP — base + phi.sum(axis=1) == predict(obs)
     phi, base = agent.shap(obs, return_base=True)
-    # phi.shape  == (n_samples, n_features, output_dim)
-    # base.shape == (n_samples, output_dim)
+    # phi  — shape (n_samples, n_features, output_dim)
+    #         Each entry is the contribution of one feature to the prediction
+    #         relative to the expected prediction.
+    # base — shape (n_samples, output_dim)
+    #         The expected model output (bias + expected tree contributions).
+    #
+    # Identity: base + phi.sum(axis=1) == predict(obs)  for every sample.
 
-    # Single-tree SHAP — base + phi.sum(axis=1) == contribution of tree 0
+``tree_shap()`` explains **one tree at a time**. Its ``base`` and ``phi_t`` are
+different objects that describe only that tree's contribution, not the whole model:
+
+.. code-block:: python
+
     phi_t, base_t = agent.tree_shap(0, obs, return_base=True)
+    # phi_t  — shape (n_samples, n_features, output_dim)
+    #           Feature contributions for tree 0 only.
+    # base_t — shape (n_samples, output_dim)
+    #           Expected contribution of tree 0 alone.
+    #
+    # Identity: base_t + phi_t.sum(axis=1) == contribution of tree 0 per sample.
+    # This does NOT reconstruct predict(obs); for that, use shap().
 
-.. note::
-
-   For **Adam**-optimized models, ``shap()`` and ``tree_shap()`` emit a
-   ``RuntimeWarning``. Both identities above still hold exactly; the approximation
-   is in feature attribution — counterfactual paths freeze the factual pre-tree
-   optimizer state rather than recomputing the full Adam history.
+Both identities hold exactly for SGD and Adam. For Adam, ``shap()`` and
+``tree_shap()`` emit a ``RuntimeWarning`` because the feature attribution is a
+local approximation: counterfactual paths freeze the factual pre-tree optimizer
+state instead of recomputing the full Adam history.
 
 Learning Rate Schedulers
 ------------------------
