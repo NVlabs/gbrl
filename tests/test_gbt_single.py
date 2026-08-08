@@ -925,5 +925,73 @@ class TestGBTSingle(unittest.TestCase):
         self.assertTrue(loss < value, f'Expected loss = {loss} < {value}')
 
 
+    def test_shap_rejects_student_model(self):
+        """shap() and tree_shap() must raise when a student model is attached."""
+        rng = np.random.default_rng(0)
+        X = rng.normal(size=(50, self.input_dim)).astype(np.float32)
+        Y = rng.normal(size=(50, self.out_dim)).astype(np.float32)
+        model = GBTModel(
+            input_dim=self.input_dim, output_dim=self.out_dim,
+            tree_struct={'max_depth': 3, 'n_bins': 64, 'min_data_in_leaf': 1,
+                         'grow_policy': 'oblivious'},
+            optimizers=self.sgd_optimizer,
+            params={'split_score_func': 'Cosine', 'generator_type': 'Quantile'},
+            device='cpu', verbose=0,
+        )
+        target = th.as_tensor(Y)
+        for _ in range(5):
+            pred_t = model(X, requires_grad=True)
+            loss = ((pred_t.reshape(target.shape) - target) ** 2).mean()
+            loss.backward()
+            model.step(X)
+        model.learner.distil(X, [Y], params={'min_steps': 3, 'limit_steps': 5, 'min_distillation_loss': 0.0})
+        with self.assertRaises(RuntimeError, msg="shap() should raise with student model"):
+            model.shap(X, return_base=True)
+        with self.assertRaises(RuntimeError, msg="tree_shap() should raise with student model"):
+            model.tree_shap(0, X, return_base=True)
+
+    def test_overlapping_optimizer_raises(self):
+        """Overlapping optimizer output ranges must raise RuntimeError to the caller."""
+        overlapping = [
+            {'algo': 'SGD', 'lr': 0.1, 'start_idx': 0, 'stop_idx': 2},
+            {'algo': 'SGD', 'lr': 0.05, 'start_idx': 1, 'stop_idx': 3},
+        ]
+        with self.assertRaises(RuntimeError):
+            GBTModel(
+                input_dim=self.input_dim, output_dim=3,
+                tree_struct={'max_depth': 3, 'n_bins': 64, 'min_data_in_leaf': 1,
+                             'grow_policy': 'oblivious'},
+                optimizers=overlapping,
+                params={'split_score_func': 'Cosine', 'generator_type': 'Quantile'},
+                device='cpu', verbose=0,
+            )
+
+    def test_shap_float64_input(self):
+        """Low-level SHAP binding must not dangle when obs requires float32 conversion."""
+        rng = np.random.default_rng(1)
+        X = rng.normal(size=(20, self.input_dim)).astype(np.float32)
+        Y = rng.normal(size=(20, self.out_dim)).astype(np.float32)
+        model = GBTModel(
+            input_dim=self.input_dim, output_dim=self.out_dim,
+            tree_struct={'max_depth': 3, 'n_bins': 64, 'min_data_in_leaf': 1,
+                         'grow_policy': 'oblivious'},
+            optimizers=self.sgd_optimizer,
+            params={'split_score_func': 'Cosine', 'generator_type': 'Quantile'},
+            device='cpu', verbose=0,
+        )
+        target = th.as_tensor(Y)
+        for _ in range(5):
+            pred_t = model(X, requires_grad=True)
+            loss = ((pred_t.reshape(target.shape) - target) ** 2).mean()
+            loss.backward()
+            model.step(X)
+        phi32, base32 = model.shap(X, return_base=True)
+        phi64, base64 = model.shap(X.astype(np.float64), return_base=True)
+        np.testing.assert_allclose(phi32, phi64, rtol=1e-5,
+                                   err_msg="float64 input gives different SHAP values than float32")
+        np.testing.assert_allclose(base32, base64, rtol=1e-5,
+                                   err_msg="float64 input gives different base values than float32")
+
+
 if __name__ == '__main__':
     unittest.main()

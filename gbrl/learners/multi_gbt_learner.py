@@ -128,11 +128,8 @@ class MultiGBTLearner(BaseLearner):
             cpp_model.set_feature_weights(self.feature_weights)
             if self.student_models is not None:
                 self.optimizers[i]['T'] -= self.total_iterations
-            try:
-                cpp_model.set_optimizer(**self.optimizers[i])
-                self._cpp_models.append(cpp_model)
-            except RuntimeError as e:
-                print(f"Caught an exception in GBRL: {e}")
+            cpp_model.set_optimizer(**self.optimizers[i])
+            self._cpp_models.append(cpp_model)
 
         if self.student_models is None:
             self.total_iterations = 0

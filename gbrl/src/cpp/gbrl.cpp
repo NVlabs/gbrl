@@ -1339,6 +1339,12 @@ int GBRL::loadFromFile(const std::string& filename){
             throw std::runtime_error("Optimizer load error");
             return -1;
         }
+        for (const auto &existing : this->opts) {
+            if (opt->start_idx < existing->stop_idx && opt->stop_idx > existing->start_idx) {
+                delete opt;
+                throw std::runtime_error("Loaded model has overlapping optimizer output ranges");
+            }
+        }
         this->opts.push_back(opt);
     }
     file.close();

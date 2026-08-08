@@ -119,11 +119,8 @@ class GBTLearner(BaseLearner):
                 self.optimizers[i]['T'] -= self.total_iterations
         else:
             self.total_iterations = 0
-        try:
-            for opt in self.optimizers:
-                self._cpp_model.set_optimizer(**opt)
-        except RuntimeError as e:
-            print(f"Caught an exception in GBRL: {e}")
+        for opt in self.optimizers:
+            self._cpp_model.set_optimizer(**opt)
 
     def step(self,
              inputs: NumericalData,
@@ -444,7 +441,7 @@ class GBTLearner(BaseLearner):
             warnings.warn(
                 "tree_shap() was called on a model with Adam optimizer(s). "
                 "Feature attribution is approximate; factual completeness still holds: "
-                "base + phi.sum(axis=1) == predict(x).",
+                "base + phi.sum(axis=1) equals the factual contribution of tree_idx for each sample.",
                 RuntimeWarning, stacklevel=2,
             )
         if isinstance(features, th.Tensor):
