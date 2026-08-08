@@ -597,8 +597,8 @@ class MultiGBTLearner(BaseLearner):
 
         Based on Linear TreeSHAP (Yu et al., 2023): https://arxiv.org/pdf/2209.08192
 
-        For SGD models: base + phi.sum(axis=1) == predict(x) exactly.
-        For Adam models: result is an approximation, not exact SHAP attribution.
+        base + phi.sum(axis=1) == contribution of tree_idx to the prediction (not the full prediction).
+        For Adam, the contribution is evaluated under the optimizer state from all preceding trees.
 
         Args:
             tree_idx (int): index of the tree to explain.
@@ -614,14 +614,21 @@ class MultiGBTLearner(BaseLearner):
         assert self._cpp_models is not None and isinstance(self._cpp_models, list), \
             "Model not initialized."
 
-        # Warn once if any selected model uses Adam (unsupported for exact SHAP).
+        if self.student_models is not None:
+            raise RuntimeError(
+                "tree_shap() is not supported when student models are attached. "
+                "predict() sums both the main and student ensembles, so a single-model "
+                "SHAP result would not reconstruct the prediction."
+            )
+
         models_to_check = ([self._cpp_models[model_idx]] if model_idx is not None
                            else self._cpp_models)
         optimizers_flat = [o for m in models_to_check for o in m.get_optimizers()]
         if any(o.get('algo', '').lower() == 'adam' for o in optimizers_flat):
             warnings.warn(
                 "tree_shap() was called on a model with Adam optimizer(s). "
-                "Returned values are an approximation, not exact SHAP attribution.",
+                "Feature attribution is approximate; factual completeness still holds: "
+                "base + phi.sum(axis=1) == contribution of tree_idx for each sample.",
                 RuntimeWarning, stacklevel=2,
             )
 
@@ -652,8 +659,9 @@ class MultiGBTLearner(BaseLearner):
 
         Based on Linear TreeSHAP (Yu et al., 2023): https://arxiv.org/pdf/2209.08192
 
-        For SGD models: base + phi.sum(axis=1) == predict(x) exactly.
-        For Adam models: result is an approximation, not exact SHAP attribution.
+        base + phi.sum(axis=1) == predict(x) for both SGD and Adam.
+        For Adam, the feature attribution is approximate because counterfactual paths
+        freeze the factual pre-tree optimizer state rather than recomputing Adam history.
 
         Args:
             features (NumericalData): input samples.
@@ -668,14 +676,21 @@ class MultiGBTLearner(BaseLearner):
         assert self._cpp_models is not None and isinstance(self._cpp_models, list), \
             "Model not initialized."
 
-        # Warn once if any selected model uses Adam (unsupported for exact SHAP).
+        if self.student_models is not None:
+            raise RuntimeError(
+                "shap() is not supported when student models are attached. "
+                "predict() sums both the main and student ensembles, so a single-model "
+                "SHAP result would not reconstruct the prediction."
+            )
+
         models_to_check = ([self._cpp_models[model_idx]] if model_idx is not None
                            else self._cpp_models)
         optimizers_flat = [o for m in models_to_check for o in m.get_optimizers()]
         if any(o.get('algo', '').lower() == 'adam' for o in optimizers_flat):
             warnings.warn(
                 "shap() was called on a model with Adam optimizer(s). "
-                "Returned values are an approximation, not exact SHAP attribution.",
+                "Feature attribution is approximate; factual completeness still holds: "
+                "base + phi.sum(axis=1) == predict(x).",
                 RuntimeWarning, stacklevel=2,
             )
 

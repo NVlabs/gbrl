@@ -1251,7 +1251,15 @@ gbrl.def("get_matrix_representation", [](GBRL &self, py::object &obs, py::object
     // Shared argument-parsing helper for all four SHAP bindings.
     // Caller must keep the original py::object& arguments alive for the
     // duration of any C++ call that uses the returned pointers.
+    // ShapArgs holds both the owning array objects (keeping buffers alive through
+    // the C++ call) and the raw pointers extracted from them.
     struct ShapArgs {
+        py::object obs_owner;
+        py::object cat_owner;
+        py::object norm_owner;
+        py::object base_poly_owner;
+        py::object offset_owner;
+
         const float *obs_ptr     = nullptr;
         const char  *cat_obs_ptr = nullptr;
         float *norm_ptr          = nullptr;
@@ -1273,6 +1281,7 @@ gbrl.def("get_matrix_representation", [](GBRL &self, py::object &obs, py::object
             a.obs_ptr = static_cast<const float*>(info.ptr);
             if (info.shape.size() == 1) { a.n_num_features = static_cast<int>(info.shape[0]); a.n_samples = 1; }
             else { a.n_num_features = static_cast<int>(info.shape[1]); a.n_samples = static_cast<int>(info.shape[0]); }
+            a.obs_owner = std::move(arr);
         }
         if (!categorical_obs.is_none()) {
             py::array arr = py::cast<py::array>(categorical_obs);
@@ -1282,21 +1291,25 @@ gbrl.def("get_matrix_representation", [](GBRL &self, py::object &obs, py::object
             a.cat_obs_ptr = static_cast<const char*>(info.ptr);
             if (info.shape.size() == 1) { a.n_cat_features = static_cast<int>(info.shape[0]); if (a.n_samples == 0) a.n_samples = 1; }
             else { a.n_cat_features = static_cast<int>(info.shape[1]); if (a.n_samples == 0) a.n_samples = static_cast<int>(info.shape[0]); }
+            a.cat_owner = std::move(arr);
         }
         if (!norm_values.is_none()) {
             py::array_t<float> arr = py::cast<py::array_t<float>>(norm_values);
             if (!arr.attr("flags").attr("c_contiguous").cast<bool>()) throw std::runtime_error("Arrays must be C-contiguous");
             a.norm_ptr = static_cast<float*>(arr.request().ptr);
+            a.norm_owner = std::move(arr);
         }
         if (!base_poly.is_none()) {
             py::array_t<float> arr = py::cast<py::array_t<float>>(base_poly);
             if (!arr.attr("flags").attr("c_contiguous").cast<bool>()) throw std::runtime_error("Arrays must be C-contiguous");
             a.base_poly_ptr = static_cast<float*>(arr.request().ptr);
+            a.base_poly_owner = std::move(arr);
         }
         if (!offset.is_none()) {
             py::array_t<float> arr = py::cast<py::array_t<float>>(offset);
             if (!arr.attr("flags").attr("c_contiguous").cast<bool>()) throw std::runtime_error("Arrays must be C-contiguous");
             a.offset_ptr = static_cast<float*>(arr.request().ptr);
+            a.offset_owner = std::move(arr);
         }
         return a;
     };

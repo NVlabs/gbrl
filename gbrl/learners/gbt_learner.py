@@ -433,11 +433,18 @@ class GBTLearner(BaseLearner):
             np.ndarray or tuple: shap values, or (shap_values, base_values) if
                 return_base=True
         """
+        if self.student_model is not None:
+            raise RuntimeError(
+                "tree_shap() is not supported when a student model is attached. "
+                "predict() sums both the main and student ensembles, so a single-model "
+                "SHAP result would not reconstruct the prediction."
+            )
         optimizers_flat = self._cpp_model.get_optimizers()
         if any(o.get('algo', '').lower() == 'adam' for o in optimizers_flat):
             warnings.warn(
                 "tree_shap() was called on a model with Adam optimizer(s). "
-                "Returned values are an approximation, not exact SHAP attribution.",
+                "Feature attribution is approximate; factual completeness still holds: "
+                "base + phi.sum(axis=1) == predict(x).",
                 RuntimeWarning, stacklevel=2,
             )
         if isinstance(features, th.Tensor):
@@ -479,11 +486,18 @@ class GBTLearner(BaseLearner):
             np.ndarray or tuple: shap values, or (shap_values, base_values) if
                 return_base=True
         """
+        if self.student_model is not None:
+            raise RuntimeError(
+                "shap() is not supported when a student model is attached. "
+                "predict() sums both the main and student ensembles, so a single-model "
+                "SHAP result would not reconstruct the prediction."
+            )
         optimizers_flat = self._cpp_model.get_optimizers()
         if any(o.get('algo', '').lower() == 'adam' for o in optimizers_flat):
             warnings.warn(
                 "shap() was called on a model with Adam optimizer(s). "
-                "Returned values are an approximation, not exact SHAP attribution.",
+                "Feature attribution is approximate; factual completeness still holds: "
+                "base + phi.sum(axis=1) == predict(x).",
                 RuntimeWarning, stacklevel=2,
             )
         if isinstance(features, th.Tensor):
