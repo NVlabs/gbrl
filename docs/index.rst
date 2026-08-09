@@ -33,9 +33,9 @@ The following table summarizes feature availability by tree type and device:
 .. note::
 
    Monotonic constraints apply to the output dimensions covered by the optimizer
-   (``start_idx`` to ``stop_idx-1``) and are supported only for outputs optimized with
-   **SGD** — GBRL raises a ``ValueError`` for Adam-driven constrained outputs, and
-   ``MultiGBTLearner`` does not support them at all. See :doc:`examples` for details.
+   (``start_idx`` to ``stop_idx-1``). They require **SGD**: GBRL raises a ``ValueError``
+   if *any* optimizer on the model uses Adam, and ``MultiGBTLearner`` does not support
+   them at all. See :doc:`examples` for details.
 
 .. toctree::
    :maxdepth: 2

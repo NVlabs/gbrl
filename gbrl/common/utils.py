@@ -272,9 +272,14 @@ def setup_optimizer(optimizer: Dict, prefix: str = '') -> Dict:
         optimizer['scheduler'] = 'Const'
     else:
         raise ValueError(f"Unknown scheduler '{sched}'. Must be 'linear', 'const', or 'constant'.")
-    # Validate 'T' is present for Linear scheduler
-    if optimizer['scheduler'] == 'Linear' and 'T' not in optimizer:
-        raise ValueError("Linear scheduler requires 'T' (total number of iterations) to be specified.")
+    # Validate 'T' is present and usable for Linear scheduler
+    if optimizer['scheduler'] == 'Linear':
+        if 'T' not in optimizer:
+            raise ValueError("Linear scheduler requires 'T' (total number of iterations) to be specified.")
+        # T divides in get_lr(), so a non-positive or non-integer T is unusable.
+        T = optimizer['T']
+        if isinstance(T, bool) or not isinstance(T, (int, np.integer)) or T < 1:
+            raise ValueError(f"Linear scheduler 'T' must be an integer >= 1, got {T!r}")
     optimizer['init_lr'] = float(lr)
     if optimizer['init_lr'] <= 0:
         raise ValueError("init_lr must be > 0")

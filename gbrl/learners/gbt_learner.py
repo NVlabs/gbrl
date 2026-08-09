@@ -194,7 +194,7 @@ class GBTLearner(BaseLearner):
             "Invalid gradients type"
 
         super().step(inputs)
-        if self.total_iterations == 0 or not self._feature_mapping_installed:
+        if not self._feature_mapping_installed:
             self._ensure_feature_mapping(inputs)
             self._feature_mapping_installed = True
 

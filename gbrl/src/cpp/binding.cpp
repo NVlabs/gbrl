@@ -763,7 +763,29 @@ PYBIND11_MODULE(gbrl_cpp, m) {
             throw std::runtime_error("feature_indices and constraints must have the same length");
         }
         
-        py::gil_scoped_release release; 
+        // The C++ side memcpys into buffers sized by the constructor's
+        // n_mono_constraints; nothing downstream re-checks that, so a direct
+        // low-level call could otherwise write past the allocation.
+        if (n_constraints > self.metadata->n_mono_constraints) {
+            throw std::runtime_error(
+                "set_monotonic_constraints received " + std::to_string(n_constraints) +
+                " constraints but the model was allocated for " +
+                std::to_string(self.metadata->n_mono_constraints) +
+                "; pass n_mono_constraints at construction time");
+        }
+        for (int i = 0; i < n_constraints; ++i) {
+            if (feature_indices_ptr[i] < 0 || feature_indices_ptr[i] >= self.metadata->input_dim)
+                throw std::runtime_error("monotonic feature index out of range: " +
+                                         std::to_string(feature_indices_ptr[i]));
+            if (output_indices_ptr[i] < 0 || output_indices_ptr[i] >= self.metadata->policy_dim)
+                throw std::runtime_error("monotonic output index out of range: " +
+                                         std::to_string(output_indices_ptr[i]));
+            if (constraints_ptr[i] != 1 && constraints_ptr[i] != -1)
+                throw std::runtime_error("monotonic direction must be +1 or -1, got " +
+                                         std::to_string(constraints_ptr[i]));
+        }
+
+        py::gil_scoped_release release;
         self.set_monotonic_constraints(feature_indices_ptr, output_indices_ptr, constraints_ptr, n_constraints); 
     }, "Set GBRL model monotonic constraints");
     
@@ -783,7 +805,16 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         int* feature_mapping_ptr = static_cast<int*>(info.ptr);
         int input_dim = static_cast<int>(len(feature_mapping));
 
+        if (info.ndim != 1) {
+            throw std::runtime_error("feature_mapping must be a 1D array");
+        }
+
         info = mapping_numerics.request();
+        if (info.ndim != 1 || static_cast<int>(info.size) != input_dim) {
+            throw std::runtime_error(
+                "mapping_numerics must be a 1D array of length " + std::to_string(input_dim) +
+                ", got " + std::to_string(info.size));
+        }
         bool* mapping_numerics_ptr = static_cast<bool*>(info.ptr);
         py::gil_scoped_release release; 
         self.set_feature_mapping(feature_mapping_ptr, mapping_numerics_ptr, input_dim); 

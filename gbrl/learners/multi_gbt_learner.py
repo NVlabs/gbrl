@@ -220,7 +220,7 @@ class MultiGBTLearner(BaseLearner):
         assert self._cpp_models is not None, "Model not initialized."
 
         super().step(inputs)
-        if self.total_iterations == 0 or not self._feature_mapping_installed:
+        if not self._feature_mapping_installed:
             self._ensure_feature_mapping(inputs)
             self._feature_mapping_installed = True
 
@@ -439,15 +439,13 @@ class MultiGBTLearner(BaseLearner):
             # Keep the lists from the loop above, don't overwrite with single values
             instance.input_dim = metadata['input_dim']
             instance.verbose = metadata['verbose']
-            instance.params = {'split_score_func':
-                               metadata['split_score_func'],
-                               'generator_type':
-                               metadata['generator_type'],
-                               'use_control_variates':
-                               metadata['use_control_variates'],
-                               }
+            # params is NOT truncated here: reset() rebuilds every C++ model from
+            # it, so dropping max_depth / n_bins / batch_size / grow_policy /
+            # device would silently recreate them with constructor defaults.
 
-            instance.iteration = metadata['iteration']
+            # iteration is per-learner everywhere else (step/fit index into it),
+            # so a scalar here breaks any continued training after load.
+            instance.iteration = [m.get_iteration() for m in instance._cpp_models]
             instance.total_iterations = metadata['iteration']
             instance.student_models = None
             instance.feature_weights = instance._cpp_models[0].get_feature_weights()

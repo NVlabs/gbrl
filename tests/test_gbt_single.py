@@ -1011,10 +1011,6 @@ class TestGBTSingle(unittest.TestCase):
                                    err_msg="float64 obs gives different base values than float32")
 
 
-if __name__ == '__main__':
-    unittest.main()
-
-
 class TestLearnerLifecycle(unittest.TestCase):
     """Guards the bug class behind most lifecycle regressions: load() and
     __copy__ build instances via __new__, so they silently miss fields that
@@ -1088,3 +1084,50 @@ class TestLearnerLifecycle(unittest.TestCase):
         """policy_dim is documented as int-or-list; output_dim is normalized, so
         policy_dim must be too or the base-class type assertion fires."""
         self._trained_multi()
+
+
+class TestLinearScheduler(unittest.TestCase):
+    """The linear schedule must honour its documented endpoints in BOTH
+    directions. The old clamp assumed a decaying schedule, so warmup
+    (stop_lr > lr) collapsed to a constant stop_lr and then grew past it
+    once t exceeded T."""
+
+    def _model(self, lr, stop_lr, T):
+        return GBTModel(
+            input_dim=4, output_dim=1,
+            tree_struct={'max_depth': 3, 'n_bins': 64, 'min_data_in_leaf': 1,
+                         'par_th': 2, 'grow_policy': 'oblivious'},
+            optimizers={'algo': 'SGD', 'lr': lr, 'stop_lr': stop_lr, 'T': T,
+                        'scheduler': 'Linear', 'start_idx': 0, 'stop_idx': 1},
+            params={'split_score_func': 'Cosine', 'generator_type': 'Quantile'},
+            device='cpu', verbose=0)
+
+    def _train(self, model, n):
+        X = np.random.default_rng(0).normal(size=(20, 4)).astype(np.float32)
+        y = th.as_tensor(X[:, :1].copy())
+        for _ in range(n):
+            p = model(X, requires_grad=True)
+            ((p.reshape(y.shape) - y) ** 2).mean().backward()
+            model.step(X)
+
+    def test_warmup_never_exceeds_stop_lr(self):
+        """stop_lr > lr must ramp up to stop_lr and stay there, not overshoot."""
+        T = 5
+        model = self._model(lr=0.1, stop_lr=0.5, T=T)
+        self._train(model, T * 2)
+        lr = float(np.asarray(model.learner.get_schedule_learning_rates()).ravel()[0])
+        self.assertLessEqual(lr, 0.5 + 1e-6,
+                             f'warmup lr {lr} exceeded stop_lr past T')
+        self.assertGreaterEqual(lr, 0.1 - 1e-6, f'warmup lr {lr} below init_lr')
+
+    def test_decay_never_undershoots_stop_lr(self):
+        T = 5
+        model = self._model(lr=0.1, stop_lr=0.01, T=T)
+        self._train(model, T * 2)
+        lr = float(np.asarray(model.learner.get_schedule_learning_rates()).ravel()[0])
+        self.assertGreaterEqual(lr, 0.01 - 1e-6, f'decay lr {lr} below stop_lr')
+        self.assertLessEqual(lr, 0.1 + 1e-6, f'decay lr {lr} above init_lr')
+
+
+if __name__ == '__main__':
+    unittest.main()
