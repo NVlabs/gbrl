@@ -59,6 +59,10 @@ struct shapData {
     float *predictions;             /**< Leaf prediction values */
     float *weights;                 /**< Edge weights */
     char *categorical_values;       /**< Categorical split values */
+    int *global_feature_indices;    /**< Global (original input column) feature index per node, -1 for leaves.
+                                         feature_indices holds the TYPE-LOCAL index used to read obs /
+                                         categorical_obs; this holds the index used for SHAP output columns,
+                                         repeated-feature detection and distinct-feature counts. */
     int *node_to_leaf_idx;          /**< Absolute leaf index for leaf nodes, -1 for internal nodes */
     float *leaf_cond_probs;         /**< Conditional probability (product of edge weights) for leaf nodes, 0 for internal nodes */
 };

@@ -315,6 +315,33 @@ def validate_optimizer_ranges(optimizers: Union[Dict, List[Dict]]) -> None:
         seen.append((start, stop))
 
 
+def validate_monotonic_features_numerical(constraints, numerical_mask) -> None:
+    """Reject monotonic constraints placed on categorical features.
+
+    Monotonicity is an ordering property, so it is only defined for numerical
+    features; a categorical feature has no order to be monotone in. Feature types
+    are not known until the first batch is seen, so this runs then rather than at
+    construction time.
+
+    Args:
+        constraints (Dict): feature index -> (direction, output_dims), or None.
+        numerical_mask (np.ndarray): per-global-column bool, True for numerical.
+
+    Raises:
+        ValueError: If any constrained feature is categorical.
+    """
+    if not constraints:
+        return
+    bad = [int(f) for f in constraints
+           if 0 <= int(f) < len(numerical_mask) and not bool(numerical_mask[int(f)])]
+    if bad:
+        raise ValueError(
+            f"Monotonic constraints were set on categorical feature(s) {bad}. "
+            f"Monotonicity requires an ordering, so it is only defined for "
+            f"numerical features."
+        )
+
+
 def clip_grad_norm(grads: NumericalData, grad_clip: Optional[float]) ->\
       NumericalData:
     """clip per sample gradients according to their norm

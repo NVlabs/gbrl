@@ -38,7 +38,8 @@ from gbrl.common.compression import ParametricActorCompression, TreeCompression
 from gbrl.common.utils import (NumericalData, ensure_leaf_tensor_or_array,
                                get_poly_vectors, get_tensor_info,
                                normalize_vector_input, numerical_dtype,
-                               preprocess_features, to_numpy)
+                               preprocess_features, to_numpy,
+                               validate_monotonic_features_numerical)
 from gbrl.learners.base import BaseLearner
 
 
@@ -77,7 +78,18 @@ class MultiGBTLearner(BaseLearner):
             names (Optional[Union[str, List[str]]], optional): Name(s) for the learner(s). Defaults to None.
         """
 
-        assert len(optimizers) == 1 or len(optimizers) == n_learners
+        # Normalize before measuring length: a dict would otherwise be counted by
+        # its number of keys, and a one-element list was never replicated.
+        if isinstance(optimizers, dict):
+            optimizers = [optimizers.copy() for _ in range(n_learners)]
+        elif len(optimizers) == 1:
+            optimizers = [optimizers[0].copy() for _ in range(n_learners)]
+        elif len(optimizers) != n_learners:
+            raise ValueError(
+                f"optimizers must be a dict or a list of 1 or {n_learners} dicts, "
+                f"got {len(optimizers)}")
+        else:
+            optimizers = [opt.copy() for opt in optimizers]
         if isinstance(output_dim, int):
             output_dim = [output_dim] * n_learners
         if isinstance(output_dim, list):
@@ -93,8 +105,6 @@ class MultiGBTLearner(BaseLearner):
                          policy_dim=policy_dim,
                          verbose=verbose,
                          device=device)
-        if isinstance(optimizers, dict):
-            optimizers = [optimizers for _ in range(n_learners)]
         self.optimizers = optimizers
         self._cpp_models = None
         self.student_models = None
@@ -113,8 +123,13 @@ class MultiGBTLearner(BaseLearner):
         """Resets the learner to its initial state, reinitializing the C++ model and optimizers."""
         if self._cpp_models:
             for i in range(self.n_learners):
-                lr = self._cpp_models[i].get_scheduler_lrs()
-                self.optimizers[i]['init_lr'] = lr
+                # get_scheduler_lrs() returns one entry per optimizer as an array;
+                # storing the array itself would break the next set_optimizer call.
+                lrs = self._cpp_models[i].get_scheduler_lrs()
+                if len(lrs) != 1:
+                    raise RuntimeError(
+                        f"Expected exactly one optimizer for learner {i}, got {len(lrs)}")
+                self.optimizers[i]['init_lr'] = float(lrs[0])
 
         self._cpp_models = []
         params = self.params.copy()
@@ -126,7 +141,14 @@ class MultiGBTLearner(BaseLearner):
             cpp_model = GBRL_CPP(**params, learner_name=self.learner_names[i])
             cpp_model.set_feature_weights(self.feature_weights)
             if self.student_models is not None:
-                self.optimizers[i]['T'] -= self.total_iterations
+                # Only a linear scheduler carries 'T' (see GBTLearner.reset).
+                sched = str(self.optimizers[i].get('scheduler', 'Const')).lower()
+                if sched == 'linear':
+                    remaining = self.optimizers[i]['T'] - self.total_iterations
+                    if remaining <= 0:
+                        raise ValueError(
+                            f"Linear scheduler for learner {i} has no remaining iterations")
+                    self.optimizers[i]['T'] = remaining
             try:
                 cpp_model.set_optimizer(**self.optimizers[i])
             except RuntimeError as exc:
@@ -159,6 +181,7 @@ class MultiGBTLearner(BaseLearner):
         if self.total_iterations == 0:
             assert self.feature_mapping is not None, "Feature mapping not set"
             feature_mapping, numerical_mask = self.feature_mapping
+            validate_monotonic_features_numerical(self.monotonic_constraints, numerical_mask)
             for i in range(len(self._cpp_models)):
                 self._cpp_models[i].set_feature_mapping(np.ascontiguousarray(feature_mapping),
                                                         np.ascontiguousarray(numerical_mask))
@@ -823,9 +846,15 @@ class MultiGBTLearner(BaseLearner):
         for i in range(self.n_learners):
             output_dim_i = (self.output_dim[i] if isinstance(self.output_dim, list)
                             else self.output_dim)
+            policy_dim_i = (self.policy_dim[i] if isinstance(self.policy_dim, list)
+                            else self.policy_dim)
+            # Each learner gets its own params copy: the loop mutates min_steps,
+            # so a shared dict leaked learner i's state into learner i+1 and made
+            # every returned entry alias the last learner.
+            learner_params = params.copy()
             student_params = {**base_distil_params,
                               'output_dim': output_dim_i,
-                              'policy_dim': output_dim_i}
+                              'policy_dim': policy_dim_i}
             student_model = GBRL_CPP(**student_params)  # type: ignore
             # start_idx/stop_idx are required: stop_idx defaults to 0 in the binding
             # and C++ rejects stop_idx <= 0, which would leave the student with no
@@ -840,22 +869,23 @@ class MultiGBTLearner(BaseLearner):
                     f"for learner {i}: {exc}") from exc
 
             bias = np.mean(targets[i], axis=0)
-            if isinstance(bias, float):
-                bias = np.array([bias])
+            # np.mean returns a NumPy scalar (e.g. np.float32), not a Python
+            # float, so the old isinstance check never fired for 1-D targets.
+            bias = np.atleast_1d(bias).astype(numerical_dtype, copy=False)
 
             student_model.set_bias(bias.astype(numerical_dtype))
-            tr_loss = student_model.fit(num_obs, cat_obs, targets[i], params['min_steps'])
-            while tr_loss > params.get('min_distillation_loss', 0.1):
-                if params['min_steps'] < params['limit_steps']:
-                    steps_to_add = min(500, params['limit_steps'] - params['min_steps'])
+            tr_loss = student_model.fit(num_obs, cat_obs, targets[i], learner_params['min_steps'])
+            while tr_loss > learner_params.get('min_distillation_loss', 0.1):
+                if learner_params['min_steps'] < learner_params['limit_steps']:
+                    steps_to_add = min(500, learner_params['limit_steps'] - learner_params['min_steps'])
                     tr_loss = student_model.fit(num_obs, cat_obs,
                                                 targets[i], steps_to_add,
                                                 shuffle=False)
-                    params['min_steps'] += steps_to_add
+                    learner_params['min_steps'] += steps_to_add
                 else:
                     break
             tr_losses.append(tr_loss)
-            out_params.append(params)
+            out_params.append(learner_params)
             self.student_models.append(student_model)
         self.reset()
         return tr_losses, out_params

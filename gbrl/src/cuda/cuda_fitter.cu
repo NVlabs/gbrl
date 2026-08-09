@@ -1696,13 +1696,15 @@ void fit_tree_greedy_cuda(
  */
 
 /**
- * @brief PAVA kernel for applying isotonic regression to leaf values
- * 
- * Each block handles one output dimension.
- * Within each block, thread 0 performs sequential PAVA (inherently sequential algorithm).
- * 
- * For trees with non-monotonic features, leaves are grouped into subtrees.
- * PAVA is applied independently to each subtree.
+ * @brief Projects one violating leaf pair onto equality (pairwise pooling).
+ *
+ * Despite the name this is NOT textbook PAVA: there is no linear order, no
+ * level-set stack and no adjacent-block merging.  Each block handles exactly one
+ * pair of leaves differing only in the constrained depth's bit and averages them
+ * if they violate the constraint.  The host loop repeats whole passes until one
+ * makes no changes.
+ *
+ * Launched as <<<n_planes, 1>>>: one block per leaf pair, one thread per block.
  */
 __global__ void pava_kernel(
     float* __restrict__ values,
@@ -1713,7 +1715,8 @@ __global__ void pava_kernel(
     const int n_leaves_in_tree,
     const int output_dim,
     const int target_output,       // Which output dimension to process
-    int* d_changed                 // Set to 1 when any pair is pooled this pass
+    float* __restrict__ z_d,       // Dykstra correction for this depth (n_leaves_in_tree)
+    int* d_changed                 // Set when any leaf moves by more than the tolerance
 ) {
     // Each block handles one "plane" of leaves where all other depths are fixed
     // and only the constraint_depth varies
@@ -1751,9 +1754,14 @@ __global__ void pava_kernel(
     int global_leaf0 = start_leaf_idx + leaf0;
     int global_leaf1 = start_leaf_idx + leaf1;
     
-    // Get current values
-    float val0 = values[global_leaf0 * output_dim + target_output];
-    float val1 = values[global_leaf1 * output_dim + target_output];
+    // Dykstra: project (v + z_d) rather than v itself.  The pairs at a given depth
+    // are disjoint, so one thread can do the whole update for its pair locally.
+    float v0 = values[global_leaf0 * output_dim + target_output];
+    float v1 = values[global_leaf1 * output_dim + target_output];
+    float y0 = v0 + z_d[leaf0];
+    float y1 = v1 + z_d[leaf1];
+    float val0 = y0;
+    float val1 = y1;
     
     // For increasing constraint (+1): leaf0 (bit=0) should have value <= leaf1 (bit=1)
     // For decreasing constraint (-1): leaf0 (bit=0) should have value >= leaf1 (bit=1)
@@ -1763,10 +1771,20 @@ __global__ void pava_kernel(
 
     if (violation) {
         float pooled = (val0 + val1) / 2.0f;
-        values[global_leaf0 * output_dim + target_output] = pooled;
-        values[global_leaf1 * output_dim + target_output] = pooled;
-        atomicOr(d_changed, 1);
+        val0 = pooled;
+        val1 = pooled;
     }
+
+    // v = P(y);  z_d = y - P(y)
+    values[global_leaf0 * output_dim + target_output] = val0;
+    values[global_leaf1 * output_dim + target_output] = val1;
+    z_d[leaf0] = y0 - val0;
+    z_d[leaf1] = y1 - val1;
+
+    // Dykstra converges asymptotically, so flag on movement beyond the tolerance
+    // rather than on any change at all.
+    if (fabsf(val0 - v0) > PAVA_TOLERANCE || fabsf(val1 - v1) > PAVA_TOLERANCE)
+        atomicOr(d_changed, 1);
 }
 
 void apply_monotonic_constraints_cuda(
@@ -1853,14 +1871,19 @@ void apply_monotonic_constraints_cuda(
         }
     }
 
-    // Apply constraints using PAVA, iterating until convergence (up to 64 passes).
-    // A single depth-ordered pass is not sufficient: pooling at one depth can
-    // re-introduce violations at a previously fixed depth when multiple features
-    // at different depths are both constrained.
+    // Iterative pairwise projection (not textbook PAVA - see fitter.cpp).  Each
+    // block averages one violating leaf pair; whole passes repeat until a pass
+    // makes no changes or PAVA_MAX_PASSES is hit.  A single depth-ordered pass is
+    // not sufficient because pooling at one depth can re-introduce violations at
+    // a previously corrected depth when several depths are constrained.
     // Only iterate over policy_dim since monotonic constraints only apply to policy outputs.
     int* d_any_change;
     cudaMalloc(&d_any_change, sizeof(int));
+    // Dykstra correction, one vector per depth.
+    float* d_z;
+    cudaMalloc(&d_z, sizeof(float) * tree_depth * n_leaves_in_tree);
     for (int out_idx = 0; out_idx < metadata->policy_dim; ++out_idx) {
+        cudaMemset(d_z, 0, sizeof(float) * tree_depth * n_leaves_in_tree);
         bool converged = false;
         for (int pass = 0; pass < PAVA_MAX_PASSES; ++pass) {
             cudaMemset(d_any_change, 0, sizeof(int));
@@ -1877,6 +1900,7 @@ void apply_monotonic_constraints_cuda(
                     n_leaves_in_tree,
                     metadata->output_dim,
                     out_idx,
+                    d_z + d * n_leaves_in_tree,
                     d_any_change
                 );
                 cudaError_t launch_err = cudaGetLastError();
@@ -1897,11 +1921,32 @@ void apply_monotonic_constraints_cuda(
                 break;
             }
         }
+        // Feasibility cleanup: zeroing z before every pass turns the same kernel
+        // into a plain projection, restoring exact monotonicity after Dykstra's
+        // asymptotic approach.  See fitter.cpp for the rationale.
+        for (int pass = 0; pass < PAVA_MAX_PASSES; ++pass) {
+            cudaMemset(d_z, 0, sizeof(float) * tree_depth * n_leaves_in_tree);
+            cudaMemset(d_any_change, 0, sizeof(int));
+            for (int d = 0; d < tree_depth; ++d) {
+                int constraint_dir = effective_constraints[d][out_idx];
+                if (constraint_dir == 0) continue;
+                pava_kernel<<<n_planes, 1>>>(
+                    edata->leaf_data->values, d, constraint_dir, tree_depth,
+                    start_leaf_idx, n_leaves_in_tree, metadata->output_dim, out_idx,
+                    d_z + d * n_leaves_in_tree, d_any_change);
+            }
+            cudaDeviceSynchronize();
+            int h_changed = 0;
+            cudaMemcpy(&h_changed, d_any_change, sizeof(int), cudaMemcpyDeviceToHost);
+            if (!h_changed) break;
+        }
+
         if (!converged) {
-            std::cerr << "WARNING: monotonic constraint PAVA did not converge in " << PAVA_MAX_PASSES << " passes for output " << out_idx << std::endl;
+            std::cerr << "WARNING: monotonic constraint projection did not converge in " << PAVA_MAX_PASSES << " passes for output " << out_idx << std::endl;
         }
     }
     cudaFree(d_any_change);
+    cudaFree(d_z);
     
     delete[] h_feature_indices;
     delete[] h_inequality_directions;

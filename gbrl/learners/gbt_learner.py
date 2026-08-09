@@ -38,7 +38,8 @@ from gbrl.common.utils import (NumericalData, concatenate_arrays,
                                ensure_leaf_tensor_or_array, get_poly_vectors,
                                normalize_vector_input, numerical_dtype,
                                preprocess_features, process_monotonic_constraints,
-                               to_numpy, validate_optimizer_ranges)
+                               to_numpy, validate_monotonic_features_numerical,
+                               validate_optimizer_ranges)
 from gbrl.learners.base import BaseLearner
 
 
@@ -116,7 +117,16 @@ class GBTLearner(BaseLearner):
         
         if self.student_model is not None:
             for i in range(len(self.optimizers)):
-                self.optimizers[i]['T'] -= self.total_iterations
+                # Only a linear scheduler carries 'T'.  A constant scheduler has
+                # no such key, so the old unconditional subtraction raised
+                # KeyError after distillation.
+                if str(self.optimizers[i].get('scheduler', 'Const')).lower() != 'linear':
+                    continue
+                remaining = self.optimizers[i]['T'] - self.total_iterations
+                if remaining <= 0:
+                    raise ValueError(
+                        "Linear scheduler has no remaining iterations after distillation")
+                self.optimizers[i]['T'] = remaining
         else:
             self.total_iterations = 0
         try:
@@ -149,6 +159,7 @@ class GBTLearner(BaseLearner):
         if self.total_iterations == 0:
             assert self.feature_mapping is not None, "Feature mapping not set"
             feature_mapping, numerical_mask = self.feature_mapping
+            validate_monotonic_features_numerical(self.monotonic_constraints, numerical_mask)
             self._cpp_model.set_feature_mapping(np.ascontiguousarray(feature_mapping),
                                                 np.ascontiguousarray(numerical_mask))
 
@@ -583,7 +594,7 @@ class GBTLearner(BaseLearner):
         num_obs, cat_obs = preprocess_features(obs)
         distil_params = {'input_dim': self.input_dim,
                          'output_dim': self.output_dim,
-                         'policy_dim': self.output_dim,
+                         'policy_dim': self.policy_dim,
                          'split_score_func': 'L2',
                          'generator_type': 'Quantile',
                          'use_control_variates': False, 'device': self.device,
@@ -605,8 +616,9 @@ class GBTLearner(BaseLearner):
                 f"Invalid GBRL distillation optimizer configuration: {exc}") from exc
 
         bias = np.mean(targets, axis=0)
-        if isinstance(bias, float):
-            bias = np.array([bias])
+        # np.mean returns a NumPy scalar (e.g. np.float32), not a Python
+        # float, so the old isinstance check never fired for 1-D targets.
+        bias = np.atleast_1d(bias).astype(numerical_dtype, copy=False)
         self.student_model.set_bias(bias.astype(numerical_dtype))
         tr_loss = self.student_model.fit(num_obs, cat_obs,
                                          targets, params['min_steps'])

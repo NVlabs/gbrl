@@ -1309,22 +1309,46 @@ gbrl.def("get_matrix_representation", [](GBRL &self, py::object &obs, py::object
             if (a.n_samples == 0) a.n_samples = cat_samples;
             a.cat_owner = std::move(arr);
         }
-        if (!norm_values.is_none()) {
+        if (norm_values.is_none())
+            throw std::runtime_error("norm_values is required and must not be None");
+        {
             py::array_t<float> arr = py::cast<py::array_t<float>>(norm_values);
             if (!arr.attr("flags").attr("c_contiguous").cast<bool>()) throw std::runtime_error("Arrays must be C-contiguous");
-            a.norm_ptr = static_cast<float*>(arr.request().ptr);
+            py::buffer_info info = arr.request();
+            size_t expected = static_cast<size_t>(metadata->max_depth + 1) * metadata->max_depth;
+            if (static_cast<size_t>(info.size) != expected)
+                throw std::runtime_error("norm_values has " + std::to_string(info.size) +
+                                         " elements but max_depth=" + std::to_string(metadata->max_depth) +
+                                         " requires " + std::to_string(expected));
+            a.norm_ptr = static_cast<float*>(info.ptr);
             a.norm_owner = std::move(arr);
         }
-        if (!base_poly.is_none()) {
+        if (base_poly.is_none())
+            throw std::runtime_error("base_poly is required and must not be None");
+        {
             py::array_t<float> arr = py::cast<py::array_t<float>>(base_poly);
             if (!arr.attr("flags").attr("c_contiguous").cast<bool>()) throw std::runtime_error("Arrays must be C-contiguous");
-            a.base_poly_ptr = static_cast<float*>(arr.request().ptr);
+            py::buffer_info info = arr.request();
+            size_t expected = static_cast<size_t>(metadata->max_depth);
+            if (static_cast<size_t>(info.size) != expected)
+                throw std::runtime_error("base_poly has " + std::to_string(info.size) +
+                                         " elements but max_depth=" + std::to_string(metadata->max_depth) +
+                                         " requires " + std::to_string(expected));
+            a.base_poly_ptr = static_cast<float*>(info.ptr);
             a.base_poly_owner = std::move(arr);
         }
-        if (!offset.is_none()) {
+        if (offset.is_none())
+            throw std::runtime_error("offset is required and must not be None");
+        {
             py::array_t<float> arr = py::cast<py::array_t<float>>(offset);
             if (!arr.attr("flags").attr("c_contiguous").cast<bool>()) throw std::runtime_error("Arrays must be C-contiguous");
-            a.offset_ptr = static_cast<float*>(arr.request().ptr);
+            py::buffer_info info = arr.request();
+            size_t expected = static_cast<size_t>(metadata->max_depth) * metadata->max_depth;
+            if (static_cast<size_t>(info.size) != expected)
+                throw std::runtime_error("offset has " + std::to_string(info.size) +
+                                         " elements but max_depth=" + std::to_string(metadata->max_depth) +
+                                         " requires " + std::to_string(expected));
+            a.offset_ptr = static_cast<float*>(info.ptr);
             a.offset_owner = std::move(arr);
         }
         // The SHAP buffer is sized from the model metadata, and the returned

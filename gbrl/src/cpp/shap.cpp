@@ -62,6 +62,7 @@ shapData* alloc_shap_data(const ensembleMetaData *metadata, const ensembleData *
     float *predictions = new float[node_capacity * metadata->output_dim];
     float *weights = new float[node_capacity];
     char *categorical_values = new char[node_capacity*MAX_CHAR_SIZE];
+    int *global_feature_indices = new int[node_capacity];
     int *node_to_leaf_idx = new int[node_capacity];
     float *leaf_cond_probs = new float[node_capacity];
     int *parents = new int[node_capacity];
@@ -73,6 +74,7 @@ shapData* alloc_shap_data(const ensembleMetaData *metadata, const ensembleData *
         feature_parent_node[i] = -1;
         weights[i] = 1.0f;
         feature_values[i] = INFINITY;
+        global_feature_indices[i] = -1;
         node_to_leaf_idx[i] = -1;
     }
 
@@ -103,6 +105,13 @@ shapData* alloc_shap_data(const ensembleMetaData *metadata, const ensembleData *
             node_stack.push(left_child);
             int feature_idx = edata->feature_data->feature_indices[idx*metadata->max_depth + crnt_node.depth];
             feature_indices[n_nodes] = feature_idx;
+            // feature_idx is TYPE-LOCAL: numerical and categorical splits each
+            // count from 0, so they collide in the SHAP output.  Map to the
+            // original input column for everything feature-identity related.
+            global_feature_indices[n_nodes] =
+                edata->feature_data->is_numerics[idx*metadata->max_depth + crnt_node.depth]
+                    ? edata->feature_mappings->reverse_num_feature_mapping[feature_idx]
+                    : edata->feature_mappings->reverse_cat_feature_mapping[feature_idx];
             if (edata->feature_data->is_numerics[idx*metadata->max_depth + crnt_node.depth])
                 feature_values[n_nodes] = edata->feature_data->feature_values[idx*metadata->max_depth + crnt_node.depth];
             else 
@@ -110,8 +119,19 @@ shapData* alloc_shap_data(const ensembleMetaData *metadata, const ensembleData *
             numerics[n_nodes] = edata->feature_data->is_numerics[idx*metadata->max_depth + crnt_node.depth];
 
         } else {
-            // Calculate number of unique features at the leaf node
-            int n_unique_features = count_distinct(edata->feature_data->feature_indices + idx * metadata->max_depth, edata->ensemble_info->depths[idx]);
+            // Calculate number of unique features at the leaf node.  Counting the
+            // type-local indices would merge a numerical and a categorical split
+            // that share a local index, so map to global indices first.
+            const int leaf_depth = edata->ensemble_info->depths[idx];
+            int *path_global = new int[leaf_depth > 0 ? leaf_depth : 1];
+            for (int pd = 0; pd < leaf_depth; ++pd) {
+                int local = edata->feature_data->feature_indices[idx * metadata->max_depth + pd];
+                path_global[pd] = edata->feature_data->is_numerics[idx * metadata->max_depth + pd]
+                    ? edata->feature_mappings->reverse_num_feature_mapping[local]
+                    : edata->feature_mappings->reverse_cat_feature_mapping[local];
+            }
+            int n_unique_features = count_distinct(path_global, leaf_depth);
+            delete[] path_global;
             // Backtrack to update max_unique_features array
             int parent_idx = parents[n_nodes];
             if (n_unique_features > max_unique_features[n_nodes])
@@ -136,9 +156,9 @@ shapData* alloc_shap_data(const ensembleMetaData *metadata, const ensembleData *
         bool found = false;
         if (parent_idx >= 0){
             int grandparent_idx = parents[parent_idx];
-            int prev_feature = feature_indices[parent_idx];
+            int prev_feature = global_feature_indices[parent_idx];
             while (grandparent_idx >= 0) {
-                if (prev_feature == feature_indices[grandparent_idx]){
+                if (prev_feature == global_feature_indices[grandparent_idx]){
                     found = true;
                     break;
                 }
@@ -170,6 +190,7 @@ shapData* alloc_shap_data(const ensembleMetaData *metadata, const ensembleData *
     shap_data->feature_indices = feature_indices;
     shap_data->feature_values = feature_values;
     shap_data->predictions = predictions;
+    shap_data->global_feature_indices = global_feature_indices;
     shap_data->node_to_leaf_idx = node_to_leaf_idx;
     shap_data->leaf_cond_probs = leaf_cond_probs;
 
@@ -201,6 +222,7 @@ void dealloc_shap_data(shapData *shap_data){
     delete[] shap_data->weights;
     delete[] shap_data->max_unique_features;
     delete[] shap_data->categorical_values;
+    delete[] shap_data->global_feature_indices;
     delete[] shap_data->node_to_leaf_idx;
     delete[] shap_data->leaf_cond_probs;
     delete[] shap_data->C;
@@ -320,11 +342,13 @@ void linear_tree_shap(const ensembleMetaData *metadata, const ensembleData *edat
         bool is_greater = (shap_data->numerics[crnt_node]) ? dataset->obs->data[sample_offset*metadata->n_num_features + shap_data->feature_indices[crnt_node]] > shap_data->feature_values[crnt_node]: strcmp(&dataset->categorical_obs->data[(sample_offset*metadata->n_cat_features + shap_data->feature_indices[crnt_node]) * MAX_CHAR_SIZE],  shap_data->categorical_values + crnt_node*MAX_CHAR_SIZE) == 0;
         shap_data->active_nodes[right] = (is_greater) ? true : false;
         shap_data->active_nodes[left] = (is_greater) ? false : true;
-        linear_tree_shap(metadata, edata, shap_data, dataset, shap_values, left, crnt_depth + 1, shap_data->feature_indices[crnt_node], sample_offset);
+        // Pass the GLOBAL index: crnt_feature selects the SHAP output column.
+        // Data access above still uses the type-local feature_indices.
+        linear_tree_shap(metadata, edata, shap_data, dataset, shap_values, left, crnt_depth + 1, shap_data->global_feature_indices[crnt_node], sample_offset);
         poly_degree = shap_data->max_unique_features[crnt_node] - shap_data->max_unique_features[left];
         _broadcast_mat_elementwise_mult_by_vec(G_next_depth, shap_data->offset_poly + poly_degree * metadata->max_depth, 0.0f, metadata->max_depth, metadata->output_dim, metadata->par_th);
         _copy_mat(G_depth, G_next_depth, col_size, metadata->par_th);
-        linear_tree_shap(metadata, edata, shap_data, dataset, shap_values, right, crnt_depth + 1, shap_data->feature_indices[crnt_node], sample_offset);
+        linear_tree_shap(metadata, edata, shap_data, dataset, shap_values, right, crnt_depth + 1, shap_data->global_feature_indices[crnt_node], sample_offset);
         poly_degree = shap_data->max_unique_features[crnt_node] - shap_data->max_unique_features[right];
         _broadcast_mat_elementwise_mult_by_vec(G_next_depth, shap_data->offset_poly + poly_degree * metadata->max_depth, 0.0f, metadata->max_depth, metadata->output_dim, metadata->par_th);
         _element_wise_addition(G_depth, G_next_depth, col_size, metadata->par_th);

@@ -725,50 +725,110 @@ void Fitter::apply_monotonic_constraints_cpu(
         }
     }
     
-    // Apply constraints using PAVA, iterating until convergence (up to 64 passes).
-    // A single depth-ordered pass is not sufficient: pooling at one depth can
-    // re-introduce violations at a previously fixed depth.  Repeating until no
-    // changes are made guarantees all pair-wise constraints are satisfied.
+    // Isotonic projection of the leaf values onto the monotone cone, via Dykstra's
+    // algorithm.
+    //
+    // For ONE constrained depth the leaf pairs are disjoint, so averaging a
+    // violating pair is already the exact L2 projection (2-point PAVA).  With two
+    // or more constrained depths the pair sets overlap: simply cycling through the
+    // depths (plain POCS) lands somewhere feasible but NOT at the nearest monotone
+    // point, distorting leaf values more than the constraint requires.
+    //
+    // Dykstra adds a per-depth correction term z_d: project (v + z_d) instead of v,
+    // then fold the residual back into z_d.  That converges to the true projection
+    // onto the intersection (Boyle-Dykstra).  Convergence is asymptotic, hence the
+    // tolerance test rather than an exact no-change test.
+    float *v      = new float[n_leaves];
+    float *v_prev = new float[n_leaves];
+    float *y      = new float[n_leaves];
+    float *z      = new float[tree_depth * n_leaves];
+
     for (int out_idx = 0; out_idx < policy_dim; ++out_idx) {
-        bool any_change = true;
-        int pass = 0;
-        while (any_change && pass < PAVA_MAX_PASSES) {
-            any_change = false;
+        // Skip outputs with no constraint at any depth.
+        bool constrained = false;
+        for (int d = 0; d < tree_depth && !constrained; ++d)
+            if (effective_constraints[d][out_idx] != 0) constrained = true;
+        if (!constrained) continue;
+
+        for (int i = 0; i < n_leaves; ++i)
+            v[i] = edata->leaf_data->values[(start_leaf_idx + i) * output_dim + out_idx];
+        std::fill(z, z + tree_depth * n_leaves, 0.0f);
+
+        bool converged = false;
+        for (int pass = 0; pass < PAVA_MAX_PASSES && !converged; ++pass) {
+            std::copy(v, v + n_leaves, v_prev);
+
             for (int d = 0; d < tree_depth; ++d) {
                 int constraint_dir = effective_constraints[d][out_idx];
                 if (constraint_dir == 0) continue;
+                float *z_d = z + d * n_leaves;
 
-                // CRITICAL: Depth 0 (root) is MSB, depth (tree_depth-1) is LSB
+                // y = v + z_d
+                for (int i = 0; i < n_leaves; ++i) y[i] = v[i] + z_d[i];
+
+                // v = P_d(y): pool violating pairs.  CRITICAL: depth 0 (root) is
+                // the MSB, depth (tree_depth-1) the LSB.
+                std::copy(y, y + n_leaves, v);
                 int bit_mask = 1 << (tree_depth - 1 - d);
-
-                // Process all leaf pairs that differ only in this bit
                 for (int i = 0; i < n_leaves; ++i) {
-                    // Only process when this bit is 0 (avoid double counting)
-                    if ((i & bit_mask) == 0) {
-                        int global_leaf0 = start_leaf_idx + i;
-                        int global_leaf1 = start_leaf_idx + (i | bit_mask);
+                    if ((i & bit_mask) != 0) continue;   // handle each pair once
+                    int j = i | bit_mask;
+                    // constraint_dir == 1 means v[i] <= v[j]
+                    bool violation = (constraint_dir == 1) ? (v[i] > v[j]) : (v[i] < v[j]);
+                    if (violation) {
+                        float pooled = (v[i] + v[j]) * 0.5f;
+                        v[i] = pooled;
+                        v[j] = pooled;
+                    }
+                }
 
-                        float val0 = edata->leaf_data->values[global_leaf0 * output_dim + out_idx];
-                        float val1 = edata->leaf_data->values[global_leaf1 * output_dim + out_idx];
+                // z_d = y - P_d(y)
+                for (int i = 0; i < n_leaves; ++i) z_d[i] = y[i] - v[i];
+            }
 
-                        // Check violation: constraint_dir=1 means val0 <= val1
-                        bool violation = (constraint_dir == 1) ? (val0 > val1) : (val0 < val1);
+            float max_delta = 0.0f;
+            for (int i = 0; i < n_leaves; ++i)
+                max_delta = std::max(max_delta, std::fabs(v[i] - v_prev[i]));
+            if (max_delta < PAVA_TOLERANCE) converged = true;
+        }
 
-                        if (violation) {
-                            float pooled = (val0 + val1) * 0.5f;
-                            edata->leaf_data->values[global_leaf0 * output_dim + out_idx] = pooled;
-                            edata->leaf_data->values[global_leaf1 * output_dim + out_idx] = pooled;
-                            any_change = true;
-                        }
+        // Feasibility cleanup.  Dykstra approaches the optimum from outside the
+        // feasible set, so it can stop with violations of order PAVA_TOLERANCE.
+        // Monotonicity is a hard contract, so run plain projections (z = 0) until
+        // nothing moves.  Measured shift away from the optimum is ~1e-6.
+        for (int pass = 0; pass < PAVA_MAX_PASSES; ++pass) {
+            std::copy(v, v + n_leaves, v_prev);
+            for (int d = 0; d < tree_depth; ++d) {
+                int constraint_dir = effective_constraints[d][out_idx];
+                if (constraint_dir == 0) continue;
+                int bit_mask = 1 << (tree_depth - 1 - d);
+                for (int i = 0; i < n_leaves; ++i) {
+                    if ((i & bit_mask) != 0) continue;
+                    int j = i | bit_mask;
+                    bool violation = (constraint_dir == 1) ? (v[i] > v[j]) : (v[i] < v[j]);
+                    if (violation) {
+                        float pooled = (v[i] + v[j]) * 0.5f;
+                        v[i] = pooled;
+                        v[j] = pooled;
                     }
                 }
             }
-            ++pass;
+            if (std::equal(v, v + n_leaves, v_prev)) break;
         }
-        if (any_change) {
-            std::cerr << "WARNING: monotonic constraint PAVA did not converge in " << PAVA_MAX_PASSES << " passes for output " << out_idx << std::endl;
+
+        for (int i = 0; i < n_leaves; ++i)
+            edata->leaf_data->values[(start_leaf_idx + i) * output_dim + out_idx] = v[i];
+
+        if (!converged) {
+            std::cerr << "WARNING: monotonic constraint projection did not converge in "
+                      << PAVA_MAX_PASSES << " passes for output " << out_idx << std::endl;
         }
     }
+
+    delete[] v;
+    delete[] v_prev;
+    delete[] y;
+    delete[] z;
     
     delete[] feature_indices;
     delete[] split_is_numeric;
