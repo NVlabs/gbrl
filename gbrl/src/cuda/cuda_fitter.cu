@@ -28,6 +28,8 @@
 #include <math_constants.h>
 #include <device_launch_parameters.h>
 #include <limits>
+#include <stdexcept>
+#include <vector>
 
 #include "utils.h"
 #include "cuda_fitter.h"
@@ -1890,6 +1892,9 @@ void apply_monotonic_constraints_cuda(
     // Any CUDA failure aborts the whole projection: continuing would leave the
     // leaf values partially projected and therefore non-monotone.
     bool cuda_failed = false;
+    bool infeasible = false;
+    int infeasible_out = -1;
+    float worst_gap = 0.0f;
     for (int out_idx = 0; out_idx < metadata->policy_dim && !cuda_failed; ++out_idx) {
         cudaMemset(d_z, 0, sizeof(float) * tree_depth * n_leaves_in_tree);
         bool converged = false;
@@ -1978,16 +1983,51 @@ void apply_monotonic_constraints_cuda(
             if (!h_changed) break;
         }
 
-        if (cuda_failed) {
-            std::cerr << "ERROR: monotonic constraints were not fully applied for tree "
-                      << tree_idx << "; leaf values may not satisfy the constraints." << std::endl;
-        } else if (!converged) {
-            std::cerr << "WARNING: monotonic constraint projection did not converge in " << MONOTONIC_MAX_PASSES << " passes for output " << out_idx << std::endl;
+        // Final feasibility scan: `converged` only reflects the Dykstra phase, so
+        // check the real property by copying this tree's leaf values back.
+        if (!cuda_failed) {
+            std::vector<float> h_vals(static_cast<size_t>(n_leaves_in_tree) * metadata->output_dim);
+            cudaError_t cp = cudaMemcpy(h_vals.data(),
+                                        edata->leaf_data->values + static_cast<size_t>(start_leaf_idx) * metadata->output_dim,
+                                        h_vals.size() * sizeof(float), cudaMemcpyDeviceToHost);
+            if (cp != cudaSuccess) {
+                std::cerr << "ERROR: monotonic feasibility copy failed: " << cudaGetErrorString(cp) << std::endl;
+                cuda_failed = true;
+            } else {
+                for (int d = 0; d < tree_depth; ++d) {
+                    int constraint_dir = effective_constraints[d][out_idx];
+                    if (constraint_dir == 0) continue;
+                    int bit_mask = 1 << (tree_depth - 1 - d);
+                    for (int i = 0; i < n_leaves_in_tree; ++i) {
+                        if ((i & bit_mask) != 0) continue;
+                        int j = i | bit_mask;
+                        float vi = h_vals[static_cast<size_t>(i) * metadata->output_dim + out_idx];
+                        float vj = h_vals[static_cast<size_t>(j) * metadata->output_dim + out_idx];
+                        float gap = (constraint_dir == 1) ? (vi - vj) : (vj - vi);
+                        if (gap > MONOTONIC_TOLERANCE) {
+                            infeasible = true;
+                            // Keep the reported index paired with the reported gap.
+                            if (gap > worst_gap) {
+                                worst_gap = gap;
+                                infeasible_out = out_idx;
+                            }
+                        }
+                    }
+                }
+            }
         }
+        (void)converged;
     }
     cudaFree(d_any_change);
     cudaFree(d_z);
     
+    // Monotonicity is a hard contract: surface failures to Python rather than
+    // leaving a silently non-monotone model behind.  Free host state first.
+    const bool failed = cuda_failed;
+    const bool bad = infeasible;
+    const int bad_out = infeasible_out;
+    const float bad_gap = worst_gap;
+
     delete[] h_feature_indices;
     delete[] h_inequality_directions;
     delete[] h_reverse_mapping;
@@ -1999,6 +2039,18 @@ void apply_monotonic_constraints_cuda(
         delete[] effective_constraints[d];
     }
     delete[] effective_constraints;
+
+    if (failed) {
+        throw std::runtime_error(
+            "CUDA failure while applying monotonic constraints; leaf values may "
+            "not satisfy the constraints");
+    }
+    if (bad) {
+        throw std::runtime_error(
+            "Monotonic constraints could not be satisfied for output " +
+            std::to_string(bad_out) + " (worst violation " +
+            std::to_string(bad_gap) + ")");
+    }
 }
 
 __device__ int strcmpCuda(const char* __restrict__ str_a,

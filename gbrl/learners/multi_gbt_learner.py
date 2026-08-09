@@ -97,6 +97,10 @@ class MultiGBTLearner(BaseLearner):
 
         if policy_dim is None:
             policy_dim = output_dim
+        # Normalize unconditionally, mirroring output_dim above: BaseLearner
+        # asserts both have the same type, so an int policy_dim would fail.
+        if isinstance(policy_dim, int):
+            policy_dim = [policy_dim] * n_learners
 
         super().__init__(input_dim=input_dim,
                          output_dim=output_dim,
@@ -114,6 +118,7 @@ class MultiGBTLearner(BaseLearner):
         self.optimizers = optimizers
         self._cpp_models = None
         self.student_models = None
+        self._feature_mapping_installed = False
         self.n_learners = n_learners
 
         # Handle learner names
@@ -137,7 +142,10 @@ class MultiGBTLearner(BaseLearner):
                         f"Expected exactly one optimizer for learner {i}, got {len(lrs)}")
                 self.optimizers[i]['init_lr'] = float(lrs[0])
 
+        old_models = self._cpp_models if self._cpp_models else None
         self._cpp_models = []
+        # Fresh C++ models carry no feature mapping.
+        self._feature_mapping_installed = False
         params = self.params.copy()
         for i in range(self.n_learners):
             params['input_dim'] = self.input_dim   # type: ignore
@@ -156,7 +164,12 @@ class MultiGBTLearner(BaseLearner):
                     raise ValueError(
                         f"Linear scheduler for learner {i} requires 'T' "
                         f"(total number of iterations)")
-                remaining = horizon - self.total_iterations
+                # Per-model, not the shared total: sub-models trained with
+                # model_idx build different numbers of trees, so one global
+                # count cannot represent every learner's schedule.
+                trained_i = (old_models[i].get_iteration()
+                             if old_models is not None else self.total_iterations)
+                remaining = horizon - trained_i
                 if remaining <= 0:
                     raise ValueError(
                         f"Linear scheduler for learner {i} has no remaining iterations")
@@ -172,6 +185,23 @@ class MultiGBTLearner(BaseLearner):
         if self.student_models is None:
             self.total_iterations = 0
         self.iteration = [0] * self.n_learners
+
+    def _ensure_feature_mapping(self, inputs) -> None:
+        """Install the numerical/categorical feature mapping on every sub-model.
+
+        The C++ reverse maps are zero-initialised, so without this SHAP attributes
+        every feature to column 0 -- silently, since completeness is unaffected by
+        moving attribution between columns.  Keyed on the C++ models rather than on
+        total_iterations, because distillation recreates them while leaving
+        total_iterations non-zero.
+        """
+        if self.feature_mapping is None:
+            self.feature_mapping = get_index_mapping(inputs)
+        feature_mapping, numerical_mask = self.feature_mapping
+        validate_monotonic_features_numerical(self.monotonic_constraints, numerical_mask)
+        for model in self._cpp_models:
+            model.set_feature_mapping(np.ascontiguousarray(feature_mapping),
+                                      np.ascontiguousarray(numerical_mask))
 
     def step(self,
              inputs: NumericalData,
@@ -190,13 +220,9 @@ class MultiGBTLearner(BaseLearner):
         assert self._cpp_models is not None, "Model not initialized."
 
         super().step(inputs)
-        if self.total_iterations == 0:
-            assert self.feature_mapping is not None, "Feature mapping not set"
-            feature_mapping, numerical_mask = self.feature_mapping
-            validate_monotonic_features_numerical(self.monotonic_constraints, numerical_mask)
-            for i in range(len(self._cpp_models)):
-                self._cpp_models[i].set_feature_mapping(np.ascontiguousarray(feature_mapping),
-                                                        np.ascontiguousarray(numerical_mask))
+        if self.total_iterations == 0 or not self._feature_mapping_installed:
+            self._ensure_feature_mapping(inputs)
+            self._feature_mapping_installed = True
 
         num_inputs, cat_inputs = preprocess_features(inputs)
 
@@ -249,6 +275,11 @@ class MultiGBTLearner(BaseLearner):
         if isinstance(inputs, th.Tensor):
             inputs = inputs.detach().cpu().numpy()
         num_inputs, cat_inputs = preprocess_features(inputs)
+        # fit() must install the mapping too; without it SHAP collapses every
+        # feature onto column 0 (see _ensure_feature_mapping).
+        if not self._feature_mapping_installed:
+            self._ensure_feature_mapping(inputs)
+            self._feature_mapping_installed = True
 
         self.total_iterations += iterations
 
@@ -421,6 +452,11 @@ class MultiGBTLearner(BaseLearner):
             instance.student_models = None
             instance.feature_weights = instance._cpp_models[0].get_feature_weights()
             instance.feature_mapping = instance._cpp_models[0].get_feature_mapping()
+            instance._feature_mapping_installed = True
+            instance._cpp_model = None   # set by BaseLearner.__init__; unused here
+            instance.learner_names = [m.get_learner_name() for m in instance._cpp_models]
+            # Monotonic constraints are not serialized; a loaded model has none.
+            instance.monotonic_constraints = None
             instance._memory = []
             return instance
         except RuntimeError as e:
@@ -1123,6 +1159,9 @@ class MultiGBTLearner(BaseLearner):
             copy_._cpp_models = [None] * self.n_learners
             for i in range(self.n_learners):
                 copy_._cpp_models[i] = GBRL_CPP(self._cpp_models[i])
-                if self.student_models[i] is not None:  # type: ignore
+                # Guarded separately: the enclosing check is on _cpp_models, so
+                # subscripting student_models here raised TypeError whenever no
+                # distillation had been run.
+                if self.student_models is not None and self.student_models[i] is not None:
                     copy_.student_models[i] = GBRL_CPP(self.student_models[i])  # type: ignore
         return copy_

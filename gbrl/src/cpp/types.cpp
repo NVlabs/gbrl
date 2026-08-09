@@ -55,7 +55,10 @@ generatorType stringTogeneratorType(std::string str) {
 }
 
 growPolicy stringTogrowPolicy(std::string str) {
-    if (str == "oblivious" || str == "Oblivious") return growPolicy::OBLIVIOUS;
+    // "Oblivous" (sic) was emitted by growPolicyToString before the typo was
+    // fixed; accept it so models saved by earlier versions still round-trip.
+    if (str == "oblivious" || str == "Oblivious" ||
+        str == "oblivous"  || str == "Oblivous") return growPolicy::OBLIVIOUS;
     if (str == "greedy" || str == "Greedy") return growPolicy::GREEDY;
     throw std::runtime_error("Invalid generator function! Options are: Greedy/Oblivious");
     return growPolicy::GREEDY;
@@ -124,7 +127,7 @@ std::string generatorTypeToString(generatorType type) {
 std::string growPolicyToString(growPolicy type) {
     switch (type) {
         case growPolicy::OBLIVIOUS:
-            return "Oblivous";
+            return "Oblivious";
         case growPolicy::GREEDY:
             return "Greedy";
         default:

@@ -34,6 +34,7 @@
 #include <fstream>
 #include <cstring>
 #include <iostream>
+#include <stdexcept>
 #include <string>
 
 #include "fitter.h"
@@ -738,6 +739,10 @@ void Fitter::apply_monotonic_constraints_cpu(
     // then fold the residual back into z_d.  That converges to the true projection
     // onto the intersection (Boyle-Dykstra).  Convergence is asymptotic, hence the
     // tolerance test rather than an exact no-change test.
+    // Set when the final feasibility scan still finds a violation.
+    bool infeasible = false;
+    int infeasible_out = -1;
+    float worst_gap = 0.0f;
     float *v      = new float[n_leaves];
     float *v_prev = new float[n_leaves];
     float *y      = new float[n_leaves];
@@ -816,13 +821,33 @@ void Fitter::apply_monotonic_constraints_cpu(
             if (std::equal(v, v + n_leaves, v_prev)) break;
         }
 
+        // Final feasibility scan.  `converged` only records whether the Dykstra
+        // phase met its movement tolerance; it says nothing about whether the
+        // cleanup phase actually removed every violation.  Check the real
+        // property instead of inferring it.
+        for (int d = 0; d < tree_depth; ++d) {
+            int constraint_dir = effective_constraints[d][out_idx];
+            if (constraint_dir == 0) continue;
+            int bit_mask = 1 << (tree_depth - 1 - d);
+            for (int i = 0; i < n_leaves; ++i) {
+                if ((i & bit_mask) != 0) continue;
+                int j = i | bit_mask;
+                float gap = (constraint_dir == 1) ? (v[i] - v[j]) : (v[j] - v[i]);
+                if (gap > MONOTONIC_TOLERANCE) {
+                    infeasible = true;
+                    // Keep the reported index paired with the reported gap.
+                    if (gap > worst_gap) {
+                        worst_gap = gap;
+                        infeasible_out = out_idx;
+                    }
+                }
+            }
+        }
+
         for (int i = 0; i < n_leaves; ++i)
             edata->leaf_data->values[(start_leaf_idx + i) * output_dim + out_idx] = v[i];
 
-        if (!converged) {
-            std::cerr << "WARNING: monotonic constraint projection did not converge in "
-                      << MONOTONIC_MAX_PASSES << " passes for output " << out_idx << std::endl;
-        }
+        (void)converged;
     }
 
     delete[] v;
@@ -837,4 +862,13 @@ void Fitter::apply_monotonic_constraints_cpu(
         delete[] effective_constraints[d];
     }
     delete[] effective_constraints;
+
+    // Monotonicity is a hard contract, so surface a failure to Python rather
+    // than leaving a silently non-monotone model behind.
+    if (infeasible) {
+        throw std::runtime_error(
+            "Monotonic constraints could not be satisfied for output " +
+            std::to_string(infeasible_out) + " (worst violation " +
+            std::to_string(worst_gap) + ")");
+    }
 }

@@ -314,17 +314,25 @@ float TreeNode::splitScoreL2WithConstraint(
         right_mean[d] *= right_count_recip;
     }
     
-    // Pool means for the specific output dimension if constraint is violated
-    // constraint_dir = 1: left should be <= right (increasing)
-    // constraint_dir = -1: left should be >= right (decreasing)
+    // Pool means for the specific output dimension if the constraint is violated.
+    //
+    // NOTE ON SIGN: left_mean/right_mean are means of RAW GRADIENTS, but the
+    // constraint is a statement about PREDICTIONS.  For SGD the tree contributes
+    // delta = -lr * g with lr > 0, so the gradient order is the reverse of the
+    // prediction order:
+    //     increasing  =>  pred_left <= pred_right  =>  g_left >= g_right
+    //     decreasing  =>  pred_left >= pred_right  =>  g_left <= g_right
+    // The comparisons below are therefore inverted relative to the constraint
+    // direction.  (stop_lr > 0 is enforced in Python so the sign cannot flip
+    // partway through a linear schedule.)
     if (output_idx >= 0 && output_idx < n_cols) {
         bool violation = false;
         if (constraint_dir == 1) {
-            // Increasing: left_mean should be <= right_mean
-            violation = (left_mean[output_idx] > right_mean[output_idx]);
-        } else if (constraint_dir == -1) {
-            // Decreasing: left_mean should be >= right_mean
+            // Increasing prediction => gradients must be non-increasing
             violation = (left_mean[output_idx] < right_mean[output_idx]);
+        } else if (constraint_dir == -1) {
+            // Decreasing prediction => gradients must be non-decreasing
+            violation = (left_mean[output_idx] > right_mean[output_idx]);
         }
         
         if (violation) {

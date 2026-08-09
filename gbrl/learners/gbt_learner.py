@@ -256,6 +256,10 @@ class GBTLearner(BaseLearner):
                                    targets.astype(numerical_dtype),
                                    iterations, shuffle, loss_type)
         self.iteration = self._cpp_model.get_iteration()
+        # Keep total_iterations in step with the C++ model: reset() derives the
+        # remaining linear-scheduler horizon from it, and fit() previously left
+        # it at 0 no matter how many trees were built.
+        self.total_iterations = self.iteration
         return loss
 
     def save(self, filename: str) -> None:
@@ -343,6 +347,8 @@ class GBTLearner(BaseLearner):
             instance.feature_mapping = instance._cpp_model.get_feature_mapping()
             # The loaded C++ model already carries its feature mapping.
             instance._feature_mapping_installed = True
+            # Monotonic constraints are not serialized; a loaded model has none.
+            instance.monotonic_constraints = None
             instance._memory = []
             instance.learner_name = instance._cpp_model.get_learner_name()
             return instance

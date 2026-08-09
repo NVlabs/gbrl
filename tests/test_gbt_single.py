@@ -1013,3 +1013,78 @@ class TestGBTSingle(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestLearnerLifecycle(unittest.TestCase):
+    """Guards the bug class behind most lifecycle regressions: load() and
+    __copy__ build instances via __new__, so they silently miss fields that
+    __init__ sets. Diffing the attribute sets catches all of them at once."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.test_dir = tempfile.mkdtemp()
+        cls.ts = {'max_depth': 3, 'n_bins': 64, 'min_data_in_leaf': 1,
+                  'par_th': 2, 'grow_policy': 'oblivious'}
+        cls.pr = {'split_score_func': 'Cosine', 'generator_type': 'Quantile'}
+        cls.X = np.random.default_rng(0).normal(size=(20, 4)).astype(np.float32)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.test_dir)
+
+    def _trained_single(self):
+        m = GBTModel(input_dim=4, output_dim=1, tree_struct=self.ts,
+                     optimizers={'algo': 'SGD', 'lr': 0.1, 'start_idx': 0, 'stop_idx': 1},
+                     params=dict(self.pr), device='cpu', verbose=0)
+        y = th.as_tensor(self.X[:, :1].copy())
+        for _ in range(3):
+            p = m(self.X, requires_grad=True)
+            ((p.reshape(y.shape) - y) ** 2).mean().backward()
+            m.step(self.X)
+        return m
+
+    def _trained_multi(self):
+        from gbrl.learners.multi_gbt_learner import MultiGBTLearner
+        from gbrl.common.utils import setup_optimizer
+        opt = setup_optimizer({'algo': 'SGD', 'lr': 0.1, 'start_idx': 0, 'stop_idx': 1})
+        mo = MultiGBTLearner(
+            input_dim=4, output_dim=1, tree_struct=self.ts, optimizers=dict(opt),
+            params={**self.pr, **self.ts, 'input_dim': 4, 'output_dim': 1, 'policy_dim': 1},
+            n_learners=2, policy_dim=1)
+        mo.reset()
+        g = np.random.default_rng(1).normal(size=(20, 1)).astype(np.float32)
+        mo.step(self.X, [g, g])
+        return mo
+
+    def test_load_preserves_all_init_attributes(self):
+        """load() must set every attribute __init__ does; it bypasses __init__."""
+        from gbrl.learners.multi_gbt_learner import MultiGBTLearner
+        m = self._trained_single()
+        m.save_learner(os.path.join(self.test_dir, 'lc_single'))
+        loaded = GBTModel.load_learner(os.path.join(self.test_dir, 'lc_single'), device='cpu')
+        missing = sorted(set(vars(m.learner)) - set(vars(loaded.learner)))
+        self.assertEqual(missing, [], f'GBTLearner.load() missing attrs: {missing}')
+
+        mo = self._trained_multi()
+        mo.save(os.path.join(self.test_dir, 'lc_multi'))
+        mol = MultiGBTLearner.load(os.path.join(self.test_dir, 'lc_multi'), 'cpu')
+        missing = sorted(set(vars(mo)) - set(vars(mol)))
+        self.assertEqual(missing, [], f'MultiGBTLearner.load() missing attrs: {missing}')
+
+    def test_copy_without_student_models(self):
+        """__copy__ must not assume distillation has run."""
+        import copy as _copy
+        _copy.copy(self._trained_single().learner)
+        _copy.copy(self._trained_multi())
+
+    def test_loaded_model_can_reset(self):
+        """grow_policy must round-trip: the emitted string has to parse back."""
+        m = self._trained_single()
+        m.save_learner(os.path.join(self.test_dir, 'lc_reset'))
+        loaded = GBTModel.load_learner(os.path.join(self.test_dir, 'lc_reset'), device='cpu')
+        loaded.learner.reset()
+
+    def test_multi_accepts_int_policy_dim(self):
+        """policy_dim is documented as int-or-list; output_dim is normalized, so
+        policy_dim must be too or the base-class type assertion fires."""
+        self._trained_multi()

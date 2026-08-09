@@ -278,6 +278,17 @@ def setup_optimizer(optimizer: Dict, prefix: str = '') -> Dict:
     optimizer['init_lr'] = float(lr)
     if optimizer['init_lr'] <= 0:
         raise ValueError("init_lr must be > 0")
+    # A schedule crossing zero flips the sign of the leaf-value -> prediction
+    # transform partway through the ensemble, which the monotonic projection
+    # assumes is constant.  NaN/inf must be rejected explicitly: NaN fails every
+    # comparison, so a bare `<= 0` test lets it through.
+    if optimizer.get('stop_lr') is not None:
+        stop_lr = float(optimizer['stop_lr'])
+        if not np.isfinite(stop_lr) or stop_lr <= 0:
+            raise ValueError(f"stop_lr must be a finite value > 0, got {optimizer['stop_lr']}")
+        optimizer['stop_lr'] = stop_lr
+    if not np.isfinite(optimizer['init_lr']):
+        raise ValueError(f"init_lr must be finite, got {optimizer['init_lr']}")
     optimizer['algo'] = optimizer.get('algo', 'SGD')
     assert optimizer['algo'] in APPROVED_OPTIMIZERS, \
         f"optimization algo has to be in {APPROVED_OPTIMIZERS}"
