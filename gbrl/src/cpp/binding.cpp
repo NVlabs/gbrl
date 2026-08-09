@@ -1269,18 +1269,23 @@ gbrl.def("get_matrix_representation", [](GBRL &self, py::object &obs, py::object
         int n_num_features = 0;
         int n_cat_features = 0;
     };
-    auto parse_shap_args = [](py::object &obs, py::object &categorical_obs,
+    auto parse_shap_args = [](const ensembleMetaData *metadata,
+                               py::object &obs, py::object &categorical_obs,
                                py::object &norm_values, py::object &base_poly,
                                py::object &offset) -> ShapArgs {
         ShapArgs a;
+        int num_samples = 0, cat_samples = 0;
         if (!obs.is_none()) {
             py::array_t<float> arr = py::cast<py::array_t<float>>(obs);
             if (!arr.attr("flags").attr("c_contiguous").cast<bool>())
                 throw std::runtime_error("Arrays must be C-contiguous");
             py::buffer_info info = arr.request();
+            if (info.shape.size() != 1 && info.shape.size() != 2)
+                throw std::runtime_error("obs must be a 1-D or 2-D array");
             a.obs_ptr = static_cast<const float*>(info.ptr);
-            if (info.shape.size() == 1) { a.n_num_features = static_cast<int>(info.shape[0]); a.n_samples = 1; }
-            else { a.n_num_features = static_cast<int>(info.shape[1]); a.n_samples = static_cast<int>(info.shape[0]); }
+            if (info.shape.size() == 1) { a.n_num_features = static_cast<int>(info.shape[0]); num_samples = 1; }
+            else { a.n_num_features = static_cast<int>(info.shape[1]); num_samples = static_cast<int>(info.shape[0]); }
+            a.n_samples = num_samples;
             a.obs_owner = std::move(arr);
         }
         if (!categorical_obs.is_none()) {
@@ -1288,9 +1293,12 @@ gbrl.def("get_matrix_representation", [](GBRL &self, py::object &obs, py::object
             if (!arr.attr("flags").attr("c_contiguous").cast<bool>())
                 throw std::runtime_error("Arrays must be C-contiguous");
             py::buffer_info info = arr.request();
+            if (info.shape.size() != 1 && info.shape.size() != 2)
+                throw std::runtime_error("categorical_obs must be a 1-D or 2-D array");
             a.cat_obs_ptr = static_cast<const char*>(info.ptr);
-            if (info.shape.size() == 1) { a.n_cat_features = static_cast<int>(info.shape[0]); if (a.n_samples == 0) a.n_samples = 1; }
-            else { a.n_cat_features = static_cast<int>(info.shape[1]); if (a.n_samples == 0) a.n_samples = static_cast<int>(info.shape[0]); }
+            if (info.shape.size() == 1) { a.n_cat_features = static_cast<int>(info.shape[0]); cat_samples = 1; }
+            else { a.n_cat_features = static_cast<int>(info.shape[1]); cat_samples = static_cast<int>(info.shape[0]); }
+            if (a.n_samples == 0) a.n_samples = cat_samples;
             a.cat_owner = std::move(arr);
         }
         if (!norm_values.is_none()) {
@@ -1311,6 +1319,24 @@ gbrl.def("get_matrix_representation", [](GBRL &self, py::object &obs, py::object
             a.offset_ptr = static_cast<float*>(arr.request().ptr);
             a.offset_owner = std::move(arr);
         }
+        // The SHAP buffer is sized from the model metadata, and the returned
+        // NumPy shape must describe exactly that buffer.  Reject any input whose
+        // feature counts disagree with the model, otherwise the returned array
+        // would span memory past the allocation.
+        if (a.n_num_features != metadata->n_num_features)
+            throw std::runtime_error("obs has " + std::to_string(a.n_num_features) +
+                                     " numerical features but model expects " +
+                                     std::to_string(metadata->n_num_features));
+        if (a.n_cat_features != metadata->n_cat_features)
+            throw std::runtime_error("categorical_obs has " + std::to_string(a.n_cat_features) +
+                                     " categorical features but model expects " +
+                                     std::to_string(metadata->n_cat_features));
+        if (num_samples > 0 && cat_samples > 0 && num_samples != cat_samples)
+            throw std::runtime_error("obs has " + std::to_string(num_samples) +
+                                     " samples but categorical_obs has " +
+                                     std::to_string(cat_samples));
+        if (a.n_samples <= 0)
+            throw std::runtime_error("SHAP requires at least one input sample");
         return a;
     };
 
@@ -1318,31 +1344,31 @@ gbrl.def("get_matrix_representation", [](GBRL &self, py::object &obs, py::object
                             py::object &obs, py::object &categorical_obs,
                             py::object &norm_values, py::object &base_poly,
                             py::object &offset) -> py::array_t<float> {
-        auto a = parse_shap_args(obs, categorical_obs, norm_values, base_poly, offset);
+        auto a = parse_shap_args(self.metadata, obs, categorical_obs, norm_values, base_poly, offset);
         py::gil_scoped_release release;
         float* shap_values = self.tree_shap(tree_idx, a.obs_ptr, a.cat_obs_ptr, a.n_samples, a.norm_ptr, a.base_poly_ptr, a.offset_ptr);
         py::gil_scoped_acquire acquire;
         auto capsule = py::capsule(shap_values, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
-        return py::array({a.n_samples, a.n_num_features + a.n_cat_features, self.metadata->output_dim}, shap_values, capsule);
+        return py::array({a.n_samples, self.metadata->n_num_features + self.metadata->n_cat_features, self.metadata->output_dim}, shap_values, capsule);
     }, py::arg("tree_idx")=0, py::arg("obs"), py::arg("categorical_obs"), py::arg("norm_values"), py::arg("base_poly"), py::arg("offset"), "Calculate SHAP values of a single tree");
 
     gbrl.def("ensemble_shap", [parse_shap_args](GBRL &self,
                             py::object &obs, py::object &categorical_obs,
                             py::object &norm_values, py::object &base_poly,
                             py::object &offset) -> py::array_t<float> {
-        auto a = parse_shap_args(obs, categorical_obs, norm_values, base_poly, offset);
+        auto a = parse_shap_args(self.metadata, obs, categorical_obs, norm_values, base_poly, offset);
         py::gil_scoped_release release;
         float* shap_values = self.ensemble_shap(a.obs_ptr, a.cat_obs_ptr, a.n_samples, a.norm_ptr, a.base_poly_ptr, a.offset_ptr);
         py::gil_scoped_acquire acquire;
         auto capsule = py::capsule(shap_values, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
-        return py::array({a.n_samples, a.n_num_features + a.n_cat_features, self.metadata->output_dim}, shap_values, capsule);
+        return py::array({a.n_samples, self.metadata->n_num_features + self.metadata->n_cat_features, self.metadata->output_dim}, shap_values, capsule);
     }, py::arg("obs"), py::arg("categorical_obs"), py::arg("norm_values"), py::arg("base_poly"), py::arg("offset"), "Calculate SHAP values for the ensemble");
 
     gbrl.def("ensemble_shap_and_base", [parse_shap_args](GBRL &self,
                             py::object &obs, py::object &categorical_obs,
                             py::object &norm_values, py::object &base_poly,
                             py::object &offset) -> py::tuple {
-        auto a = parse_shap_args(obs, categorical_obs, norm_values, base_poly, offset);
+        auto a = parse_shap_args(self.metadata, obs, categorical_obs, norm_values, base_poly, offset);
         float *base_values = new float[a.n_samples * self.metadata->output_dim]();
         float* shap_values = nullptr;
         try {
@@ -1356,7 +1382,7 @@ gbrl.def("get_matrix_representation", [](GBRL &self, py::object &obs, py::object
         auto capsule_shap = py::capsule(shap_values, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
         auto capsule_base = py::capsule(base_values, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
         return py::make_tuple(
-            py::array({a.n_samples, a.n_num_features + a.n_cat_features, self.metadata->output_dim}, shap_values, capsule_shap),
+            py::array({a.n_samples, self.metadata->n_num_features + self.metadata->n_cat_features, self.metadata->output_dim}, shap_values, capsule_shap),
             py::array({a.n_samples, self.metadata->output_dim}, base_values, capsule_base));
     }, py::arg("obs"), py::arg("categorical_obs"), py::arg("norm_values"), py::arg("base_poly"), py::arg("offset"),
        "Calculate SHAP values and sample-specific base values for the ensemble");
@@ -1365,7 +1391,7 @@ gbrl.def("get_matrix_representation", [](GBRL &self, py::object &obs, py::object
                             py::object &obs, py::object &categorical_obs,
                             py::object &norm_values, py::object &base_poly,
                             py::object &offset) -> py::tuple {
-        auto a = parse_shap_args(obs, categorical_obs, norm_values, base_poly, offset);
+        auto a = parse_shap_args(self.metadata, obs, categorical_obs, norm_values, base_poly, offset);
         float *base_values = new float[a.n_samples * self.metadata->output_dim]();
         float* shap_values = nullptr;
         try {
@@ -1379,7 +1405,7 @@ gbrl.def("get_matrix_representation", [](GBRL &self, py::object &obs, py::object
         auto capsule_shap = py::capsule(shap_values, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
         auto capsule_base = py::capsule(base_values, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
         return py::make_tuple(
-            py::array({a.n_samples, a.n_num_features + a.n_cat_features, self.metadata->output_dim}, shap_values, capsule_shap),
+            py::array({a.n_samples, self.metadata->n_num_features + self.metadata->n_cat_features, self.metadata->output_dim}, shap_values, capsule_shap),
             py::array({a.n_samples, self.metadata->output_dim}, base_values, capsule_base));
     }, py::arg("tree_idx")=0, py::arg("obs"), py::arg("categorical_obs"), py::arg("norm_values"), py::arg("base_poly"), py::arg("offset"),
        "Calculate SHAP values and sample-specific base values for a single tree");

@@ -24,6 +24,7 @@
  * @brief Implementation of SHAP value computation for model explanability
  */
 
+#include <algorithm>
 #include <iostream>
 #include <stdexcept>
 #include <cstring>
@@ -41,27 +42,31 @@ shapData* alloc_shap_data(const ensembleMetaData *metadata, const ensembleData *
     int start_leaf_idx = edata->ensemble_info->tree_indices[tree_idx];
     int n_leaves = stop_leaf_idx - start_leaf_idx;
 
-    stack<nodeInfo> node_stack(n_leaves * metadata->max_depth);
+    // A binary tree with n_leaves leaves has 2*n_leaves-1 nodes.  The old
+    // n_leaves*max_depth expression is smaller than that at max_depth == 1,
+    // so size every node-indexed array from an explicit capacity instead.
+    const int node_capacity = std::max(2 * n_leaves - 1, n_leaves * metadata->max_depth);
+    stack<nodeInfo> node_stack(node_capacity);
     nodeInfo root = {0, -1, 0, false, false};  // Assuming starting from root node
     node_stack.push(root);
     int n_nodes = 0;
     int leaf_idx = start_leaf_idx;
 
     // Allocate arrays for storing data (adjust sizes as needed)
-    int *feature_parent_node = new int[n_leaves * metadata->max_depth];
-    int *left_children = new int[n_leaves * metadata->max_depth];
-    int *right_children = new int[n_leaves * metadata->max_depth];
-    int *feature_indices = new int[n_leaves * metadata->max_depth];
-    float *feature_values = new float[n_leaves * metadata->max_depth];
-    bool *numerics = new bool[n_leaves * metadata->max_depth];
-    float *predictions = new float[n_leaves * metadata->max_depth * metadata->output_dim];
-    float *weights = new float[n_leaves * metadata->max_depth];
-    char *categorical_values = new char[(n_leaves * metadata->max_depth)*MAX_CHAR_SIZE];
-    int *node_to_leaf_idx = new int[n_leaves * metadata->max_depth];
-    float *leaf_cond_probs = new float[n_leaves * metadata->max_depth];
-    int *parents = new int[n_leaves * metadata->max_depth];
-    int *max_unique_features = new int[n_leaves * metadata->max_depth];
-    for (int i = 0; i < n_leaves * metadata->max_depth; ++i){
+    int *feature_parent_node = new int[node_capacity];
+    int *left_children = new int[node_capacity];
+    int *right_children = new int[node_capacity];
+    int *feature_indices = new int[node_capacity];
+    float *feature_values = new float[node_capacity];
+    bool *numerics = new bool[node_capacity];
+    float *predictions = new float[node_capacity * metadata->output_dim];
+    float *weights = new float[node_capacity];
+    char *categorical_values = new char[node_capacity*MAX_CHAR_SIZE];
+    int *node_to_leaf_idx = new int[node_capacity];
+    float *leaf_cond_probs = new float[node_capacity];
+    int *parents = new int[node_capacity];
+    int *max_unique_features = new int[node_capacity];
+    for (int i = 0; i < node_capacity; ++i){
         left_children[i] = -1;
         right_children[i] = -1;
         feature_indices[i] = -1;
@@ -71,9 +76,9 @@ shapData* alloc_shap_data(const ensembleMetaData *metadata, const ensembleData *
         node_to_leaf_idx[i] = -1;
     }
 
-    memset(max_unique_features, 0, sizeof(int) * n_leaves * metadata->max_depth);
-    memset(predictions, 0, sizeof(float) * n_leaves * metadata->max_depth * metadata->output_dim);
-    memset(leaf_cond_probs, 0, sizeof(float) * n_leaves * metadata->max_depth);
+    memset(max_unique_features, 0, sizeof(int) * node_capacity);
+    memset(predictions, 0, sizeof(float) * node_capacity * metadata->output_dim);
+    memset(leaf_cond_probs, 0, sizeof(float) * node_capacity);
     // Process the tree using DFS
     while (!node_stack.is_empty()) {
         nodeInfo crnt_node = node_stack.top();

@@ -678,8 +678,10 @@ void Fitter::apply_monotonic_constraints_cpu(
     
     // Get feature indices for this tree (feature_indices[0] is root split)
     int* feature_indices = new int[tree_depth];
+    bool* split_is_numeric = new bool[tree_depth];
     for (int d = 0; d < tree_depth; ++d) {
         feature_indices[d] = edata->feature_data->feature_indices[tree_idx * metadata->max_depth + d];
+        split_is_numeric[d] = edata->feature_data->is_numerics[tree_idx * metadata->max_depth + d];
     }
     
     // Get inequality directions for this tree (from first leaf)
@@ -705,7 +707,13 @@ void Fitter::apply_monotonic_constraints_cpu(
             // CRITICAL: Convert internal feature index to global using reverse mapping
             // feature_indices[d] is the INTERNAL index used by the tree builder
             // We need to map it back to GLOBAL index to compare with constraints
+            // Monotonic constraints apply to numerical splits only.  A categorical
+            // split carries a categorical internal index, so looking it up in
+            // reverse_num_feature_mapping would either alias onto an unrelated
+            // numerical feature or read past the end of that mapping.
+            if (!split_is_numeric[d]) continue;
             int internal_idx = feature_indices[d];
+            if (internal_idx < 0 || internal_idx >= metadata->n_num_features) continue;
             int global_idx = edata->feature_mappings->reverse_num_feature_mapping[internal_idx];
             
             if (global_idx == global_feature_idx) {
@@ -763,6 +771,7 @@ void Fitter::apply_monotonic_constraints_cpu(
     }
     
     delete[] feature_indices;
+    delete[] split_is_numeric;
     delete[] inequality_directions;
     for (int d = 0; d < tree_depth; ++d) {
         delete[] effective_constraints[d];

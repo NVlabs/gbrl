@@ -814,10 +814,16 @@ class MultiGBTLearner(BaseLearner):
                          'verbose': verbose, 'batch_size':
                          self.params.get('distil_batch_size', 2048)}
 
-        distil_optimizer = {'algo': 'SGD', 'init_lr': params.get('distil_lr', 0.1)}
+        # start_idx/stop_idx are required: stop_idx defaults to 0 in the binding
+        # and C++ rejects stop_idx <= 0, which would leave the student with no
+        # optimizer and make it predict only its bias.
+        distil_optimizer = {'algo': 'SGD', 'init_lr': params.get('distil_lr', 0.1),
+                            'start_idx': 0, 'stop_idx': self.params['output_dim']}
         self.student_models = []
         tr_losses = []
-        distil_params = []
+        # Separate name: distil_params above holds the C++ model config and must
+        # not be shadowed by the per-learner results accumulator.
+        out_params = []
         for i in range(self.n_learners):
             student_model = GBRL_CPP(**distil_params)  # type: ignore
             try:
@@ -841,10 +847,10 @@ class MultiGBTLearner(BaseLearner):
                 else:
                     break
             tr_losses.append(tr_loss)
-            distil_params.append(params)
+            out_params.append(params)
             self.student_models.append(student_model)
         self.reset()
-        return tr_losses, distil_params
+        return tr_losses, out_params
 
     def get_matrix_representation(self, features: NumericalData, model_idx: Optional[int] = None) -> \
             Tuple[Union[np.ndarray, List[np.ndarray]], Union[np.ndarray, List[np.ndarray]],

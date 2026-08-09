@@ -587,8 +587,13 @@ class GBTLearner(BaseLearner):
                          'verbose': verbose, 'batch_size':
                          self.params.get('distil_batch_size', 2048)}
         self.student_model = GBRL_CPP(**distil_params)
+        # start_idx/stop_idx are required: stop_idx defaults to 0 in the binding
+        # and C++ rejects stop_idx <= 0, which would leave the student with no
+        # optimizer and make it predict only its bias.
         distil_optimizer = {'algo': 'SGD',
-                            'init_lr': params.get('distil_lr', 0.1)}
+                            'init_lr': params.get('distil_lr', 0.1),
+                            'start_idx': 0,
+                            'stop_idx': self.output_dim}
         try:
             self.student_model.set_optimizer(**distil_optimizer)
         except RuntimeError as e:

@@ -1795,6 +1795,14 @@ void apply_monotonic_constraints_cuda(
                tree_depth * sizeof(bool),
                cudaMemcpyDeviceToHost);
     
+    // Monotonic constraints apply to numerical splits only; copy the per-depth
+    // split types so a categorical split is not looked up in the numerical mapping.
+    bool* h_split_is_numeric = new bool[tree_depth];
+    cudaMemcpy(h_split_is_numeric,
+               edata->feature_data->is_numerics + tree_idx * metadata->max_depth,
+               tree_depth * sizeof(bool),
+               cudaMemcpyDeviceToHost);
+
     // FIX: Copy reverse feature mapping to convert internal->global indices
     int* h_reverse_mapping = new int[metadata->n_num_features];
     cudaMemcpy(h_reverse_mapping,
@@ -1828,6 +1836,7 @@ void apply_monotonic_constraints_cuda(
         
         for (int d = 0; d < tree_depth; ++d) {
             // Convert internal feature index to global using reverse mapping with bounds checks
+            if (!h_split_is_numeric[d]) continue;
             int internal_idx = h_feature_indices[d];
             if (internal_idx < 0 || internal_idx >= metadata->n_num_features) continue;
             
@@ -1897,6 +1906,7 @@ void apply_monotonic_constraints_cuda(
     delete[] h_feature_indices;
     delete[] h_inequality_directions;
     delete[] h_reverse_mapping;
+    delete[] h_split_is_numeric;
     delete[] h_mono_feature_idx;
     delete[] h_mono_output_idx;
     delete[] h_mono_constraint;
