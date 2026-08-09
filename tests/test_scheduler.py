@@ -83,10 +83,12 @@ class TestScheduler(unittest.TestCase):
     def test_linear_scheduler_scales_trees_cpu(self):
         """Prove linear scheduler applies different LRs to each tree on CPU.
         
-        With T=2, init_lr=1.0, stop_lr=0.1:
-        - Tree 0: lr = 0.55
-        - Tree 1: lr = 0.1
-        
+        With T=2, init_lr=1.0, stop_lr=0.1 the schedule is
+        lr(t) = init_lr + clamp(t/T, 0, 1) * (stop_lr - init_lr):
+        - Tree 0: lr = 1.0   (t/T = 0   -> init_lr)
+        - Tree 1: lr = 0.55  (t/T = 0.5 -> midpoint)
+        - Tree 2+: lr = 0.1  (t/T >= 1  -> stop_lr)
+
         We verify the actual predictions match the expected LR scaling.
         """
         optimizer = {
@@ -123,23 +125,16 @@ class TestScheduler(unittest.TestCase):
         pred_tree0 = self._get_tree_predictions(model, 'cpu', 0, 1)
         pred_tree1 = self._get_tree_predictions(model, 'cpu', 1, 2)
         
-        # Tree 0 should have lr=0.55 applied
-        # For samples with X > 0 (indices 2,3): raw gradient points toward 1.0
-        # The tree fits gradient -0.5 (half of 1.0) for these, scaled by 0.55 => 0.55 * -(-0.5 * 2) = 0.55
-        # For simplicity, just verify the predictions are what we expect:
-        # Sample 2,3 should have prediction ~0.55 (lr * leaf_value)
-        
+        # Tree 0 uses init_lr (t/T = 0), so samples 2,3 predict lr * leaf_value = 1.0.
         print("\nCPU Linear Scheduler Test:")
         print(f"  Tree 0 predictions: {pred_tree0.flatten()}")
         print(f"  Tree 1 predictions: {pred_tree1.flatten()}")
-        print("  Expected tree 0 (samples 2,3): ~0.55 (lr=0.55)")
-        print("  Expected tree 1 (samples 2,3): ~0.045 (lr=0.1, reduced residual)")
-        
-        # The key test: Tree 0 samples 2,3 should be exactly 0.55
-        # (with depth=1, bias=0, target=1 for samples 2,3, gradient=-1, leaf=-(-1)=1, pred=lr*1=0.55)
+        print("  Expected tree 0 (samples 2,3): ~1.0 (lr=1.0 = init_lr)")
+
+        # depth=1, bias=0, target=1 for samples 2,3 => gradient=-1, leaf=1, pred=lr*1
         np.testing.assert_allclose(
-            pred_tree0[2:4], [0.55, 0.55], rtol=1e-5,
-            err_msg="Tree 0 positive samples should have lr=0.55 applied"
+            pred_tree0[2:4], [1.0, 1.0], rtol=1e-5,
+            err_msg="Tree 0 positive samples should have lr=init_lr=1.0 applied"
         )
 
     @unittest.skipIf(not cuda_available(), "CUDA not available")
@@ -183,10 +178,10 @@ class TestScheduler(unittest.TestCase):
         print(f"  Tree 0 predictions: {pred_tree0.flatten()}")
         print(f"  Tree 1 predictions: {pred_tree1.flatten()}")
         
-        # Tree 0 samples 2,3 should be exactly 0.55 (lr=0.55 * raw_leaf=1.0)
+        # Tree 0 uses init_lr (t/T = 0): 1.0 * raw_leaf=1.0
         np.testing.assert_allclose(
-            pred_tree0[2:4], [0.55, 0.55], rtol=1e-5,
-            err_msg="GPU: Tree 0 positive samples should have lr=0.55 applied"
+            pred_tree0[2:4], [1.0, 1.0], rtol=1e-5,
+            err_msg="GPU: Tree 0 positive samples should have lr=init_lr=1.0 applied"
         )
 
     def test_constant_scheduler_equal_trees_cpu(self):
