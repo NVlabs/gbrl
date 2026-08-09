@@ -370,16 +370,12 @@ different objects that describe only that tree's contribution, not the whole mod
     # Identity: base_t + phi_t.sum(axis=1) == contribution of tree 0 per sample.
     # This does NOT reconstruct predict(obs); for that, use shap().
 
-Both identities hold exactly for SGD and Adam alike — the numbers always add up.
+Both identities above hold for SGD and Adam.
 
-For **Adam** models, ``shap()`` and ``tree_shap()`` emit a ``RuntimeWarning``
-because the per-feature scores are approximate. Adam's update at each tree depends
-on the gradient history built up by every preceding tree. A fully exact SHAP score
-for feature *i* would require re-running that entire history for every hypothetical
-"what if feature *i* had a different value" — which is not feasible. Instead, GBRL
-holds the Adam state fixed at what it actually was before each tree and computes
-the scores from there. The prediction still reconstructs exactly; only the
-*split of credit across features* is an approximation.
+With SGD a tree's contribution is just its leaf value scaled by the learning rate.
+With Adam it also depends on the optimizer state accumulated by all earlier trees,
+so GBRL replays that state tree by tree and explains each tree using the same state
+the real prediction used.
 
 Learning Rate Schedulers
 ------------------------

@@ -28,7 +28,6 @@ architectures with separate models.
 """
 import json
 import os
-import warnings
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
@@ -623,19 +622,6 @@ class MultiGBTLearner(BaseLearner):
                 "SHAP result would not reconstruct the prediction."
             )
 
-        models_to_check = ([self._cpp_models[model_idx]] if model_idx is not None
-                           else self._cpp_models)
-        optimizers_flat = [o for m in models_to_check for o in m.get_optimizers()]
-        if any(o.get('algo', '').lower() == 'adam' for o in optimizers_flat):
-            warnings.warn(
-                "tree_shap() was called on a model with Adam optimizer(s). "
-                "The numbers add up: base + phi.sum(axis=1) equals the actual contribution "
-                "of tree_idx for each sample. Per-feature scores are approximate because "
-                "GBRL uses the optimizer state from the real path through the trees, not "
-                "from hypothetical alternative paths.",
-                RuntimeWarning, stacklevel=2,
-            )
-
         if isinstance(features, th.Tensor):
             features = features.detach().cpu().numpy()
         num_inputs, cat_inputs = preprocess_features(features)
@@ -685,19 +671,6 @@ class MultiGBTLearner(BaseLearner):
                 "shap() is not supported when student models are attached. "
                 "predict() sums both the main and student ensembles, so a single-model "
                 "SHAP result would not reconstruct the prediction."
-            )
-
-        models_to_check = ([self._cpp_models[model_idx]] if model_idx is not None
-                           else self._cpp_models)
-        optimizers_flat = [o for m in models_to_check for o in m.get_optimizers()]
-        if any(o.get('algo', '').lower() == 'adam' for o in optimizers_flat):
-            warnings.warn(
-                "shap() was called on a model with Adam optimizer(s). "
-                "The numbers add up: base + phi.sum(axis=1) == predict(x). "
-                "Per-feature scores are approximate because GBRL uses the optimizer "
-                "state from the real path through the trees, not from hypothetical "
-                "alternative paths.",
-                RuntimeWarning, stacklevel=2,
             )
 
         if isinstance(features, th.Tensor):
