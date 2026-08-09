@@ -57,6 +57,10 @@ shapData* alloc_shap_data(const ensembleMetaData *metadata, const ensembleData *
     float *predictions = new float[n_leaves * metadata->max_depth * metadata->output_dim];
     float *weights = new float[n_leaves * metadata->max_depth];
     char *categorical_values = new char[(n_leaves * metadata->max_depth)*MAX_CHAR_SIZE];
+    int *node_to_leaf_idx = new int[n_leaves * metadata->max_depth];
+    float *leaf_cond_probs = new float[n_leaves * metadata->max_depth];
+    int *parents = new int[n_leaves * metadata->max_depth];
+    int *max_unique_features = new int[n_leaves * metadata->max_depth];
     for (int i = 0; i < n_leaves * metadata->max_depth; ++i){
         left_children[i] = -1;
         right_children[i] = -1;
@@ -64,15 +68,11 @@ shapData* alloc_shap_data(const ensembleMetaData *metadata, const ensembleData *
         feature_parent_node[i] = -1;
         weights[i] = 1.0f;
         feature_values[i] = INFINITY;
+        node_to_leaf_idx[i] = -1;
     }
-    int *node_to_leaf_idx = new int[n_leaves * metadata->max_depth];
-    float *leaf_cond_probs = new float[n_leaves * metadata->max_depth];
-    int *parents = new int[n_leaves * metadata->max_depth];
-    int *max_unique_features = new int[n_leaves * metadata->max_depth];
 
     memset(max_unique_features, 0, sizeof(int) * n_leaves * metadata->max_depth);
     memset(predictions, 0, sizeof(float) * n_leaves * metadata->max_depth * metadata->output_dim);
-    memset(node_to_leaf_idx, -1, sizeof(int) * n_leaves * metadata->max_depth);
     memset(leaf_cond_probs, 0, sizeof(float) * n_leaves * metadata->max_depth);
     // Process the tree using DFS
     while (!node_stack.is_empty()) {

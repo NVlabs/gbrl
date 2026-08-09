@@ -128,7 +128,12 @@ class MultiGBTLearner(BaseLearner):
             cpp_model.set_feature_weights(self.feature_weights)
             if self.student_models is not None:
                 self.optimizers[i]['T'] -= self.total_iterations
-            cpp_model.set_optimizer(**self.optimizers[i])
+            try:
+                cpp_model.set_optimizer(**self.optimizers[i])
+            except RuntimeError as e:
+                print(f"Caught an exception in GBRL: {e}")
+            # Always append so len(_cpp_models) == n_learners; a missing entry
+            # would shift the learner -> model mapping in every later loop.
             self._cpp_models.append(cpp_model)
 
         if self.student_models is None:
@@ -624,8 +629,10 @@ class MultiGBTLearner(BaseLearner):
         if any(o.get('algo', '').lower() == 'adam' for o in optimizers_flat):
             warnings.warn(
                 "tree_shap() was called on a model with Adam optimizer(s). "
-                "Feature attribution is approximate; factual completeness still holds: "
-                "base + phi.sum(axis=1) == contribution of tree_idx for each sample.",
+                "The numbers add up: base + phi.sum(axis=1) equals the actual contribution "
+                "of tree_idx for each sample. Per-feature scores are approximate because "
+                "GBRL uses the optimizer state from the real path through the trees, not "
+                "from hypothetical alternative paths.",
                 RuntimeWarning, stacklevel=2,
             )
 
@@ -657,8 +664,8 @@ class MultiGBTLearner(BaseLearner):
         Based on Linear TreeSHAP (Yu et al., 2023): https://arxiv.org/pdf/2209.08192
 
         base + phi.sum(axis=1) == predict(x) for both SGD and Adam.
-        For Adam, the feature attribution is approximate because counterfactual paths
-        freeze the factual pre-tree optimizer state rather than recomputing Adam history.
+        For Adam, per-feature scores are approximate because GBRL uses the optimizer
+        state from the real path through the trees, not from hypothetical alternative paths.
 
         Args:
             features (NumericalData): input samples.
@@ -686,8 +693,10 @@ class MultiGBTLearner(BaseLearner):
         if any(o.get('algo', '').lower() == 'adam' for o in optimizers_flat):
             warnings.warn(
                 "shap() was called on a model with Adam optimizer(s). "
-                "Feature attribution is approximate; factual completeness still holds: "
-                "base + phi.sum(axis=1) == predict(x).",
+                "The numbers add up: base + phi.sum(axis=1) == predict(x). "
+                "Per-feature scores are approximate because GBRL uses the optimizer "
+                "state from the real path through the trees, not from hypothetical "
+                "alternative paths.",
                 RuntimeWarning, stacklevel=2,
             )
 

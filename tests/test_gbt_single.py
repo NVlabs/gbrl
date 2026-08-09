@@ -948,12 +948,12 @@ class TestGBTSingle(unittest.TestCase):
             model.tree_shap(0, obs, return_base=True)
 
     def test_overlapping_optimizer_raises(self):
-        """Overlapping optimizer output ranges must raise RuntimeError to the caller."""
+        """Overlapping optimizer output ranges must raise to the caller, not be printed."""
         overlapping = [
             {'algo': 'SGD', 'lr': 0.1, 'start_idx': 0, 'stop_idx': 2},
             {'algo': 'SGD', 'lr': 0.05, 'start_idx': 1, 'stop_idx': 3},
         ]
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(ValueError, 'Overlapping optimizer'):
             GBTModel(
                 input_dim=self.input_dim, output_dim=3,
                 tree_struct={'max_depth': 3, 'n_bins': 64, 'min_data_in_leaf': 1,

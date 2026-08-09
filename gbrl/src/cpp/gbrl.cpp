@@ -1339,12 +1339,6 @@ int GBRL::loadFromFile(const std::string& filename){
             throw std::runtime_error("Optimizer load error");
             return -1;
         }
-        for (const auto &existing : this->opts) {
-            if (opt->start_idx < existing->stop_idx && opt->stop_idx > existing->start_idx) {
-                delete opt;
-                throw std::runtime_error("Loaded model has overlapping optimizer output ranges");
-            }
-        }
         this->opts.push_back(opt);
     }
     file.close();
@@ -1391,6 +1385,31 @@ void GBRL::print_ensemble_metadata(){
 // ---------------------------------------------------------------------------
 // Adam-aware SHAP helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * @brief Reject optimizer configurations that SHAP cannot represent.
+ *
+ * SHAP assumes every output dimension is driven by at most one optimizer:
+ * the SGD path sums a single per-dimension scale and the Adam path keeps one
+ * moment state per dimension.  Overlapping ranges break both.  set_optimizer()
+ * rejects these when they are registered, but models saved before that check
+ * existed can still contain them, so they are re-checked here.
+ */
+static void validate_shap_optimizer_ranges(const std::vector<Optimizer*> &opts)
+{
+    for (size_t i = 0; i < opts.size(); ++i) {
+        for (size_t j = i + 1; j < opts.size(); ++j) {
+            if (opts[i]->start_idx < opts[j]->stop_idx &&
+                opts[j]->start_idx < opts[i]->stop_idx) {
+                std::cerr << "SHAP does not support overlapping optimizer output ranges: ["
+                          << opts[i]->start_idx << ", " << opts[i]->stop_idx << ") overlaps ["
+                          << opts[j]->start_idx << ", " << opts[j]->stop_idx << ")." << std::endl;
+                throw std::runtime_error(
+                    "SHAP is not supported for models with overlapping optimizer output ranges");
+            }
+        }
+    }
+}
 
 /**
  * @brief Accumulate per-sample SHAP base contribution from one tree.
@@ -1568,6 +1587,7 @@ static void advance_adam_state(
 
 float* GBRL::tree_shap(const int tree_idx, const float *obs, const char *categorical_obs, const int n_samples, float *norm, float *base_poly, float *offset, float *base_values){
     valid_tree_idx(tree_idx, this->metadata);
+    validate_shap_optimizer_ranges(this->opts);
     ensembleData *edata_cpu = nullptr;
 #ifdef USE_CUDA
     if (this->device == gpu){
@@ -1654,6 +1674,7 @@ float* GBRL::tree_shap(const int tree_idx, const float *obs, const char *categor
 
 float* GBRL::ensemble_shap(const float *obs, const char *categorical_obs, const int n_samples, float *norm, float *base_poly, float *offset, float *base_values){
     valid_tree_idx(0, this->metadata);
+    validate_shap_optimizer_ranges(this->opts);
     float *shap_values = init_zero_mat((this->metadata->n_num_features + this->metadata->n_cat_features)*this->metadata->output_dim * n_samples);
 
     dataHolder<const float> obs_holder{obs, cpu};

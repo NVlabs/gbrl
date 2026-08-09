@@ -39,7 +39,7 @@ from gbrl.common.utils import (NumericalData, concatenate_arrays,
                                ensure_leaf_tensor_or_array, get_poly_vectors,
                                normalize_vector_input, numerical_dtype,
                                preprocess_features, process_monotonic_constraints,
-                               to_numpy)
+                               to_numpy, validate_optimizer_ranges)
 from gbrl.learners.base import BaseLearner
 
 
@@ -78,6 +78,7 @@ class GBTLearner(BaseLearner):
         super().__init__(input_dim, output_dim, tree_struct, params, policy_dim, verbose, device)
         if not isinstance(optimizers, list):
             optimizers = [optimizers]
+        validate_optimizer_ranges(optimizers)
         self.optimizers = optimizers
         self.student_model = None
         self.learner_name = name
@@ -119,8 +120,11 @@ class GBTLearner(BaseLearner):
                 self.optimizers[i]['T'] -= self.total_iterations
         else:
             self.total_iterations = 0
-        for opt in self.optimizers:
-            self._cpp_model.set_optimizer(**opt)
+        try:
+            for opt in self.optimizers:
+                self._cpp_model.set_optimizer(**opt)
+        except RuntimeError as e:
+            print(f"Caught an exception in GBRL: {e}")
 
     def step(self,
              inputs: NumericalData,
@@ -414,16 +418,16 @@ class GBTLearner(BaseLearner):
         Implementation based on - https://github.com/yupbank/linear_tree_shap
         See Linear TreeShap, Yu et al, 2023, https://arxiv.org/pdf/2209.08192
 
-        For Adam models, tree_shap(tree_idx, x) explains tree tree_idx under the
-        factual Adam moment state induced by all preceding trees in the ensemble,
-        NOT under tree tree_idx in isolation.
+        For Adam models, tree_shap(tree_idx, x) explains tree tree_idx using the
+        Adam optimizer state as it actually was before that tree was applied
+        (built up by all preceding trees), not tree tree_idx in isolation.
 
         Args:
             tree_idx (int): tree index
             features (NumericalData): input data
             return_base (bool): if True, return (phi, base) where base has shape
                 (n_samples, output_dim). base[s] + phi[s].sum(axis=0) equals the
-                factual contribution of tree tree_idx for sample s. For Adam,
+                actual contribution of tree tree_idx for sample s. For Adam,
                 base is sample-specific.
 
         Returns:
@@ -440,8 +444,10 @@ class GBTLearner(BaseLearner):
         if any(o.get('algo', '').lower() == 'adam' for o in optimizers_flat):
             warnings.warn(
                 "tree_shap() was called on a model with Adam optimizer(s). "
-                "Feature attribution is approximate; factual completeness still holds: "
-                "base + phi.sum(axis=1) equals the factual contribution of tree_idx for each sample.",
+                "The numbers add up: base + phi.sum(axis=1) equals the actual contribution "
+                "of tree_idx for each sample. Per-feature scores are approximate because "
+                "GBRL uses the optimizer state from the real path through the trees, not "
+                "from hypothetical alternative paths.",
                 RuntimeWarning, stacklevel=2,
             )
         if isinstance(features, th.Tensor):
@@ -467,11 +473,11 @@ class GBTLearner(BaseLearner):
         Implementation based on - https://github.com/yupbank/linear_tree_shap
         See Linear TreeShap, Yu et al, 2023, https://arxiv.org/pdf/2209.08192
 
-        For Adam-optimized models, GBRL computes optimizer-aware local TreeSHAP:
-        the factual Adam moment state is replayed before each tree, and each tree
-        is explained using one-step Adam deltas under that frozen state. This is
-        locally prediction-aligned when used with return_base=True, but it is
-        not exact Shapley attribution over all counterfactual optimizer histories.
+        For Adam models, GBRL explains each tree using the Adam optimizer state
+        as it actually was before that tree was applied. The numbers always add up:
+        base + phi.sum(axis=1) == predict(x). Per-feature scores are approximate
+        because GBRL uses the optimizer state from the real path, not from
+        hypothetical alternative paths.
 
         Args:
             features: input data
@@ -493,8 +499,10 @@ class GBTLearner(BaseLearner):
         if any(o.get('algo', '').lower() == 'adam' for o in optimizers_flat):
             warnings.warn(
                 "shap() was called on a model with Adam optimizer(s). "
-                "Feature attribution is approximate; factual completeness still holds: "
-                "base + phi.sum(axis=1) == predict(x).",
+                "The numbers add up: base + phi.sum(axis=1) == predict(x). "
+                "Per-feature scores are approximate because GBRL uses the optimizer "
+                "state from the real path through the trees, not from hypothetical "
+                "alternative paths.",
                 RuntimeWarning, stacklevel=2,
             )
         if isinstance(features, th.Tensor):

@@ -26,7 +26,7 @@ This module provides utility functions for data preprocessing, array manipulatio
 tensor operations, optimizer setup, and SHAP value computation used throughout
 the GBRL library.
 """
-from typing import Dict, Sequence, Optional, Tuple, Union
+from typing import Dict, List, Sequence, Optional, Tuple, Union
 
 import numpy as np
 import torch as th
@@ -283,6 +283,36 @@ def setup_optimizer(optimizer: Dict, prefix: str = '') -> Dict:
         f"optimization algo has to be in {APPROVED_OPTIMIZERS}"
     return {k: v for k, v in optimizer.items() if k in VALID_OPTIMIZER_ARGS
             and v is not None}
+
+
+def validate_optimizer_ranges(optimizers: Union[Dict, List[Dict]]) -> None:
+    """Reject optimizers whose output ranges overlap.
+
+    Each output dimension must be covered by at most one optimizer. Overlapping
+    ranges make the per-dimension update ambiguous and produce incorrect SHAP
+    values, so they are rejected before the C++ model is built.
+
+    Args:
+        optimizers (Union[Dict, List[Dict]]): One optimizer dict or a list of them.
+
+    Raises:
+        ValueError: If any two optimizers cover the same output dimension.
+    """
+    if isinstance(optimizers, dict):
+        optimizers = [optimizers]
+    seen = []
+    for opt in optimizers:
+        start, stop = opt.get('start_idx'), opt.get('stop_idx')
+        if start is None or stop is None:
+            continue
+        for prev_start, prev_stop in seen:
+            if start < prev_stop and stop > prev_start:
+                raise ValueError(
+                    f"Overlapping optimizer output ranges are not supported: "
+                    f"[{start}, {stop}) overlaps [{prev_start}, {prev_stop}). "
+                    f"Each output dimension may be covered by at most one optimizer."
+                )
+        seen.append((start, stop))
 
 
 def clip_grad_norm(grads: NumericalData, grad_clip: Optional[float]) ->\
