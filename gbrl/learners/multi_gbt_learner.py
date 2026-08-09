@@ -151,7 +151,12 @@ class MultiGBTLearner(BaseLearner):
             cfg = self.optimizers[i].copy()
             if (self.student_models is not None and
                     str(cfg.get('scheduler', 'Const')).lower() == 'linear'):
-                remaining = cfg['T'] - self.total_iterations
+                horizon = cfg.get('T')
+                if horizon is None:
+                    raise ValueError(
+                        f"Linear scheduler for learner {i} requires 'T' "
+                        f"(total number of iterations)")
+                remaining = horizon - self.total_iterations
                 if remaining <= 0:
                     raise ValueError(
                         f"Linear scheduler for learner {i} has no remaining iterations")

@@ -1887,7 +1887,10 @@ void apply_monotonic_constraints_cuda(
     // Dykstra correction, one vector per depth.
     float* d_z;
     cudaMalloc(&d_z, sizeof(float) * tree_depth * n_leaves_in_tree);
-    for (int out_idx = 0; out_idx < metadata->policy_dim; ++out_idx) {
+    // Any CUDA failure aborts the whole projection: continuing would leave the
+    // leaf values partially projected and therefore non-monotone.
+    bool cuda_failed = false;
+    for (int out_idx = 0; out_idx < metadata->policy_dim && !cuda_failed; ++out_idx) {
         cudaMemset(d_z, 0, sizeof(float) * tree_depth * n_leaves_in_tree);
         bool converged = false;
         for (int pass = 0; pass < MONOTONIC_MAX_PASSES; ++pass) {
@@ -1914,14 +1917,24 @@ void apply_monotonic_constraints_cuda(
                     std::cerr << "ERROR: monotonic_project_kernel launch failed (depth=" << d << ", dir=" << constraint_dir
                               << ", tree_depth=" << tree_depth << ", start_idx=" << start_leaf_idx
                               << ", n_leaves=" << n_leaves_in_tree << "): " << cudaGetErrorString(launch_err) << std::endl;
+                    cuda_failed = true;
+                    break;
                 }
             }
+            if (cuda_failed) break;
             cudaError_t sync_err = cudaDeviceSynchronize();
             if (sync_err != cudaSuccess) {
                 std::cerr << "ERROR: monotonic_project_kernel sync failed: " << cudaGetErrorString(sync_err) << std::endl;
+                cuda_failed = true;
+                break;
             }
             int h_any_change = 0;
-            cudaMemcpy(&h_any_change, d_any_change, sizeof(int), cudaMemcpyDeviceToHost);
+            cudaError_t copy_err = cudaMemcpy(&h_any_change, d_any_change, sizeof(int), cudaMemcpyDeviceToHost);
+            if (copy_err != cudaSuccess) {
+                std::cerr << "ERROR: monotonic change-flag copy failed: " << cudaGetErrorString(copy_err) << std::endl;
+                cuda_failed = true;
+                break;
+            }
             if (!h_any_change) {
                 converged = true;
                 break;
@@ -1930,7 +1943,7 @@ void apply_monotonic_constraints_cuda(
         // Feasibility cleanup: zeroing z before every pass turns the same kernel
         // into a plain projection, restoring exact monotonicity after Dykstra's
         // asymptotic approach.  See fitter.cpp for the rationale.
-        for (int pass = 0; pass < MONOTONIC_MAX_PASSES; ++pass) {
+        for (int pass = 0; pass < MONOTONIC_MAX_PASSES && !cuda_failed; ++pass) {
             cudaMemset(d_z, 0, sizeof(float) * tree_depth * n_leaves_in_tree);
             cudaMemset(d_any_change, 0, sizeof(int));
             for (int d = 0; d < tree_depth; ++d) {
@@ -1940,14 +1953,35 @@ void apply_monotonic_constraints_cuda(
                     edata->leaf_data->values, d, constraint_dir, tree_depth,
                     start_leaf_idx, n_leaves_in_tree, metadata->output_dim, out_idx,
                     d_z + d * n_leaves_in_tree, 0.0f, d_any_change);
+                cudaError_t launch_err = cudaGetLastError();
+                if (launch_err != cudaSuccess) {
+                    std::cerr << "ERROR: monotonic cleanup launch failed (depth=" << d
+                              << "): " << cudaGetErrorString(launch_err) << std::endl;
+                    cuda_failed = true;
+                    break;
+                }
             }
-            cudaDeviceSynchronize();
+            if (cuda_failed) break;
+            cudaError_t sync_err = cudaDeviceSynchronize();
+            if (sync_err != cudaSuccess) {
+                std::cerr << "ERROR: monotonic cleanup sync failed: " << cudaGetErrorString(sync_err) << std::endl;
+                cuda_failed = true;
+                break;
+            }
             int h_changed = 0;
-            cudaMemcpy(&h_changed, d_any_change, sizeof(int), cudaMemcpyDeviceToHost);
+            cudaError_t copy_err = cudaMemcpy(&h_changed, d_any_change, sizeof(int), cudaMemcpyDeviceToHost);
+            if (copy_err != cudaSuccess) {
+                std::cerr << "ERROR: monotonic cleanup flag copy failed: " << cudaGetErrorString(copy_err) << std::endl;
+                cuda_failed = true;
+                break;
+            }
             if (!h_changed) break;
         }
 
-        if (!converged) {
+        if (cuda_failed) {
+            std::cerr << "ERROR: monotonic constraints were not fully applied for tree "
+                      << tree_idx << "; leaf values may not satisfy the constraints." << std::endl;
+        } else if (!converged) {
             std::cerr << "WARNING: monotonic constraint projection did not converge in " << MONOTONIC_MAX_PASSES << " passes for output " << out_idx << std::endl;
         }
     }

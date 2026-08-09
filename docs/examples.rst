@@ -487,15 +487,8 @@ Monotonic constraints enforce that the model output is monotonically increasing 
     values makes every sample's contribution monotone. With SGD the update is a fixed signed
     scale, which preserves the ordering.
 
-    The check is per output dimension, so a model using SGD on some outputs and Adam on others
-    may still constrain the SGD-driven ones:
-
-    .. code-block:: python
-
-        optimizers = [
-            {'algo': 'SGD',  'lr': 0.1,  'start_idx': 0, 'stop_idx': 2},  # constrainable
-            {'algo': 'Adam', 'lr': 0.01, 'start_idx': 2, 'stop_idx': 3},  # not constrainable
-        ]
+    This applies to the whole model: if any optimizer uses Adam, monotonic constraints
+    are rejected. Use SGD for a model that needs constrained outputs.
 
 .. note::
 

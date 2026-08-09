@@ -137,7 +137,11 @@ class GBTLearner(BaseLearner):
             cfg = opt.copy()
             if (self.student_model is not None and
                     str(cfg.get('scheduler', 'Const')).lower() == 'linear'):
-                remaining = cfg['T'] - self.total_iterations
+                horizon = cfg.get('T')
+                if horizon is None:
+                    raise ValueError(
+                        "Linear scheduler requires 'T' (total number of iterations)")
+                remaining = horizon - self.total_iterations
                 if remaining <= 0:
                     raise ValueError(
                         "Linear scheduler has no remaining iterations after distillation")
