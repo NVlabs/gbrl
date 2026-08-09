@@ -729,7 +729,7 @@ void Fitter::apply_monotonic_constraints_cpu(
     // algorithm.
     //
     // For ONE constrained depth the leaf pairs are disjoint, so averaging a
-    // violating pair is already the exact L2 projection (2-point PAVA).  With two
+    // violating pair is already the exact L2 projection (2-point isotonic).  With two
     // or more constrained depths the pair sets overlap: simply cycling through the
     // depths (plain POCS) lands somewhere feasible but NOT at the nearest monotone
     // point, distorting leaf values more than the constraint requires.
@@ -755,7 +755,7 @@ void Fitter::apply_monotonic_constraints_cpu(
         std::fill(z, z + tree_depth * n_leaves, 0.0f);
 
         bool converged = false;
-        for (int pass = 0; pass < PAVA_MAX_PASSES && !converged; ++pass) {
+        for (int pass = 0; pass < MONOTONIC_MAX_PASSES && !converged; ++pass) {
             std::copy(v, v + n_leaves, v_prev);
 
             for (int d = 0; d < tree_depth; ++d) {
@@ -789,14 +789,14 @@ void Fitter::apply_monotonic_constraints_cpu(
             float max_delta = 0.0f;
             for (int i = 0; i < n_leaves; ++i)
                 max_delta = std::max(max_delta, std::fabs(v[i] - v_prev[i]));
-            if (max_delta < PAVA_TOLERANCE) converged = true;
+            if (max_delta < MONOTONIC_TOLERANCE) converged = true;
         }
 
         // Feasibility cleanup.  Dykstra approaches the optimum from outside the
-        // feasible set, so it can stop with violations of order PAVA_TOLERANCE.
+        // feasible set, so it can stop with violations of order MONOTONIC_TOLERANCE.
         // Monotonicity is a hard contract, so run plain projections (z = 0) until
         // nothing moves.  Measured shift away from the optimum is ~1e-6.
-        for (int pass = 0; pass < PAVA_MAX_PASSES; ++pass) {
+        for (int pass = 0; pass < MONOTONIC_MAX_PASSES; ++pass) {
             std::copy(v, v + n_leaves, v_prev);
             for (int d = 0; d < tree_depth; ++d) {
                 int constraint_dir = effective_constraints[d][out_idx];
@@ -821,7 +821,7 @@ void Fitter::apply_monotonic_constraints_cpu(
 
         if (!converged) {
             std::cerr << "WARNING: monotonic constraint projection did not converge in "
-                      << PAVA_MAX_PASSES << " passes for output " << out_idx << std::endl;
+                      << MONOTONIC_MAX_PASSES << " passes for output " << out_idx << std::endl;
         }
     }
 

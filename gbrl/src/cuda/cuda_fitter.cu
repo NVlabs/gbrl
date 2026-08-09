@@ -491,7 +491,7 @@ __global__ void split_score_cosine_cuda(
             right_mean[d] = (r_count[0] > 0.0f) ? right_mean[d] / r_count[0] : 0.0f;
         }
         
-        // Check monotonic constraints and apply PAVA-like pooling if violated
+        // Check monotonic constraints and pool the violating pair if needed
         for (int c = 0; c < n_mono_constraints; ++c) {
             if (mono_feature_idx[c] != feat_idx) continue;
             
@@ -1566,7 +1566,7 @@ void fit_tree_oblivious_cuda(
         free_tree_node(tree_nodes[node_idx]);
     }
 
-    // Apply monotonic constraints using PAVA after all leaves are computed
+    // Apply monotonic constraints by isotonic projection after all leaves are computed
     if (metadata->n_mono_constraints > 0 && depth > 0) {
         apply_monotonic_constraints_cuda(edata, metadata, tree_idx, depth, start_leaf_idx);
     }
@@ -1664,7 +1664,7 @@ void fit_tree_greedy_cuda(
 }
 
 // ============================================================================
-// Monotonic Constraints Implementation (PAVA for Oblivious Trees)
+// Monotonic Constraints Implementation (isotonic projection, oblivious trees)
 // ============================================================================
 
 /**
@@ -1682,31 +1682,33 @@ void fit_tree_greedy_cuda(
  * When multiple monotonic features exist, they define a partial order.
  * We linearize this by treating the monotonic bits as a number and sorting.
  * 
- * Algorithm:
- * 1. Find which depths use monotonic features for a given output
- * 2. Build a linear order on leaves consistent with the partial order
- * 3. Apply PAVA (Pool Adjacent Violators Algorithm) along that order
- * 
- * PAVA for isotonic regression:
- * - Process leaves in order
- * - Maintain a stack of "level sets" (contiguous groups with same adjusted value)
- * - When adding a new element, if it violates monotonicity with the previous level set,
- *   merge them and take the weighted average
- * - Continue until no violations remain
+ * Algorithm (Dykstra's cyclic projection, not classical PAVA):
+ * 1. Find which depths carry a monotonic constraint for a given output.
+ * 2. For each such depth, project onto that depth's constraint set: the leaf pairs
+ *    differing only in that depth's bit are disjoint, so averaging each violating
+ *    pair is already the exact L2 projection for that set.
+ * 3. Cycle over the depths carrying a per-depth Dykstra correction z_d, projecting
+ *    (v + z_d) and folding the residual back into z_d.  Plain cycling would land
+ *    somewhere feasible but not at the nearest monotone point; the corrections make
+ *    it converge to the true isotonic projection (Boyle-Dykstra).
+ * 4. Finish with plain projection passes (z = 0) to clear the sub-tolerance
+ *    violations Dykstra's asymptotic approach can leave behind.
+ *
+ * Classical PAVA - a linear order with a stack of merged level sets - is NOT used;
+ * the leaves form a hypercube partial order, not a chain.
  */
 
 /**
- * @brief Projects one violating leaf pair onto equality (pairwise pooling).
+ * @brief Projects one violating leaf pair onto equality, with Dykstra correction.
  *
- * Despite the name this is NOT textbook PAVA: there is no linear order, no
- * level-set stack and no adjacent-block merging.  Each block handles exactly one
- * pair of leaves differing only in the constrained depth's bit and averages them
- * if they violate the constraint.  The host loop repeats whole passes until one
- * makes no changes.
+ * Each block handles exactly one pair of leaves differing only in the constrained
+ * depth's bit, averaging them if they violate the constraint.  Pairs at a depth are
+ * disjoint, so one thread performs the whole y = v + z_d / v = P(y) / z_d = y - P(y)
+ * update locally with no contention.  The host loop repeats whole passes.
  *
  * Launched as <<<n_planes, 1>>>: one block per leaf pair, one thread per block.
  */
-__global__ void pava_kernel(
+__global__ void monotonic_project_kernel(
     float* __restrict__ values,
     const int constraint_depth,    // Which depth has the constraint we're enforcing
     const int constraint_dir,      // Direction: +1 (increasing) or -1 (decreasing)
@@ -1716,7 +1718,8 @@ __global__ void pava_kernel(
     const int output_dim,
     const int target_output,       // Which output dimension to process
     float* __restrict__ z_d,       // Dykstra correction for this depth (n_leaves_in_tree)
-    int* d_changed                 // Set when any leaf moves by more than the tolerance
+    const float change_tol,        // Movement above which d_changed is raised
+    int* d_changed                 // Set when any leaf moves by more than change_tol
 ) {
     // Each block handles one "plane" of leaves where all other depths are fixed
     // and only the constraint_depth varies
@@ -1725,7 +1728,7 @@ __global__ void pava_kernel(
     
     if (plane_idx >= n_planes) return;
     
-    // Only thread 0 does the work (PAVA is sequential)
+    // One thread per block: this pair's update is sequential
     if (threadIdx.x != 0) return;
     
     // CRITICAL FIX: Use proper bit ordering where depth 0 (root) is MSB
@@ -1781,9 +1784,11 @@ __global__ void pava_kernel(
     z_d[leaf0] = y0 - val0;
     z_d[leaf1] = y1 - val1;
 
-    // Dykstra converges asymptotically, so flag on movement beyond the tolerance
-    // rather than on any change at all.
-    if (fabsf(val0 - v0) > PAVA_TOLERANCE || fabsf(val1 - v1) > PAVA_TOLERANCE)
+    // Dykstra passes use change_tol = MONOTONIC_TOLERANCE (it converges asymptotically,
+    // so exact no-change would never trigger).  The feasibility cleanup passes
+    // change_tol = 0 so it keeps going until every violation is gone, however
+    // small - matching the exact-equality test the CPU cleanup uses.
+    if (fabsf(val0 - v0) > change_tol || fabsf(val1 - v1) > change_tol)
         atomicOr(d_changed, 1);
 }
 
@@ -1871,9 +1876,9 @@ void apply_monotonic_constraints_cuda(
         }
     }
 
-    // Iterative pairwise projection (not textbook PAVA - see fitter.cpp).  Each
+    // Dykstra's cyclic projection (see fitter.cpp for the rationale).  Each
     // block averages one violating leaf pair; whole passes repeat until a pass
-    // makes no changes or PAVA_MAX_PASSES is hit.  A single depth-ordered pass is
+    // makes no changes or MONOTONIC_MAX_PASSES is hit.  A single depth-ordered pass is
     // not sufficient because pooling at one depth can re-introduce violations at
     // a previously corrected depth when several depths are constrained.
     // Only iterate over policy_dim since monotonic constraints only apply to policy outputs.
@@ -1885,13 +1890,13 @@ void apply_monotonic_constraints_cuda(
     for (int out_idx = 0; out_idx < metadata->policy_dim; ++out_idx) {
         cudaMemset(d_z, 0, sizeof(float) * tree_depth * n_leaves_in_tree);
         bool converged = false;
-        for (int pass = 0; pass < PAVA_MAX_PASSES; ++pass) {
+        for (int pass = 0; pass < MONOTONIC_MAX_PASSES; ++pass) {
             cudaMemset(d_any_change, 0, sizeof(int));
             for (int d = 0; d < tree_depth; ++d) {
                 int constraint_dir = effective_constraints[d][out_idx];
                 if (constraint_dir == 0) continue;
 
-                pava_kernel<<<n_planes, 1>>>(
+                monotonic_project_kernel<<<n_planes, 1>>>(
                     edata->leaf_data->values,
                     d,
                     constraint_dir,
@@ -1901,18 +1906,19 @@ void apply_monotonic_constraints_cuda(
                     metadata->output_dim,
                     out_idx,
                     d_z + d * n_leaves_in_tree,
+                    MONOTONIC_TOLERANCE,
                     d_any_change
                 );
                 cudaError_t launch_err = cudaGetLastError();
                 if (launch_err != cudaSuccess) {
-                    std::cerr << "ERROR: pava_kernel launch failed (depth=" << d << ", dir=" << constraint_dir
+                    std::cerr << "ERROR: monotonic_project_kernel launch failed (depth=" << d << ", dir=" << constraint_dir
                               << ", tree_depth=" << tree_depth << ", start_idx=" << start_leaf_idx
                               << ", n_leaves=" << n_leaves_in_tree << "): " << cudaGetErrorString(launch_err) << std::endl;
                 }
             }
             cudaError_t sync_err = cudaDeviceSynchronize();
             if (sync_err != cudaSuccess) {
-                std::cerr << "ERROR: pava_kernel sync failed: " << cudaGetErrorString(sync_err) << std::endl;
+                std::cerr << "ERROR: monotonic_project_kernel sync failed: " << cudaGetErrorString(sync_err) << std::endl;
             }
             int h_any_change = 0;
             cudaMemcpy(&h_any_change, d_any_change, sizeof(int), cudaMemcpyDeviceToHost);
@@ -1924,16 +1930,16 @@ void apply_monotonic_constraints_cuda(
         // Feasibility cleanup: zeroing z before every pass turns the same kernel
         // into a plain projection, restoring exact monotonicity after Dykstra's
         // asymptotic approach.  See fitter.cpp for the rationale.
-        for (int pass = 0; pass < PAVA_MAX_PASSES; ++pass) {
+        for (int pass = 0; pass < MONOTONIC_MAX_PASSES; ++pass) {
             cudaMemset(d_z, 0, sizeof(float) * tree_depth * n_leaves_in_tree);
             cudaMemset(d_any_change, 0, sizeof(int));
             for (int d = 0; d < tree_depth; ++d) {
                 int constraint_dir = effective_constraints[d][out_idx];
                 if (constraint_dir == 0) continue;
-                pava_kernel<<<n_planes, 1>>>(
+                monotonic_project_kernel<<<n_planes, 1>>>(
                     edata->leaf_data->values, d, constraint_dir, tree_depth,
                     start_leaf_idx, n_leaves_in_tree, metadata->output_dim, out_idx,
-                    d_z + d * n_leaves_in_tree, d_any_change);
+                    d_z + d * n_leaves_in_tree, 0.0f, d_any_change);
             }
             cudaDeviceSynchronize();
             int h_changed = 0;
@@ -1942,7 +1948,7 @@ void apply_monotonic_constraints_cuda(
         }
 
         if (!converged) {
-            std::cerr << "WARNING: monotonic constraint projection did not converge in " << PAVA_MAX_PASSES << " passes for output " << out_idx << std::endl;
+            std::cerr << "WARNING: monotonic constraint projection did not converge in " << MONOTONIC_MAX_PASSES << " passes for output " << out_idx << std::endl;
         }
     }
     cudaFree(d_any_change);

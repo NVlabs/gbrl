@@ -403,12 +403,12 @@ py::dict optimizerToDict(const optimizerConfig* conf){
         d["init_lr"] = conf->init_lr;
         d["start_idx"] = conf->start_idx;
         d["stop_idx"] = conf->stop_idx;
-        d["scheduler_func"] = conf->scheduler_func;
+        d["scheduler"] = conf->scheduler_func;
         d["stop_lr"] = conf->stop_lr;
         d["T"] = conf->T;
         d["beta_1"] = conf->beta_1;
         d["beta_2"] = conf->beta_2;
-        d["eps]"] = conf->eps;
+        d["eps"] = conf->eps;
         delete conf;  // Delete the struct pointer if it's no longer neede
     }
     
@@ -1283,7 +1283,18 @@ gbrl.def("get_matrix_representation", [](GBRL &self, py::object &obs, py::object
             if (info.shape.size() != 1 && info.shape.size() != 2)
                 throw std::runtime_error("obs must be a 1-D or 2-D array");
             a.obs_ptr = static_cast<const float*>(info.ptr);
-            if (info.shape.size() == 1) { a.n_num_features = static_cast<int>(info.shape[0]); num_samples = 1; }
+            if (info.shape.size() == 1) {
+                // Same disambiguation as fit()/predict(): a 1-D array is n samples
+                // of a single feature when the model has one numerical feature,
+                // otherwise one sample of n features.
+                if (metadata->n_num_features == 1) {
+                    a.n_num_features = 1;
+                    num_samples = static_cast<int>(info.shape[0]);
+                } else {
+                    a.n_num_features = static_cast<int>(info.shape[0]);
+                    num_samples = 1;
+                }
+            }
             else { a.n_num_features = static_cast<int>(info.shape[1]); num_samples = static_cast<int>(info.shape[0]); }
             a.n_samples = num_samples;
             a.obs_owner = std::move(arr);
@@ -1304,7 +1315,15 @@ gbrl.def("get_matrix_representation", [](GBRL &self, py::object &obs, py::object
                     "categorical_obs must be a C-contiguous NumPy array with dtype S" +
                     std::to_string(MAX_CHAR_SIZE));
             a.cat_obs_ptr = static_cast<const char*>(info.ptr);
-            if (info.shape.size() == 1) { a.n_cat_features = static_cast<int>(info.shape[0]); cat_samples = 1; }
+            if (info.shape.size() == 1) {
+                if (metadata->n_cat_features == 1) {
+                    a.n_cat_features = 1;
+                    cat_samples = static_cast<int>(info.shape[0]);
+                } else {
+                    a.n_cat_features = static_cast<int>(info.shape[0]);
+                    cat_samples = 1;
+                }
+            }
             else { a.n_cat_features = static_cast<int>(info.shape[1]); cat_samples = static_cast<int>(info.shape[0]); }
             if (a.n_samples == 0) a.n_samples = cat_samples;
             a.cat_owner = std::move(arr);

@@ -38,7 +38,9 @@ from gbrl.common.utils import (NumericalData, concatenate_arrays,
                                ensure_leaf_tensor_or_array, get_poly_vectors,
                                normalize_vector_input, numerical_dtype,
                                preprocess_features, process_monotonic_constraints,
-                               to_numpy, validate_monotonic_features_numerical,
+                               get_index_mapping, to_numpy,
+                               validate_monotonic_features_numerical,
+                               validate_monotonic_optimizer_compat,
                                validate_optimizer_ranges)
 from gbrl.learners.base import BaseLearner
 
@@ -79,8 +81,10 @@ class GBTLearner(BaseLearner):
         if not isinstance(optimizers, list):
             optimizers = [optimizers]
         validate_optimizer_ranges(optimizers)
+        validate_monotonic_optimizer_compat(self.monotonic_constraints, optimizers)
         self.optimizers = optimizers
         self.student_model = None
+        self._feature_mapping_installed = False
         self.learner_name = name
 
     def reset(self) -> None:
@@ -92,6 +96,11 @@ class GBTLearner(BaseLearner):
             lrs = self._cpp_model.get_scheduler_lrs()
             for i in range(len(self.optimizers)):
                 self.optimizers[i]['init_lr'] = lrs[i]
+
+        # Re-checked here as well as in __init__: load() builds instances via
+        # __new__ and bypasses __init__, so a model saved by an older version
+        # could otherwise resume training with Adam-driven constraints.
+        validate_monotonic_optimizer_compat(self.monotonic_constraints, self.optimizers)
 
         # Process monotonic constraints first to know size for allocation
         n_mono_constraints = 0
@@ -108,6 +117,7 @@ class GBTLearner(BaseLearner):
         
         # Create C++ model with correct constraint buffer size
         self._cpp_model = GBRL_CPP(**self.params, learner_name=self.learner_name, n_mono_constraints=n_mono_constraints)
+        self._feature_mapping_installed = False
         self._cpp_model.set_feature_weights(self.feature_weights)
         
         # Set monotonic constraint data if provided
@@ -115,27 +125,51 @@ class GBTLearner(BaseLearner):
             feat_idx, out_idx, dirs = mono_data
             self._cpp_model.set_monotonic_constraints(feat_idx, out_idx, dirs)
         
-        if self.student_model is not None:
-            for i in range(len(self.optimizers)):
-                # Only a linear scheduler carries 'T'.  A constant scheduler has
-                # no such key, so the old unconditional subtraction raised
-                # KeyError after distillation.
-                if str(self.optimizers[i].get('scheduler', 'Const')).lower() != 'linear':
-                    continue
-                remaining = self.optimizers[i]['T'] - self.total_iterations
+        if self.student_model is None:
+            self.total_iterations = 0
+
+        # Build the configs handed to C++ as copies.  Writing the reduced horizon
+        # back into self.optimizers would subtract total_iterations again on every
+        # subsequent reset().  Only a linear scheduler carries 'T'; a constant one
+        # has no such key.
+        configs = []
+        for i, opt in enumerate(self.optimizers):
+            cfg = opt.copy()
+            if (self.student_model is not None and
+                    str(cfg.get('scheduler', 'Const')).lower() == 'linear'):
+                remaining = cfg['T'] - self.total_iterations
                 if remaining <= 0:
                     raise ValueError(
                         "Linear scheduler has no remaining iterations after distillation")
-                self.optimizers[i]['T'] = remaining
-        else:
-            self.total_iterations = 0
+                cfg['T'] = remaining
+            configs.append(cfg)
         try:
-            for opt in self.optimizers:
+            for opt in configs:
                 self._cpp_model.set_optimizer(**opt)
         except RuntimeError as exc:
             # No safe fallback: a model missing its optimizer trains nothing and
             # predicts only its bias, so this must reach the caller.
             raise ValueError(f"Invalid GBRL optimizer configuration: {exc}") from exc
+
+    def _ensure_feature_mapping(self, features) -> None:
+        """Compute and install the numerical/categorical feature mapping.
+
+        SHAP maps each split's type-local index through the reverse mappings to
+        recover the original input column.  Those arrays are zero-initialised in
+        C++, so without this every feature collapses onto column 0 -- silently,
+        because completeness is unaffected by moving attribution between columns.
+        Monotonic constraints and feature-weighted scoring read them too.
+
+        Called from both step() and fit(); keyed on the C++ model rather than on
+        total_iterations, because distillation swaps in a fresh model while
+        leaving total_iterations non-zero.
+        """
+        if self.feature_mapping is None:
+            self.feature_mapping = get_index_mapping(features)
+        feature_mapping, numerical_mask = self.feature_mapping
+        validate_monotonic_features_numerical(self.monotonic_constraints, numerical_mask)
+        self._cpp_model.set_feature_mapping(np.ascontiguousarray(feature_mapping),
+                                            np.ascontiguousarray(numerical_mask))
 
     def step(self,
              inputs: NumericalData,
@@ -156,12 +190,9 @@ class GBTLearner(BaseLearner):
             "Invalid gradients type"
 
         super().step(inputs)
-        if self.total_iterations == 0:
-            assert self.feature_mapping is not None, "Feature mapping not set"
-            feature_mapping, numerical_mask = self.feature_mapping
-            validate_monotonic_features_numerical(self.monotonic_constraints, numerical_mask)
-            self._cpp_model.set_feature_mapping(np.ascontiguousarray(feature_mapping),
-                                                np.ascontiguousarray(numerical_mask))
+        if self.total_iterations == 0 or not self._feature_mapping_installed:
+            self._ensure_feature_mapping(inputs)
+            self._feature_mapping_installed = True
 
         if isinstance(grads, tuple):
             grads = concatenate_arrays(grads)
@@ -203,6 +234,11 @@ class GBTLearner(BaseLearner):
         if isinstance(features, th.Tensor):
             features = features.detach().cpu().numpy()
         num_features, cat_features = preprocess_features(features)
+        # fit() must install the mapping too; without it SHAP attributes every
+        # feature to column 0 (see _ensure_feature_mapping).
+        if not self._feature_mapping_installed:
+            self._ensure_feature_mapping(features)
+            self._feature_mapping_installed = True
         targets = to_numpy(targets)
 
         # Handle 1D targets
@@ -301,6 +337,8 @@ class GBTLearner(BaseLearner):
             instance.feature_weights = instance._cpp_model.get_feature_weights()
             instance.device = instance.params['device']
             instance.feature_mapping = instance._cpp_model.get_feature_mapping()
+            # The loaded C++ model already carries its feature mapping.
+            instance._feature_mapping_installed = True
             instance._memory = []
             instance.learner_name = instance._cpp_model.get_learner_name()
             return instance
@@ -602,6 +640,15 @@ class GBTLearner(BaseLearner):
                          'verbose': verbose, 'batch_size':
                          self.params.get('distil_batch_size', 2048)}
         self.student_model = GBRL_CPP(**distil_params)
+        # A raw C++ model starts with zero feature weights and an uninitialised
+        # feature mapping.  Zero weights collapse every split score, so the student
+        # would train on essentially no signal.
+        self.student_model.set_feature_weights(
+            np.ascontiguousarray(self.feature_weights, dtype=numerical_dtype))
+        student_mapping, student_mask = get_index_mapping(obs)
+        self.student_model.set_feature_mapping(np.ascontiguousarray(student_mapping),
+                                               np.ascontiguousarray(student_mask))
+        targets = np.ascontiguousarray(targets, dtype=numerical_dtype)
         # start_idx/stop_idx are required: stop_idx defaults to 0 in the binding
         # and C++ rejects stop_idx <= 0, which would leave the student with no
         # optimizer and make it predict only its bias.

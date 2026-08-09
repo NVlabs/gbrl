@@ -58,12 +58,16 @@
 #define CAT_TYPE TOSTRING(MAX_CHAR_SIZE) "s"
 
 /** @brief Maximum Dykstra passes per output when applying monotonic constraints.
- *  Dykstra converges asymptotically; measured worst case is ~104 passes for 4
- *  constrained depths at depth 6, so this leaves substantial headroom. */
-#define PAVA_MAX_PASSES 256
+ *
+ *  The monotonic projection is Dykstra's cyclic projection method over pairwise
+ *  halfspaces - NOT the classical Pool Adjacent Violators Algorithm, which uses a
+ *  linear order and a stack of level sets.  Dykstra converges asymptotically;
+ *  measured worst case is ~104 passes for 4 constrained depths at depth 6, so this
+ *  leaves substantial headroom. */
+#define MONOTONIC_MAX_PASSES 256
 
 /** @brief Convergence tolerance for the monotonic-constraint projection */
-#define PAVA_TOLERANCE 1e-6f
+#define MONOTONIC_TOLERANCE 1e-6f
 
 /** @brief Forward declaration of Optimizer class */
 class Optimizer;

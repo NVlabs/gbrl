@@ -342,6 +342,62 @@ def validate_monotonic_features_numerical(constraints, numerical_mask) -> None:
         )
 
 
+def validate_monotonic_optimizer_compat(constraints, optimizers) -> None:
+    """Reject monotonic constraints on outputs driven by Adam.
+
+    The projection orders the raw leaf gradients g, but the contribution Adam
+    actually adds is
+
+        delta = -alpha * (b1*m + (1-b1)*g) / (sqrt(b2*v + (1-b2)*g^2) + eps)
+
+    whose derivative w.r.t. g has sign proportional to
+
+        (1-b1)*b2*v - (1-b2)*b1*m*g
+
+    so a larger gradient does not reliably give a larger contribution. m and v are
+    also sample-specific (they depend on the path each sample took through the
+    earlier trees), while leaf values are shared, so no ordering of leaf values can
+    make every sample's contribution monotone. Only SGD, whose transform is a fixed
+    signed scale, preserves the ordering.
+
+    Args:
+        constraints (Dict): feature index -> (direction, output_dims), or None.
+        optimizers (Union[Dict, List[Dict]]): optimizer configuration(s).
+
+    Raises:
+        ValueError: If a constrained output dimension is covered by Adam.
+    """
+    if not constraints:
+        return
+    if isinstance(optimizers, dict):
+        optimizers = [optimizers]
+    adam_dims = set()
+    for opt in optimizers:
+        if str(opt.get('algo', 'SGD')).lower() != 'adam':
+            continue
+        start, stop = opt.get('start_idx'), opt.get('stop_idx')
+        if start is None or stop is None:
+            continue
+        adam_dims.update(range(int(start), int(stop)))
+    if not adam_dims:
+        return
+    offending = {}
+    for feat, spec in constraints.items():
+        outs = spec[1] if isinstance(spec, (tuple, list)) and len(spec) > 1 else []
+        outs = [outs] if isinstance(outs, (int, np.integer)) else list(outs)
+        hit = sorted({int(o) for o in outs} & adam_dims)
+        if hit:
+            offending[int(feat)] = hit
+    if offending:
+        raise ValueError(
+            f"Monotonic constraints are not supported for outputs optimized by Adam "
+            f"(feature -> Adam output dims: {offending}). Adam's update is non-linear "
+            f"in the leaf gradient and depends on per-sample optimizer state, so "
+            f"ordering leaf values does not make predictions monotone. Use SGD for "
+            f"the constrained output dimensions."
+        )
+
+
 def clip_grad_norm(grads: NumericalData, grad_clip: Optional[float]) ->\
       NumericalData:
     """clip per sample gradients according to their norm

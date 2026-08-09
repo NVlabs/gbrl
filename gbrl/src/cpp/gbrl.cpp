@@ -1169,7 +1169,12 @@ float GBRL::fit(dataHolder<float> *obs,
                     }
                 }
                 for (int k = 0; k < n_cat_features; ++k){
-                    training_cat_obs[(i * n_cat_features + k) * MAX_CHAR_SIZE] = categorical_obs->data[(indices[i] * n_cat_features + k) * MAX_CHAR_SIZE];
+                    // Copy the WHOLE fixed-width value: assigning a single byte left
+                    // 127 bytes uninitialised, so categories sharing a first byte
+                    // ("apple"/"apricot") compared as equal or nondeterministically.
+                    memcpy(training_cat_obs + (i * n_cat_features + k) * MAX_CHAR_SIZE,
+                           categorical_obs->data + (indices[i] * n_cat_features + k) * MAX_CHAR_SIZE,
+                           MAX_CHAR_SIZE);
                 }
             }
         } else {

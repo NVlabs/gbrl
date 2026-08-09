@@ -36,7 +36,7 @@ import torch as th
 from gbrl import GBRL_CPP
 from gbrl.common.compression import ParametricActorCompression, TreeCompression
 from gbrl.common.utils import (NumericalData, ensure_leaf_tensor_or_array,
-                               get_poly_vectors, get_tensor_info,
+                               get_index_mapping, get_poly_vectors, get_tensor_info,
                                normalize_vector_input, numerical_dtype,
                                preprocess_features, to_numpy,
                                validate_monotonic_features_numerical)
@@ -105,6 +105,12 @@ class MultiGBTLearner(BaseLearner):
                          policy_dim=policy_dim,
                          verbose=verbose,
                          device=device)
+        # MultiGBTLearner never forwards constraints to its sub-models, so accepting
+        # them would silently train an unconstrained model.  Reject instead.
+        if self.monotonic_constraints:
+            raise ValueError(
+                "Monotonic constraints are not supported by MultiGBTLearner. "
+                "Use GBTLearner, which installs them on its C++ model.")
         self.optimizers = optimizers
         self._cpp_models = None
         self.student_models = None
@@ -140,17 +146,18 @@ class MultiGBTLearner(BaseLearner):
                 params['policy_dim'] = self.policy_dim[i]   # type: ignore
             cpp_model = GBRL_CPP(**params, learner_name=self.learner_names[i])
             cpp_model.set_feature_weights(self.feature_weights)
-            if self.student_models is not None:
-                # Only a linear scheduler carries 'T' (see GBTLearner.reset).
-                sched = str(self.optimizers[i].get('scheduler', 'Const')).lower()
-                if sched == 'linear':
-                    remaining = self.optimizers[i]['T'] - self.total_iterations
-                    if remaining <= 0:
-                        raise ValueError(
-                            f"Linear scheduler for learner {i} has no remaining iterations")
-                    self.optimizers[i]['T'] = remaining
+            # Copy: writing the reduced horizon back would subtract
+            # total_iterations again on every subsequent reset().
+            cfg = self.optimizers[i].copy()
+            if (self.student_models is not None and
+                    str(cfg.get('scheduler', 'Const')).lower() == 'linear'):
+                remaining = cfg['T'] - self.total_iterations
+                if remaining <= 0:
+                    raise ValueError(
+                        f"Linear scheduler for learner {i} has no remaining iterations")
+                cfg['T'] = remaining
             try:
-                cpp_model.set_optimizer(**self.optimizers[i])
+                cpp_model.set_optimizer(**cfg)
             except RuntimeError as exc:
                 # No safe fallback: a learner missing its optimizer trains nothing.
                 raise ValueError(
@@ -856,6 +863,15 @@ class MultiGBTLearner(BaseLearner):
                               'output_dim': output_dim_i,
                               'policy_dim': policy_dim_i}
             student_model = GBRL_CPP(**student_params)  # type: ignore
+            # Mirror GBTLearner.distil(): a raw C++ model starts with zero feature
+            # weights and no feature mapping, so split scores collapse and mixed
+            # numerical/categorical handling is wrong.
+            student_model.set_feature_weights(
+                np.ascontiguousarray(self.feature_weights, dtype=numerical_dtype))
+            student_mapping, student_mask = get_index_mapping(obs)
+            student_model.set_feature_mapping(np.ascontiguousarray(student_mapping),
+                                              np.ascontiguousarray(student_mask))
+            targets[i] = np.ascontiguousarray(targets[i], dtype=numerical_dtype)
             # start_idx/stop_idx are required: stop_idx defaults to 0 in the binding
             # and C++ rejects stop_idx <= 0, which would leave the student with no
             # optimizer and make it predict only its bias.

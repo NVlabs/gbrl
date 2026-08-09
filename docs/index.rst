@@ -17,7 +17,7 @@ The following table summarizes feature availability by tree type and device:
 +============================+=====================+===================+=====================+===================+
 | Tree Fitting               | ✓                   | ✓                 | ✓                   | ✓                 |
 +----------------------------+---------------------+-------------------+---------------------+-------------------+
-| Monotonic Constraints      | ✗                   | ✗                 | ✓ (policy only)     | ✓ (policy only)   |
+| Monotonic Constraints      | ✗                   | ✗                 | ✓ (SGD only)        | ✓ (SGD only)      |
 +----------------------------+---------------------+-------------------+---------------------+-------------------+
 | Linear LR Scheduler        | ✓                   | ✗                 | ✓                   | ✓                 |
 +----------------------------+---------------------+-------------------+---------------------+-------------------+
@@ -29,6 +29,13 @@ The following table summarizes feature availability by tree type and device:
 +----------------------------+---------------------+-------------------+---------------------+-------------------+
 | Control Variates           | ✓                   | ✗                 | ✓                   | ✗                 |
 +----------------------------+---------------------+-------------------+---------------------+-------------------+
+
+.. note::
+
+   Monotonic constraints apply to the output dimensions covered by the optimizer
+   (``start_idx`` to ``stop_idx-1``) and are supported only for outputs optimized with
+   **SGD** — GBRL raises a ``ValueError`` for Adam-driven constrained outputs, and
+   ``MultiGBTLearner`` does not support them at all. See :doc:`examples` for details.
 
 .. toctree::
    :maxdepth: 2
