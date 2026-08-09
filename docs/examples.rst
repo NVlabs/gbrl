@@ -372,10 +372,15 @@ different objects that describe only that tree's contribution, not the whole mod
 
 Both identities above hold for SGD and Adam.
 
-With SGD a tree's contribution is just its leaf value scaled by the learning rate.
-With Adam it also depends on the optimizer state accumulated by all earlier trees,
-so GBRL replays that state tree by tree and explains each tree using the same state
-the real prediction used.
+With SGD a tree's contribution is just its leaf value scaled by the learning rate,
+and ``base`` is the same for every sample by construction.
+
+With Adam a tree's contribution also depends on the optimizer state accumulated by
+all earlier trees. GBRL replays that state tree by tree and holds it fixed while
+explaining the alternative leaves of that tree, so ``base`` is per-sample. The
+returned values reconstruct that sample's own prediction, but they are not the
+exact Shapley values of the full Adam prediction function, because alternative
+earlier-tree histories are not recomputed.
 
 Learning Rate Schedulers
 ------------------------

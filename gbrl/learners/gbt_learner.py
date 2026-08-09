@@ -122,8 +122,10 @@ class GBTLearner(BaseLearner):
         try:
             for opt in self.optimizers:
                 self._cpp_model.set_optimizer(**opt)
-        except RuntimeError as e:
-            print(f"Caught an exception in GBRL: {e}")
+        except RuntimeError as exc:
+            # No safe fallback: a model missing its optimizer trains nothing and
+            # predicts only its bias, so this must reach the caller.
+            raise ValueError(f"Invalid GBRL optimizer configuration: {exc}") from exc
 
     def step(self,
              inputs: NumericalData,
@@ -472,7 +474,7 @@ class GBTLearner(BaseLearner):
             features: input data
             return_base: if True, return (phi, base) where base has shape
                 (n_samples, output_dim) and satisfies base[s] + phi[s].sum(axis=0) == predict(x_s).
-                For Adam, base is sample-specific. For SGD, it is approximately shared.
+                For Adam, base is sample-specific. For SGD, it is shared across samples by construction.
 
         Returns:
             np.ndarray or tuple: shap values, or (shap_values, base_values) if
@@ -579,7 +581,9 @@ class GBTLearner(BaseLearner):
             Tuple[float, Dict]: The final loss and updated parameters.
         """
         num_obs, cat_obs = preprocess_features(obs)
-        distil_params = {'output_dim': self.params['output_dim'],
+        distil_params = {'input_dim': self.input_dim,
+                         'output_dim': self.output_dim,
+                         'policy_dim': self.output_dim,
                          'split_score_func': 'L2',
                          'generator_type': 'Quantile',
                          'use_control_variates': False, 'device': self.device,
@@ -596,8 +600,9 @@ class GBTLearner(BaseLearner):
                             'stop_idx': self.output_dim}
         try:
             self.student_model.set_optimizer(**distil_optimizer)
-        except RuntimeError as e:
-            print(f"Caught an exception in GBRL: {e}")
+        except RuntimeError as exc:
+            raise ValueError(
+                f"Invalid GBRL distillation optimizer configuration: {exc}") from exc
 
         bias = np.mean(targets, axis=0)
         if isinstance(bias, float):

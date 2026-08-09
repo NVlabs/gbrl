@@ -129,10 +129,10 @@ class MultiGBTLearner(BaseLearner):
                 self.optimizers[i]['T'] -= self.total_iterations
             try:
                 cpp_model.set_optimizer(**self.optimizers[i])
-            except RuntimeError as e:
-                print(f"Caught an exception in GBRL: {e}")
-            # Always append so len(_cpp_models) == n_learners; a missing entry
-            # would shift the learner -> model mapping in every later loop.
+            except RuntimeError as exc:
+                # No safe fallback: a learner missing its optimizer trains nothing.
+                raise ValueError(
+                    f"Invalid GBRL optimizer configuration for learner {i}: {exc}") from exc
             self._cpp_models.append(cpp_model)
 
         if self.student_models is None:
@@ -806,30 +806,38 @@ class MultiGBTLearner(BaseLearner):
         assert self._cpp_models is not None and isinstance(self._cpp_models, list), \
             "Model not initialized."
         num_obs, cat_obs = preprocess_features(obs)
-        distil_params = {'output_dim': self.params['output_dim'],
-                         'split_score_func': 'L2',
-                         'generator_type': 'Quantile',
-                         'use_control_variates': False, 'device': self.device,
-                         'max_depth': params.get('distil_max_depth', 6),
-                         'verbose': verbose, 'batch_size':
-                         self.params.get('distil_batch_size', 2048)}
-
-        # start_idx/stop_idx are required: stop_idx defaults to 0 in the binding
-        # and C++ rejects stop_idx <= 0, which would leave the student with no
-        # optimizer and make it predict only its bias.
-        distil_optimizer = {'algo': 'SGD', 'init_lr': params.get('distil_lr', 0.1),
-                            'start_idx': 0, 'stop_idx': self.params['output_dim']}
+        # output_dim / policy_dim are per-learner and are filled inside the loop:
+        # self.output_dim is a list, which the C++ constructor cannot accept.
+        base_distil_params = {'input_dim': self.input_dim,
+                              'split_score_func': 'L2',
+                              'generator_type': 'Quantile',
+                              'use_control_variates': False, 'device': self.device,
+                              'max_depth': params.get('distil_max_depth', 6),
+                              'verbose': verbose, 'batch_size':
+                              self.params.get('distil_batch_size', 2048)}
         self.student_models = []
         tr_losses = []
-        # Separate name: distil_params above holds the C++ model config and must
+        # Separate name: base_distil_params holds the C++ model config and must
         # not be shadowed by the per-learner results accumulator.
         out_params = []
         for i in range(self.n_learners):
-            student_model = GBRL_CPP(**distil_params)  # type: ignore
+            output_dim_i = (self.output_dim[i] if isinstance(self.output_dim, list)
+                            else self.output_dim)
+            student_params = {**base_distil_params,
+                              'output_dim': output_dim_i,
+                              'policy_dim': output_dim_i}
+            student_model = GBRL_CPP(**student_params)  # type: ignore
+            # start_idx/stop_idx are required: stop_idx defaults to 0 in the binding
+            # and C++ rejects stop_idx <= 0, which would leave the student with no
+            # optimizer and make it predict only its bias.
+            distil_optimizer = {'algo': 'SGD', 'init_lr': params.get('distil_lr', 0.1),
+                                'start_idx': 0, 'stop_idx': output_dim_i}
             try:
                 student_model.set_optimizer(**distil_optimizer)
-            except RuntimeError as e:
-                print(f"Caught an exception in GBRL: {e}")
+            except RuntimeError as exc:
+                raise ValueError(
+                    f"Invalid GBRL distillation optimizer configuration "
+                    f"for learner {i}: {exc}") from exc
 
             bias = np.mean(targets[i], axis=0)
             if isinstance(bias, float):

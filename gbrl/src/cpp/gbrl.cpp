@@ -1454,9 +1454,9 @@ static void apply_optimizer_shap_predictions(
 {
     const int out_dim = metadata->output_dim;
 
-    // Pre-compute per-output-dimension SGD scale so that overlapping optimizer
-    // ranges produce the correct additive -lr behaviour (matching predict()).
-    // Adam dimensions are flagged separately and handled per-leaf below.
+    // Pre-compute the per-output-dimension SGD scale.  Overlapping ranges are
+    // rejected before this runs, so at most one optimizer contributes per
+    // dimension.  Adam dimensions are flagged separately and handled per-leaf below.
     std::vector<float> sgd_scale(out_dim, 0.0f);
     std::vector<bool>  dim_is_adam(out_dim, false);
     for (size_t oi = 0; oi < opts.size(); ++oi) {

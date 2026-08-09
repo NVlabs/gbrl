@@ -1295,6 +1295,14 @@ gbrl.def("get_matrix_representation", [](GBRL &self, py::object &obs, py::object
             py::buffer_info info = arr.request();
             if (info.shape.size() != 1 && info.shape.size() != 2)
                 throw std::runtime_error("categorical_obs must be a 1-D or 2-D array");
+            // The tree code advances this pointer in fixed MAX_CHAR_SIZE strides,
+            // so an S1/unicode/object array with the right feature count would
+            // still read past the end of the buffer.  Match the dtype the other
+            // bindings require.
+            if (info.format != CAT_TYPE || info.itemsize != MAX_CHAR_SIZE)
+                throw std::runtime_error(
+                    "categorical_obs must be a C-contiguous NumPy array with dtype S" +
+                    std::to_string(MAX_CHAR_SIZE));
             a.cat_obs_ptr = static_cast<const char*>(info.ptr);
             if (info.shape.size() == 1) { a.n_cat_features = static_cast<int>(info.shape[0]); cat_samples = 1; }
             else { a.n_cat_features = static_cast<int>(info.shape[1]); cat_samples = static_cast<int>(info.shape[0]); }
