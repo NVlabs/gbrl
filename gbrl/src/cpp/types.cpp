@@ -479,6 +479,10 @@ ensembleData* copy_ensemble_data(ensembleData *other_edata, ensembleMetaData *me
     edata->mono_constraints->constraint = new int[metadata->n_mono_constraints];
     data_size += sizeof(int) * metadata->n_mono_constraints;
     memcpy(edata->mono_constraints->constraint, other_edata->mono_constraints->constraint, metadata->n_mono_constraints * sizeof(int));
+    // The arrays were copied, so the active count must follow.  CUDA split
+    // scoring reads this field rather than the metadata copy, so leaving it
+    // at 0 silently disables constraints on a copied model.
+    edata->mono_constraints->n_constraints = metadata->n_mono_constraints;
 
     // Feature mappings
     edata->feature_mappings->reverse_num_feature_mapping = new int[metadata->input_dim];
@@ -599,6 +603,10 @@ ensembleData* copy_compressed_ensemble_data(ensembleData *other_edata, ensembleM
     edata->mono_constraints->constraint = new int[metadata->n_mono_constraints];
     data_size += sizeof(int) * metadata->n_mono_constraints;
     memcpy(edata->mono_constraints->constraint, other_edata->mono_constraints->constraint, metadata->n_mono_constraints * sizeof(int));
+    // The arrays were copied, so the active count must follow.  CUDA split
+    // scoring reads this field rather than the metadata copy, so leaving it
+    // at 0 silently disables constraints on a copied model.
+    edata->mono_constraints->n_constraints = metadata->n_mono_constraints;
     
     metadata->max_trees = n_compressed_trees;
     metadata->max_leaves = n_compressed_leaves;

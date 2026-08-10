@@ -229,31 +229,70 @@ float TreeNode::getSplitScoreWithConstraints(
     // Check if this feature has a monotonic constraint (only for numerical features)
     int constraint_dir = 0;
     int constraint_output_idx = -1;
+    // Collect EVERY constraint on this feature: a feature may be constrained on
+    // several output dimensions, and previously only the first affected scoring.
+    int n_feature_constraints = 0;
     if (is_numeric && mono_constraints != nullptr && n_mono_constraints > 0) {
         for (int c = 0; c < n_mono_constraints; ++c) {
-            if (mono_constraints->feature_idx[c] == global_feature_idx) {
-                constraint_dir = mono_constraints->constraint[c];
-                constraint_output_idx = mono_constraints->output_idx[c];
-                break;
-            }
+            if (mono_constraints->feature_idx[c] == global_feature_idx)
+                ++n_feature_constraints;
         }
     }
-    
-    // If no constraint or categorical, use regular scoring
-    if (constraint_dir == 0 || !is_numeric) {
+
+    if (n_feature_constraints == 0 || !is_numeric) {
         return this->getSplitScore(dataset, split_score_func, split_candidate, min_data_in_leaf);
     }
     
-    // Use constraint-aware scoring (only L2 for now, can extend to Cosine later)
+    // Both score functions are constraint-aware: pool every violating output
+    // dimension first, then evaluate the ordinary score on the pooled means.
     if (split_score_func == L2) {
         return this->splitScoreL2WithConstraint(
-            dataset->obs->data, dataset->build_grads->data, 
-            split_candidate, min_data_in_leaf, constraint_dir, constraint_output_idx
+            dataset->obs->data, dataset->build_grads->data,
+            split_candidate, min_data_in_leaf, global_feature_idx,
+            mono_constraints, n_mono_constraints
         );
-    } else {
-        // For Cosine, fall back to regular scoring for now
-        // TODO: Implement constraint-aware Cosine scoring if needed
-        return this->getSplitScore(dataset, split_score_func, split_candidate, min_data_in_leaf);
+    }
+    return this->splitScoreCosineWithConstraint(
+        dataset->obs->data, dataset->build_grads->data,
+        split_candidate, min_data_in_leaf, global_feature_idx,
+        mono_constraints, n_mono_constraints
+    );
+}
+
+/**
+ * @brief Pool every constrained output dimension that violates its direction.
+ *
+ * Shared by the L2 and Cosine constrained scorers so both use one definition.
+ * left_mean/right_mean hold RAW GRADIENT means while the constraint is about
+ * predictions; SGD contributes delta = -lr * g with lr > 0, so the gradient
+ * order is the reverse of the prediction order:
+ *     increasing  =>  g_left >= g_right
+ *     decreasing  =>  g_left <= g_right
+ * Pooling is count-weighted, matching the count-weighted objectives below.
+ */
+static void pool_constrained_means(
+    float *left_mean, float *right_mean, int n_cols,
+    float left_count_f, float right_count_f,
+    int global_feature_idx,
+    const monotonicConstraints *mono_constraints,
+    const int n_mono_constraints)
+{
+    if (mono_constraints == nullptr) return;
+    const float total = left_count_f + right_count_f;
+    for (int c = 0; c < n_mono_constraints; ++c) {
+        if (mono_constraints->feature_idx[c] != global_feature_idx) continue;
+        const int out_idx = mono_constraints->output_idx[c];
+        if (out_idx < 0 || out_idx >= n_cols) continue;
+        const int dir = mono_constraints->constraint[c];
+        bool violation = (dir == 1)  ? (left_mean[out_idx] < right_mean[out_idx])
+                       : (dir == -1) ? (left_mean[out_idx] > right_mean[out_idx])
+                                     : false;
+        if (!violation) continue;
+        const float pooled = (total > 0.0f)
+            ? (left_count_f * left_mean[out_idx] + right_count_f * right_mean[out_idx]) / total
+            : (left_mean[out_idx] + right_mean[out_idx]) * 0.5f;
+        left_mean[out_idx] = pooled;
+        right_mean[out_idx] = pooled;
     }
 }
 
@@ -262,36 +301,26 @@ float TreeNode::splitScoreL2WithConstraint(
     const float *grads,
     const splitCandidate &split_candidate,
     const int min_data_in_leaf,
-    const int constraint_dir,
-    const int output_idx
+    const int global_feature_idx,
+    const monotonicConstraints *mono_constraints,
+    const int n_mono_constraints
 ) {
     int left_count = 0, right_count = 0;
-    int n_cols = this->output_dim, n_features = this->n_num_features;
+    const int n_features = this->n_num_features, n_cols = this->output_dim;
     const int *_sample_indices = this->sample_indices;
+    float *left_mean = new float[n_cols]();
+    float *right_mean = new float[n_cols]();
 
-    float *left_mean = new float[n_cols]; 
-    float *right_mean = new float[n_cols]; 
-
-    #pragma omp simd
-    for (int d = 0; d < n_cols; ++d) {
-        left_mean[d] = 0;
-        right_mean[d] = 0;
-    }
-    int sample_idx, grad_row;
-
-    // Accumulate sums
     for (int n = 0; n < this->n_samples; ++n) {
-        sample_idx = _sample_indices[n];
-        grad_row = sample_idx * n_cols;
+        int sample_idx = _sample_indices[n];
+        int grad_row = sample_idx * n_cols;
         if (obs[sample_idx * n_features + split_candidate.feature_idx] > split_candidate.feature_value) {
             #pragma omp simd
-            for (int d = 0; d < n_cols; ++d)
-                right_mean[d] += grads[grad_row + d];
+            for (int d = 0; d < n_cols; ++d) right_mean[d] += grads[grad_row + d];
             ++right_count;
         } else {
             #pragma omp simd
-            for (int d = 0; d < n_cols; ++d)
-                left_mean[d] += grads[grad_row + d];
+            for (int d = 0; d < n_cols; ++d) left_mean[d] += grads[grad_row + d];
             ++left_count;
         }
     }
@@ -300,61 +329,94 @@ float TreeNode::splitScoreL2WithConstraint(
         delete[] left_mean;
         delete[] right_mean;
         return -INFINITY;
-    } 
+    }
 
-    float left_count_f = static_cast<float>(left_count);
-    float right_count_f = static_cast<float>(right_count);
-    float left_count_recip = (left_count > 0) ? 1.0f / left_count : 0.0f;
-    float right_count_recip = (right_count > 0) ? 1.0f / right_count_f : 0.0f;
-
-    // Compute means
+    const float left_count_f = static_cast<float>(left_count);
+    const float right_count_f = static_cast<float>(right_count);
     #pragma omp simd
     for (int d = 0; d < n_cols; ++d) {
-        left_mean[d] *= left_count_recip;
-        right_mean[d] *= right_count_recip;
+        left_mean[d] /= left_count_f;
+        right_mean[d] /= right_count_f;
     }
-    
-    // Pool means for the specific output dimension if the constraint is violated.
-    //
-    // NOTE ON SIGN: left_mean/right_mean are means of RAW GRADIENTS, but the
-    // constraint is a statement about PREDICTIONS.  For SGD the tree contributes
-    // delta = -lr * g with lr > 0, so the gradient order is the reverse of the
-    // prediction order:
-    //     increasing  =>  pred_left <= pred_right  =>  g_left >= g_right
-    //     decreasing  =>  pred_left >= pred_right  =>  g_left <= g_right
-    // The comparisons below are therefore inverted relative to the constraint
-    // direction.  (stop_lr > 0 is enforced in Python so the sign cannot flip
-    // partway through a linear schedule.)
-    if (output_idx >= 0 && output_idx < n_cols) {
-        bool violation = false;
-        if (constraint_dir == 1) {
-            // Increasing prediction => gradients must be non-increasing
-            violation = (left_mean[output_idx] < right_mean[output_idx]);
-        } else if (constraint_dir == -1) {
-            // Decreasing prediction => gradients must be non-decreasing
-            violation = (left_mean[output_idx] > right_mean[output_idx]);
-        }
-        
-        if (violation) {
-            // Count-weighted, matching this function's own count-weighted
-            // objective below and the CUDA scorer.  An arithmetic mean is only
-            // the constrained optimum when the two children are equal-sized.
-            float total_count = left_count_f + right_count_f;
-            float pooled = (total_count > 0.0f)
-                ? (left_count_f * left_mean[output_idx] + right_count_f * right_mean[output_idx]) / total_count
-                : (left_mean[output_idx] + right_mean[output_idx]) * 0.5f;
-            left_mean[output_idx] = pooled;
-            right_mean[output_idx] = pooled;
-        }
+
+    pool_constrained_means(left_mean, right_mean, n_cols, left_count_f, right_count_f,
+                           global_feature_idx, mono_constraints, n_mono_constraints);
+
+    float left_mean_norm = 0.0f, right_mean_norm = 0.0f;
+    #pragma omp simd
+    for (int d = 0; d < n_cols; ++d) {
+        left_mean_norm += left_mean[d] * left_mean[d];
+        right_mean_norm += right_mean[d] * right_mean[d];
     }
-    
-    // Compute score using (possibly pooled) means
-    float left_mean_norm = squared_norm(left_mean, n_cols);
-    float right_mean_norm = squared_norm(right_mean, n_cols);
+    const float split_score = left_count_f * left_mean_norm + right_count_f * right_mean_norm;
+
     delete[] left_mean;
     delete[] right_mean;
-    
-    float split_score = left_count_f * left_mean_norm + right_count_f * right_mean_norm;
+    return split_score;
+}
+
+float TreeNode::splitScoreCosineWithConstraint(
+    const float *obs,
+    const float *grads,
+    const splitCandidate &split_candidate,
+    const int min_data_in_leaf,
+    const int global_feature_idx,
+    const monotonicConstraints *mono_constraints,
+    const int n_mono_constraints
+) {
+    int left_count = 0, right_count = 0;
+    const int n_features = this->n_num_features, n_cols = this->output_dim;
+    const int *_sample_indices = this->sample_indices;
+    int *left_indices = new int[this->n_samples];
+    int *right_indices = new int[this->n_samples];
+    float *left_mean = new float[n_cols]();
+    float *right_mean = new float[n_cols]();
+
+    for (int n = 0; n < this->n_samples; ++n) {
+        int sample_idx = _sample_indices[n];
+        int grad_row = sample_idx * n_cols;
+        if (obs[sample_idx * n_features + split_candidate.feature_idx] > split_candidate.feature_value) {
+            #pragma omp simd
+            for (int d = 0; d < n_cols; ++d) right_mean[d] += grads[grad_row + d];
+            right_indices[right_count] = sample_idx;
+            ++right_count;
+        } else {
+            #pragma omp simd
+            for (int d = 0; d < n_cols; ++d) left_mean[d] += grads[grad_row + d];
+            left_indices[left_count] = sample_idx;
+            ++left_count;
+        }
+    }
+
+    if (left_count < min_data_in_leaf || right_count < min_data_in_leaf) {
+        delete[] left_mean;
+        delete[] right_mean;
+        delete[] left_indices;
+        delete[] right_indices;
+        return -INFINITY;
+    }
+
+    const float left_count_f = static_cast<float>(left_count);
+    const float right_count_f = static_cast<float>(right_count);
+    #pragma omp simd
+    for (int d = 0; d < n_cols; ++d) {
+        left_mean[d] /= left_count_f;
+        right_mean[d] /= right_count_f;
+    }
+
+    // Pool BEFORE scoring so the numerator and denominator inside cosine_score
+    // describe the same child vectors.
+    pool_constrained_means(left_mean, right_mean, n_cols, left_count_f, right_count_f,
+                           global_feature_idx, mono_constraints, n_mono_constraints);
+
+    const float split_score = cosine_score(right_indices, left_indices, grads,
+                                           right_mean, left_mean,
+                                           right_count, left_count, n_cols);
+
+    delete[] left_mean;
+    delete[] right_mean;
+    delete[] left_indices;
+    delete[] right_indices;
     return split_score;
 }
 

@@ -169,7 +169,7 @@ class GBTLearner(BaseLearner):
         leaving total_iterations non-zero.
         """
         if self.feature_mapping is None:
-            self.feature_mapping = get_index_mapping(features)
+            self.feature_mapping = get_index_mapping(self._mapping_input(features))
         feature_mapping, numerical_mask = self.feature_mapping
         validate_monotonic_features_numerical(self.monotonic_constraints, numerical_mask)
         self._cpp_model.set_feature_mapping(np.ascontiguousarray(feature_mapping),
@@ -252,14 +252,15 @@ class GBTLearner(BaseLearner):
         else:
             targets = targets.reshape((len(targets), self.params['output_dim']))
 
+        # Accumulate the delta rather than assigning: after distillation the main
+        # C++ model restarts at zero trees while total_iterations deliberately
+        # keeps the teacher's history, so assigning would discard it.
+        iters_before = self._cpp_model.get_iteration()
         loss = self._cpp_model.fit(num_features, cat_features,
                                    targets.astype(numerical_dtype),
                                    iterations, shuffle, loss_type)
         self.iteration = self._cpp_model.get_iteration()
-        # Keep total_iterations in step with the C++ model: reset() derives the
-        # remaining linear-scheduler horizon from it, and fit() previously left
-        # it at 0 no matter how many trees were built.
-        self.total_iterations = self.iteration
+        self.total_iterations += self.iteration - iters_before
         return loss
 
     def save(self, filename: str) -> None:
@@ -345,10 +346,36 @@ class GBTLearner(BaseLearner):
             instance.feature_weights = instance._cpp_model.get_feature_weights()
             instance.device = instance.params['device']
             instance.feature_mapping = instance._cpp_model.get_feature_mapping()
-            # The loaded C++ model already carries its feature mapping.
+            # Models trained by versions whose fit() never installed a mapping carry
+            # an all-zero one.  Trusting it makes SHAP attribute every feature to
+            # column 0 -- invisibly, since additivity is unaffected by moving
+            # attribution between columns.  Detect that and force a rebuild from
+            # the next batch instead.
             instance._feature_mapping_installed = True
-            # Monotonic constraints are not serialized; a loaded model has none.
+            if instance.input_dim > 1 and instance.feature_mapping is not None:
+                mapping = np.asarray(instance.feature_mapping[0])
+                if mapping.size == instance.input_dim and not np.any(mapping):
+                    instance.feature_mapping = None
+                    instance._feature_mapping_installed = False
+            # Rebuild the Python constraint dict from the serialized arrays so
+            # reset()/distil() recreate a model with the same constraints.
             instance.monotonic_constraints = None
+            if int(metadata.get('n_mono_constraints', 0)) > 0:
+                feats, outs, dirs = instance._cpp_model.get_monotonic_constraints()
+                restored = {}
+                for f, o, d in zip(feats.tolist(), outs.tolist(), dirs.tolist()):
+                    direction = 'increasing' if d == 1 else 'decreasing'
+                    if f in restored:
+                        # Same feature, more output dims: extend the existing entry.
+                        prev_dir, prev_outs = restored[f]
+                        if prev_dir != direction:
+                            raise RuntimeError(
+                                f"Loaded model has conflicting monotonic directions "
+                                f"for feature {f}")
+                        prev_outs.append(o)
+                    else:
+                        restored[f] = (direction, [o])
+                instance.monotonic_constraints = restored
             instance._memory = []
             instance.learner_name = instance._cpp_model.get_learner_name()
             return instance
@@ -500,6 +527,13 @@ class GBTLearner(BaseLearner):
                 "predict() sums both the main and student ensembles, so a single-model "
                 "SHAP result would not reconstruct the prediction."
             )
+        if not self._feature_mapping_installed:
+            raise RuntimeError(
+                "This model has no valid feature mapping, so SHAP cannot tell which "
+                "input column each split belongs to and would attribute everything "
+                "to column 0. It was most likely trained by an older version whose "
+                "fit() did not install one. Call step() or fit() once with a "
+                "representative batch to rebuild it.")
         if isinstance(features, th.Tensor):
             features = features.detach().cpu().numpy()
         num_features, cat_features = preprocess_features(features)
@@ -545,6 +579,13 @@ class GBTLearner(BaseLearner):
                 "predict() sums both the main and student ensembles, so a single-model "
                 "SHAP result would not reconstruct the prediction."
             )
+        if not self._feature_mapping_installed:
+            raise RuntimeError(
+                "This model has no valid feature mapping, so SHAP cannot tell which "
+                "input column each split belongs to and would attribute everything "
+                "to column 0. It was most likely trained by an older version whose "
+                "fit() did not install one. Call step() or fit() once with a "
+                "representative batch to rebuild it.")
         if isinstance(features, th.Tensor):
             features = features.detach().cpu().numpy()
         num_features, cat_features = preprocess_features(features)

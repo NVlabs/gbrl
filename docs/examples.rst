@@ -516,6 +516,11 @@ Monotonic constraints are enforced through two mechanisms:
    isotonic projection. A short cleanup phase then clears any residual violation left by
    Dykstra's asymptotic convergence.
 
+   Dykstra runs up to a fixed pass limit. The returned leaf values are always monotone;
+   they are the closest monotone values provided that phase converged, which it does in
+   the large majority of cases. If the limit is reached, GBRL emits a warning and the
+   result is monotone but only approximately nearest.
+
 **Practical Trade-offs:**
 
 - Split search may be slower due to constraint checking and mean pooling during scoring

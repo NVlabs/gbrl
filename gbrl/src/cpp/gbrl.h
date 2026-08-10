@@ -34,6 +34,7 @@
 
 #include <string>
 #include <tuple>
+#include <vector>
 
 #include "node.h"
 #include "optimizer.h"
@@ -418,6 +419,17 @@ class GBRL {
         void set_feature_mapping(const int *feature_mapping, const bool *mapping_numerics, const int input_dim);
         
         void set_monotonic_constraints(const int *feature_indices, const int *output_idx, const int *constraint, const int n_constraints);
+
+        /**
+         * @brief Read back the monotonic constraints into host buffers.
+         *
+         * Copies n_mono_constraints entries into each output vector, from device
+         * memory when running on GPU.  Needed so Python can reconstruct its
+         * constraint dictionary after loading a model.
+         */
+        void get_monotonic_constraints(std::vector<int> &feature_indices,
+                                       std::vector<int> &output_idx,
+                                       std::vector<int> &constraint);
         /**
          * @brief Get current bias term
          * 

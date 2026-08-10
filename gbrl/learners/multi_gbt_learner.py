@@ -119,6 +119,9 @@ class MultiGBTLearner(BaseLearner):
         self._cpp_models = None
         self.student_models = None
         self._feature_mapping_installed = False
+        # Cumulative scheduler steps per learner.  reset() replaces the C++ models,
+        # so their local iteration counts cannot carry history across resets.
+        self._consumed_steps = [0] * n_learners
         self.n_learners = n_learners
 
         # Handle learner names
@@ -142,7 +145,11 @@ class MultiGBTLearner(BaseLearner):
                         f"Expected exactly one optimizer for learner {i}, got {len(lrs)}")
                 self.optimizers[i]['init_lr'] = float(lrs[0])
 
-        old_models = self._cpp_models if self._cpp_models else None
+        # Fold this generation's trees into the persistent counts before the
+        # models are replaced.
+        if self._cpp_models:
+            for i in range(self.n_learners):
+                self._consumed_steps[i] += self._cpp_models[i].get_iteration()
         self._cpp_models = []
         # Fresh C++ models carry no feature mapping.
         self._feature_mapping_installed = False
@@ -164,12 +171,10 @@ class MultiGBTLearner(BaseLearner):
                     raise ValueError(
                         f"Linear scheduler for learner {i} requires 'T' "
                         f"(total number of iterations)")
-                # Per-model, not the shared total: sub-models trained with
-                # model_idx build different numbers of trees, so one global
-                # count cannot represent every learner's schedule.
-                trained_i = (old_models[i].get_iteration()
-                             if old_models is not None else self.total_iterations)
-                remaining = horizon - trained_i
+                # Persistent per-learner count: old_models are about to be
+                # discarded, so a later reset() would otherwise see only the
+                # trees built since the previous reset.
+                remaining = horizon - self._consumed_steps[i]
                 if remaining <= 0:
                     raise ValueError(
                         f"Linear scheduler for learner {i} has no remaining iterations")
@@ -196,7 +201,7 @@ class MultiGBTLearner(BaseLearner):
         total_iterations non-zero.
         """
         if self.feature_mapping is None:
-            self.feature_mapping = get_index_mapping(inputs)
+            self.feature_mapping = get_index_mapping(self._mapping_input(inputs))
         feature_mapping, numerical_mask = self.feature_mapping
         validate_monotonic_features_numerical(self.monotonic_constraints, numerical_mask)
         for model in self._cpp_models:
@@ -451,6 +456,7 @@ class MultiGBTLearner(BaseLearner):
             instance.feature_weights = instance._cpp_models[0].get_feature_weights()
             instance.feature_mapping = instance._cpp_models[0].get_feature_mapping()
             instance._feature_mapping_installed = True
+            instance._consumed_steps = [m.get_iteration() for m in instance._cpp_models]
             instance._cpp_model = None   # set by BaseLearner.__init__; unused here
             instance.learner_names = [m.get_learner_name() for m in instance._cpp_models]
             # Monotonic constraints are not serialized; a loaded model has none.

@@ -331,6 +331,28 @@ void GBRL::set_feature_mapping(const int *feature_mapping, const bool *mapping_n
 }
 
 
+void GBRL::get_monotonic_constraints(std::vector<int> &feature_indices,
+                                     std::vector<int> &output_idx,
+                                     std::vector<int> &constraint){
+    const int n = this->metadata->n_mono_constraints;
+    feature_indices.assign(n, 0);
+    output_idx.assign(n, 0);
+    constraint.assign(n, 0);
+    if (n <= 0) return;
+#ifdef USE_CUDA
+    if (this->device == gpu){
+        cudaMemcpy(feature_indices.data(), this->edata->mono_constraints->feature_idx, sizeof(int)*n, cudaMemcpyDeviceToHost);
+        cudaMemcpy(output_idx.data(), this->edata->mono_constraints->output_idx, sizeof(int)*n, cudaMemcpyDeviceToHost);
+        cudaMemcpy(constraint.data(), this->edata->mono_constraints->constraint, sizeof(int)*n, cudaMemcpyDeviceToHost);
+    }
+#endif
+    if (this->device == cpu){
+        memcpy(feature_indices.data(), this->edata->mono_constraints->feature_idx, sizeof(int)*n);
+        memcpy(output_idx.data(), this->edata->mono_constraints->output_idx, sizeof(int)*n);
+        memcpy(constraint.data(), this->edata->mono_constraints->constraint, sizeof(int)*n);
+    }
+}
+
 void GBRL::set_monotonic_constraints(const int *feature_indices, const int *output_idx, const int *constraint, const int n_constraints){
     // Guard against buffer overflow: n_constraints is validated at Python layer
     // and buffers are pre-allocated with sufficient capacity during metadata allocation
@@ -1328,6 +1350,11 @@ int GBRL::loadFromFile(const std::string& filename){
     this->metadata->max_leaves_batch = TREES_BATCH * (1 << this->metadata->max_depth);
 
     this->edata = load_ensemble_data(file, this->metadata);
+    // load_ensemble_data allocates mono_constraints with n_constraints = 0 and
+    // never restores it.  CUDA split scoring reads this field (not the metadata
+    // copy), so without this a loaded constrained model scores as unconstrained.
+    if (this->edata->mono_constraints != nullptr)
+        this->edata->mono_constraints->n_constraints = this->metadata->n_mono_constraints;
 
     for (size_t i = 0; i < this->opts.size(); i++)
         delete this->opts[i];

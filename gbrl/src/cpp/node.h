@@ -199,8 +199,35 @@ class TreeNode {
             const float *grads,
             const splitCandidate &split_candidate,
             const int min_data_in_leaf,
-            const int constraint_dir,
-            const int output_idx
+            const int global_feature_idx,
+            const monotonicConstraints *mono_constraints,
+            const int n_mono_constraints
+        );
+
+        /**
+         * @brief Score numerical split using cosine similarity, honouring every
+         *        monotonic constraint on this feature.
+         *
+         * Violating output dimensions are pooled before scoring so the cosine
+         * numerator and denominator describe the same child vectors.
+         *
+         * @param obs Numerical observations
+         * @param grads Gradient values
+         * @param split_candidate Split to evaluate
+         * @param min_data_in_leaf Minimum samples per leaf
+         * @param global_feature_idx Original input column of this split
+         * @param mono_constraints Constraint arrays (may be nullptr)
+         * @param n_mono_constraints Number of constraints
+         * @return Cosine split score with pooled constrained dimensions
+         */
+        float splitScoreCosineWithConstraint(
+            const float *obs,
+            const float *grads,
+            const splitCandidate &split_candidate,
+            const int min_data_in_leaf,
+            const int global_feature_idx,
+            const monotonicConstraints *mono_constraints,
+            const int n_mono_constraints
         );
         
         /**

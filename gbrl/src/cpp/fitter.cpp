@@ -95,6 +95,13 @@ void Fitter::step_cpu(dataSet *dataset, ensembleData *edata, ensembleMetaData *m
     dataHolder<float> build_grads_holder{build_grads, cpu};
     dataset->build_grads = &build_grads_holder; 
     
+    // Snapshot before the tree is appended: the projection below can throw, and
+    // the ensemble counts are already advanced by the fit_*_tree call.  Without
+    // this the model would keep a tree that failed its constraints while
+    // iteration stayed behind, leaving n_trees and iteration disagreeing.
+    const int trees_before_step = metadata->n_trees;
+    const int leaves_before_step = metadata->n_leaves;
+
     int added_leaves = 0;
     if (metadata->grow_policy == GREEDY)
         added_leaves = Fitter::fit_greedy_tree(dataset, edata, metadata, generator);
@@ -108,7 +115,23 @@ void Fitter::step_cpu(dataSet *dataset, ensembleData *edata, ensembleMetaData *m
         int tree_depth = edata->ensemble_info->depths[tree_idx];
         int start_leaf_idx = edata->ensemble_info->tree_indices[tree_idx];
         if (tree_depth > 0) {
-            Fitter::apply_monotonic_constraints_cpu(edata, metadata, tree_idx, tree_depth, start_leaf_idx);
+            try {
+                Fitter::apply_monotonic_constraints_cpu(edata, metadata, tree_idx, tree_depth, start_leaf_idx);
+            } catch (...) {
+                // Un-publish the tree, then release this call's temporaries since
+                // the cleanup below is skipped by the unwind.
+                metadata->n_trees = trees_before_step;
+                metadata->n_leaves = leaves_before_step;
+                if (indices != nullptr) {
+                    for (int i = 0; i < metadata->n_num_features; ++i)
+                        delete[] indices[i];
+                    delete[] indices;
+                }
+                delete[] build_grads;
+                if (norm_grads != nullptr)
+                    delete[] norm_grads;
+                throw;
+            }
         }
     }
 
@@ -241,7 +264,16 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
             int tree_depth = edata->ensemble_info->depths[tree_idx];
             int start_leaf_idx = edata->ensemble_info->tree_indices[tree_idx];
             if (tree_depth > 0) {
-                Fitter::apply_monotonic_constraints_cpu(edata, metadata, tree_idx, tree_depth, start_leaf_idx);
+                // Roll the tree back if the projection rejects it (see step_cpu).
+                const int trees_before = metadata->n_trees - 1;
+                const int leaves_before = metadata->n_leaves - added_leaves;
+                try {
+                    Fitter::apply_monotonic_constraints_cpu(edata, metadata, tree_idx, tree_depth, start_leaf_idx);
+                } catch (...) {
+                    metadata->n_trees = trees_before;
+                    metadata->n_leaves = leaves_before;
+                    throw;
+                }
             }
         }
         
@@ -847,7 +879,15 @@ void Fitter::apply_monotonic_constraints_cpu(
         for (int i = 0; i < n_leaves; ++i)
             edata->leaf_data->values[(start_leaf_idx + i) * output_dim + out_idx] = v[i];
 
-        (void)converged;
+        // Dykstra converges to the NEAREST monotone point only if it converged.
+        // If it hit the pass limit the cleanup phase still guarantees a feasible
+        // result, but it is no longer provably the closest one.
+        if (!converged) {
+            std::cerr << "WARNING: monotonic projection for output " << out_idx
+                      << " reached the " << MONOTONIC_MAX_PASSES
+                      << "-pass limit; leaf values are monotone but may not be the"
+                         " closest monotone values" << std::endl;
+        }
     }
 
     delete[] v;

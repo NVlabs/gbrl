@@ -28,6 +28,7 @@
  */
 
 #define PYBIND11_DETAILED_ERROR_MESSAGES
+#include <cstring>
 #include <pybind11/pybind11.h>
 #include <pybind11/numpy.h>
 #ifdef USE_CUDA
@@ -329,6 +330,7 @@ py::dict metadataToDict(const ensembleMetaData* metadata){
         d["max_leaves"] = metadata->max_leaves;
         d["max_trees_batch"] = metadata->max_trees_batch;
         d["max_leaves_batch"] = metadata->max_leaves_batch;
+        d["n_mono_constraints"] = metadata->n_mono_constraints;
     }
     return d;
 }
@@ -726,6 +728,18 @@ PYBIND11_MODULE(gbrl_cpp, m) {
     // Configures per-feature monotonicity constraints: each feature can be constrained
     // to be monotonically increasing (+1) or decreasing (-1) for specific output dimensions.
     // Populates internal constraint arrays used during tree fitting and prediction.
+    gbrl.def("get_monotonic_constraints", [](GBRL &self) -> py::tuple {
+        std::vector<int> feat, out, dirs;
+        self.get_monotonic_constraints(feat, out, dirs);
+        auto to_arr = [](const std::vector<int> &v) {
+            py::array_t<int> a(static_cast<py::ssize_t>(v.size()));
+            if (!v.empty())
+                std::memcpy(a.mutable_data(), v.data(), v.size() * sizeof(int));
+            return a;
+        };
+        return py::make_tuple(to_arr(feat), to_arr(out), to_arr(dirs));
+    }, "Return (feature_indices, output_indices, directions) for the monotonic constraints");
+
     gbrl.def("set_monotonic_constraints", [](GBRL &self, const py::array_t<int> &feature_indices, const py::array_t<int> &output_indices, const py::array_t<int>& constraints) {
         if (!feature_indices.attr("flags").attr("c_contiguous").cast<bool>()) {
             throw std::runtime_error("feature_indices must be C-contiguous");

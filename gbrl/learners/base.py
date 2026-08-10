@@ -135,10 +135,22 @@ class BaseLearner(ABC):
         """Resets the model, reinitializing internal states and parameters."""
         pass
 
+    def _mapping_input(self, inputs: NumericalData) -> NumericalData:
+        """Normalize input shape before deriving the feature mapping.
+
+        get_index_mapping() reads a 1-D array as one row of many features. For a
+        single-feature model, (n_samples,) means many samples of one feature, so
+        without this the mapping is built with length n_samples and C++ rejects
+        it against input_dim == 1.
+        """
+        if getattr(inputs, 'ndim', None) == 1 and self.input_dim == 1:
+            return inputs.reshape(-1, 1)
+        return inputs
+
     def step(self, inputs: NumericalData, *args, **kwargs) -> None:
         """Performs a single update step using provided gradients."""
         if self.feature_mapping is None:
-            self.feature_mapping = get_index_mapping(inputs)
+            self.feature_mapping = get_index_mapping(self._mapping_input(inputs))
 
     @abstractmethod
     def fit(self, *args, **kwargs) -> Union[float, List[float]]:
