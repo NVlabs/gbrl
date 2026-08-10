@@ -572,6 +572,14 @@ class GBRL {
         deviceType device = unspecified;    /**< Current compute device */
         bool parallel_predict = true;       /**< Enable parallel prediction */
         std::string learner_name = "GBRL";  /**< Name identifier for this learner */
+        /** @brief Row where the next fit() starts taking mini-batches.
+         *
+         *  Kept on the model rather than local to fit_cpu so repeated fit()
+         *  calls keep walking the data instead of restarting at row 0, which
+         *  over-trained the first batches.  Deliberately not serialized: a
+         *  loaded model starts a fresh pass. Only the CPU path batches; the
+         *  CUDA path always fits on the full dataset. */
+        int batch_cursor = 0;
         
 #ifdef USE_CUDA
         SGDOptimizerGPU** cuda_opt = nullptr;  /**< GPU optimizers */

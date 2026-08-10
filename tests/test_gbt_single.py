@@ -1139,6 +1139,11 @@ class TestRepeatedFit(unittest.TestCase):
     prediction a second time. Splitting a run into two calls therefore produced
     a different model from doing it in one, and distillation - which calls fit()
     repeatedly on the same student - trained its later chunks on wrong targets.
+
+    The mini-batch cursor is part of this: it used to be local to fit_cpu(), so
+    every call restarted at row 0 and the first batches were trained on far more
+    than the last. It now lives on the model, so a split run walks the same batch
+    sequence as a single one.
     """
 
     @classmethod
@@ -1202,6 +1207,110 @@ class TestRepeatedFit(unittest.TestCase):
             np.asarray(single.learner.predict(self.X, requires_grad=False, tensor=False)),
             rtol=1e-4, atol=1e-5,
             err_msg=f'{device}: 6x5 iterations disagree with 30')
+
+    def _assert_split_matches_single_cv(self, device):
+        """Control variates were keyed on the loop counter, so the first tree of
+        a second fit() skipped them even though the model already had trees."""
+        def mk():
+            return GBTModel(
+                input_dim=4, output_dim=1,
+                tree_struct={'max_depth': 3, 'n_bins': 64, 'min_data_in_leaf': 0,
+                             'par_th': 2, 'grow_policy': 'greedy'},
+                optimizers={'algo': 'SGD', 'lr': 0.1, 'start_idx': 0, 'stop_idx': 1},
+                params={'split_score_func': 'L2', 'generator_type': 'Quantile',
+                        'control_variates': True},
+                device=device, verbose=0)
+
+        one = mk()
+        one.fit(self.X, self.y, iterations=5, shuffle=False)
+        two = mk()
+        two.fit(self.X, self.y, iterations=3, shuffle=False)
+        two.fit(self.X, self.y, iterations=2, shuffle=False)
+        np.testing.assert_allclose(
+            np.asarray(one.learner.predict(self.X, requires_grad=False, tensor=False)),
+            np.asarray(two.learner.predict(self.X, requires_grad=False, tensor=False)),
+            rtol=1e-4, atol=1e-5,
+            err_msg=f'{device}: 3+2 disagree with 5 under control variates')
+
+    def test_split_fit_matches_single_fit_cpu_control_variates(self):
+        self._assert_split_matches_single_cv('cpu')
+
+    def test_categorical_fit_cpu(self):
+        """Categorical candidate generation is host code; fit() must feed it a
+        host buffer. On CUDA it was handed a device pointer."""
+        self._assert_categorical_fit('cpu')
+
+    @unittest.skipUnless(cuda_available(), 'CUDA not available')
+    def test_categorical_fit_cuda(self):
+        self._assert_categorical_fit('cuda')
+
+    def _assert_categorical_fit(self, device):
+        rng = np.random.default_rng(3)
+        cats = np.array(['apple', 'apricot', 'banana', 'cherry'])
+        X = np.column_stack([
+            rng.normal(size=200).astype(object),
+            rng.choice(cats, size=200).astype(object),
+        ])
+        y = np.where(X[:, 1] == 'apple', 1.0, -1.0).astype(np.float32)[:, None]
+        model = GBTModel(
+            input_dim=2, output_dim=1,
+            tree_struct={'max_depth': 3, 'n_bins': 32, 'min_data_in_leaf': 0,
+                         'par_th': 2, 'grow_policy': 'greedy'},
+            optimizers={'algo': 'SGD', 'lr': 0.1, 'start_idx': 0, 'stop_idx': 1},
+            params={'split_score_func': 'L2', 'generator_type': 'Quantile'},
+            device=device, verbose=0)
+        loss = model.fit(X, y, iterations=5, shuffle=True)
+        self.assertTrue(np.isfinite(loss), f'{device}: categorical fit loss is not finite')
+        preds = np.asarray(model.learner.predict(X, requires_grad=False, tensor=False))
+        self.assertTrue(np.all(np.isfinite(preds)), f'{device}: categorical predictions not finite')
+
+    def _assert_split_matches_single_minibatch(self, device, batch_size):
+        """With batch_size < n_samples a single call walks 0,1,2,3,0 while split
+        calls used to walk 0,1,2 then 0,1 - over-training the early rows."""
+        def mk():
+            return GBTModel(
+                input_dim=4, output_dim=1,
+                tree_struct={'max_depth': 3, 'n_bins': 64, 'min_data_in_leaf': 0,
+                             'par_th': 2, 'grow_policy': 'greedy',
+                             'batch_size': batch_size},
+                optimizers={'algo': 'SGD', 'lr': 0.1, 'start_idx': 0, 'stop_idx': 1},
+                params={'split_score_func': 'L2', 'generator_type': 'Quantile'},
+                device=device, verbose=0)
+
+        one = mk()
+        one.fit(self.X, self.y, iterations=5, shuffle=False)
+        two = mk()
+        two.fit(self.X, self.y, iterations=3, shuffle=False)
+        two.fit(self.X, self.y, iterations=2, shuffle=False)
+        np.testing.assert_allclose(
+            np.asarray(one.learner.predict(self.X, requires_grad=False, tensor=False)),
+            np.asarray(two.learner.predict(self.X, requires_grad=False, tensor=False)),
+            rtol=1e-4, atol=1e-5,
+            err_msg=f'{device}: 3+2 disagree with 5 at batch_size={batch_size}')
+
+    def test_split_fit_matches_single_fit_cpu_minibatch(self):
+        # 256 samples / 64 -> 4 batches, so the cursor wraps during the run.
+        self._assert_split_matches_single_minibatch('cpu', batch_size=64)
+
+    def test_split_fit_matches_single_fit_cpu_uneven_minibatch(self):
+        # 256 / 100 -> batches of 100, 100, 56: also exercises the short tail.
+        self._assert_split_matches_single_minibatch('cpu', batch_size=100)
+
+    def test_batch_cursor_resets_when_dataset_size_changes(self):
+        """A cursor left past the end of a smaller dataset must not be used."""
+        model = GBTModel(
+            input_dim=4, output_dim=1,
+            tree_struct={'max_depth': 3, 'n_bins': 64, 'min_data_in_leaf': 0,
+                         'par_th': 2, 'grow_policy': 'greedy', 'batch_size': 64},
+            optimizers={'algo': 'SGD', 'lr': 0.1, 'start_idx': 0, 'stop_idx': 1},
+            params={'split_score_func': 'L2', 'generator_type': 'Quantile'},
+            device='cpu', verbose=0)
+        model.fit(self.X, self.y, iterations=3, shuffle=False)
+        small_X, small_y = self.X[:32], self.y[:32]
+        loss = model.fit(small_X, small_y, iterations=2, shuffle=False)
+        self.assertTrue(np.isfinite(loss), 'fit on a smaller dataset returned a non-finite loss')
+        preds = np.asarray(model.learner.predict(small_X, requires_grad=False, tensor=False))
+        self.assertTrue(np.all(np.isfinite(preds)))
 
     def test_many_chunks_match_single_fit_cpu(self):
         self._assert_many_chunks_match_single('cpu')

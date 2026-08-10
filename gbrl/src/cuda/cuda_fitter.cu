@@ -487,9 +487,10 @@ __global__ void split_score_cosine_cuda(
     if (threadIdx.x == 0){
         int tmp_idx = __ldg(&candidate_indices[cand_idx]);
         int feat_idx = (candidate_numeric[cand_idx]) ? r_num_mapping[tmp_idx] : r_cat_mapping[tmp_idx];
-        // Unused reverse-mapping slots hold -1, so an incomplete mapping would
-        // read feature_weights out of bounds.  Reject the candidate instead.
-        if (feat_idx < 0){
+        // Unused reverse-mapping slots hold -1 and a stale mapping can name a
+        // column past the end, either of which reads feature_weights out of
+        // bounds.  Reject the candidate instead.
+        if (feat_idx < 0 || feat_idx >= n_num_features + node->n_cat_features){
             split_scores[cand_idx] = -CUDART_INF_F;
             return;
         }
@@ -530,14 +531,13 @@ __global__ void split_score_cosine_cuda(
                     float pooled = (l_count[0] * l_val + r_count[0] * r_val) / total_cnt;
                     left_mean[out_idx] = pooled;
                     right_mean[out_idx] = pooled;
-                    // The dot sums were accumulated against the UNPOOLED means,
-                    // so without this the cosine numerator and denominator would
-                    // describe different child vectors.  Per pooled dimension the
-                    // numerator shifts by mean_orig * (pooled - mean_orig).
-                    // l_dot_sum holds n*||mu||^2 after its /count, so the shift
-                    // per pooled dimension is n * mu_d * (pooled - mu_d).
-                    l_dot_fix += l_count[0] * l_val * (pooled - l_val);
-                    r_dot_fix += r_count[0] * r_val * (pooled - r_val);
+                    // The dot sums were accumulated against the UNPOOLED means, so
+                    // without this the cosine numerator and denominator would
+                    // describe different child vectors.  l_dot_sum holds
+                    // n*||mu||^2 after its /count, so replacing mu_d by pooled
+                    // shifts it by n * (pooled^2 - mu_d^2).
+                    l_dot_fix += l_count[0] * (pooled * pooled - l_val * l_val);
+                    r_dot_fix += r_count[0] * (pooled * pooled - r_val * r_val);
                 }
             }
         }
@@ -664,9 +664,10 @@ __global__ void split_score_l2_cuda(
 
         int tmp_idx = __ldg(&candidate_indices[cand_idx]);
         int feat_idx = (candidate_numeric[cand_idx]) ? r_num_mapping[tmp_idx] : r_cat_mapping[tmp_idx];
-        // Unused reverse-mapping slots hold -1, so an incomplete mapping would
-        // read feature_weights out of bounds.  Reject the candidate instead.
-        if (feat_idx < 0){
+        // Unused reverse-mapping slots hold -1 and a stale mapping can name a
+        // column past the end, either of which reads feature_weights out of
+        // bounds.  Reject the candidate instead.
+        if (feat_idx < 0 || feat_idx >= n_num_features + node->n_cat_features){
             split_scores[cand_idx] = -CUDART_INF_F;
             return;
         }
@@ -878,9 +879,10 @@ __global__ void split_cosine_score_kernel(
         float cos = numerator / sqrtf(denominator);
         int tmp_idx = __ldg(&candidate_indices[cand_idx]);
         int feat_idx = (candidate_numeric[cand_idx]) ? r_num_mapping[tmp_idx] : r_cat_mapping[tmp_idx];
-        // Unused reverse-mapping slots hold -1, so an incomplete mapping would
-        // read feature_weights out of bounds.  Reject the candidate instead.
-        if (feat_idx < 0){
+        // Unused reverse-mapping slots hold -1 and a stale mapping can name a
+        // column past the end, either of which reads feature_weights out of
+        // bounds.  Reject the candidate instead.
+        if (feat_idx < 0 || feat_idx >= n_num_features + node->n_cat_features){
             split_scores[cand_idx] = -CUDART_INF_F;
             return;
         }
@@ -952,9 +954,10 @@ __global__ void split_l2_score_kernel(
 
         int tmp_idx = __ldg(&candidate_indices[cand_idx]);
         int feat_idx = (candidate_numeric[cand_idx]) ? r_num_mapping[tmp_idx] : r_cat_mapping[tmp_idx];
-        // Unused reverse-mapping slots hold -1, so an incomplete mapping would
-        // read feature_weights out of bounds.  Reject the candidate instead.
-        if (feat_idx < 0){
+        // Unused reverse-mapping slots hold -1 and a stale mapping can name a
+        // column past the end, either of which reads feature_weights out of
+        // bounds.  Reject the candidate instead.
+        if (feat_idx < 0 || feat_idx >= n_num_features + node->n_cat_features){
             split_scores[cand_idx] = -CUDART_INF_F;
             return;
         }

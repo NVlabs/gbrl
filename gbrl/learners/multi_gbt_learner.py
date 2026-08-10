@@ -202,9 +202,13 @@ class MultiGBTLearner(BaseLearner):
         total_iterations, because distillation recreates them while leaving
         total_iterations non-zero.
         """
-        if self.feature_mapping is None:
-            self.feature_mapping = get_index_mapping(self._mapping_input(inputs))
-        feature_mapping, numerical_mask = self.feature_mapping
+        # Kept local until every check and the C++ setters succeed: publishing the
+        # candidate first meant a rejected batch stuck to the model, so the retry
+        # the error message asks for could never recompute it.
+        candidate = self.feature_mapping
+        if candidate is None:
+            candidate = get_index_mapping(self._mapping_input(inputs))
+        feature_mapping, numerical_mask = candidate
         # Sub-models that have already trained know how many features of each kind
         # they expect.  Rebuilding from a batch with a different mix would name the
         # wrong column for every split, so reject it.
@@ -221,6 +225,7 @@ class MultiGBTLearner(BaseLearner):
         for model in self._cpp_models:
             model.set_feature_mapping(np.ascontiguousarray(feature_mapping),
                                       np.ascontiguousarray(numerical_mask))
+        self.feature_mapping = candidate
 
     def step(self,
              inputs: NumericalData,
@@ -446,6 +451,14 @@ class MultiGBTLearner(BaseLearner):
                 loadname += '.gbrl_model'
                 cpp_model = GBRL_CPP.load(loadname)
                 model_optimizers = cpp_model.get_optimizers()
+                # One optimizer per sub-model: self.optimizers is indexed by
+                # learner in reset() and distil(), so a sub-model with a
+                # different count would silently shift every later learner onto
+                # the wrong config.
+                if len(model_optimizers) != 1:
+                    raise ValueError(
+                        f"Sub-model {i} has {len(model_optimizers)} optimizers; "
+                        f"MultiGBTLearner supports exactly one per sub-model.")
                 # __new__ bypasses __init__, so the checks it runs have to be
                 # repeated here.  Per sub-model: each one covers its own outputs
                 # from 0, so checking the combined list would flag them all.
@@ -954,7 +967,10 @@ class MultiGBTLearner(BaseLearner):
                               'max_depth': params.get('distil_max_depth', 6),
                               'verbose': verbose, 'batch_size':
                               self.params.get('distil_batch_size', 2048)}
-        self.student_models = []
+        # Built locally and published only once every learner succeeds: predict(),
+        # get_num_trees() and __copy__() all assume student_models is either
+        # absent or complete, so a throw mid-loop left them indexing a short list.
+        students = []
         tr_losses = []
         # Separate name: base_distil_params holds the C++ model config and must
         # not be shadowed by the per-learner results accumulator.
@@ -1011,7 +1027,8 @@ class MultiGBTLearner(BaseLearner):
                     break
             tr_losses.append(tr_loss)
             out_params.append(learner_params)
-            self.student_models.append(student_model)
+            students.append(student_model)
+        self.student_models = students
         self.reset()
         return tr_losses, out_params
 
@@ -1219,7 +1236,9 @@ class MultiGBTLearner(BaseLearner):
                                 policy_dim=self.policy_dim,
                                 verbose=self.verbose,
                                 device=self.device)
-        copy_.iteration = self.iteration
+        # Copy, like _consumed_steps: sharing the list let training the copy
+        # advance the original's per-learner counters.
+        copy_.iteration = list(self.iteration)
         copy_.total_iterations = self.total_iterations
         copy_._consumed_steps = list(self._consumed_steps)
         if self.student_models is not None:

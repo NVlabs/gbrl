@@ -335,10 +335,15 @@ void GBRL::get_monotonic_constraints(std::vector<int> &feature_indices,
                                      std::vector<int> &output_idx,
                                      std::vector<int> &constraint){
     const int n = this->metadata->n_mono_constraints;
+    // Before assign(): a negative count from a corrupt file converts to a huge
+    // size_t and the allocation is what fails, not the check.
+    feature_indices.clear();
+    output_idx.clear();
+    constraint.clear();
+    if (n <= 0) return;
     feature_indices.assign(n, 0);
     output_idx.assign(n, 0);
     constraint.assign(n, 0);
-    if (n <= 0) return;
 #ifdef USE_CUDA
     if (this->device == gpu){
         cudaMemcpy(feature_indices.data(), this->edata->mono_constraints->feature_idx, sizeof(int)*n, cudaMemcpyDeviceToHost);
@@ -786,6 +791,12 @@ void GBRL::_step_gpu(dataSet *dataset){
     };
     candidatesData candidata{n_candidates, candidate_indices, candidate_values, candidate_numerical, candidate_categories};
     splitDataGPU *split_data = allocate_split_data(this->metadata, candidata.n_candidates);
+    // Returns nullptr on allocation failure rather than throwing, so the cleanup
+    // below would dereference it.
+    if (split_data == nullptr){
+        cudaFree(device_memory_block);
+        throw std::runtime_error("Failed to allocate split data on the GPU");
+    }
     // A rejected monotonic projection throws out of fit_tree_*_cuda; without this
     // the device block and split data below are never released, so a caller that
     // retries after the failure leaks GPU memory on every attempt.
@@ -1032,10 +1043,28 @@ float GBRL::_fit_gpu(dataHolder<float> *obs,
 
     preprocess_matrices(gpu_build_grads, gpu_grads_norm, n_samples, output_dim, this->metadata->split_score_func);
 
-    int n_candidates = process_candidates_cuda(gpu_obs, gpu_categorical_obs, gpu_grads_norm, candidate_indices, candidate_values, candidate_categories, candidate_numerical, n_samples, n_num_features, n_cat_features, n_bins, this->metadata->generator_type);
+    // Categorical candidate generation runs on the HOST: it builds std::strings
+    // straight from this pointer.  gpu_categorical_obs is cudaMalloc memory, so
+    // it has to come back first, after any shuffle, to match the row order of
+    // the gradient norms that function also copies to the host.
+    std::vector<char> host_categorical_obs;
+    const char *candidate_cat_obs = nullptr;
+    if (n_cat_features > 0 && gpu_categorical_obs != nullptr){
+        host_categorical_obs.resize(static_cast<size_t>(n_samples) * n_cat_features * MAX_CHAR_SIZE);
+        cudaMemcpy(host_categorical_obs.data(), gpu_categorical_obs,
+                   host_categorical_obs.size(), cudaMemcpyDeviceToHost);
+        candidate_cat_obs = host_categorical_obs.data();
+    }
+    int n_candidates = process_candidates_cuda(gpu_obs, candidate_cat_obs, gpu_grads_norm, candidate_indices, candidate_values, candidate_categories, candidate_numerical, n_samples, n_num_features, n_cat_features, n_bins, this->metadata->generator_type);
 
     candidatesData candidata{n_candidates, candidate_indices, candidate_values, candidate_numerical, candidate_categories};
     splitDataGPU *split_data = allocate_split_data(this->metadata, candidata.n_candidates);
+    // Returns nullptr on allocation failure rather than throwing, so the cleanup
+    // below would dereference it.
+    if (split_data == nullptr){
+        cudaFree(device_memory_block);
+        throw std::runtime_error("Failed to allocate split data on the GPU");
+    }
     // A rejected monotonic projection throws out of fit_tree_*_cuda part-way
     // through the loop; without this the buffers below are never released, so a
     // caller that retries after the failure leaks GPU memory on every attempt.
@@ -1260,7 +1289,9 @@ float GBRL::fit(dataHolder<float> *obs,
         };
 
         if (this->device == cpu){
-        full_loss = Fitter::fit_cpu(&dataset, training_targets, this->edata, this->metadata, iterations, loss_type, this->opts);
+        // batch_cursor persists on the model so a second fit() continues the
+        // pass over the data instead of re-training the first batches.
+        full_loss = Fitter::fit_cpu(&dataset, training_targets, this->edata, this->metadata, iterations, loss_type, this->opts, this->batch_cursor);
         }
     }
 
@@ -1380,6 +1411,10 @@ int GBRL::loadFromFile(const std::string& filename){
     this->metadata->max_leaves       = this->metadata->n_leaves;
     this->metadata->max_trees_batch  = TREES_BATCH;
     this->metadata->max_leaves_batch = TREES_BATCH * (1 << this->metadata->max_depth);
+    // A negative count would size every constraint buffer from a huge size_t.
+    if (this->metadata->n_mono_constraints < 0){
+        throw std::runtime_error("Serialized model has a negative monotonic constraint count");
+    }
 
     this->edata = load_ensemble_data(file, this->metadata);
     // load_ensemble_data allocates mono_constraints with n_constraints = 0 and
@@ -1394,6 +1429,14 @@ int GBRL::loadFromFile(const std::string& filename){
 
     int num_opts;
     file.read(reinterpret_cast<char*>(&num_opts), sizeof(int));
+    // Ranges must be disjoint and inside output_dim, so there cannot be more
+    // optimizers than outputs.  Bounded before the loop so a corrupt count
+    // cannot drive it.
+    if (num_opts < 0 || num_opts > this->metadata->output_dim){
+        std::cerr << "Serialized model claims " << num_opts << " optimizers for output_dim "
+                  << this->metadata->output_dim << std::endl;
+        throw std::runtime_error("Serialized model has an invalid optimizer count");
+    }
     // Similar procedure for loading optimizers
     for (int i = 0; i < num_opts; ++i) {  // Adjust as needed
         Optimizer* opt = Optimizer::loadFromFile(file);  // Adjust as needed
@@ -1402,6 +1445,25 @@ int GBRL::loadFromFile(const std::string& filename){
             delete opt;
             throw std::runtime_error("Optimizer load error");
             return -1;
+        }
+        // set_optimizer() range-checks what it registers, but this path writes
+        // straight into opts.  Prediction loops to stop_idx, so an out-of-range
+        // serialized range reads past the leaf values and writes past the
+        // prediction row.
+        if (opt->start_idx < 0 || opt->start_idx >= opt->stop_idx ||
+            opt->stop_idx > this->metadata->output_dim) {
+            std::cerr << "Serialized optimizer " << i << " covers outputs ["
+                      << opt->start_idx << ", " << opt->stop_idx
+                      << ") but the model has output_dim " << this->metadata->output_dim << std::endl;
+            delete opt;
+            throw std::runtime_error("Serialized optimizer has an invalid output range");
+        }
+        for (size_t j = 0; j < this->opts.size(); ++j) {
+            if (opt->start_idx < this->opts[j]->stop_idx &&
+                this->opts[j]->start_idx < opt->stop_idx) {
+                delete opt;
+                throw std::runtime_error("Serialized optimizers cover overlapping output ranges");
+            }
         }
         this->opts.push_back(opt);
     }
@@ -1472,6 +1534,33 @@ static void validate_shap_optimizer_ranges(const std::vector<Optimizer*> &opts)
                     "SHAP is not supported for models with overlapping optimizer output ranges");
             }
         }
+    }
+}
+
+/**
+ * @brief Reject raw SHAP inputs that do not match what the model expects.
+ *
+ * The bindings can be called directly, so a null obs on a model with numerical
+ * features (or a negative sample count) would be dereferenced by the tree walk.
+ * Mirrors the checks predict() already performs.
+ */
+static void validate_shap_inputs(const ensembleMetaData *metadata,
+                                 const float *obs,
+                                 const char *categorical_obs,
+                                 const int n_samples)
+{
+    if (n_samples < 0) {
+        throw std::runtime_error("SHAP received a negative sample count");
+    }
+    if (metadata->n_num_features > 0 && obs == nullptr) {
+        throw std::runtime_error(
+            "SHAP requires numerical observations: the model was trained with "
+            "numerical features but none were given");
+    }
+    if (metadata->n_cat_features > 0 && categorical_obs == nullptr) {
+        throw std::runtime_error(
+            "SHAP requires categorical observations: the model was trained with "
+            "categorical features but none were given");
     }
 }
 
@@ -1717,6 +1806,7 @@ float* GBRL::tree_shap(const int tree_idx, const float *obs, const char *categor
     valid_tree_idx(tree_idx, this->metadata);
     validate_shap_optimizer_ranges(this->opts);
     validate_shap_feature_mapping(this->metadata, this->edata, this->device);
+    validate_shap_inputs(this->metadata, obs, categorical_obs, n_samples);
     ensembleData *edata_cpu = nullptr;
 #ifdef USE_CUDA
     if (this->device == gpu){
@@ -1805,6 +1895,7 @@ float* GBRL::ensemble_shap(const float *obs, const char *categorical_obs, const 
     valid_tree_idx(0, this->metadata);
     validate_shap_optimizer_ranges(this->opts);
     validate_shap_feature_mapping(this->metadata, this->edata, this->device);
+    validate_shap_inputs(this->metadata, obs, categorical_obs, n_samples);
     float *shap_values = init_zero_mat((this->metadata->n_num_features + this->metadata->n_cat_features)*this->metadata->output_dim * n_samples);
 
     dataHolder<const float> obs_holder{obs, cpu};

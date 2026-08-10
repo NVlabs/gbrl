@@ -243,6 +243,8 @@ float TreeNode::getSplitScoreWithConstraints(
     
     // Both score functions are constraint-aware: pool every violating output
     // dimension first, then evaluate the ordinary score on the pooled means.
+    // Dispatch explicitly so an unknown scoreFunc reports the same invalid score
+    // as getSplitScore instead of being treated as Cosine.
     if (split_score_func == L2) {
         return this->splitScoreL2WithConstraint(
             dataset->obs->data, dataset->build_grads->data,
@@ -250,11 +252,15 @@ float TreeNode::getSplitScoreWithConstraints(
             mono_constraints, n_mono_constraints
         );
     }
-    return this->splitScoreCosineWithConstraint(
-        dataset->obs->data, dataset->build_grads->data,
-        split_candidate, min_data_in_leaf, global_feature_idx,
-        mono_constraints, n_mono_constraints
-    );
+    if (split_score_func == Cosine) {
+        return this->splitScoreCosineWithConstraint(
+            dataset->obs->data, dataset->build_grads->data,
+            split_candidate, min_data_in_leaf, global_feature_idx,
+            mono_constraints, n_mono_constraints
+        );
+    }
+    std::cerr << "Unknown scoreFunc." << std::endl;
+    return -INFINITY;
 }
 
 /**

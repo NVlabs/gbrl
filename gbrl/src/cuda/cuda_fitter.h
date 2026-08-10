@@ -222,8 +222,8 @@ void add_leaf_node(
  * @brief Apply monotonic constraints to leaf values by isotonic projection
  * 
  * For oblivious trees only. Iteratively adjusts leaf values to satisfy
- * monotonic constraints on specified feature-output pairs. Uses Pool Adjacent
- * Dykstra's cyclic projection over pairwise halfspaces to ensure monotonicity
+ * monotonic constraints on specified feature-output pairs. Uses Dykstra's
+ * cyclic projection over pairwise halfspaces to ensure monotonicity
  * while minimizing the change to the leaf values.
  * 
  * For each constraint (feature_idx, output_idx, direction):

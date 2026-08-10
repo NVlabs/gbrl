@@ -52,6 +52,25 @@ namespace py = pybind11;
  * @throws std::runtime_error if object is not a valid NumPy array
  */
 template <typename T>
+/**
+ * NOT A PUBLIC API.
+ *
+ * gbrl_cpp is an internal binding. The supported entry points are the Python
+ * classes in gbrl.learners / gbrl.models; calling gbrl_cpp.GBRL directly is
+ * unsupported and its argument contract is not guaranteed across releases.
+ *
+ * Callers must pass C-contiguous arrays of the expected dtype. Every supported
+ * path already guarantees this: preprocess_features() and
+ * BaseLearner.transform_data() run np.ascontiguousarray() before anything
+ * reaches this layer. py::array::ensure() below is therefore a no-op that
+ * returns the caller's own object, which stays alive for the duration of the
+ * call.
+ *
+ * A non-contiguous or wrong-dtype array would instead make ensure() build a
+ * temporary copy owned only by the local `arr`, leaving the extracted pointer
+ * dangling once this function returns. That is why the contract above is a
+ * requirement and not a convenience.
+ */
 void get_numpy_array_info(
     py::object obj,
     T*& ptr,
@@ -434,7 +453,14 @@ py::list getOptimizerConfigs(const std::vector<Optimizer*>& opts) {
 }
 
 PYBIND11_MODULE(gbrl_cpp, m) {
-    py::class_<GBRL> gbrl(m, "GBRL");
+    m.doc() = "Internal C++/CUDA binding for GBRL. NOT a public API: use the "
+              "Python classes in gbrl.learners / gbrl.models instead. Calling "
+              "this module directly is unsupported - inputs must be "
+              "C-contiguous arrays of the expected dtype, which the Python "
+              "layer guarantees and this layer does not re-establish.";
+    py::class_<GBRL> gbrl(m, "GBRL",
+        "Internal binding type. Unsupported for direct use; construct models "
+        "through gbrl.learners.GBTLearner / gbrl.models.GBTModel.");
     gbrl.def(py::init<int, int, int, int, int, int, int, float, std::string, std::string, bool, int, std::string, int, std::string, std::string, int>(),
          py::arg("input_dim")=1, 
          py::arg("output_dim")=1, 

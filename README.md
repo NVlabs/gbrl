@@ -54,7 +54,7 @@ For a detailed usage example, see `tutorial.ipynb`
     - MultiRMSE loss (only)
 - Categorical inputs
 - Input feature weights - (CPU/GPU)
-- Monotonic constraints - (CPU/GPU, oblivious trees, SGD-optimized outputs only)
+- Monotonic constraints - (CPU/GPU, oblivious trees; the whole model must use SGD, Adam is not allowed on any output)
 
 ### GBT Inference
 

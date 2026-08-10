@@ -185,9 +185,13 @@ class GBTLearner(BaseLearner):
         model rather than on total_iterations, because distillation swaps in a
         fresh model while leaving total_iterations non-zero.
         """
-        if self.feature_mapping is None:
-            self.feature_mapping = get_index_mapping(self._mapping_input(features))
-        feature_mapping, numerical_mask = self.feature_mapping
+        # Kept local until every check and the C++ setter succeed: publishing the
+        # candidate first meant a rejected batch stuck to the model, so the retry
+        # the error message asks for could never recompute it.
+        candidate = self.feature_mapping
+        if candidate is None:
+            candidate = get_index_mapping(self._mapping_input(features))
+        feature_mapping, numerical_mask = candidate
         # A model that has already trained knows how many features of each kind it
         # expects.  Rebuilding from a batch with a different mix would install a
         # mapping that names the wrong column for every split, so reject it.
@@ -203,6 +207,7 @@ class GBTLearner(BaseLearner):
         validate_monotonic_features_numerical(self.monotonic_constraints, numerical_mask)
         self._cpp_model.set_feature_mapping(np.ascontiguousarray(feature_mapping),
                                             np.ascontiguousarray(numerical_mask))
+        self.feature_mapping = candidate
 
     def step(self,
              inputs: NumericalData,
@@ -417,6 +422,17 @@ class GBTLearner(BaseLearner):
                     else:
                         restored[f] = (direction, [o])
                 instance.monotonic_constraints = restored
+            # The same monotonic checks __init__ runs.  reset() repeats the
+            # optimizer one, but step()/fit() can be reached straight after
+            # load(), so a model saved by a version without these checks would
+            # otherwise resume training with constraints it cannot honour.
+            validate_monotonic_optimizer_compat(instance.monotonic_constraints,
+                                                instance.optimizers)
+            if instance._feature_mapping_installed and instance.feature_mapping is not None:
+                # Feature types are only known once a mapping exists; a rebuilt
+                # mapping is checked in _ensure_feature_mapping instead.
+                validate_monotonic_features_numerical(instance.monotonic_constraints,
+                                                      instance.feature_mapping[1])
             instance._memory = []
             instance.learner_name = instance._cpp_model.get_learner_name()
             return instance

@@ -74,6 +74,9 @@ class Fitter {
          * @param iterations Number of boosting iterations
          * @param loss_type Loss function to use
          * @param opts Vector of optimizers for leaf value updates
+         * @param batch_start_idx Row to start taking mini-batches from; advanced
+         *        in place so a later fit() continues the pass instead of
+         *        restarting at row 0
          * @return Final loss value after training
          */
         static float fit_cpu(
@@ -83,7 +86,8 @@ class Fitter {
             ensembleMetaData *metadata,
             const int iterations,
             lossType loss_type,
-            std::vector<Optimizer*> opts
+            std::vector<Optimizer*> opts,
+            int &batch_start_idx
         );
         
         /**

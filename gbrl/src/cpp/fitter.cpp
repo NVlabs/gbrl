@@ -148,8 +148,12 @@ void Fitter::step_cpu(dataSet *dataset, ensembleData *edata, ensembleMetaData *m
     metadata->iteration++;
 }
 
-float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edata, ensembleMetaData *metadata, const int iterations, lossType loss_type, std::vector<Optimizer*> opts){
-    int batch_start_idx = 0, output_dim = metadata->output_dim;
+float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edata, ensembleMetaData *metadata, const int iterations, lossType loss_type, std::vector<Optimizer*> opts, int &batch_start_idx){
+    // batch_start_idx is owned by the caller so successive fit() calls continue
+    // the pass over the data.  A dataset of a different size invalidates it.
+    if (batch_start_idx < 0 || batch_start_idx >= dataset->n_samples)
+        batch_start_idx = 0;
+    int output_dim = metadata->output_dim;
     int batch_size = metadata->batch_size, par_th = metadata->par_th;
     int batch_n_samples = batch_start_idx + batch_size < dataset->n_samples ? batch_size : dataset->n_samples - batch_start_idx;
     bool is_last_batch;
@@ -231,7 +235,10 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
             batch_loss = MultiRMSE::get_loss_and_gradients(preds, shifted_targets, grads, batch_dataset.n_samples, metadata->output_dim, par_th);
         }
         batch_dataset.grads->data = grads;
-        if (metadata->use_cv && i > 0){
+        // Keyed on the model, not the loop counter, like step_cpu: `i` counts
+        // trees added by THIS call, so a fit() on a model that already had trees
+        // skipped control variates on its first iteration.
+        if (metadata->use_cv && metadata->n_trees > 0){
             Fitter::control_variates(&batch_dataset, edata, metadata);
         }
 
