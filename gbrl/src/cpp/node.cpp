@@ -336,7 +336,13 @@ float TreeNode::splitScoreL2WithConstraint(
         }
         
         if (violation) {
-            float pooled = (left_mean[output_idx] + right_mean[output_idx]) * 0.5f;
+            // Count-weighted, matching this function's own count-weighted
+            // objective below and the CUDA scorer.  An arithmetic mean is only
+            // the constrained optimum when the two children are equal-sized.
+            float total_count = left_count_f + right_count_f;
+            float pooled = (total_count > 0.0f)
+                ? (left_count_f * left_mean[output_idx] + right_count_f * right_mean[output_idx]) / total_count
+                : (left_mean[output_idx] + right_mean[output_idx]) * 0.5f;
             left_mean[output_idx] = pooled;
             right_mean[output_idx] = pooled;
         }

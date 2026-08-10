@@ -503,9 +503,15 @@ __global__ void split_score_cosine_cuda(
             float l_val = left_mean[out_idx];
             float r_val = right_mean[out_idx];
             
-            // Check violation: Inc(+1) requires r >= l, Dec(-1) requires r <= l
-            bool violation = (direction == 1 && r_val < l_val) ||
-                            (direction == -1 && r_val > l_val);
+            // SIGN: left_mean/right_mean are RAW GRADIENT means, but the
+            // constraint is about PREDICTIONS.  SGD contributes
+            // delta = -lr * g with lr > 0, so the gradient order is the
+            // reverse of the prediction order:
+            //     increasing  =>  g_left >= g_right
+            //     decreasing  =>  g_left <= g_right
+            // Must match splitScoreL2WithConstraint in cpp/node.cpp.
+            bool violation = (direction == 1 && l_val < r_val) ||
+                            (direction == -1 && l_val > r_val);
             
             if (violation) {
                 // Pool the means (weighted average) for this output dimension
@@ -657,9 +663,15 @@ __global__ void split_score_l2_cuda(
             float l_val = left_mean[out_idx];
             float r_val = right_mean[out_idx];
             
-            // Check violation: Inc(+1) requires l <= r, Dec(-1) requires l >= r
-            bool violation = (direction == 1 && l_val > r_val) ||
-                            (direction == -1 && l_val < r_val);
+            // SIGN: left_mean/right_mean are RAW GRADIENT means, but the
+            // constraint is about PREDICTIONS.  SGD contributes
+            // delta = -lr * g with lr > 0, so the gradient order is the
+            // reverse of the prediction order:
+            //     increasing  =>  g_left >= g_right
+            //     decreasing  =>  g_left <= g_right
+            // Must match splitScoreL2WithConstraint in cpp/node.cpp.
+            bool violation = (direction == 1 && l_val < r_val) ||
+                            (direction == -1 && l_val > r_val);
             
             if (violation) {
                 // Pool the means using count-weighted averaging
