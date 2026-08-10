@@ -29,6 +29,7 @@ import os
 import sys
 import tempfile
 import unittest
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -1285,6 +1286,59 @@ class TestMonotonicConstraintsPersistence(unittest.TestCase):
         violations_after, total_after = check_monotonicity(loaded_model, X_gpu, 0, 1)
         print(f"GPU - Before save: {violations_before}/{total_before}, After load: {violations_after}/{total_after}")
         self.assertEqual(violations_after, 0, "Loaded GPU model should still have no violations")
+
+
+class TestProjectionWarning(unittest.TestCase):
+    """The projection reports a pass-limit hit as a Python RuntimeWarning.
+
+    The count behind it lives in one thread_local in types.cpp, so these check
+    the two things that could go wrong with shared state: a model with no
+    constraints must never see it, and a projection that converges normally
+    must not raise it either.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.X, cls.y = create_monotonic_data(n_samples=200)
+        cls.input_dim = cls.X.shape[1]
+
+    def _model(self, constraints=None):
+        params = {"control_variates": False, "split_score_func": "L2"}
+        if constraints is not None:
+            params["monotonic_constraints"] = constraints
+        return GBTModel(
+            input_dim=self.input_dim, output_dim=1,
+            tree_struct={'max_depth': 3, 'n_bins': 64, 'min_data_in_leaf': 0,
+                         'par_th': 2, 'grow_policy': 'oblivious'},
+            optimizers={'algo': 'SGD', 'lr': 0.5, 'start_idx': 0, 'stop_idx': 1},
+            params=params, verbose=0, device='cpu')
+
+    def _train(self, model, n=10):
+        for _ in range(n):
+            y_pred = model(self.X, requires_grad=True)
+            (0.5 * mse_loss(y_pred, self.y.squeeze())).backward()
+            model.step()
+
+    def test_unconstrained_model_never_warns(self):
+        """No constraints means the projection never runs, so the count stays 0."""
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", RuntimeWarning)
+            self._train(self._model())
+            self._model().fit(self.X.numpy(), self.y.numpy(), iterations=10)
+
+    def test_converging_projection_does_not_warn(self):
+        """A projection that converges must not report a pass-limit hit."""
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", RuntimeWarning)
+            self._train(self._model({0: ("increasing", 0)}))
+
+    def test_constrained_model_does_not_leak_count_to_next_model(self):
+        """The count is cleared at the start of every step()/fit(), so a
+        constrained model cannot make a later unconstrained one warn."""
+        self._train(self._model({0: ("increasing", 0)}))
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", RuntimeWarning)
+            self._train(self._model())
 
 
 if __name__ == '__main__':

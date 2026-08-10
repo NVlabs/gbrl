@@ -75,8 +75,8 @@
  *  provably the closest monotone values.  step()/fit() clear the count before
  *  training and Python reads it afterwards to raise a RuntimeWarning; a plain
  *  message on stderr is invisible to warnings.catch_warnings()/pytest.warns().
- *  The projection runs on the host between tree builds, so a plain int is
- *  enough - no concurrent writers. */
+ *  Counted per thread: the pybind wrappers release the GIL, so models training
+ *  in separate Python threads must not share the count. */
 int  get_monotonic_nonconverged();
 void reset_monotonic_nonconverged();
 void note_monotonic_nonconverged();

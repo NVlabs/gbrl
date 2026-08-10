@@ -1022,6 +1022,9 @@ float GBRL::_fit_gpu(dataHolder<float> *obs,
         &build_grads_holder,    // build gradients on GPU
         n_samples,         // number of samples
     };
+    // obs_holder was built with trans_obs for tree fitting; the predict kernels
+    // want the untransposed layout, like the two other predict sites below.
+    cuda_dataset.obs->data = gpu_obs;
     predict_cuda_no_host(&cuda_dataset, gpu_preds, this->metadata, this->edata, this->cuda_opt, this->n_cuda_opts, 0, 0, true);
 
     MultiRMSEGrad(gpu_preds, gpu_targets, gpu_grads,  output_dim, n_samples, n_blocks, threads_per_block);
@@ -1049,7 +1052,8 @@ float GBRL::_fit_gpu(dataHolder<float> *obs,
             ++this->metadata->iteration;
 
             cuda_dataset.obs->data = gpu_obs;
-            predict_cuda_no_host(&cuda_dataset, gpu_preds, this->metadata, this->edata, this->cuda_opt, this->n_cuda_opts, i, 0, false);
+            predict_cuda_no_host(&cuda_dataset, gpu_preds, this->metadata, this->edata, this->cuda_opt, this->n_cuda_opts,
+                                 this->metadata->n_trees - 1, this->metadata->n_trees, false);
             cudaMemset(gpu_grads, 0, grads_size);
             if (this->metadata->verbose == 0)
                 MultiRMSEGrad(gpu_preds, gpu_targets, gpu_grads, output_dim, n_samples, n_blocks, threads_per_block);
@@ -1189,11 +1193,18 @@ float GBRL::fit(dataHolder<float> *obs,
             shuffle);
 #endif
     if (this->device == cpu){
+        // Vectors, not new[]: fit_cpu below can throw and used to leak these.
+        std::vector<float> shuffled_obs;
+        std::vector<char> shuffled_cat_obs;
+        std::vector<float> shuffled_targets;
         if (shuffle){
             // Allocate memory for shuffled data
-            training_obs = new float[n_samples * n_num_features];
-            training_cat_obs = new char[n_samples * n_cat_features * MAX_CHAR_SIZE];
-            training_targets = new float[n_samples * output_dim];
+            shuffled_obs.resize(static_cast<size_t>(n_samples) * n_num_features);
+            shuffled_cat_obs.resize(static_cast<size_t>(n_samples) * n_cat_features * MAX_CHAR_SIZE);
+            shuffled_targets.resize(static_cast<size_t>(n_samples) * output_dim);
+            training_obs = shuffled_obs.data();
+            training_cat_obs = shuffled_cat_obs.data();
+            training_targets = shuffled_targets.data();
 
             // Apply shuffled indices
             for (int i = 0; i < n_samples; ++i) {
@@ -1229,8 +1240,12 @@ float GBRL::fit(dataHolder<float> *obs,
             training_targets = targets->data;
         }
 
-        float *bias = calculate_mean(training_targets, n_samples, output_dim, metadata->par_th);
-        dataHolder<const float> bias_holder{bias, this->device};
+        // Same reason: calculate_mean returns a new[] buffer that used to be freed
+        // only on the success path.
+        float *bias_raw = calculate_mean(training_targets, n_samples, output_dim, metadata->par_th);
+        std::vector<float> bias(bias_raw, bias_raw + output_dim);
+        delete[] bias_raw;
+        dataHolder<const float> bias_holder{bias.data(), this->device};
         this->set_bias(&bias_holder, this->metadata->output_dim);
 
         dataHolder<const float> tr_obs_holder{training_obs, this->device};
@@ -1247,13 +1262,6 @@ float GBRL::fit(dataHolder<float> *obs,
         if (this->device == cpu){
         full_loss = Fitter::fit_cpu(&dataset, training_targets, this->edata, this->metadata, iterations, loss_type, this->opts);
         }
-
-        if (shuffle){
-            delete[] training_obs;
-            delete[] training_cat_obs;
-            delete[] training_targets;
-        }
-        delete[] bias;
     }
 
     return full_loss;   

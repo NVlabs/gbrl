@@ -179,8 +179,11 @@ std::string schedulerTypeToString(schedulerFunc func) {
 }
 
 // Shared by the CPU and CUDA monotonic projections, which both run on the host
-// between tree builds, so no synchronisation is needed.
-static int monotonic_nonconverged = 0;
+// between tree builds.  thread_local, NOT a plain global: the pybind wrappers
+// release the GIL, so two models training in separate Python threads would
+// otherwise race on this and steal each other's counts.  step()/fit() cannot
+// interleave within one thread, so a per-thread count is exact.
+static thread_local int monotonic_nonconverged = 0;
 
 int get_monotonic_nonconverged(){
     return monotonic_nonconverged;

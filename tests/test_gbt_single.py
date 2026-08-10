@@ -1129,5 +1129,104 @@ class TestLinearScheduler(unittest.TestCase):
         self.assertLessEqual(lr, 0.1 + 1e-6, f'decay lr {lr} above init_lr')
 
 
+class TestRepeatedFit(unittest.TestCase):
+    """fit() must boost against every tree already in the model.
+
+    The tree range was counted from the start of the call rather than the start
+    of the ensemble, so a second fit() built its trees against a prefix of the
+    ensemble: on CPU the residual skipped both the existing trees and the ones
+    just added, and on CUDA the existing ensemble was added to the running
+    prediction a second time. Splitting a run into two calls therefore produced
+    a different model from doing it in one, and distillation - which calls fit()
+    repeatedly on the same student - trained its later chunks on wrong targets.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        rng = np.random.default_rng(0)
+        cls.X = rng.normal(size=(256, 4)).astype(np.float32)
+        cls.y = (cls.X[:, 0] * 2.0 - cls.X[:, 1]).reshape(-1, 1).astype(np.float32)
+        cls.test_dir = tempfile.mkdtemp()
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.test_dir)
+
+    def _model(self, device='cpu', grow_policy='greedy'):
+        return GBTModel(
+            input_dim=4, output_dim=1,
+            tree_struct={'max_depth': 3, 'n_bins': 64, 'min_data_in_leaf': 0,
+                         'par_th': 2, 'grow_policy': grow_policy},
+            optimizers={'algo': 'SGD', 'lr': 0.1, 'start_idx': 0, 'stop_idx': 1},
+            params={'split_score_func': 'L2', 'generator_type': 'Quantile'},
+            device=device, verbose=0)
+
+    def _assert_split_matches_single(self, device, grow_policy='greedy'):
+        one = self._model(device, grow_policy)
+        one.fit(self.X, self.y, iterations=5, shuffle=False)
+
+        two = self._model(device, grow_policy)
+        two.fit(self.X, self.y, iterations=3, shuffle=False)
+        two.fit(self.X, self.y, iterations=2, shuffle=False)
+
+        self.assertEqual(one.learner.get_num_trees(), two.learner.get_num_trees())
+        np.testing.assert_allclose(
+            np.asarray(one.learner.predict(self.X, requires_grad=False, tensor=False)),
+            np.asarray(two.learner.predict(self.X, requires_grad=False, tensor=False)),
+            rtol=1e-4, atol=1e-5,
+            err_msg=f'{device}/{grow_policy}: 3+2 iterations disagree with 5')
+
+    def test_split_fit_matches_single_fit_cpu(self):
+        self._assert_split_matches_single('cpu')
+
+    def test_split_fit_matches_single_fit_cpu_oblivious(self):
+        self._assert_split_matches_single('cpu', grow_policy='oblivious')
+
+    @unittest.skipUnless(cuda_available(), 'CUDA not available')
+    def test_split_fit_matches_single_fit_cuda(self):
+        self._assert_split_matches_single('cuda')
+
+    def _assert_many_chunks_match_single(self, device):
+        """Six chunks of 5 must equal one call of 30. One extra call could match
+        by luck; drift compounds, so repeating it is the real check."""
+        chunked = self._model(device)
+        for _ in range(6):
+            chunked.fit(self.X, self.y, iterations=5, shuffle=False)
+
+        single = self._model(device)
+        single.fit(self.X, self.y, iterations=30, shuffle=False)
+
+        self.assertEqual(chunked.learner.get_num_trees(), single.learner.get_num_trees())
+        np.testing.assert_allclose(
+            np.asarray(chunked.learner.predict(self.X, requires_grad=False, tensor=False)),
+            np.asarray(single.learner.predict(self.X, requires_grad=False, tensor=False)),
+            rtol=1e-4, atol=1e-5,
+            err_msg=f'{device}: 6x5 iterations disagree with 30')
+
+    def test_many_chunks_match_single_fit_cpu(self):
+        self._assert_many_chunks_match_single('cpu')
+
+    @unittest.skipUnless(cuda_available(), 'CUDA not available')
+    def test_many_chunks_match_single_fit_cuda(self):
+        self._assert_many_chunks_match_single('cuda')
+
+    def test_distillation_over_multiple_chunks(self):
+        """distil() calls the student's fit() again for each chunk past the
+        first, so it exercises exactly the continued-fit path."""
+        model = self._model()
+        model.fit(self.X, self.y, iterations=10, shuffle=False)
+        targets = np.asarray(model.learner.predict(self.X, requires_grad=False, tensor=False))
+        # A loss threshold of 0 forces the while loop to keep adding chunks
+        # until limit_steps, so more than one fit() call always happens.
+        params = {'min_steps': 5, 'limit_steps': 15, 'min_distillation_loss': 0.0,
+                  'distil_lr': 0.1, 'distil_max_depth': 4}
+        loss, out_params = model.learner.distil(self.X, targets, params)
+        self.assertGreater(out_params['min_steps'], 5,
+                           'distillation did not run more than one fit() chunk')
+        self.assertTrue(np.isfinite(loss))
+        preds = np.asarray(model.learner.predict(self.X, requires_grad=False, tensor=False))
+        self.assertTrue(np.all(np.isfinite(preds)))
+
+
 if __name__ == '__main__':
     unittest.main()

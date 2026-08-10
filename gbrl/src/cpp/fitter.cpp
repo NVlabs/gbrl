@@ -185,8 +185,9 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
     }
     float *full_preds = nullptr;
     if (metadata->n_cat_features > 0){
-        full_preds = init_zero_mat(dataset->n_samples*metadata->output_dim); 
-        Predictor::predict_cpu(dataset, full_preds, edata, metadata, 0, iterations, false, opts);
+        full_preds = init_zero_mat(dataset->n_samples*metadata->output_dim);
+        // 0 = every tree currently in the model; `iterations` is a per-call count, not a tree index.
+        Predictor::predict_cpu(dataset, full_preds, edata, metadata, 0, 0, false, opts);
         float *full_grads = init_zero_mat(dataset->n_samples*metadata->output_dim); 
         float *full_grad_norms = init_zero_mat(dataset->n_samples); 
         batch_loss = MultiRMSE::get_loss_and_gradients(full_preds, targets, full_grads, dataset->n_samples, metadata->output_dim, par_th);
@@ -223,7 +224,8 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
             memset(preds, 0, batch_preds_size * sizeof(float));
         }
 
-        Predictor::predict_cpu(&batch_dataset, preds, edata, metadata, 0, i, false, opts);
+        // Boost against every tree in the model; `i` only counts the ones this call added.
+        Predictor::predict_cpu(&batch_dataset, preds, edata, metadata, 0, 0, false, opts);
         grads = is_last_batch ? last_batch_grads : batch_grads;
         if (loss_type == MultiRMSE){
             batch_loss = MultiRMSE::get_loss_and_gradients(preds, shifted_targets, grads, batch_dataset.n_samples, metadata->output_dim, par_th);
@@ -311,9 +313,10 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
         delete[] indices;
     }
     
-    full_preds = init_zero_mat(dataset->n_samples*metadata->output_dim); 
+    full_preds = init_zero_mat(dataset->n_samples*metadata->output_dim);
 
-    Predictor::predict_cpu(dataset, full_preds, edata, metadata, 0, iterations, false, opts);
+    // Loss of the model as it now stands, not of its first `iterations` trees.
+    Predictor::predict_cpu(dataset, full_preds, edata, metadata, 0, 0, false, opts);
     float full_loss = INFINITY;
     if (loss_type == MultiRMSE){
         full_loss = MultiRMSE::get_loss(full_preds, targets, dataset->n_samples, output_dim, par_th); 
