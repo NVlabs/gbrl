@@ -321,6 +321,18 @@ def validate_optimizer_ranges(optimizers: Union[Dict, List[Dict]]) -> None:
         start, stop = opt.get('start_idx'), opt.get('stop_idx')
         if start is None or stop is None:
             continue
+        # An empty or reversed interval never overlaps anything, so the check
+        # below would wave it through even though C++ rejects it later.
+        if (isinstance(start, bool) or isinstance(stop, bool)
+                or not isinstance(start, (int, np.integer))
+                or not isinstance(stop, (int, np.integer))):
+            raise ValueError(
+                f"optimizer start_idx/stop_idx must be integers, got "
+                f"{start!r}/{stop!r}")
+        if start < 0 or start >= stop:
+            raise ValueError(
+                f"optimizer output range must satisfy 0 <= start_idx < stop_idx, "
+                f"got [{start}, {stop})")
         for prev_start, prev_stop in seen:
             if start < prev_stop and stop > prev_start:
                 raise ValueError(
@@ -329,6 +341,50 @@ def validate_optimizer_ranges(optimizers: Union[Dict, List[Dict]]) -> None:
                     f"Each output dimension may be covered by at most one optimizer."
                 )
         seen.append((start, stop))
+
+
+def is_valid_feature_mapping(mapping, input_dim: int, n_num_features: int,
+                             n_cat_features: int) -> bool:
+    """Check that a feature mapping can identify the input column of every split.
+
+    Numerical and categorical features each index from 0 internally, so the
+    mapping is what turns a split's internal index back into an input column.
+    Models trained by versions whose fit() never installed one carry an all-zero
+    mapping, which sends every feature to column 0 -- invisibly, since additivity
+    is unaffected by moving attribution between columns.
+
+    A mapping is valid when it covers every input column and the two halves are
+    exactly 0..n_num_features-1 and 0..n_cat_features-1.
+
+    Args:
+        mapping: (feature_mapping, numerical_mask) as returned by
+            get_feature_mapping(), or None.
+        input_dim (int): number of input columns.
+        n_num_features (int): number of numerical columns the model was trained on.
+        n_cat_features (int): number of categorical columns the model was trained on.
+
+    Returns:
+        bool: True if the mapping is usable.
+    """
+    if mapping is None:
+        return False
+    # A model that has never seen data reports 0 features of both kinds, so there
+    # is nothing to check the mapping against.
+    if n_num_features + n_cat_features != input_dim:
+        return False
+    try:
+        indices = np.asarray(mapping[0]).ravel()
+        mask = np.asarray(mapping[1]).ravel().astype(bool)
+    except (TypeError, ValueError, IndexError):
+        return False
+    if indices.size != input_dim or mask.size != input_dim:
+        return False
+    if int(mask.sum()) != n_num_features or int((~mask).sum()) != n_cat_features:
+        return False
+    numerical = np.sort(indices[mask])
+    categorical = np.sort(indices[~mask])
+    return (np.array_equal(numerical, np.arange(n_num_features))
+            and np.array_equal(categorical, np.arange(n_cat_features)))
 
 
 def validate_monotonic_features_numerical(constraints, numerical_mask) -> None:

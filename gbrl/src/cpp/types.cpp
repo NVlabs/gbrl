@@ -178,6 +178,22 @@ std::string schedulerTypeToString(schedulerFunc func) {
     }
 }
 
+// Shared by the CPU and CUDA monotonic projections, which both run on the host
+// between tree builds, so no synchronisation is needed.
+static int monotonic_nonconverged = 0;
+
+int get_monotonic_nonconverged(){
+    return monotonic_nonconverged;
+}
+
+void reset_monotonic_nonconverged(){
+    monotonic_nonconverged = 0;
+}
+
+void note_monotonic_nonconverged(){
+    ++monotonic_nonconverged;
+}
+
 ensembleMetaData* ensemble_metadata_alloc(
     int max_trees,
     int max_leaves,

@@ -37,9 +37,11 @@ from gbrl import GBRL_CPP
 from gbrl.common.compression import ParametricActorCompression, TreeCompression
 from gbrl.common.utils import (NumericalData, ensure_leaf_tensor_or_array,
                                get_index_mapping, get_poly_vectors, get_tensor_info,
+                               is_valid_feature_mapping,
                                normalize_vector_input, numerical_dtype,
                                preprocess_features, to_numpy,
-                               validate_monotonic_features_numerical)
+                               validate_monotonic_features_numerical,
+                               validate_optimizer_ranges)
 from gbrl.learners.base import BaseLearner
 
 
@@ -203,6 +205,18 @@ class MultiGBTLearner(BaseLearner):
         if self.feature_mapping is None:
             self.feature_mapping = get_index_mapping(self._mapping_input(inputs))
         feature_mapping, numerical_mask = self.feature_mapping
+        # Sub-models that have already trained know how many features of each kind
+        # they expect.  Rebuilding from a batch with a different mix would name the
+        # wrong column for every split, so reject it.
+        metadata = self._cpp_models[0].get_metadata()
+        n_num = int(metadata.get('n_num_features', 0))
+        n_cat = int(metadata.get('n_cat_features', 0))
+        if n_num + n_cat > 0 and not is_valid_feature_mapping(
+                (feature_mapping, numerical_mask), self.input_dim, n_num, n_cat):
+            raise ValueError(
+                f"The given batch does not match the data these models were "
+                f"trained on: they expect {n_num} numerical and {n_cat} "
+                f"categorical columns. Pass a representative batch.")
         validate_monotonic_features_numerical(self.monotonic_constraints, numerical_mask)
         for model in self._cpp_models:
             model.set_feature_mapping(np.ascontiguousarray(feature_mapping),
@@ -288,8 +302,10 @@ class MultiGBTLearner(BaseLearner):
             self._ensure_feature_mapping(inputs)
             self._feature_mapping_installed = True
 
-        self.total_iterations += iterations
-
+        # Counted from what the backend actually built, in a finally block: the
+        # call can throw after adding some of the requested trees (a rejected
+        # monotonic projection, for instance), and adding `iterations` up front
+        # left the Python count ahead of the C++ one.
         if model_idx is not None:
             assert not isinstance(targets, list), \
                 "when model_idx is specified, targets should not be a list"
@@ -299,29 +315,42 @@ class MultiGBTLearner(BaseLearner):
             else:
                 output_dim_idx = self.output_dim
             targets = targets.reshape((len(targets), output_dim_idx))
-            loss = self._cpp_models[model_idx].fit(num_inputs, cat_inputs,
-                                                   targets.astype(
-                                                       numerical_dtype),
-                                                   iterations, shuffle,
-                                                   loss_type)
-            self.iteration[model_idx] = self._cpp_models[model_idx].get_iteration()
+            iters_before = self._cpp_models[model_idx].get_iteration()
+            try:
+                loss = self._cpp_models[model_idx].fit(num_inputs, cat_inputs,
+                                                       targets.astype(
+                                                           numerical_dtype),
+                                                       iterations, shuffle,
+                                                       loss_type)
+            finally:
+                self.iteration[model_idx] = self._cpp_models[model_idx].get_iteration()
+                self.total_iterations += self.iteration[model_idx] - iters_before
             return loss
 
         assert isinstance(targets, list) and len(targets) == self.n_learners, \
             "when model_idx is not specified, targets should be a list with length equal to n_learners"
         losses = []
-        for i in range(self.n_learners):
-            targets[i] = to_numpy(targets[i])
-            if isinstance(self.output_dim, list):
-                output_dim_i = self.output_dim[i]
-            else:
-                output_dim_i = self.output_dim
-            targets[i] = targets[i].reshape((len(targets[i]), output_dim_i))
-            loss = self._cpp_models[i].fit(num_inputs, cat_inputs,
-                                           targets[i],
-                                           iterations, shuffle, loss_type)
-            self.iteration[i] = self._cpp_models[i].get_iteration()
-            losses.append(loss)
+        # One shared count for all sub-models, which train the same number of
+        # iterations: take the first learner's progress so it is not multiplied
+        # by n_learners.
+        iters_before = self._cpp_models[0].get_iteration()
+        try:
+            for i in range(self.n_learners):
+                targets[i] = to_numpy(targets[i])
+                if isinstance(self.output_dim, list):
+                    output_dim_i = self.output_dim[i]
+                else:
+                    output_dim_i = self.output_dim
+                targets[i] = targets[i].reshape((len(targets[i]), output_dim_i))
+                loss = self._cpp_models[i].fit(num_inputs, cat_inputs,
+                                               targets[i],
+                                               iterations, shuffle, loss_type)
+                self.iteration[i] = self._cpp_models[i].get_iteration()
+                losses.append(loss)
+        finally:
+            for i in range(self.n_learners):
+                self.iteration[i] = self._cpp_models[i].get_iteration()
+            self.total_iterations += self.iteration[0] - iters_before
         return losses
 
     def save(self, filename: str, custom_names: Optional[List] = None) -> None:
@@ -416,7 +445,12 @@ class MultiGBTLearner(BaseLearner):
                     loadname = filename + f'_{custom_names[i]}'
                 loadname += '.gbrl_model'
                 cpp_model = GBRL_CPP.load(loadname)
-                instance.optimizers.extend(cpp_model.get_optimizers())
+                model_optimizers = cpp_model.get_optimizers()
+                # __new__ bypasses __init__, so the checks it runs have to be
+                # repeated here.  Per sub-model: each one covers its own outputs
+                # from 0, so checking the combined list would flag them all.
+                validate_optimizer_ranges(model_optimizers)
+                instance.optimizers.extend(model_optimizers)
                 instance._cpp_models.append(cpp_model)
                 model_metadata = cpp_model.get_metadata()
                 instance.output_dim.append(model_metadata['output_dim'])
@@ -457,7 +491,17 @@ class MultiGBTLearner(BaseLearner):
             instance.student_models = None
             instance.feature_weights = instance._cpp_models[0].get_feature_weights()
             instance.feature_mapping = instance._cpp_models[0].get_feature_mapping()
-            instance._feature_mapping_installed = True
+            # Models trained by versions whose fit() never installed a mapping carry
+            # an all-zero one.  Trusting it makes SHAP attribute every feature to
+            # column 0 -- invisibly, since additivity is unaffected by moving
+            # attribution between columns.  Check the mapping against the feature
+            # counts the models were trained with and force a rebuild if it fails.
+            instance._feature_mapping_installed = is_valid_feature_mapping(
+                instance.feature_mapping, instance.input_dim,
+                int(metadata.get('n_num_features', 0)),
+                int(metadata.get('n_cat_features', 0)))
+            if not instance._feature_mapping_installed:
+                instance.feature_mapping = None
             # Zero: the first reset() folds the currently loaded generation in,
             # so seeding with their counts would double-count them.
             instance._consumed_steps = [0] * n_learners
@@ -703,6 +747,12 @@ class MultiGBTLearner(BaseLearner):
 
         if isinstance(features, th.Tensor):
             features = features.detach().cpu().numpy()
+        # Models saved before fit() installed a mapping carry an unusable one.
+        # Rebuild it from the batch being explained, so such models can still be
+        # explained without a training call first.
+        if not self._feature_mapping_installed:
+            self._ensure_feature_mapping(features)
+            self._feature_mapping_installed = True
         features = self._mapping_input(features)
         num_inputs, cat_inputs = preprocess_features(features)
         poly_vectors = get_poly_vectors(self.params['max_depth'], numerical_dtype)
@@ -755,6 +805,12 @@ class MultiGBTLearner(BaseLearner):
 
         if isinstance(features, th.Tensor):
             features = features.detach().cpu().numpy()
+        # Models saved before fit() installed a mapping carry an unusable one.
+        # Rebuild it from the batch being explained, so such models can still be
+        # explained without a training call first.
+        if not self._feature_mapping_installed:
+            self._ensure_feature_mapping(features)
+            self._feature_mapping_installed = True
         features = self._mapping_input(features)
         num_inputs, cat_inputs = preprocess_features(features)
         poly_vectors = get_poly_vectors(self.params['max_depth'], numerical_dtype)

@@ -314,6 +314,10 @@ py::dict metadataToDict(const ensembleMetaData* metadata){
     py::dict d;
     if (metadata != nullptr){
         d["input_dim"] = metadata->input_dim;
+        // Needed to check a loaded feature mapping: the numerical and categorical
+        // halves each index from 0, so their sizes are what makes a mapping valid.
+        d["n_num_features"] = metadata->n_num_features;
+        d["n_cat_features"] = metadata->n_cat_features;
         d["output_dim"] = metadata->output_dim;
         d["policy_dim"] = metadata->policy_dim;
         d["split_score_func"] = scoreFuncToString(metadata->split_score_func);
@@ -1076,9 +1080,13 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         return self.get_learner_name(); 
     }, "Return the learner name");  
     gbrl.def("get_iteration", [](GBRL &self) ->  int {
-        py::gil_scoped_release release; 
-        return self.get_iteration(); 
-    }, "Return current ensemble iteration");  
+        py::gil_scoped_release release;
+        return self.get_iteration();
+    }, "Return current ensemble iteration");
+    gbrl.def_static("get_monotonic_nonconverged", []() -> int {
+        return get_monotonic_nonconverged();
+    }, "Number of monotonic projections in the last step()/fit() that hit the pass "
+       "limit. Their leaf values are monotone but may not be the closest monotone values.");
     gbrl.def("print_tree", [](GBRL &self, int tree_idx) {
         py::gil_scoped_release release; 
         self.print_tree(tree_idx); 

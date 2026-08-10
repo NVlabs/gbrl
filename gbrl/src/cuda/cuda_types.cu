@@ -679,10 +679,11 @@ void allocate_ensemble_memory_cuda(ensembleMetaData *metadata, ensembleData *eda
         cudaMemcpy(new_data->mono_constraints->feature_idx, edata->mono_constraints->feature_idx, metadata->n_mono_constraints * sizeof(int), cudaMemcpyDeviceToDevice);
         cudaMemcpy(new_data->mono_constraints->output_idx, edata->mono_constraints->output_idx, metadata->n_mono_constraints * sizeof(int), cudaMemcpyDeviceToDevice);
         cudaMemcpy(new_data->mono_constraints->constraint, edata->mono_constraints->constraint, metadata->n_mono_constraints * sizeof(int), cudaMemcpyDeviceToDevice);
-        // Target is new_data here: CUDA split scoring reads this field rather
-        // than the metadata copy, so leaving it at 0 disables constraint-aware
-        // scoring after a growth reallocation.
-        new_data->mono_constraints->n_constraints = metadata->n_mono_constraints;
+        // edata is the container that survives: new_data->mono_constraints is
+        // deleted below once its arrays have been handed over.  CUDA split
+        // scoring reads this field rather than the metadata copy, so it must be
+        // set on edata or constraint-aware scoring silently stops after growth.
+        edata->mono_constraints->n_constraints = metadata->n_mono_constraints;
         if (metadata->grow_policy == GREEDY){
             cudaMemcpy(new_data->ensemble_info->depths, edata->ensemble_info->depths, leaf_idx * sizeof(int), cudaMemcpyDeviceToDevice);
             cudaMemcpy(new_data->feature_data->feature_indices, edata->feature_data->feature_indices, leaf_idx * metadata->max_depth * sizeof(int), cudaMemcpyDeviceToDevice);

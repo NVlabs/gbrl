@@ -487,7 +487,13 @@ __global__ void split_score_cosine_cuda(
     if (threadIdx.x == 0){
         int tmp_idx = __ldg(&candidate_indices[cand_idx]);
         int feat_idx = (candidate_numeric[cand_idx]) ? r_num_mapping[tmp_idx] : r_cat_mapping[tmp_idx];
-        
+        // Unused reverse-mapping slots hold -1, so an incomplete mapping would
+        // read feature_weights out of bounds.  Reject the candidate instead.
+        if (feat_idx < 0){
+            split_scores[cand_idx] = -CUDART_INF_F;
+            return;
+        }
+
         // Convert sums to means first (left_mean and right_mean hold sums at this point)
         for (int d = 0; d < n_cols; ++d){
             left_mean[d] = (l_count[0] > 0.0f) ? left_mean[d] / l_count[0] : 0.0f;
@@ -658,6 +664,12 @@ __global__ void split_score_l2_cuda(
 
         int tmp_idx = __ldg(&candidate_indices[cand_idx]);
         int feat_idx = (candidate_numeric[cand_idx]) ? r_num_mapping[tmp_idx] : r_cat_mapping[tmp_idx];
+        // Unused reverse-mapping slots hold -1, so an incomplete mapping would
+        // read feature_weights out of bounds.  Reject the candidate instead.
+        if (feat_idx < 0){
+            split_scores[cand_idx] = -CUDART_INF_F;
+            return;
+        }
 
         // Convert sums to means
         for (int d = 0; d < n_cols; ++d){
@@ -866,6 +878,12 @@ __global__ void split_cosine_score_kernel(
         float cos = numerator / sqrtf(denominator);
         int tmp_idx = __ldg(&candidate_indices[cand_idx]);
         int feat_idx = (candidate_numeric[cand_idx]) ? r_num_mapping[tmp_idx] : r_cat_mapping[tmp_idx];
+        // Unused reverse-mapping slots hold -1, so an incomplete mapping would
+        // read feature_weights out of bounds.  Reject the candidate instead.
+        if (feat_idx < 0){
+            split_scores[cand_idx] = -CUDART_INF_F;
+            return;
+        }
         split_scores[cand_idx] = cos * __ldg(feature_weights + feat_idx);
     }
 }
@@ -934,7 +952,13 @@ __global__ void split_l2_score_kernel(
 
         int tmp_idx = __ldg(&candidate_indices[cand_idx]);
         int feat_idx = (candidate_numeric[cand_idx]) ? r_num_mapping[tmp_idx] : r_cat_mapping[tmp_idx];
-        split_scores[cand_idx] = (l_mean_norm + r_mean_norm) * __ldg(feature_weights + feat_idx);    
+        // Unused reverse-mapping slots hold -1, so an incomplete mapping would
+        // read feature_weights out of bounds.  Reject the candidate instead.
+        if (feat_idx < 0){
+            split_scores[cand_idx] = -CUDART_INF_F;
+            return;
+        }
+        split_scores[cand_idx] = (l_mean_norm + r_mean_norm) * __ldg(feature_weights + feat_idx);
     }
 }
 
@@ -1903,13 +1927,14 @@ void apply_monotonic_constraints_cuda(
     mono_cuda_check(cudaMemcpy(h_mono_constraint, edata->mono_constraints->constraint,
                metadata->n_mono_constraints * sizeof(int), cudaMemcpyDeviceToHost), "constraint copy");
     
-    // Build map: depth -> (effective_constraint, output_idx) for this tree
-    // Only allocate for policy_dim since monotonic constraints only apply to policy outputs
-    int** effective_constraints = new int*[tree_depth];
-    for (int d = 0; d < tree_depth; ++d) {
-        effective_constraints[d] = new int[metadata->policy_dim]();
-    }
-    
+    // Build map: depth -> (effective_constraint, output_idx) for this tree.
+    // Flat and owned by a vector: the device allocations below throw on failure,
+    // and a raw int** here would leak on that path.
+    // Only sized for policy_dim since monotonic constraints only apply to policy outputs.
+    const int policy_dim = metadata->policy_dim;
+    std::vector<int> effective_constraints_v(static_cast<size_t>(tree_depth) * policy_dim, 0);
+    int *effective_constraints = effective_constraints_v.data();
+
     for (int c = 0; c < metadata->n_mono_constraints; ++c) {
         int global_feature_idx = h_mono_feature_idx[c];
         int constraint_dir = h_mono_constraint[c];
@@ -1929,7 +1954,7 @@ void apply_monotonic_constraints_cuda(
             if (global_idx == global_feature_idx) {
                 // If inequality_direction is inverted (false), flip the constraint
                 int effective_dir = h_inequality_directions[d] ? constraint_dir : -constraint_dir;
-                effective_constraints[d][constraint_output] = effective_dir;
+                effective_constraints[d * policy_dim + constraint_output] = effective_dir;
             }
         }
     }
@@ -1940,6 +1965,10 @@ void apply_monotonic_constraints_cuda(
     // not sufficient because pooling at one depth can re-introduce violations at
     // a previously corrected depth when several depths are constrained.
     // Only iterate over policy_dim since monotonic constraints only apply to policy outputs.
+    // Host copy of this tree's leaf values, used by the feasibility scan.
+    // Allocated before the device buffers so a bad_alloc here cannot leak them.
+    std::vector<float> h_vals(static_cast<size_t>(n_leaves_in_tree) * metadata->output_dim);
+
     int* d_any_change;
     mono_cuda_check(cudaMalloc(&d_any_change, sizeof(int)), "d_any_change alloc");
     // Dykstra correction, one vector per depth.
@@ -1949,13 +1978,16 @@ void apply_monotonic_constraints_cuda(
         cudaFree(d_any_change);   // do not leak the flag allocated just above
         mono_cuda_check(z_alloc, "d_z alloc");
     }
+    // Nothing between here and the two cudaFree calls below may throw, so the
+    // device buffers cannot leak.
     // Any CUDA failure aborts the whole projection: continuing would leave the
     // leaf values partially projected and therefore non-monotone.
     bool cuda_failed = false;
     bool infeasible = false;
     int infeasible_out = -1;
     float worst_gap = 0.0f;
-    for (int out_idx = 0; out_idx < metadata->policy_dim && !cuda_failed; ++out_idx) {
+    int nonconverged = 0;
+    for (int out_idx = 0; out_idx < policy_dim && !cuda_failed; ++out_idx) {
         cudaError_t z_clear = cudaMemset(d_z, 0, sizeof(float) * tree_depth * n_leaves_in_tree);
         if (z_clear != cudaSuccess) {
             std::cerr << "ERROR: d_z memset failed: " << cudaGetErrorString(z_clear) << std::endl;
@@ -1971,7 +2003,7 @@ void apply_monotonic_constraints_cuda(
                 break;
             }
             for (int d = 0; d < tree_depth; ++d) {
-                int constraint_dir = effective_constraints[d][out_idx];
+                int constraint_dir = effective_constraints[d * policy_dim + out_idx];
                 if (constraint_dir == 0) continue;
 
                 monotonic_project_kernel<<<n_planes, 1>>>(
@@ -2019,10 +2051,18 @@ void apply_monotonic_constraints_cuda(
         // into a plain projection, restoring exact monotonicity after Dykstra's
         // asymptotic approach.  See fitter.cpp for the rationale.
         for (int pass = 0; pass < MONOTONIC_MAX_PASSES && !cuda_failed; ++pass) {
-            cudaMemset(d_z, 0, sizeof(float) * tree_depth * n_leaves_in_tree);
-            cudaMemset(d_any_change, 0, sizeof(int));
+            // Checked like the Dykstra-phase memsets: an unchecked failure here
+            // would launch the next kernel against stale corrections.
+            cudaError_t clear_err = cudaMemset(d_z, 0, sizeof(float) * tree_depth * n_leaves_in_tree);
+            if (clear_err == cudaSuccess)
+                clear_err = cudaMemset(d_any_change, 0, sizeof(int));
+            if (clear_err != cudaSuccess) {
+                std::cerr << "ERROR: monotonic cleanup memset failed: " << cudaGetErrorString(clear_err) << std::endl;
+                cuda_failed = true;
+                break;
+            }
             for (int d = 0; d < tree_depth; ++d) {
-                int constraint_dir = effective_constraints[d][out_idx];
+                int constraint_dir = effective_constraints[d * policy_dim + out_idx];
                 if (constraint_dir == 0) continue;
                 monotonic_project_kernel<<<n_planes, 1>>>(
                     edata->leaf_data->values, d, constraint_dir, tree_depth,
@@ -2056,7 +2096,6 @@ void apply_monotonic_constraints_cuda(
         // Final feasibility scan: `converged` only reflects the Dykstra phase, so
         // check the real property by copying this tree's leaf values back.
         if (!cuda_failed) {
-            std::vector<float> h_vals(static_cast<size_t>(n_leaves_in_tree) * metadata->output_dim);
             cudaError_t cp = cudaMemcpy(h_vals.data(),
                                         edata->leaf_data->values + static_cast<size_t>(start_leaf_idx) * metadata->output_dim,
                                         h_vals.size() * sizeof(float), cudaMemcpyDeviceToHost);
@@ -2065,7 +2104,7 @@ void apply_monotonic_constraints_cuda(
                 cuda_failed = true;
             } else {
                 for (int d = 0; d < tree_depth; ++d) {
-                    int constraint_dir = effective_constraints[d][out_idx];
+                    int constraint_dir = effective_constraints[d * policy_dim + out_idx];
                     if (constraint_dir == 0) continue;
                     int bit_mask = 1 << (tree_depth - 1 - d);
                     for (int i = 0; i < n_leaves_in_tree; ++i) {
@@ -2088,6 +2127,7 @@ void apply_monotonic_constraints_cuda(
         }
         // See fitter.cpp: feasible-but-not-provably-nearest when Dykstra hit the cap.
         if (!converged) {
+            ++nonconverged;
             std::cerr << "WARNING: monotonic projection for output " << out_idx
                       << " reached the " << MONOTONIC_MAX_PASSES
                       << "-pass limit; leaf values are monotone but may not be the"
@@ -2096,18 +2136,17 @@ void apply_monotonic_constraints_cuda(
     }
     cudaFree(d_any_change);
     cudaFree(d_z);
-    
+
+    // Counted so the Python layer can raise a real RuntimeWarning after fit()/step().
+    for (int i = 0; i < nonconverged; ++i)
+        note_monotonic_nonconverged();
+
     // Monotonicity is a hard contract: surface failures to Python rather than
-    // leaving a silently non-monotone model behind.  Free host state first.
+    // leaving a silently non-monotone model behind.
     const bool failed = cuda_failed;
     const bool bad = infeasible;
     const int bad_out = infeasible_out;
     const float bad_gap = worst_gap;
-
-    for (int d = 0; d < tree_depth; ++d) {
-        delete[] effective_constraints[d];
-    }
-    delete[] effective_constraints;
 
     if (failed) {
         throw std::runtime_error(

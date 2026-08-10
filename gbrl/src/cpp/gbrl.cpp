@@ -785,15 +785,25 @@ void GBRL::_step_gpu(dataSet *dataset){
         n_samples,           // number of samples
     };
     candidatesData candidata{n_candidates, candidate_indices, candidate_values, candidate_numerical, candidate_categories};
-    splitDataGPU *split_data = allocate_split_data(this->metadata, candidata.n_candidates);  
-    if (this->metadata->grow_policy == GREEDY)
-        fit_tree_greedy_cuda(&cuda_dataset, this->edata, this->metadata, &candidata, split_data);
-    else
-        fit_tree_oblivious_cuda(&cuda_dataset, this->edata, this->metadata, &candidata, split_data);
+    splitDataGPU *split_data = allocate_split_data(this->metadata, candidata.n_candidates);
+    // A rejected monotonic projection throws out of fit_tree_*_cuda; without this
+    // the device block and split data below are never released, so a caller that
+    // retries after the failure leaks GPU memory on every attempt.
+    try {
+        if (this->metadata->grow_policy == GREEDY)
+            fit_tree_greedy_cuda(&cuda_dataset, this->edata, this->metadata, &candidata, split_data);
+        else
+            fit_tree_oblivious_cuda(&cuda_dataset, this->edata, this->metadata, &candidata, split_data);
+    } catch (...) {
+        cudaFree(split_data->split_scores);
+        delete split_data;
+        cudaFree(device_memory_block);
+        throw;
+    }
     cudaFree(split_data->split_scores);
     delete split_data;
     cudaFree(device_memory_block);
-    
+
     ++this->metadata->iteration;
 }
 
@@ -1022,32 +1032,42 @@ float GBRL::_fit_gpu(dataHolder<float> *obs,
     int n_candidates = process_candidates_cuda(gpu_obs, gpu_categorical_obs, gpu_grads_norm, candidate_indices, candidate_values, candidate_categories, candidate_numerical, n_samples, n_num_features, n_cat_features, n_bins, this->metadata->generator_type);
 
     candidatesData candidata{n_candidates, candidate_indices, candidate_values, candidate_numerical, candidate_categories};
-    splitDataGPU *split_data = allocate_split_data(this->metadata, candidata.n_candidates);  
-    for (int i = 0 ; i < n_iterations; ++i){
-       cuda_dataset.grads->data = gpu_grads;
-       cuda_dataset.obs->data = trans_obs;
-       cuda_dataset.build_grads->data = gpu_build_grads;
-        if (this->metadata->grow_policy == GREEDY)
-            fit_tree_greedy_cuda(&cuda_dataset, this->edata, this->metadata, &candidata, split_data);
-        else
-            fit_tree_oblivious_cuda(&cuda_dataset, this->edata, this->metadata, &candidata, split_data);
+    splitDataGPU *split_data = allocate_split_data(this->metadata, candidata.n_candidates);
+    // A rejected monotonic projection throws out of fit_tree_*_cuda part-way
+    // through the loop; without this the buffers below are never released, so a
+    // caller that retries after the failure leaks GPU memory on every attempt.
+    try {
+        for (int i = 0 ; i < n_iterations; ++i){
+           cuda_dataset.grads->data = gpu_grads;
+           cuda_dataset.obs->data = trans_obs;
+           cuda_dataset.build_grads->data = gpu_build_grads;
+            if (this->metadata->grow_policy == GREEDY)
+                fit_tree_greedy_cuda(&cuda_dataset, this->edata, this->metadata, &candidata, split_data);
+            else
+                fit_tree_oblivious_cuda(&cuda_dataset, this->edata, this->metadata, &candidata, split_data);
 
-        ++this->metadata->iteration;
+            ++this->metadata->iteration;
 
-        cuda_dataset.obs->data = gpu_obs;
-        predict_cuda_no_host(&cuda_dataset, gpu_preds, this->metadata, this->edata, this->cuda_opt, this->n_cuda_opts, i, 0, false);
-        cudaMemset(gpu_grads, 0, grads_size);
-        if (this->metadata->verbose == 0)
-            MultiRMSEGrad(gpu_preds, gpu_targets, gpu_grads, output_dim, n_samples, n_blocks, threads_per_block);
-        else{
-            cudaMemset(result_tmp, 0, result_tmp_size);
-            float loss = MultiRMSEGradandLoss(gpu_preds, gpu_targets, gpu_grads, result_tmp, output_dim, n_samples, n_blocks, threads_per_block);
-            std::cout << this->learner_name << " - Boosting iteration: " << this->metadata->iteration << " - MultiRMSE Loss: " << loss << std::endl;
+            cuda_dataset.obs->data = gpu_obs;
+            predict_cuda_no_host(&cuda_dataset, gpu_preds, this->metadata, this->edata, this->cuda_opt, this->n_cuda_opts, i, 0, false);
+            cudaMemset(gpu_grads, 0, grads_size);
+            if (this->metadata->verbose == 0)
+                MultiRMSEGrad(gpu_preds, gpu_targets, gpu_grads, output_dim, n_samples, n_blocks, threads_per_block);
+            else{
+                cudaMemset(result_tmp, 0, result_tmp_size);
+                float loss = MultiRMSEGradandLoss(gpu_preds, gpu_targets, gpu_grads, result_tmp, output_dim, n_samples, n_blocks, threads_per_block);
+                std::cout << this->learner_name << " - Boosting iteration: " << this->metadata->iteration << " - MultiRMSE Loss: " << loss << std::endl;
+            }
+            cudaMemcpy(gpu_build_grads, gpu_grads, grads_size, cudaMemcpyDeviceToDevice);
+
+            preprocess_matrices(gpu_build_grads, gpu_grads_norm, n_samples, output_dim, this->metadata->split_score_func);
+
         }
-        cudaMemcpy(gpu_build_grads, gpu_grads, grads_size, cudaMemcpyDeviceToDevice);
-        
-        preprocess_matrices(gpu_build_grads, gpu_grads_norm, n_samples, output_dim, this->metadata->split_score_func);
-        
+    } catch (...) {
+        cudaFree(split_data->split_scores);
+        delete split_data;
+        cudaFree(device_memory_block);
+        throw;
     }
     cudaFree(split_data->split_scores);
     delete split_data;
@@ -1094,11 +1114,13 @@ void GBRL::step(dataHolder<const float> *obs,
 #endif
     dataSet dataset{
         obs,                // observations
-        categorical_obs,    // categorical observations  
+        categorical_obs,    // categorical observations
         grads,             // gradients
         nullptr,           // build_grads (not used in step)
         n_samples,         // number of samples
     };
+    // Cleared so Python can tell whether THIS call hit the projection pass limit.
+    reset_monotonic_nonconverged();
 #ifdef USE_CUDA
     if (this->device == gpu)
         this->_step_gpu(&dataset);
@@ -1153,6 +1175,8 @@ float GBRL::fit(dataHolder<float> *obs,
     }
 
     float full_loss = -INFINITY;
+    // Cleared so Python can tell whether THIS call hit the projection pass limit.
+    reset_monotonic_nonconverged();
 #ifdef USE_CUDA
     if (this->device == gpu)
         full_loss = this->_fit_gpu(
@@ -1444,6 +1468,70 @@ static void validate_shap_optimizer_ranges(const std::vector<Optimizer*> &opts)
 }
 
 /**
+ * @brief Reject a feature mapping that cannot identify the input column of a split.
+ *
+ * SHAP maps each split's type-local index through the reverse mappings to pick the
+ * output column it attributes to.  A model trained before fit() installed the
+ * mapping carries an all-zero one, which silently attributes every feature to
+ * column 0; an out-of-range entry would index past the SHAP output array.  Check
+ * that the first n_num_features / n_cat_features entries are in range and name a
+ * distinct input column each, before anything is allocated.
+ */
+static void validate_shap_feature_mapping(const ensembleMetaData *metadata,
+                                          const ensembleData *edata,
+                                          deviceType device)
+{
+    const int input_dim = metadata->input_dim;
+    const int n_num = metadata->n_num_features;
+    const int n_cat = metadata->n_cat_features;
+    if (n_num + n_cat != input_dim) {
+        throw std::runtime_error(
+            "SHAP is not available: the model does not know how many of its inputs "
+            "are numerical and how many are categorical. Train it with step() or "
+            "fit() before asking for SHAP values.");
+    }
+
+    std::vector<int> num_map(input_dim), cat_map(input_dim);
+    if (device == gpu) {
+#ifdef USE_CUDA
+        cudaMemcpy(num_map.data(), edata->feature_mappings->reverse_num_feature_mapping,
+                   sizeof(int) * input_dim, cudaMemcpyDeviceToHost);
+        cudaMemcpy(cat_map.data(), edata->feature_mappings->reverse_cat_feature_mapping,
+                   sizeof(int) * input_dim, cudaMemcpyDeviceToHost);
+#else
+        throw std::runtime_error("GBRL was not compiled for GPU but GPU data detected!");
+#endif
+    } else {
+        memcpy(num_map.data(), edata->feature_mappings->reverse_num_feature_mapping,
+               sizeof(int) * input_dim);
+        memcpy(cat_map.data(), edata->feature_mappings->reverse_cat_feature_mapping,
+               sizeof(int) * input_dim);
+    }
+
+    std::vector<bool> seen(input_dim, false);
+    for (int i = 0; i < n_num; ++i) {
+        int global_idx = num_map[i];
+        if (global_idx < 0 || global_idx >= input_dim || seen[global_idx]) {
+            throw std::runtime_error(
+                "SHAP is not available: this model has no valid feature mapping, so "
+                "SHAP cannot tell which input column each split belongs to. Call "
+                "step() or fit() once with a representative batch to rebuild it.");
+        }
+        seen[global_idx] = true;
+    }
+    for (int i = 0; i < n_cat; ++i) {
+        int global_idx = cat_map[i];
+        if (global_idx < 0 || global_idx >= input_dim || seen[global_idx]) {
+            throw std::runtime_error(
+                "SHAP is not available: this model has no valid feature mapping, so "
+                "SHAP cannot tell which input column each split belongs to. Call "
+                "step() or fit() once with a representative batch to rebuild it.");
+        }
+        seen[global_idx] = true;
+    }
+}
+
+/**
  * @brief Accumulate per-sample SHAP base contribution from one tree.
  *
  * Adds sum_{leaf nodes} predictions[node * out_dim + d] into
@@ -1620,6 +1708,7 @@ static void advance_adam_state(
 float* GBRL::tree_shap(const int tree_idx, const float *obs, const char *categorical_obs, const int n_samples, float *norm, float *base_poly, float *offset, float *base_values){
     valid_tree_idx(tree_idx, this->metadata);
     validate_shap_optimizer_ranges(this->opts);
+    validate_shap_feature_mapping(this->metadata, this->edata, this->device);
     ensembleData *edata_cpu = nullptr;
 #ifdef USE_CUDA
     if (this->device == gpu){
@@ -1707,6 +1796,7 @@ float* GBRL::tree_shap(const int tree_idx, const float *obs, const char *categor
 float* GBRL::ensemble_shap(const float *obs, const char *categorical_obs, const int n_samples, float *norm, float *base_poly, float *offset, float *base_values){
     valid_tree_idx(0, this->metadata);
     validate_shap_optimizer_ranges(this->opts);
+    validate_shap_feature_mapping(this->metadata, this->edata, this->device);
     float *shap_values = init_zero_mat((this->metadata->n_num_features + this->metadata->n_cat_features)*this->metadata->output_dim * n_samples);
 
     dataHolder<const float> obs_holder{obs, cpu};

@@ -27,6 +27,7 @@ for single gradient boosted tree models. It supports training, prediction,
 SHAP computation, and model serialization.
 """
 import os
+import warnings
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
@@ -36,6 +37,7 @@ from gbrl import GBRL_CPP
 from gbrl.common.compression import ParametricActorCompression, TreeCompression
 from gbrl.common.utils import (NumericalData, concatenate_arrays,
                                ensure_leaf_tensor_or_array, get_poly_vectors,
+                               is_valid_feature_mapping,
                                normalize_vector_input, numerical_dtype,
                                preprocess_features, process_monotonic_constraints,
                                get_index_mapping, to_numpy,
@@ -43,6 +45,21 @@ from gbrl.common.utils import (NumericalData, concatenate_arrays,
                                validate_monotonic_optimizer_compat,
                                validate_optimizer_ranges)
 from gbrl.learners.base import BaseLearner
+
+
+def warn_on_projection_limit() -> None:
+    """Raise a Python warning if a monotonic projection hit its pass limit.
+
+    The C++ side also prints to stderr, which nothing in Python can observe. The
+    leaf values are still monotone; they are just no longer guaranteed to be the
+    closest monotone values to the ones the trees produced.
+    """
+    n_hits = GBRL_CPP.get_monotonic_nonconverged()
+    if n_hits > 0:
+        warnings.warn(
+            f"{n_hits} monotonic projection(s) hit the pass limit. Leaf values "
+            f"satisfy the constraints but may not be the closest values that do.",
+            RuntimeWarning, stacklevel=3)
 
 
 class GBTLearner(BaseLearner):
@@ -164,13 +181,25 @@ class GBTLearner(BaseLearner):
         because completeness is unaffected by moving attribution between columns.
         Monotonic constraints and feature-weighted scoring read them too.
 
-        Called from both step() and fit(); keyed on the C++ model rather than on
-        total_iterations, because distillation swaps in a fresh model while
-        leaving total_iterations non-zero.
+        Called from step(), fit() and the SHAP entry points; keyed on the C++
+        model rather than on total_iterations, because distillation swaps in a
+        fresh model while leaving total_iterations non-zero.
         """
         if self.feature_mapping is None:
             self.feature_mapping = get_index_mapping(self._mapping_input(features))
         feature_mapping, numerical_mask = self.feature_mapping
+        # A model that has already trained knows how many features of each kind it
+        # expects.  Rebuilding from a batch with a different mix would install a
+        # mapping that names the wrong column for every split, so reject it.
+        metadata = self._cpp_model.get_metadata()
+        n_num = int(metadata.get('n_num_features', 0))
+        n_cat = int(metadata.get('n_cat_features', 0))
+        if n_num + n_cat > 0 and not is_valid_feature_mapping(
+                (feature_mapping, numerical_mask), self.input_dim, n_num, n_cat):
+            raise ValueError(
+                f"The given batch does not match the data this model was trained "
+                f"on: it expects {n_num} numerical and {n_cat} categorical "
+                f"columns. Pass a representative batch.")
         validate_monotonic_features_numerical(self.monotonic_constraints, numerical_mask)
         self._cpp_model.set_feature_mapping(np.ascontiguousarray(feature_mapping),
                                             np.ascontiguousarray(numerical_mask))
@@ -218,6 +247,7 @@ class GBTLearner(BaseLearner):
 
         self.iteration = self._cpp_model.get_iteration()
         self.total_iterations += 1
+        warn_on_projection_limit()
 
     def fit(self, features: NumericalData,
             targets: NumericalData, iterations: int,
@@ -257,12 +287,18 @@ class GBTLearner(BaseLearner):
         # Accumulate the delta rather than assigning: after distillation the main
         # C++ model restarts at zero trees while total_iterations deliberately
         # keeps the teacher's history, so assigning would discard it.
+        # In a finally block because a rejected monotonic projection can throw
+        # after several trees were already added and kept; skipping the update
+        # would leave the Python counts behind the C++ ones.
         iters_before = self._cpp_model.get_iteration()
-        loss = self._cpp_model.fit(num_features, cat_features,
-                                   targets.astype(numerical_dtype),
-                                   iterations, shuffle, loss_type)
-        self.iteration = self._cpp_model.get_iteration()
-        self.total_iterations += self.iteration - iters_before
+        try:
+            loss = self._cpp_model.fit(num_features, cat_features,
+                                       targets.astype(numerical_dtype),
+                                       iterations, shuffle, loss_type)
+        finally:
+            self.iteration = self._cpp_model.get_iteration()
+            self.total_iterations += self.iteration - iters_before
+        warn_on_projection_limit()
         return loss
 
     def save(self, filename: str) -> None:
@@ -351,20 +387,17 @@ class GBTLearner(BaseLearner):
             # Models trained by versions whose fit() never installed a mapping carry
             # an all-zero one.  Trusting it makes SHAP attribute every feature to
             # column 0 -- invisibly, since additivity is unaffected by moving
-            # attribution between columns.  Detect that and force a rebuild from
-            # the next batch instead.
-            instance._feature_mapping_installed = True
-            if instance.input_dim > 1 and instance.feature_mapping is not None:
-                mapping = np.asarray(instance.feature_mapping[0])
-                mask = np.asarray(instance.feature_mapping[1])
-                # A genuine mapping for one numerical + one categorical column is
-                # [0, 0], since each type indexes from 0 -- so an all-zero mapping
-                # alone is not proof of corruption.  An uninitialised mapping has
-                # an all-zero numerical mask as well.
-                if (mapping.size == instance.input_dim and not np.any(mapping)
-                        and not np.any(mask)):
-                    instance.feature_mapping = None
-                    instance._feature_mapping_installed = False
+            # attribution between columns.  Check the mapping against the feature
+            # counts the model was trained with and force a rebuild if it fails.
+            instance._feature_mapping_installed = is_valid_feature_mapping(
+                instance.feature_mapping, instance.input_dim,
+                int(metadata.get('n_num_features', 0)),
+                int(metadata.get('n_cat_features', 0)))
+            if not instance._feature_mapping_installed:
+                instance.feature_mapping = None
+            # __new__ bypasses __init__, so the checks it runs have to be repeated
+            # here for a model saved by a version that did not have them.
+            validate_optimizer_ranges(instance.optimizers)
             # Rebuild the Python constraint dict from the serialized arrays so
             # reset()/distil() recreate a model with the same constraints.
             instance.monotonic_constraints = None
@@ -535,15 +568,14 @@ class GBTLearner(BaseLearner):
                 "predict() sums both the main and student ensembles, so a single-model "
                 "SHAP result would not reconstruct the prediction."
             )
-        if not self._feature_mapping_installed:
-            raise RuntimeError(
-                "This model has no valid feature mapping, so SHAP cannot tell which "
-                "input column each split belongs to and would attribute everything "
-                "to column 0. It was most likely trained by an older version whose "
-                "fit() did not install one. Call step() or fit() once with a "
-                "representative batch to rebuild it.")
         if isinstance(features, th.Tensor):
             features = features.detach().cpu().numpy()
+        # A model saved before fit() installed a mapping carries an unusable one.
+        # Rebuild it from the batch being explained, so such a model can still be
+        # explained without a training call first.
+        if not self._feature_mapping_installed:
+            self._ensure_feature_mapping(features)
+            self._feature_mapping_installed = True
         features = self._mapping_input(features)
         num_features, cat_features = preprocess_features(features)
         poly_vectors = get_poly_vectors(self.params['max_depth'], numerical_dtype)
@@ -588,15 +620,14 @@ class GBTLearner(BaseLearner):
                 "predict() sums both the main and student ensembles, so a single-model "
                 "SHAP result would not reconstruct the prediction."
             )
-        if not self._feature_mapping_installed:
-            raise RuntimeError(
-                "This model has no valid feature mapping, so SHAP cannot tell which "
-                "input column each split belongs to and would attribute everything "
-                "to column 0. It was most likely trained by an older version whose "
-                "fit() did not install one. Call step() or fit() once with a "
-                "representative batch to rebuild it.")
         if isinstance(features, th.Tensor):
             features = features.detach().cpu().numpy()
+        # A model saved before fit() installed a mapping carries an unusable one.
+        # Rebuild it from the batch being explained, so such a model can still be
+        # explained without a training call first.
+        if not self._feature_mapping_installed:
+            self._ensure_feature_mapping(features)
+            self._feature_mapping_installed = True
         features = self._mapping_input(features)
         num_features, cat_features = preprocess_features(features)
         poly_vectors = get_poly_vectors(self.params['max_depth'], numerical_dtype)
@@ -691,6 +722,16 @@ class GBTLearner(BaseLearner):
         Returns:
             Tuple[float, Dict]: The final loss and updated parameters.
         """
+        # predict() adds the student's output to the main model's, so the public
+        # prediction is only monotone if the student is too.  A student trained on
+        # a monotone teacher's outputs carries no such guarantee, which would
+        # quietly break the hard monotonicity contract.
+        if self.monotonic_constraints:
+            raise ValueError(
+                "Distillation is not supported for models with monotonic "
+                "constraints. predict() adds the student model's output to the "
+                "main model's, and the student is not constrained, so the result "
+                "would not be guaranteed monotone.")
         obs = self._mapping_input(obs)
         num_obs, cat_obs = preprocess_features(obs)
         distil_params = {'input_dim': self.input_dim,

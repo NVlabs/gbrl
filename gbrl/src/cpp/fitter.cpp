@@ -193,6 +193,7 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
         calculate_squared_norm(full_grad_norms, full_grads, dataset->n_samples, metadata->output_dim, metadata->par_th);
         generator.processCategoricalCandidates(dataset->categorical_obs->data, full_grad_norms);
         delete[] full_preds;
+        full_preds = nullptr;
         delete[] full_grads;
         delete[] full_grad_norms;
     }
@@ -272,6 +273,21 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
                 } catch (...) {
                     metadata->n_trees = trees_before;
                     metadata->n_leaves = leaves_before;
+                    // Release everything this call allocated: the cleanup after
+                    // the loop is skipped by the unwind.
+                    if (indices != nullptr){
+                        for (int f = 0; f < metadata->n_num_features; ++f)
+                            delete[] indices[f];
+                        delete[] indices;
+                    }
+                    delete[] batch_preds;
+                    delete[] last_batch_preds;
+                    delete[] batch_grads;
+                    delete[] batch_build_grads;
+                    delete[] last_batch_grads;
+                    delete[] last_batch_build_grads;
+                    delete[] batch_grad_norms;
+                    delete[] last_batch_grad_norms;
                     throw;
                 }
             }
@@ -479,10 +495,15 @@ int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMe
             for (int j = start_idx; j < end_idx; ++j) {
                 float score = 0.0f;
                 // Get the global feature index for constraint lookup
-                int global_feature_idx = (split_candidates[j].categorical_value == nullptr) 
-                    ? edata->feature_mappings->reverse_num_feature_mapping[split_candidates[j].feature_idx] 
+                int global_feature_idx = (split_candidates[j].categorical_value == nullptr)
+                    ? edata->feature_mappings->reverse_num_feature_mapping[split_candidates[j].feature_idx]
                     : edata->feature_mappings->reverse_cat_feature_mapping[split_candidates[j].feature_idx];
-                
+                // set_feature_mapping fills unused reverse slots with -1, so a
+                // mapping that does not cover this split would index
+                // feature_weights out of bounds.  Reject the candidate instead.
+                if (global_feature_idx < 0 || global_feature_idx >= metadata->input_dim)
+                    continue;
+
                 for (int node_idx = 0; node_idx < (1 << depth); ++node_idx){
                     TreeNode *crnt_node = tree_nodes[node_idx];
                     // Use constraint-aware scoring if constraints exist
@@ -887,8 +908,10 @@ void Fitter::apply_monotonic_constraints_cpu(
 
         // Dykstra converges to the NEAREST monotone point only if it converged.
         // If it hit the pass limit the cleanup phase still guarantees a feasible
-        // result, but it is no longer provably the closest one.
+        // result, but it is no longer provably the closest one.  Counted so the
+        // Python layer can raise a real RuntimeWarning after fit()/step().
         if (!converged) {
+            note_monotonic_nonconverged();
             std::cerr << "WARNING: monotonic projection for output " << out_idx
                       << " reached the " << MONOTONIC_MAX_PASSES
                       << "-pass limit; leaf values are monotone but may not be the"
