@@ -229,6 +229,7 @@ class MultiGBTLearner(BaseLearner):
             self._ensure_feature_mapping(inputs)
             self._feature_mapping_installed = True
 
+        inputs = self._mapping_input(inputs)
         num_inputs, cat_inputs = preprocess_features(inputs)
 
         if model_idx is not None:
@@ -279,6 +280,7 @@ class MultiGBTLearner(BaseLearner):
         assert self._cpp_models is not None, "Model not initialized."
         if isinstance(inputs, th.Tensor):
             inputs = inputs.detach().cpu().numpy()
+        inputs = self._mapping_input(inputs)
         num_inputs, cat_inputs = preprocess_features(inputs)
         # fit() must install the mapping too; without it SHAP collapses every
         # feature onto column 0 (see _ensure_feature_mapping).
@@ -456,7 +458,9 @@ class MultiGBTLearner(BaseLearner):
             instance.feature_weights = instance._cpp_models[0].get_feature_weights()
             instance.feature_mapping = instance._cpp_models[0].get_feature_mapping()
             instance._feature_mapping_installed = True
-            instance._consumed_steps = [m.get_iteration() for m in instance._cpp_models]
+            # Zero: the first reset() folds the currently loaded generation in,
+            # so seeding with their counts would double-count them.
+            instance._consumed_steps = [0] * n_learners
             instance._cpp_model = None   # set by BaseLearner.__init__; unused here
             instance.learner_names = [m.get_learner_name() for m in instance._cpp_models]
             # Monotonic constraints are not serialized; a loaded model has none.
@@ -699,6 +703,7 @@ class MultiGBTLearner(BaseLearner):
 
         if isinstance(features, th.Tensor):
             features = features.detach().cpu().numpy()
+        features = self._mapping_input(features)
         num_inputs, cat_inputs = preprocess_features(features)
         poly_vectors = get_poly_vectors(self.params['max_depth'], numerical_dtype)
         base_poly, norm_values, offset = poly_vectors
@@ -750,6 +755,7 @@ class MultiGBTLearner(BaseLearner):
 
         if isinstance(features, th.Tensor):
             features = features.detach().cpu().numpy()
+        features = self._mapping_input(features)
         num_inputs, cat_inputs = preprocess_features(features)
         poly_vectors = get_poly_vectors(self.params['max_depth'], numerical_dtype)
         base_poly, norm_values, offset = poly_vectors
@@ -824,6 +830,7 @@ class MultiGBTLearner(BaseLearner):
             num_inputs = get_tensor_info(features)
             cat_inputs = None
         else:
+            features = self._mapping_input(features)
             num_inputs, cat_inputs = preprocess_features(features)
 
         def predict_single_model(model, student_model, device):
@@ -880,6 +887,7 @@ class MultiGBTLearner(BaseLearner):
         """
         assert self._cpp_models is not None and isinstance(self._cpp_models, list), \
             "Model not initialized."
+        obs = self._mapping_input(obs)
         num_obs, cat_obs = preprocess_features(obs)
         # output_dim / policy_dim are per-learner and are filled inside the loop:
         # self.output_dim is a list, which the C++ constructor cannot accept.
@@ -976,6 +984,7 @@ class MultiGBTLearner(BaseLearner):
         if isinstance(features, th.Tensor):
             features = features.detach().cpu().numpy().astype(np.single)
         
+        features = self._mapping_input(features)
         num_features, cat_features = preprocess_features(features)
         if model_idx is None:
             A, V, n_leaves_per_tree, n_leaves, n_trees = [], [], [], [], []
@@ -1156,6 +1165,7 @@ class MultiGBTLearner(BaseLearner):
                                 device=self.device)
         copy_.iteration = self.iteration
         copy_.total_iterations = self.total_iterations
+        copy_._consumed_steps = list(self._consumed_steps)
         if self.student_models is not None:
             copy_.student_models = [None] * self.n_learners
 

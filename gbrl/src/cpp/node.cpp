@@ -226,11 +226,9 @@ float TreeNode::getSplitScoreWithConstraints(
         }
     }
     
-    // Check if this feature has a monotonic constraint (only for numerical features)
-    int constraint_dir = 0;
-    int constraint_output_idx = -1;
-    // Collect EVERY constraint on this feature: a feature may be constrained on
-    // several output dimensions, and previously only the first affected scoring.
+    // Count EVERY constraint on this feature (numerical features only): a feature
+    // may be constrained on several output dimensions, and the scorers below
+    // handle all of them.
     int n_feature_constraints = 0;
     if (is_numeric && mono_constraints != nullptr && n_mono_constraints > 0) {
         for (int c = 0; c < n_mono_constraints; ++c) {
@@ -333,10 +331,14 @@ float TreeNode::splitScoreL2WithConstraint(
 
     const float left_count_f = static_cast<float>(left_count);
     const float right_count_f = static_cast<float>(right_count);
+    // Guarded reciprocal, as in every other scorer: min_data_in_leaf == 0 is a
+    // supported configuration, so an empty child is legitimate and its mean is 0.
+    const float left_count_recip = (left_count > 0) ? 1.0f / left_count_f : 0.0f;
+    const float right_count_recip = (right_count > 0) ? 1.0f / right_count_f : 0.0f;
     #pragma omp simd
     for (int d = 0; d < n_cols; ++d) {
-        left_mean[d] /= left_count_f;
-        right_mean[d] /= right_count_f;
+        left_mean[d] *= left_count_recip;
+        right_mean[d] *= right_count_recip;
     }
 
     pool_constrained_means(left_mean, right_mean, n_cols, left_count_f, right_count_f,
@@ -398,10 +400,14 @@ float TreeNode::splitScoreCosineWithConstraint(
 
     const float left_count_f = static_cast<float>(left_count);
     const float right_count_f = static_cast<float>(right_count);
+    // Guarded reciprocal, as in every other scorer: min_data_in_leaf == 0 is a
+    // supported configuration, so an empty child is legitimate and its mean is 0.
+    const float left_count_recip = (left_count > 0) ? 1.0f / left_count_f : 0.0f;
+    const float right_count_recip = (right_count > 0) ? 1.0f / right_count_f : 0.0f;
     #pragma omp simd
     for (int d = 0; d < n_cols; ++d) {
-        left_mean[d] /= left_count_f;
-        right_mean[d] /= right_count_f;
+        left_mean[d] *= left_count_recip;
+        right_mean[d] *= right_count_recip;
     }
 
     // Pool BEFORE scoring so the numerator and denominator inside cosine_score

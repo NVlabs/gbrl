@@ -441,6 +441,9 @@ ensembleData* ensemble_data_copy_gpu_gpu(ensembleMetaData *metadata, ensembleDat
     cudaMemcpy(edata->mono_constraints->feature_idx, other_edata->mono_constraints->feature_idx, mono_size, cudaMemcpyDeviceToDevice);
     cudaMemcpy(edata->mono_constraints->output_idx, other_edata->mono_constraints->output_idx, mono_size, cudaMemcpyDeviceToDevice);
     cudaMemcpy(edata->mono_constraints->constraint, other_edata->mono_constraints->constraint, mono_size, cudaMemcpyDeviceToDevice);
+    // CUDA split scoring reads this field, not the metadata copy, so a copy
+    // that leaves it at 0 silently disables constraint-aware scoring.
+    edata->mono_constraints->n_constraints = metadata->n_mono_constraints;
     cudaMemcpy(edata->feature_data->feature_indices, other_edata->feature_data->feature_indices, cond_sizes * sizeof(int), cudaMemcpyDeviceToDevice);
     cudaMemcpy(edata->feature_data->feature_values, other_edata->feature_data->feature_values, cond_sizes * sizeof(float), cudaMemcpyDeviceToDevice);
     cudaMemcpy(edata->leaf_data->edge_weights, other_edata->leaf_data->edge_weights, edge_size * sizeof(float), cudaMemcpyDeviceToDevice);
@@ -480,6 +483,9 @@ ensembleData* ensemble_data_copy_gpu_cpu(ensembleMetaData *metadata, ensembleDat
     cudaMemcpy(edata->mono_constraints->feature_idx, other_edata->mono_constraints->feature_idx, mono_size, cudaMemcpyDeviceToHost);
     cudaMemcpy(edata->mono_constraints->output_idx, other_edata->mono_constraints->output_idx, mono_size, cudaMemcpyDeviceToHost);
     cudaMemcpy(edata->mono_constraints->constraint, other_edata->mono_constraints->constraint, mono_size, cudaMemcpyDeviceToHost);
+    // CUDA split scoring reads this field, not the metadata copy, so a copy
+    // that leaves it at 0 silently disables constraint-aware scoring.
+    edata->mono_constraints->n_constraints = metadata->n_mono_constraints;
     cudaMemcpy(edata->feature_data->feature_indices, other_edata->feature_data->feature_indices, cond_sizes * sizeof(int), cudaMemcpyDeviceToHost);
     cudaMemcpy(edata->feature_data->feature_values, other_edata->feature_data->feature_values, cond_sizes * sizeof(float), cudaMemcpyDeviceToHost);
     cudaMemcpy(edata->leaf_data->edge_weights, other_edata->leaf_data->edge_weights, edge_size * sizeof(float), cudaMemcpyDeviceToHost);
@@ -514,6 +520,9 @@ ensembleData* ensemble_data_copy_cpu_gpu(ensembleMetaData *metadata, ensembleDat
     cudaMemcpy(edata->mono_constraints->feature_idx, other_edata->mono_constraints->feature_idx, mono_size, cudaMemcpyHostToDevice);
     cudaMemcpy(edata->mono_constraints->output_idx, other_edata->mono_constraints->output_idx, mono_size, cudaMemcpyHostToDevice);
     cudaMemcpy(edata->mono_constraints->constraint, other_edata->mono_constraints->constraint, mono_size, cudaMemcpyHostToDevice);
+    // CUDA split scoring reads this field, not the metadata copy, so a copy
+    // that leaves it at 0 silently disables constraint-aware scoring.
+    edata->mono_constraints->n_constraints = metadata->n_mono_constraints;
     cudaMemcpy(edata->ensemble_info->tree_indices, other_edata->ensemble_info->tree_indices, tree_size, cudaMemcpyHostToDevice);
     cudaMemcpy(edata->ensemble_info->depths, other_edata->ensemble_info->depths, split_sizes * sizeof(int), cudaMemcpyHostToDevice);
     cudaMemcpy(edata->leaf_data->values, other_edata->leaf_data->values, value_sizes, cudaMemcpyHostToDevice);
@@ -670,6 +679,10 @@ void allocate_ensemble_memory_cuda(ensembleMetaData *metadata, ensembleData *eda
         cudaMemcpy(new_data->mono_constraints->feature_idx, edata->mono_constraints->feature_idx, metadata->n_mono_constraints * sizeof(int), cudaMemcpyDeviceToDevice);
         cudaMemcpy(new_data->mono_constraints->output_idx, edata->mono_constraints->output_idx, metadata->n_mono_constraints * sizeof(int), cudaMemcpyDeviceToDevice);
         cudaMemcpy(new_data->mono_constraints->constraint, edata->mono_constraints->constraint, metadata->n_mono_constraints * sizeof(int), cudaMemcpyDeviceToDevice);
+        // Target is new_data here: CUDA split scoring reads this field rather
+        // than the metadata copy, so leaving it at 0 disables constraint-aware
+        // scoring after a growth reallocation.
+        new_data->mono_constraints->n_constraints = metadata->n_mono_constraints;
         if (metadata->grow_policy == GREEDY){
             cudaMemcpy(new_data->ensemble_info->depths, edata->ensemble_info->depths, leaf_idx * sizeof(int), cudaMemcpyDeviceToDevice);
             cudaMemcpy(new_data->feature_data->feature_indices, edata->feature_data->feature_indices, leaf_idx * metadata->max_depth * sizeof(int), cudaMemcpyDeviceToDevice);

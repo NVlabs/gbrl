@@ -59,7 +59,7 @@ void calc_parallelism(
         shared_mem = 2 * (output_dim + 3) * sizeof(float);
     else if (split_score_func == L2)
         shared_mem = 2 * (output_dim + 1) * sizeof(float);
-    while (threads_per_block*shared_mem > deviceProp.sharedMemPerBlock){
+    while (static_cast<size_t>(threads_per_block)*shared_mem > deviceProp.sharedMemPerBlock){
         if (threads_per_block == 1){
             std::cerr << "output_dim " << output_dim << "too large! cannot work with so many columns! use cpu version" << std::endl;
         }
@@ -88,7 +88,7 @@ void calc_oblivious_parallelism(
         shared_mem = 2 * (output_dim + 3) * sizeof(float);
     else if (split_score_func == L2)
         shared_mem = 2 * (output_dim + 1) * sizeof(float);
-    while (threads_per_block*shared_mem*(1 << depth) > deviceProp.sharedMemPerBlock){
+    while (static_cast<size_t>(threads_per_block)*shared_mem*(1u << depth) > deviceProp.sharedMemPerBlock){
         if (threads_per_block == 1){
             std::cerr << "output_dim " << output_dim << "too large! cannot work with so many columns! use cpu version" << std::endl;
         }
@@ -158,6 +158,7 @@ void evaluate_greedy_splits(
     splitDataGPU* split_data,
     const int threads_per_block,
     const int parent_n_samples){
+    (void)threads_per_block;   // block size is derived from split_data below
 
     cudaMemset(split_data->split_scores, 0, split_data->size);
     int n_blocks, tpb; 
@@ -527,8 +528,10 @@ __global__ void split_score_cosine_cuda(
                     // so without this the cosine numerator and denominator would
                     // describe different child vectors.  Per pooled dimension the
                     // numerator shifts by mean_orig * (pooled - mean_orig).
-                    l_dot_fix += l_val * (pooled - l_val);
-                    r_dot_fix += r_val * (pooled - r_val);
+                    // l_dot_sum holds n*||mu||^2 after its /count, so the shift
+                    // per pooled dimension is n * mu_d * (pooled - mu_d).
+                    l_dot_fix += l_count[0] * l_val * (pooled - l_val);
+                    r_dot_fix += r_count[0] * r_val * (pooled - r_val);
                 }
             }
         }
@@ -1278,6 +1281,7 @@ void allocate_child_tree_nodes(
     candidatesData *candidata,
     splitDataGPU *split_data,
     ensembleMetaData *metadata){
+    (void)metadata;   // kept for signature symmetry with the other allocators
 
     int n_samples = host_parent->n_samples;
     int depth = host_parent->depth + 1;

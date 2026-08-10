@@ -278,6 +278,9 @@ py::object return_tensor_info(
     deviceType device,
     bool is_torch
 ) {
+#ifndef USE_CUDA
+    (void)device;   // only consulted in CUDA builds
+#endif
     // Allocate memory
     std::vector<int64_t> shape;
     if (output_dim == 1) {
@@ -894,7 +897,7 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         int start_tree_idx = start_tree_obj.is_none() ? 0 : start_tree_obj.cast<int>();
         int stop_tree_idx = stop_tree_obj.is_none() ? 0 : stop_tree_obj.cast<int>();
 
-        if (start_tree_idx < 0 || (start_tree_idx >= self.metadata->n_trees) && (self.metadata->n_trees > 0)) {
+        if (start_tree_idx < 0 || ((start_tree_idx >= self.metadata->n_trees) && (self.metadata->n_trees > 0))) {
             std::stringstream ss;
             ss << "start_tree_idx is out of bounds! Got " << start_tree_idx 
                << ", but valid range is [0, " << self.metadata->n_trees - 1 << "]";

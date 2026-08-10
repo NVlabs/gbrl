@@ -617,6 +617,12 @@ void Fitter::calc_leaf_value(dataSet *dataset, ensembleData *edata, ensembleMeta
     bool passed;
     int idx, row_idx, cat_row_idx;
 
+    // Start from zero: this slot may still hold values from a tree that was
+    // rolled back after a failed monotonic projection, and the loop below
+    // accumulates rather than assigns.
+    float *leaf_values = edata->leaf_data->values + leaf_idx * output_dim;
+    std::fill(leaf_values, leaf_values + output_dim, 0.0f);
+
     for (int i = 0; i < dataset->n_samples; ++i){
         row_idx = i*metadata->n_num_features;
         cat_row_idx = i*metadata->n_cat_features;

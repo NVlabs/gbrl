@@ -205,6 +205,7 @@ class GBTLearner(BaseLearner):
             inputs = inputs.reshape((1, self.input_dim)) if self.input_dim > 1 else inputs.reshape((len(inputs), 1))   # type: ignore
 
         grads = grads.reshape((len(inputs), self.output_dim))  # type: ignore
+        inputs = self._mapping_input(inputs)
         num_inputs, cat_inputs = preprocess_features(inputs)
 
         self._memory = []
@@ -237,6 +238,7 @@ class GBTLearner(BaseLearner):
         """
         if isinstance(features, th.Tensor):
             features = features.detach().cpu().numpy()
+        features = self._mapping_input(features)
         num_features, cat_features = preprocess_features(features)
         # fit() must install the mapping too; without it SHAP attributes every
         # feature to column 0 (see _ensure_feature_mapping).
@@ -354,7 +356,13 @@ class GBTLearner(BaseLearner):
             instance._feature_mapping_installed = True
             if instance.input_dim > 1 and instance.feature_mapping is not None:
                 mapping = np.asarray(instance.feature_mapping[0])
-                if mapping.size == instance.input_dim and not np.any(mapping):
+                mask = np.asarray(instance.feature_mapping[1])
+                # A genuine mapping for one numerical + one categorical column is
+                # [0, 0], since each type indexes from 0 -- so an all-zero mapping
+                # alone is not proof of corruption.  An uninitialised mapping has
+                # an all-zero numerical mask as well.
+                if (mapping.size == instance.input_dim and not np.any(mapping)
+                        and not np.any(mask)):
                     instance.feature_mapping = None
                     instance._feature_mapping_installed = False
             # Rebuild the Python constraint dict from the serialized arrays so
@@ -536,6 +544,7 @@ class GBTLearner(BaseLearner):
                 "representative batch to rebuild it.")
         if isinstance(features, th.Tensor):
             features = features.detach().cpu().numpy()
+        features = self._mapping_input(features)
         num_features, cat_features = preprocess_features(features)
         poly_vectors = get_poly_vectors(self.params['max_depth'], numerical_dtype)
         base_poly, norm_values, offset = poly_vectors
@@ -588,6 +597,7 @@ class GBTLearner(BaseLearner):
                 "representative batch to rebuild it.")
         if isinstance(features, th.Tensor):
             features = features.detach().cpu().numpy()
+        features = self._mapping_input(features)
         num_features, cat_features = preprocess_features(features)
         poly_vectors = get_poly_vectors(self.params['max_depth'], numerical_dtype)
         base_poly, norm_values, offset = poly_vectors
@@ -639,6 +649,7 @@ class GBTLearner(BaseLearner):
         if stop_idx is None:
             stop_idx = 0
 
+        inputs = self._mapping_input(inputs)
         num_inputs, cat_inputs = preprocess_features(inputs)
 
         self._memory = []
@@ -680,6 +691,7 @@ class GBTLearner(BaseLearner):
         Returns:
             Tuple[float, Dict]: The final loss and updated parameters.
         """
+        obs = self._mapping_input(obs)
         num_obs, cat_obs = preprocess_features(obs)
         distil_params = {'input_dim': self.input_dim,
                          'output_dim': self.output_dim,
@@ -751,6 +763,7 @@ class GBTLearner(BaseLearner):
         """
         if isinstance(features, th.Tensor):
             features = features.detach().cpu().numpy().astype(np.single)
+        features = self._mapping_input(features)
         num_features, cat_features = preprocess_features(features)
         # Ensure float32 dtype for C++ backend
         if num_features is not None:
