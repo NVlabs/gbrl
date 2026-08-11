@@ -791,9 +791,10 @@ void Fitter::apply_monotonic_constraints_cpu(
             int global_idx = edata->feature_mappings->reverse_num_feature_mapping[internal_idx];
             
             if (global_idx == global_feature_idx) {
-                // If inequality_direction is inverted (0), flip the constraint
-                // Standard direction (1): bit=0 has lower feature values (left)
-                // Inverted direction (0): bit=0 has higher feature values (left is now high!)
+                // inequality_directions[d] is false on the left branch
+                // (x <= threshold) and true on the right, see node.cpp. Flip the
+                // requested direction on the left branch so both sides are
+                // compared in the same orientation.
                 effective_constraints[d][constraint_output] = (inequality_directions[d] == 1) ? constraint_dir : -constraint_dir;
             }
         }

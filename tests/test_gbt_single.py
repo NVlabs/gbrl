@@ -35,8 +35,8 @@ ROOT_PATH = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT_PATH))
 
 from gbrl import cuda_available
-from gbrl.common.utils import (cuda_usable, get_poly_vectors, numerical_dtype,
-                               preprocess_features)
+from gbrl.common.utils import (cuda_usable, get_poly_vectors, normalize_device,
+                               numerical_dtype, preprocess_features)
 from gbrl.models.gbt import GBTModel
 from tests import CATEGORICAL_INPUTS, CATEGORICAL_OUTPUTS
 
@@ -1752,6 +1752,96 @@ class TestCudaUnavailableIsNonDestructive(unittest.TestCase):
     def test_cuda_usable_matches_runtime(self):
         """cuda_usable() must reflect the runtime, not just the build."""
         self.assertEqual(cuda_usable(), cuda_available() and th.cuda.is_available())
+
+    @unittest.skipIf(cuda_usable(), 'CUDA is usable here; this covers the fallback path')
+    def test_gpu_alias_raises_and_preserves_model(self):
+        """'gpu' is a documented alias for 'cuda' and must hit the same guard."""
+        model = self._trained()
+        before = model(self.X, tensor=False)
+        with self.assertRaises(ValueError):
+            model.set_device('gpu')
+        with self.assertRaises(ValueError):
+            model.learner.set_device('gpu')
+        np.testing.assert_allclose(
+            model(self.X, tensor=False), before, rtol=1e-6,
+            err_msg="a refused 'gpu' move changed the model")
+        self.assertEqual(model.get_device(), 'cpu')
+
+    @unittest.skipIf(cuda_usable(), 'CUDA is usable here; this covers the fallback path')
+    def test_gpu_alias_load_and_construction_raise(self):
+        model = self._trained()
+        path = os.path.join(self.test_dir, 'gpu_alias')
+        model.save_learner(path)
+        with self.assertRaises(ValueError):
+            GBTModel.load_learner(path, device='gpu')
+        with self.assertRaises(ValueError):
+            GBTModel(
+                input_dim=4, output_dim=1, tree_struct=self.tree_struct,
+                optimizers={'algo': 'SGD', 'lr': 0.1, 'start_idx': 0, 'stop_idx': 1},
+                params=self.params, verbose=0, device='gpu')
+
+    @unittest.skipUnless(cuda_usable(), 'CUDA required')
+    def test_gpu_alias_normalizes_to_cuda(self):
+        """With CUDA present, 'gpu' must resolve to the canonical 'cuda'."""
+        model = self._trained()
+        model.set_device('gpu')
+        self.assertEqual(model.get_device(), 'cuda')
+        self.assertEqual(model.learner.device, 'cuda')
+        self.assertEqual(model.learner.params['device'], 'cuda')
+
+    def test_failed_transfer_rolls_back(self):
+        """A mid-transfer failure must not leave main and student on different
+        devices: predict() sums both, so one would get the wrong buffer type."""
+        model = self._trained()
+        learner = model.learner
+
+        class _Boom:
+            """Stands in for a student whose transfer fails."""
+            def __init__(self):
+                self.devices = []
+
+            def to_device(self, device):
+                self.devices.append(device)
+                if len(self.devices) == 1:
+                    raise RuntimeError('simulated transfer failure')
+
+            def get_device(self):
+                return 'cpu'
+
+        before = np.asarray(learner.predict(self.X, requires_grad=False, tensor=False))
+        origin = learner.device
+        boom = _Boom()
+        learner.student_model = boom
+        try:
+            with self.assertRaises(RuntimeError):
+                learner.set_device(origin)
+        finally:
+            learner.student_model = None
+
+        # The main model was put back, so it still agrees with self.device.
+        self.assertEqual(learner._cpp_model.get_device(), origin)
+        self.assertEqual(learner.device, origin)
+        np.testing.assert_allclose(
+            np.asarray(learner.predict(self.X, requires_grad=False, tensor=False)),
+            before, rtol=1e-6,
+            err_msg='a failed transfer changed the predictions')
+
+    def test_normalize_device_contract(self):
+        """Aliases and casing resolve; unknown names and bad types raise."""
+        self.assertEqual(normalize_device('cpu'), 'cpu')
+        self.assertEqual(normalize_device('CPU'), 'cpu')
+        self.assertEqual(normalize_device(th.device('cpu')), 'cpu')
+        for bad in ('tpu', 'cuda:0', ''):
+            with self.assertRaises(ValueError, msg=f'{bad!r} should be rejected'):
+                normalize_device(bad)
+        with self.assertRaises(TypeError):
+            normalize_device(0)
+
+    @unittest.skipUnless(cuda_usable(), 'CUDA required')
+    def test_normalize_device_gpu_alias(self):
+        self.assertEqual(normalize_device('gpu'), 'cuda')
+        self.assertEqual(normalize_device('GPU'), 'cuda')
+        self.assertEqual(normalize_device(th.device('cuda')), 'cuda')
 
 
 if __name__ == '__main__':

@@ -77,7 +77,8 @@ class GBTModel(BaseGBT):
                     'start_idx'
                     'stop_idx'
                 Setting scheduler type:
-                Available schedulers are Constant and Linear. Constant is default, Linear is CPU only.
+                Available schedulers are Constant and Linear. Constant is default.
+                Linear is supported on CPU, and on GPU for oblivious trees.
                 To specify a linear scheduler, 3 additional arguments must be
                 added to an optimizer dict.
                     'init_lr' (str): "lin_<value>"

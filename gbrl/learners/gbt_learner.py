@@ -41,7 +41,7 @@ from gbrl.common.utils import (NumericalData, concatenate_arrays,
                                normalize_vector_input, numerical_dtype,
                                preprocess_features, process_monotonic_constraints,
                                get_index_mapping, to_numpy,
-                               validate_cuda_request,
+                               normalize_device,
                                validate_monotonic_features_numerical,
                                validate_monotonic_optimizer_compat,
                                validate_optimizer_ranges)
@@ -382,7 +382,7 @@ class GBTLearner(BaseLearner):
         assert os.path.isfile(filename), "filename doesn't exist!"
         try:
             instance = cls.__new__(cls)
-            validate_cuda_request(device)
+            device = normalize_device(device)
             instance._cpp_model = GBRL_CPP.load(filename)
             # Check Adam/CUDA before calling set_device: instance.optimizers
             # isn't populated yet, so the check in set_device() can't fire.
@@ -721,11 +721,9 @@ class GBTLearner(BaseLearner):
         Args:
             device (Union[str, th.device]): The device to set.
         """
-        if isinstance(device, th.device):
-            device = device.type
-        # Checked before to_device(): its CPU fallback reallocates the ensemble
-        # and drops the trained trees.
-        validate_cuda_request(device)
+        # Normalised before to_device(): 'gpu' is an alias for 'cuda', and the
+        # CPU fallback reallocates the ensemble, dropping the trained trees.
+        device = normalize_device(device)
         # Adam is CPU-only; the GPU predictor represents every optimizer as SGD
         # and discards moment state, so an Adam model on CUDA gives wrong predictions.
         # Use getattr so this is safe in GBTLearner.load(), which calls set_device
@@ -736,13 +734,30 @@ class GBTLearner(BaseLearner):
             raise ValueError(
                 "Adam models are CPU-only and cannot be moved to CUDA. "
                 "The GPU predictor does not implement Adam; predictions would be wrong.")
+        # load() calls set_device() before student_model is assigned, so use
+        # getattr to avoid an AttributeError.
+        student = getattr(self, 'student_model', None)
+        origin = self._cpp_model.get_device()
+        moved = []
         try:
             self._cpp_model.to_device(device)
-            # load() calls set_device() before student_model is assigned, so use
-            # getattr to avoid an AttributeError.
-            if getattr(self, 'student_model', None) is not None:
-                self.student_model.to_device(device)
+            moved.append(self._cpp_model)
+            if student is not None:
+                student.to_device(device)
+                moved.append(student)
         except RuntimeError as e:
+            # predict() sums the main and student models, so leaving them on
+            # different devices would feed one of them the wrong buffer. Put
+            # back whatever already moved.
+            for component in moved:
+                try:
+                    component.to_device(origin)
+                except RuntimeError as rollback_error:
+                    raise RuntimeError(
+                        f"Failed to move model to device '{device}' ({e}), and "
+                        f"could not restore it to '{origin}' ({rollback_error}). "
+                        f"The learner is now inconsistent and should be reloaded."
+                    ) from e
             raise RuntimeError(
                 f"Failed to move model to device '{device}': {e}") from e
         # to_device() falls back to CPU (printing to stderr) when CUDA is

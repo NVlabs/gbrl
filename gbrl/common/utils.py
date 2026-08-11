@@ -322,21 +322,40 @@ def cuda_usable() -> bool:
         return False
 
 
-def validate_cuda_request(device: Union[str, "th.device"]) -> None:
-    """Raise if CUDA is requested but cannot be used.
+def normalize_device(device: Union[str, "th.device"]) -> str:
+    """Canonicalise a device string and reject one that cannot be used.
+
+    'gpu' is a documented alias for 'cuda' that the C++ layer accepts, so it has
+    to be normalised here or every later `device == 'cuda'` check silently misses
+    it. Returns 'cpu' or 'cuda' only.
 
     Args:
         device (Union[str, th.device]): Requested device.
 
+    Returns:
+        str: 'cpu' or 'cuda'.
+
     Raises:
-        ValueError: If device is 'cuda' and no usable CUDA device exists.
+        TypeError: If device is neither a string nor a torch.device.
+        ValueError: If the name is unknown, or CUDA is asked for but unusable.
     """
     if isinstance(device, th.device):
         device = device.type
-    if device == 'cuda' and not cuda_usable():
+    if not isinstance(device, str):
+        raise TypeError(
+            f"device must be a string or torch.device, got "
+            f"{type(device).__name__}")
+    normalized = device.lower()
+    if normalized == 'gpu':
+        normalized = 'cuda'
+    if normalized not in ('cpu', 'cuda'):
+        raise ValueError(
+            f"Unknown device {device!r}; expected 'cpu', 'cuda' or 'gpu'.")
+    if normalized == 'cuda' and not cuda_usable():
         raise ValueError(
             "CUDA is not available: GBRL was built without CUDA support or no "
             "usable GPU was found. Use device='cpu'.")
+    return normalized
 
 
 def validate_optimizer_ranges(optimizers: Union[Dict, List[Dict]]) -> None:

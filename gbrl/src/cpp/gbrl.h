@@ -202,9 +202,12 @@ class GBRL {
         );
         
         /**
-         * @brief Check if CUDA is available
-         * 
-         * @return true if CUDA support is compiled and device is available
+         * @brief Check whether the extension was built with CUDA support.
+         *
+         * This is compile-time only. It does not check that a usable CUDA
+         * device exists at runtime.
+         *
+         * @return true if compiled with CUDA support
          */
         static bool cuda_available();
         

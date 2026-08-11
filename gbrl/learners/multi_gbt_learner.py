@@ -41,7 +41,7 @@ from gbrl.common.utils import (NumericalData, ensure_leaf_tensor_or_array,
                                is_valid_feature_mapping,
                                normalize_vector_input, numerical_dtype,
                                preprocess_features, to_numpy,
-                               validate_cuda_request,
+                               normalize_device,
                                validate_monotonic_features_numerical,
                                validate_optimizer_ranges)
 from gbrl.learners.base import BaseLearner
@@ -497,7 +497,7 @@ class MultiGBTLearner(BaseLearner):
                 instance.output_dim.append(model_metadata['output_dim'])
                 instance.policy_dim.append(model_metadata['policy_dim'])
 
-            validate_cuda_request(device)
+            device = normalize_device(device)
             if device == 'cuda' and any(
                     str(opt.get('algo', 'SGD')).lower() == 'adam'
                     for opt in instance.optimizers):
@@ -918,11 +918,9 @@ class MultiGBTLearner(BaseLearner):
                 "sub-models must share one device, because predict() feeds them "
                 "the same input buffers. Call set_device() without model_idx.")
 
-        if isinstance(device, th.device):
-            device = device.type
-        # Checked before to_device(): its CPU fallback reallocates the ensemble
-        # and drops the trained trees.
-        validate_cuda_request(device)
+        # Normalised before to_device(): 'gpu' is an alias for 'cuda', and the
+        # CPU fallback reallocates the ensemble, dropping the trained trees.
+        device = normalize_device(device)
         if device == 'cuda' and any(
                 str(opt.get('algo', 'SGD')).lower() == 'adam'
                 for opt in (getattr(self, 'optimizers', None) or [])):
@@ -931,12 +929,28 @@ class MultiGBTLearner(BaseLearner):
                 "The GPU predictor does not implement Adam; predictions would be wrong.")
         # load() calls set_device() before student_models is assigned.
         _students = getattr(self, 'student_models', None)
+        origin = self._cpp_models[0].get_device()
+        moved = []
         try:
             for i in range(self.n_learners):
                 self._cpp_models[i].to_device(device)
+                moved.append(self._cpp_models[i])
                 if _students is not None and _students[i] is not None:
                     _students[i].to_device(device)
+                    moved.append(_students[i])
         except RuntimeError as e:
+            # predict() feeds every sub-model the same input buffers, so a
+            # partial move would send the wrong buffer type to the rest. Put
+            # back whatever already moved.
+            for component in moved:
+                try:
+                    component.to_device(origin)
+                except RuntimeError as rollback_error:
+                    raise RuntimeError(
+                        f"Failed to move models to device '{device}' ({e}), and "
+                        f"could not restore them to '{origin}' ({rollback_error}). "
+                        f"The learner is now inconsistent and should be reloaded."
+                    ) from e
             raise RuntimeError(
                 f"Failed to move model to device '{device}': {e}") from e
         # to_device() falls back to CPU (printing to stderr) when CUDA is

@@ -33,7 +33,7 @@ import torch as th
 
 from gbrl.common.utils import (NumericalData, TensorInfo,
                                get_tensor_info, numerical_dtype, to_numpy,
-                               validate_cuda_request)
+                               normalize_device)
 
 
 class BaseLearner(ABC):
@@ -80,9 +80,10 @@ class BaseLearner(ABC):
         if isinstance(output_dim, list) and policy_dim is not None and isinstance(policy_dim, list):
             assert len(policy_dim) == len(output_dim), \
                 "policy_dim and output_dim lists must have the same length"
-        # Checked before params is built: the C++ constructor calls to_device(),
-        # which falls back to CPU by reallocating the ensemble.
-        validate_cuda_request(device)
+        # Normalised before params is built: 'gpu' is an alias for 'cuda', and
+        # the C++ constructor calls to_device(), whose CPU fallback reallocates
+        # the ensemble.
+        device = normalize_device(device)
         self.tree_struct = tree_struct
         self.input_dim = input_dim
         self.output_dim = output_dim
