@@ -184,6 +184,46 @@ class TestScheduler(unittest.TestCase):
             err_msg="GPU: Tree 0 positive samples should have lr=init_lr=1.0 applied"
         )
 
+    def _assert_midpoint_lr(self, device):
+        """Tree 1 must get the MIDPOINT rate, not init_lr or stop_lr.
+
+        The other linear tests use init_lr=1.0, which drives the residual for
+        samples 2,3 to exactly 0, so tree 1's leaf is 0 and its prediction is 0
+        whatever rate is applied - they cannot see the midpoint at all. With
+        init_lr=0.5 the residual survives:
+            lr(0) = 0.5                          -> tree 0 = 0.5 * 1.0  = 0.5
+            lr(1) = 0.5 + 0.5*(0.1-0.5) = 0.30   -> tree 1 = 0.30 * 0.5 = 0.15
+        """
+        optimizer = {'algo': 'SGD', 'lr': 0.5, 'stop_lr': 0.1, 'scheduler': 'linear',
+                     'T': 2, 'start_idx': 0, 'stop_idx': self.output_dim}
+        model = GBTModel(
+            input_dim=self.input_dim, output_dim=self.output_dim,
+            tree_struct=self.tree_struct, optimizers=optimizer,
+            params=self.params, verbose=0, device=device)
+
+        X_tensor = th.tensor(self.X, dtype=th.float32, device=device)
+        y_tensor = th.tensor(self.y, dtype=th.float32, device=device)
+        for _ in range(2):
+            y_pred = model(X_tensor, requires_grad=True)
+            (0.5 * th.mean((y_pred - y_tensor.squeeze()) ** 2)).backward()
+            model.step()
+
+        pred_tree0 = self._get_tree_predictions(model, device, 0, 1)
+        pred_tree1 = self._get_tree_predictions(model, device, 1, 2)
+        np.testing.assert_allclose(
+            pred_tree0[2:4], [0.5, 0.5], rtol=1e-5,
+            err_msg=f'{device}: tree 0 should use init_lr=0.5')
+        np.testing.assert_allclose(
+            pred_tree1[2:4], [0.15, 0.15], rtol=1e-4,
+            err_msg=f'{device}: tree 1 should use the midpoint lr=0.30 (0.30 * 0.5 leaf)')
+
+    def test_linear_scheduler_midpoint_tree1_cpu(self):
+        self._assert_midpoint_lr('cpu')
+
+    @unittest.skipIf(not cuda_available(), "CUDA not available")
+    def test_linear_scheduler_midpoint_tree1_gpu(self):
+        self._assert_midpoint_lr('cuda')
+
     def test_constant_scheduler_equal_trees_cpu(self):
         """Prove constant scheduler gives equal weight to all trees."""
         optimizer = {
@@ -448,6 +488,50 @@ class TestSchedulerPersistence(unittest.TestCase):
         self.assertEqual(model.get_iteration(), 4, "Original should have 4 trees")
         self.assertEqual(copied_model.get_iteration(), 2, "Copy should still have 2 trees")
     
+    def test_plain_reset_restores_init_lr(self):
+        """A plain reset() must restart the linear schedule from the configured
+        init_lr, not from the decayed rate the previous generation ended at."""
+        print("Running test_plain_reset_restores_init_lr")
+
+        X = np.array([[1.0], [2.0], [3.0], [4.0]], dtype=np.float32)
+        y = np.array([[0.0], [0.0], [1.0], [1.0]], dtype=np.float32)
+        configured_init_lr = 0.5
+
+        tree_struct = {
+            'max_depth': 1, 'n_bins': 4, 'min_data_in_leaf': 1,
+            'par_th': 1, 'grow_policy': 'oblivious'
+        }
+        optimizer = {
+            'algo': 'SGD', 'lr': configured_init_lr, 'stop_lr': 0.01,
+            'T': 10, 'scheduler': 'Linear', 'start_idx': 0, 'stop_idx': 1
+        }
+        params = {"control_variates": False, "split_score_func": "L2"}
+
+        model = GBTModel(
+            input_dim=1, output_dim=1,
+            tree_struct=tree_struct, optimizers=optimizer,
+            params=params, verbose=0, device='cpu'
+        )
+
+        # Train several trees so the linear schedule decays the LR.
+        for _ in range(5):
+            y_pred = model(th.tensor(X), requires_grad=True)
+            (0.5 * th.mean((y_pred - th.tensor(y).squeeze()) ** 2)).backward()
+            model.step()
+
+        lr_after_training = model.get_schedule_learning_rates()[0]
+        self.assertLess(
+            lr_after_training, configured_init_lr,
+            "LR should have decayed after 5 trees with a linear schedule")
+
+        # Plain reset (no distillation): must restore configured init_lr.
+        model.learner.reset()
+        lr_after_reset = model.get_schedule_learning_rates()[0]
+        self.assertAlmostEqual(
+            float(lr_after_reset), configured_init_lr, places=4,
+            msg=(f"After plain reset, scheduler must start from configured "
+                 f"init_lr={configured_init_lr}, got {lr_after_reset:.6f}"))
+
     def test_save_load_with_linear_scheduler_gpu(self):
         """Test that saving and loading preserves linear scheduler on GPU."""
         print("Running test_save_load_with_linear_scheduler_gpu")

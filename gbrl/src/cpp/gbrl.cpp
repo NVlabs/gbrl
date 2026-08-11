@@ -132,9 +132,6 @@ GBRL::GBRL(GBRL& other):
         // have no default initializers.
         this->sheader = other.sheader;
         // Training state a copy is expected to continue from.
-        this->batch_cursor = other.batch_cursor;
-        this->batch_cursor_n_samples = other.batch_cursor_n_samples;
-        this->batch_cursor_obs = other.batch_cursor_obs;
         this->n_nonconverged_projections = other.n_nonconverged_projections;
         this->learner_name = other.learner_name;
         this->metadata = new ensembleMetaData;
@@ -1303,20 +1300,7 @@ float GBRL::fit(dataHolder<float> *obs,
         };
 
         if (this->device == cpu){
-        // batch_cursor persists on the model so a second fit() continues the
-        // pass over the data instead of re-training the first batches.  It is
-        // only valid for the dataset it came from, so restart whenever the row
-        // count or the observation buffer changes.  Shuffling reorders the rows
-        // on every call, so there is no pass to continue: always restart.
-        const void *dataset_id = shuffle ? nullptr
-                                         : static_cast<const void*>(training_obs);
-        if (shuffle || this->batch_cursor_obs != dataset_id ||
-            this->batch_cursor_n_samples != n_samples){
-            this->batch_cursor = 0;
-            this->batch_cursor_obs = dataset_id;
-            this->batch_cursor_n_samples = n_samples;
-        }
-        full_loss = Fitter::fit_cpu(&dataset, training_targets, this->edata, this->metadata, iterations, loss_type, this->opts, this->batch_cursor);
+        full_loss = Fitter::fit_cpu(&dataset, training_targets, this->edata, this->metadata, iterations, loss_type, this->opts);
         }
     }
 
@@ -1583,6 +1567,27 @@ static void validate_shap_optimizer_ranges(const std::vector<Optimizer*> &opts)
         }
     }
 }
+
+/**
+ * @brief Releases SHAP scratch state on every exit path, including exceptions.
+ *
+ * Only the GPU path allocates a host copy of the ensemble; on CPU edata_cpu
+ * aliases the live model and must NOT be freed, so ownership is explicit.
+ * shap_values is handed to the caller on success via release_values().
+ */
+struct shapScratch {
+    ensembleData *owned_edata = nullptr;
+    float *values = nullptr;
+    shapScratch() = default;
+    shapScratch(const shapScratch&) = delete;
+    shapScratch& operator=(const shapScratch&) = delete;
+    ~shapScratch(){
+        if (owned_edata != nullptr)
+            ensemble_data_dealloc(owned_edata);
+        delete[] values;
+    }
+    float* release_values(){ float *p = values; values = nullptr; return p; }
+};
 
 /**
  * @brief Reject raw SHAP inputs that do not match what the model expects.
@@ -1854,10 +1859,14 @@ float* GBRL::tree_shap(const int tree_idx, const float *obs, const char *categor
     validate_shap_optimizer_ranges(this->opts);
     validate_shap_feature_mapping(this->metadata, this->edata, this->device);
     validate_shap_inputs(this->metadata, obs, categorical_obs, n_samples);
+    // Owns whatever needs releasing, so an allocation failure or a throw from the
+    // tree walk cannot leak the host ensemble copy or the SHAP buffer.
+    shapScratch scratch;
     ensembleData *edata_cpu = nullptr;
 #ifdef USE_CUDA
     if (this->device == gpu){
         edata_cpu = ensemble_data_copy_gpu_cpu(this->metadata, this->edata, nullptr);
+        scratch.owned_edata = edata_cpu;
     }
 #endif
     if (this->device == cpu)
@@ -1868,7 +1877,8 @@ float* GBRL::tree_shap(const int tree_idx, const float *obs, const char *categor
     for (size_t oi = 0; oi < this->opts.size(); ++oi)
         if (this->opts[oi]->getAlgo() == Adam) { has_adam = true; break; }
 
-    float *shap_values = init_zero_mat((this->metadata->n_num_features + this->metadata->n_cat_features)*this->metadata->output_dim * n_samples);
+    scratch.values = init_zero_mat((this->metadata->n_num_features + this->metadata->n_cat_features)*this->metadata->output_dim * n_samples);
+    float *shap_values = scratch.values;
 
     dataHolder<const float> obs_holder{obs, cpu};
     dataHolder<const char> cat_obs_holder{categorical_obs, cpu};
@@ -1930,12 +1940,7 @@ float* GBRL::tree_shap(const int tree_idx, const float *obs, const char *categor
         dealloc_shap_data(shap_data);
     }
 
-#ifdef USE_CUDA
-    if (this->device == gpu){
-        ensemble_data_dealloc(edata_cpu);
-    }
-#endif
-    return shap_values;
+    return scratch.release_values();
 }
 
 float* GBRL::ensemble_shap(const float *obs, const char *categorical_obs, const int n_samples, float *norm, float *base_poly, float *offset, float *base_values){
@@ -1943,7 +1948,11 @@ float* GBRL::ensemble_shap(const float *obs, const char *categorical_obs, const 
     validate_shap_optimizer_ranges(this->opts);
     validate_shap_feature_mapping(this->metadata, this->edata, this->device);
     validate_shap_inputs(this->metadata, obs, categorical_obs, n_samples);
-    float *shap_values = init_zero_mat((this->metadata->n_num_features + this->metadata->n_cat_features)*this->metadata->output_dim * n_samples);
+    // Owns whatever needs releasing, so a throw cannot leak the SHAP buffer or
+    // the host ensemble copy taken below.
+    shapScratch scratch;
+    scratch.values = init_zero_mat((this->metadata->n_num_features + this->metadata->n_cat_features)*this->metadata->output_dim * n_samples);
+    float *shap_values = scratch.values;
 
     dataHolder<const float> obs_holder{obs, cpu};
     dataHolder<const char> cat_obs_holder{categorical_obs, cpu};
@@ -1958,6 +1967,7 @@ float* GBRL::ensemble_shap(const float *obs, const char *categorical_obs, const 
 #ifdef USE_CUDA
     if (this->device == gpu){
         edata_cpu = ensemble_data_copy_gpu_cpu(this->metadata, this->edata, nullptr);
+        scratch.owned_edata = edata_cpu;
     }
 #endif
     if (this->device == cpu)
@@ -2023,13 +2033,7 @@ float* GBRL::ensemble_shap(const float *obs, const char *categorical_obs, const 
                 base_values[s * out_dim + d] += edata_cpu->bias[d];
     }
 
-#ifdef USE_CUDA
-    if (this->device == gpu){
-        ensemble_data_dealloc(edata_cpu);
-    }
-#endif
-
-    return shap_values;
+    return scratch.release_values();
 }
 
 ensembleData* GBRL::get_ensemble_data(){

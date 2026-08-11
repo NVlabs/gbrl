@@ -112,7 +112,10 @@ class GBTLearner(BaseLearner):
         Resets the learner to its initial state,
         reinitializing the C++ model and optimizers.
         """
-        if self._cpp_model is not None:
+        # Carry the decayed LR forward only when training continues after
+        # distillation.  A plain reset must restart the scheduler from the
+        # originally configured init_lr, not from wherever the last run left it.
+        if self._cpp_model is not None and self.student_model is not None:
             lrs = self._cpp_model.get_scheduler_lrs()
             for i in range(len(self.optimizers)):
                 self.optimizers[i]['init_lr'] = lrs[i]
@@ -335,6 +338,12 @@ class GBTLearner(BaseLearner):
         filename = filename.rstrip('.')
         filename += '.gbrl_model'
         assert self._cpp_model is not None, "Can't save non-existent model!"
+        if self.student_model is not None:
+            raise ValueError(
+                "save() is not supported when a student model is attached. "
+                "The student contributes to every prediction but would be omitted "
+                "from the file, causing a silent prediction mismatch after load. "
+                "Resolve distillation before saving.")
         status = self._cpp_model.save(filename)
         assert status == 0, "Failed to save model"
 
@@ -349,6 +358,11 @@ class GBTLearner(BaseLearner):
         filename = filename.rstrip('.')
         filename += '.h'
         assert self._cpp_model is not None, "Can't export non-existent model!"
+        if self.student_model is not None:
+            raise ValueError(
+                "export() is not supported when a student model is attached. "
+                "The student contributes to every prediction but would be omitted "
+                "from the export.")
         if modelname is None:
             modelname = ""
         try:
@@ -376,6 +390,15 @@ class GBTLearner(BaseLearner):
         try:
             instance = cls.__new__(cls)
             instance._cpp_model = GBRL_CPP.load(filename)
+            # Check Adam/CUDA before calling set_device: instance.optimizers
+            # isn't populated yet, so the check in set_device() can't fire.
+            _temp_opts = instance._cpp_model.get_optimizers()
+            if device == 'cuda' and any(
+                    str(opt.get('algo', 'SGD')).lower() == 'adam'
+                    for opt in _temp_opts):
+                raise ValueError(
+                    "Adam models are CPU-only and cannot be loaded onto CUDA. "
+                    "Load with device='cpu' instead.")
             instance.set_device(device)
             metadata = instance._cpp_model.get_metadata()
             instance.tree_struct = {'max_depth': metadata['max_depth'],
@@ -699,11 +722,26 @@ class GBTLearner(BaseLearner):
         """
         if isinstance(device, th.device):
             device = device.type
+        # Adam is CPU-only; the GPU predictor represents every optimizer as SGD
+        # and discards moment state, so an Adam model on CUDA gives wrong predictions.
+        # Use getattr so this is safe in GBTLearner.load(), which calls set_device
+        # before instance.optimizers is assigned.
+        if device == 'cuda' and any(
+                str(opt.get('algo', 'SGD')).lower() == 'adam'
+                for opt in (getattr(self, 'optimizers', None) or [])):
+            raise ValueError(
+                "Adam models are CPU-only and cannot be moved to CUDA. "
+                "The GPU predictor does not implement Adam; predictions would be wrong.")
         try:
             self._cpp_model.to_device(device)
+            # load() calls set_device() before student_model is assigned; guard
+            # against the AttributeError that __new__+no-__init__ would cause.
+            if getattr(self, 'student_model', None) is not None:
+                self.student_model.to_device(device)
             self.device = device
         except RuntimeError as e:
-            print(f"Caught an exception in GBRL: {e}")
+            raise RuntimeError(
+                f"Failed to move model to device '{device}': {e}") from e
 
     def predict(self,
                 inputs: NumericalData,
@@ -725,6 +763,11 @@ class GBTLearner(BaseLearner):
             NumericalData: The predicted output.
         """
         assert self._cpp_model is not None, "No model loaded!"
+        if self.student_model is not None and (start_idx is not None or stop_idx is not None):
+            raise ValueError(
+                "Ranged prediction (start_idx/stop_idx) is not supported when a "
+                "student model is attached. The combined tree sequence has no defined "
+                "ordering. Call predict() without range arguments.")
         if stop_idx is None:
             stop_idx = 0
 
@@ -902,6 +945,11 @@ class GBTLearner(BaseLearner):
                 - n_trees (int): Total number of trees.
         """
         self._reject_unsupported_matrix_representation("get_matrix_representation()")
+        if self.student_model is not None:
+            raise ValueError(
+                "get_matrix_representation() is not supported when a student model "
+                "is attached. The matrix A@V would not match predict(), which also "
+                "sums the student ensemble.")
         if isinstance(features, th.Tensor):
             features = features.detach().cpu().numpy().astype(np.single)
         features = self._mapping_input(features)

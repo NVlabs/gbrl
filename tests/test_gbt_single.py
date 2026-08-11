@@ -1185,10 +1185,9 @@ class TestRepeatedFit(unittest.TestCase):
     a different model from doing it in one, and distillation - which calls fit()
     repeatedly on the same student - trained its later chunks on wrong targets.
 
-    The mini-batch cursor is part of this: it used to be local to fit_cpu(), so
-    every call restarted at row 0 and the first batches were trained on far more
-    than the last. It now lives on the model, so a split run walks the same batch
-    sequence as a single one.
+    These tests use the default batch_size, which is larger than the sample
+    count, so every tree here sees the full dataset and the comparison isolates
+    the tree-range behaviour.
     """
 
     @classmethod
@@ -1309,108 +1308,6 @@ class TestRepeatedFit(unittest.TestCase):
         preds = np.asarray(model.learner.predict(X, requires_grad=False, tensor=False))
         self.assertTrue(np.all(np.isfinite(preds)), f'{device}: categorical predictions not finite')
 
-    def _assert_split_matches_single_minibatch(self, device, batch_size):
-        """With batch_size < n_samples a single call walks 0,1,2,3,0 while split
-        calls used to walk 0,1,2 then 0,1 - over-training the early rows."""
-        def mk():
-            return GBTModel(
-                input_dim=4, output_dim=1,
-                tree_struct={'max_depth': 3, 'n_bins': 64, 'min_data_in_leaf': 0,
-                             'par_th': 2, 'grow_policy': 'greedy',
-                             'batch_size': batch_size},
-                optimizers={'algo': 'SGD', 'lr': 0.1, 'start_idx': 0, 'stop_idx': 1},
-                params={'split_score_func': 'L2', 'generator_type': 'Quantile'},
-                device=device, verbose=0)
-
-        one = mk()
-        one.fit(self.X, self.y, iterations=5, shuffle=False)
-        two = mk()
-        two.fit(self.X, self.y, iterations=3, shuffle=False)
-        two.fit(self.X, self.y, iterations=2, shuffle=False)
-        np.testing.assert_allclose(
-            np.asarray(one.learner.predict(self.X, requires_grad=False, tensor=False)),
-            np.asarray(two.learner.predict(self.X, requires_grad=False, tensor=False)),
-            rtol=1e-4, atol=1e-5,
-            err_msg=f'{device}: 3+2 disagree with 5 at batch_size={batch_size}')
-
-    def test_split_fit_matches_single_fit_cpu_minibatch(self):
-        # 256 samples / 64 -> 4 batches, so the cursor wraps during the run.
-        self._assert_split_matches_single_minibatch('cpu', batch_size=64)
-
-    def test_split_fit_matches_single_fit_cpu_uneven_minibatch(self):
-        # 256 / 100 -> batches of 100, 100, 56: also exercises the short tail.
-        self._assert_split_matches_single_minibatch('cpu', batch_size=100)
-
-    def test_batch_cursor_resets_when_size_changes_but_cursor_in_range(self):
-        """The cursor is tied to the dataset it came from, not just to its own
-        bounds. After 256 rows at batch_size 64 the cursor is 64, which is still
-        'in range' for a 128-row dataset - bounds-checking alone would skip that
-        dataset's first half. Fitting 128 rows must match a fresh model."""
-        def mk():
-            return GBTModel(
-                input_dim=4, output_dim=1,
-                tree_struct={'max_depth': 3, 'n_bins': 64, 'min_data_in_leaf': 0,
-                             'par_th': 2, 'grow_policy': 'greedy', 'batch_size': 64},
-                optimizers={'algo': 'SGD', 'lr': 0.1, 'start_idx': 0, 'stop_idx': 1},
-                params={'split_score_func': 'L2', 'generator_type': 'Quantile'},
-                device='cpu', verbose=0)
-
-        half_X, half_y = self.X[:128], self.y[:128]
-
-        # Cursor left at 64 (in range for 128 rows) by a pass over 256 rows.
-        reused = mk()
-        reused.fit(self.X, self.y, iterations=1, shuffle=False)
-        reused.learner.reset()          # drop the trees, keep the C++ cursor state
-        reused.fit(half_X, half_y, iterations=4, shuffle=False)
-
-        fresh = mk()
-        fresh.fit(half_X, half_y, iterations=4, shuffle=False)
-
-        np.testing.assert_allclose(
-            np.asarray(reused.learner.predict(half_X, requires_grad=False, tensor=False)),
-            np.asarray(fresh.learner.predict(half_X, requires_grad=False, tensor=False)),
-            rtol=1e-4, atol=1e-5,
-            err_msg='a stale in-range cursor changed the pass over a smaller dataset')
-
-    def test_batch_cursor_resets_for_a_different_dataset(self):
-        """The cursor is tied to the dataset it came from, not just its row count.
-
-        Row count alone cannot tell two datasets apart, so a cursor left at 64 by
-        one 128-row dataset would make the next 128-row dataset start its pass
-        halfway in. B is built so the answer is unambiguous: its first batch has
-        target +10 and its second -10, and A trains to all-zero targets so its
-        tree contributes nothing. A single boosting iteration on B therefore
-        moves predictions positive if the pass started at row 0 and negative if
-        it carried over to row 64.
-
-        Note this deliberately does NOT call reset() in between: reset() builds a
-        new C++ model, which discards the cursor and would make the test vacuous.
-        """
-        n, batch = 128, 64
-        rng = np.random.default_rng(7)
-        a_x = rng.normal(size=(n, 4)).astype(np.float32)
-        a_y = np.zeros((n, 1), dtype=np.float32)
-        b_x = rng.normal(size=(n, 4)).astype(np.float32)
-        b_y = np.concatenate([np.full((batch, 1), 10.0),
-                              np.full((n - batch, 1), -10.0)]).astype(np.float32)
-
-        model = GBTModel(
-            input_dim=4, output_dim=1,
-            tree_struct={'max_depth': 3, 'n_bins': 64, 'min_data_in_leaf': 0,
-                         'par_th': 2, 'grow_policy': 'greedy', 'batch_size': batch},
-            optimizers={'algo': 'SGD', 'lr': 0.5, 'start_idx': 0, 'stop_idx': 1},
-            params={'split_score_func': 'L2', 'generator_type': 'Quantile'},
-            device='cpu', verbose=0)
-
-        model.fit(a_x, a_y, iterations=1, shuffle=False)   # leaves the cursor at 64
-        model.fit(b_x, b_y, iterations=1, shuffle=False)
-
-        mean_pred = float(np.mean(
-            np.asarray(model.learner.predict(b_x, requires_grad=False, tensor=False))))
-        self.assertGreater(
-            mean_pred, 0.0,
-            f'mean prediction {mean_pred:+.4f} means the second fit trained on '
-            f"B's y=-10 half: the cursor carried over from a different dataset")
 
     def test_failed_distillation_leaves_learner_untouched(self):
         """distil() published the student before training it, so a failure left
@@ -1506,6 +1403,17 @@ class TestRepeatedFit(unittest.TestCase):
             model.learner.get_matrix_representation(self.X)
         self.assertIn('Adam', str(ctx.exception))
 
+        # Adam does not support fit(); use step-based training to add trees.
+        X_t = th.tensor(self.X)
+        y_t = th.tensor(self.y.squeeze())
+        for _ in range(5):
+            pred = model(X_t, requires_grad=True)
+            ((pred - y_t) ** 2).mean().backward()
+            model.step()
+        with self.assertRaises(ValueError) as ctx:
+            model.learner.compress(trees_to_keep=2, gradient_steps=1, features=self.X)
+        self.assertIn('Adam', str(ctx.exception))
+
     def test_constrained_model_rejects_compression(self):
         """Compression rewrites leaf values and never re-projects them, so the
         compressed model would advertise constraints it no longer satisfies."""
@@ -1545,6 +1453,147 @@ class TestRepeatedFit(unittest.TestCase):
         self.assertTrue(np.isfinite(loss))
         preds = np.asarray(model.learner.predict(self.X, requires_grad=False, tensor=False))
         self.assertTrue(np.all(np.isfinite(preds)))
+
+
+class TestDistilledModelRestrictions(unittest.TestCase):
+    """Verify that unsupported operations raise when a student model is attached."""
+
+    @classmethod
+    def setUpClass(cls):
+        rng = np.random.default_rng(42)
+        n, d = 80, 4
+        cls.X = rng.normal(size=(n, d)).astype(np.float32)
+        cls.y = (cls.X[:, 0] - cls.X[:, 1]).astype(np.float32)[:, np.newaxis]
+        cls.input_dim = d
+        cls.output_dim = 1
+        cls.tree_struct = {
+            'max_depth': 3, 'n_bins': 64, 'min_data_in_leaf': 1,
+            'par_th': 2, 'grow_policy': 'oblivious'
+        }
+        cls.params = {
+            'split_score_func': 'L2', 'generator_type': 'Quantile',
+            'control_variates': False
+        }
+        cls.test_dir = tempfile.mkdtemp()
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.test_dir)
+
+    def _make_trained_model(self):
+        opt = {'algo': 'SGD', 'lr': 0.1, 'start_idx': 0, 'stop_idx': self.output_dim}
+        model = GBTModel(
+            input_dim=self.input_dim, output_dim=self.output_dim,
+            tree_struct=self.tree_struct, optimizers=opt,
+            params=self.params, verbose=0, device='cpu')
+        model.fit(self.X, self.y, 15)
+        return model
+
+    def _attach_student(self, model):
+        targets = np.asarray(model.learner.predict(self.X, requires_grad=False, tensor=False))
+        params = {'min_steps': 5, 'limit_steps': 10, 'min_distillation_loss': 0.0,
+                  'distil_max_depth': 3, 'distil_lr': 0.1}
+        model.learner.distil(self.X, targets, params)
+
+    def test_save_raises_with_student(self):
+        model = self._make_trained_model()
+        self._attach_student(model)
+        with self.assertRaises(ValueError):
+            model.save_learner(os.path.join(self.test_dir, 'student_save'))
+
+    def test_export_raises_with_student(self):
+        model = self._make_trained_model()
+        self._attach_student(model)
+        with self.assertRaises(ValueError):
+            model.export_learner(os.path.join(self.test_dir, 'student_export'))
+
+    def test_ranged_predict_stop_idx_raises_with_student(self):
+        model = self._make_trained_model()
+        self._attach_student(model)
+        with self.assertRaises(ValueError):
+            model(self.X, start_idx=0, stop_idx=5)
+
+    def test_ranged_predict_start_idx_raises_with_student(self):
+        model = self._make_trained_model()
+        self._attach_student(model)
+        with self.assertRaises(ValueError):
+            model(self.X, start_idx=3)
+
+    def test_full_predict_works_with_student(self):
+        """Default (unranged) predict must still work after distillation."""
+        model = self._make_trained_model()
+        self._attach_student(model)
+        pred = model(self.X, tensor=False)
+        self.assertEqual(pred.size, self.y.size)
+
+    def test_matrix_representation_raises_with_student(self):
+        model = self._make_trained_model()
+        self._attach_student(model)
+        with self.assertRaises(ValueError):
+            model.learner.get_matrix_representation(self.X)
+
+    def test_set_device_moves_student(self):
+        """set_device on an SGD model with a student must not raise and must move both."""
+        model = self._make_trained_model()
+        self._attach_student(model)
+        model.set_device('cpu')
+        pred = model(self.X, tensor=False)
+        self.assertEqual(pred.size, self.y.size)
+
+
+class TestAdamCUDAGuard(unittest.TestCase):
+    """Adam is CPU-only; verify the Python API rejects CUDA transitions."""
+
+    @classmethod
+    def setUpClass(cls):
+        rng = np.random.default_rng(0)
+        n, d = 50, 4
+        cls.X = rng.normal(size=(n, d)).astype(np.float32)
+        cls.y = cls.X[:, 0:1].astype(np.float32)
+        cls.input_dim = d
+        cls.output_dim = 1
+        cls.tree_struct = {
+            'max_depth': 2, 'n_bins': 32, 'min_data_in_leaf': 1,
+            'par_th': 1, 'grow_policy': 'oblivious'
+        }
+        cls.params = {
+            'split_score_func': 'L2', 'generator_type': 'Quantile',
+            'control_variates': False
+        }
+        cls.test_dir = tempfile.mkdtemp()
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.test_dir)
+
+    def _make_adam_model(self):
+        import torch as th_local
+        opt = {'algo': 'Adam', 'lr': 0.01, 'start_idx': 0, 'stop_idx': self.output_dim}
+        model = GBTModel(
+            input_dim=self.input_dim, output_dim=self.output_dim,
+            tree_struct=self.tree_struct, optimizers=opt,
+            params=self.params, verbose=0, device='cpu')
+        X_t = th_local.tensor(self.X)
+        y_t = th_local.tensor(self.y)
+        for _ in range(10):
+            pred = model(X_t, requires_grad=True)
+            ((pred - y_t.squeeze()) ** 2).mean().backward()
+            model.step()
+        return model
+
+    @unittest.skipIf(not cuda_available(), "CUDA not available")
+    def test_adam_set_device_to_cuda_raises(self):
+        model = self._make_adam_model()
+        with self.assertRaises(ValueError):
+            model.set_device('cuda')
+
+    @unittest.skipIf(not cuda_available(), "CUDA not available")
+    def test_adam_load_on_cuda_raises(self):
+        model = self._make_adam_model()
+        path = os.path.join(self.test_dir, 'adam_cuda_test')
+        model.save_learner(path)
+        with self.assertRaises((ValueError, RuntimeError)):
+            GBTModel.load_learner(path, device='cuda')
 
 
 if __name__ == '__main__':

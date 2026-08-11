@@ -148,13 +148,11 @@ void Fitter::step_cpu(dataSet *dataset, ensembleData *edata, ensembleMetaData *m
     metadata->iteration++;
 }
 
-float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edata, ensembleMetaData *metadata, const int iterations, lossType loss_type, std::vector<Optimizer*> opts, int &batch_start_idx){
-    // batch_start_idx is owned by the caller so successive fit() calls continue
-    // the pass over the data.  GBRL::fit decides whether it still refers to this
-    // dataset; this is only a bounds guard.
-    if (batch_start_idx < 0 || batch_start_idx >= dataset->n_samples)
-        batch_start_idx = 0;
-    int output_dim = metadata->output_dim;
+float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edata, ensembleMetaData *metadata, const int iterations, lossType loss_type, std::vector<Optimizer*> opts){
+    // Each tree is built on one mini-batch of at most batch_size rows, so a
+    // dataset too large to build a tree on is still trainable. The loop below
+    // advances to the next batch per tree, wrapping back to row 0.
+    int batch_start_idx = 0, output_dim = metadata->output_dim;
     int batch_size = metadata->batch_size, par_th = metadata->par_th;
     int batch_n_samples = batch_start_idx + batch_size < dataset->n_samples ? batch_size : dataset->n_samples - batch_start_idx;
     bool is_last_batch;

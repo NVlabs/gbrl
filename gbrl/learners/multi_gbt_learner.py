@@ -157,10 +157,16 @@ class MultiGBTLearner(BaseLearner):
             # models are replaced.
             for i in range(self.n_learners):
                 self._consumed_steps[i] += self._cpp_models[i].get_iteration()
-        self._cpp_models = []
-        # Fresh C++ models carry no feature mapping.
+        # Fresh C++ models carry no feature mapping, and the cached layout goes
+        # with the old ones: a fresh model reports no feature counts, so a stale
+        # mapping from a previous dataset would be installed unchecked.
         self._feature_mapping_installed = False
+        self.feature_mapping = None
         params = self.params.copy()
+        # Build locally; _cpp_models is only replaced once every sub-model
+        # succeeds.  An exception mid-loop previously discarded the old trained
+        # models while leaving _cpp_models partially populated.
+        new_cpp_models = []
         for i in range(self.n_learners):
             params['input_dim'] = self.input_dim   # type: ignore
             if isinstance(self.output_dim, list):
@@ -197,7 +203,9 @@ class MultiGBTLearner(BaseLearner):
                 # No safe fallback: a learner missing its optimizer trains nothing.
                 raise ValueError(
                     f"Invalid GBRL optimizer configuration for learner {i}: {exc}") from exc
-            self._cpp_models.append(cpp_model)
+            new_cpp_models.append(cpp_model)
+        # Atomic publish: previous models are still intact until here.
+        self._cpp_models = new_cpp_models
 
         if not continuing:
             self.total_iterations = 0
@@ -216,12 +224,12 @@ class MultiGBTLearner(BaseLearner):
         total_iterations, because distillation recreates them while leaving
         total_iterations non-zero.
         """
-        # Kept local until every check and the C++ setters succeed: publishing the
-        # candidate first meant a rejected batch stuck to the model, so the retry
-        # the error message asks for could never recompute it.
-        candidate = self.feature_mapping
-        if candidate is None:
-            candidate = get_index_mapping(self._mapping_input(inputs))
+        # Always derived from the batch in hand, and kept local until every check
+        # and the C++ setters succeed.  Reusing a cached mapping meant a layout
+        # from an earlier dataset could be installed on fresh models, and a
+        # rejected batch stuck so the retry the error asks for never recomputed.
+        # This only runs while _feature_mapping_installed is False.
+        candidate = get_index_mapping(self._mapping_input(inputs))
         feature_mapping, numerical_mask = candidate
         # Sub-models that have already trained know how many features of each kind
         # they expect.  Rebuilding from a batch with a different mix would name the
@@ -380,6 +388,12 @@ class MultiGBTLearner(BaseLearner):
             filename (str): The filename to save the model to.
         """
         assert self._cpp_models is not None, "Model not initialized."
+        if self.student_models is not None:
+            raise ValueError(
+                "save() is not supported when student models are attached. "
+                "The student models contribute to every prediction but would be "
+                "omitted from the save, causing a silent prediction mismatch after "
+                "load. Resolve distillation before saving.")
 
         filename = filename.rstrip('.')
         assert custom_names is None or len(custom_names) == self.n_learners, "Custom names must be per learner"
@@ -415,6 +429,11 @@ class MultiGBTLearner(BaseLearner):
             Defaults to None.
         """
         assert self._cpp_models is not None, "Model not initialized."
+        if self.student_models is not None:
+            raise ValueError(
+                "export() is not supported when student models are attached. "
+                "The student models contribute to every prediction but would be "
+                "omitted from the export.")
 
         filename = filename.rstrip('.')
         for i in range(self.n_learners):
@@ -486,6 +505,12 @@ class MultiGBTLearner(BaseLearner):
                 instance.output_dim.append(model_metadata['output_dim'])
                 instance.policy_dim.append(model_metadata['policy_dim'])
 
+            if device == 'cuda' and any(
+                    str(opt.get('algo', 'SGD')).lower() == 'adam'
+                    for opt in instance.optimizers):
+                raise ValueError(
+                    "Adam models are CPU-only and cannot be loaded onto CUDA. "
+                    "Load with device='cpu' instead.")
             instance.set_device(device)
             metadata = instance._cpp_models[0].get_metadata()
             instance.tree_struct = {'max_depth': metadata['max_depth'],
@@ -882,15 +907,29 @@ class MultiGBTLearner(BaseLearner):
 
         if isinstance(device, th.device):
             device = device.type
+        if device == 'cuda' and any(
+                str(opt.get('algo', 'SGD')).lower() == 'adam'
+                for opt in (getattr(self, 'optimizers', None) or [])):
+            raise ValueError(
+                "Adam models are CPU-only and cannot be moved to CUDA. "
+                "The GPU predictor does not implement Adam; predictions would be wrong.")
+        # load() calls set_device() before student_models is assigned; guard
+        # against the AttributeError that __new__+no-__init__ would cause.
+        _students = getattr(self, 'student_models', None)
         try:
             if model_idx is not None:
                 self._cpp_models[model_idx].to_device(device)
+                if _students is not None and _students[model_idx] is not None:
+                    _students[model_idx].to_device(device)
             else:
                 for i in range(self.n_learners):
                     self._cpp_models[i].to_device(device)
+                    if _students is not None and _students[i] is not None:
+                        _students[i].to_device(device)
             self.device = device
         except RuntimeError as e:
-            print(f"Caught an exception in GBRL: {e}")
+            raise RuntimeError(
+                f"Failed to move model to device '{device}': {e}") from e
 
     def predict(self, features: NumericalData,  # type: ignore
                 requires_grad: bool = True, start_idx: Optional[int] = None,
@@ -913,6 +952,12 @@ class MultiGBTLearner(BaseLearner):
         assert self._cpp_models is not None and isinstance(self._cpp_models, list), \
             "Model not initialized."
         assert self.n_learners > 0, "No learners in the model."
+
+        if self.student_models is not None and (start_idx is not None or stop_idx is not None):
+            raise ValueError(
+                "Ranged prediction (start_idx/stop_idx) is not supported when student "
+                "models are attached. The combined tree sequence has no defined ordering. "
+                "Call predict() without range arguments.")
 
         if stop_idx is None:
             stop_idx = 0
@@ -1054,8 +1099,13 @@ class MultiGBTLearner(BaseLearner):
             tr_losses.append(tr_loss)
             out_params.append(learner_params)
             students.append(student_model)
+        previous_student_models = self.student_models
         self.student_models = students
-        self.reset()
+        try:
+            self.reset()
+        except Exception:
+            self.student_models = previous_student_models
+            raise
         return tr_losses, out_params
 
     def _reject_unsupported_matrix_representation(self, what: str) -> None:
@@ -1091,6 +1141,11 @@ class MultiGBTLearner(BaseLearner):
         assert self._cpp_models is not None and isinstance(self._cpp_models, list), \
             "Model not initialized."
         self._reject_unsupported_matrix_representation("get_matrix_representation()")
+        if self.student_models is not None:
+            raise ValueError(
+                "get_matrix_representation() is not supported when student models are "
+                "attached. The matrix A@V would not match predict(), which also sums "
+                "the student ensembles.")
         if isinstance(features, th.Tensor):
             features = features.detach().cpu().numpy().astype(np.single)
 

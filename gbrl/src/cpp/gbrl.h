@@ -572,32 +572,12 @@ class GBRL {
         deviceType device = unspecified;    /**< Current compute device */
         bool parallel_predict = true;       /**< Enable parallel prediction */
         std::string learner_name = "GBRL";  /**< Name identifier for this learner */
-        /** @brief Row where the next fit() starts taking mini-batches.
-         *
-         *  Kept on the model rather than local to fit_cpu so repeated fit()
-         *  calls keep walking the data instead of restarting at row 0, which
-         *  over-trained the first batches.  Deliberately not serialized: a
-         *  loaded model starts a fresh pass. Only the CPU path batches; the
-         *  CUDA path always fits on the full dataset. */
         /** @brief Monotonic projections in THIS model's last step()/fit() that hit
          *  the pass limit. Copied out of the thread-local counter at the end of
          *  each call so the value belongs to one model and cannot be observed
          *  from another. */
         int n_nonconverged_projections = 0;
-        int batch_cursor = 0;
-        /** @brief Identity of the dataset batch_cursor refers to.
-         *
-         *  A cursor only means anything for the dataset it came from. Testing it
-         *  against the new n_samples is not enough: after 256 rows with
-         *  batch_size 64 the cursor is 64, which is still "in range" for a
-         *  128-row dataset, so that dataset's first half would be skipped. Both
-         *  the row count and the observation buffer are compared. -1 / nullptr
-         *  means no pass is in progress.
-         *
-         *  batch_cursor_obs is only ever compared, never dereferenced. */
-        int batch_cursor_n_samples = -1;
-        const void *batch_cursor_obs = nullptr;
-        
+
 #ifdef USE_CUDA
         SGDOptimizerGPU** cuda_opt = nullptr;  /**< GPU optimizers */
         int n_cuda_opts;                       /**< Number of GPU optimizers */

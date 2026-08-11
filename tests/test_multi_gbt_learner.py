@@ -433,5 +433,123 @@ class TestMultiGBTLearner(unittest.TestCase):
                                        rtol=1e-5)
 
 
+class TestMultiGBTLearnerDistilRestrictions(unittest.TestCase):
+    """Verify that unsupported operations raise when student models are attached."""
+
+    @classmethod
+    def setUpClass(cls):
+        rng = np.random.default_rng(7)
+        n, d = 60, 4
+        cls.X = rng.normal(size=(n, d)).astype(np.float32)
+        cls.input_dim = d
+        cls.output_dim = 2
+        cls.n_learners = 2
+        cls.tree_struct = {
+            'max_depth': 2, 'n_bins': 32, 'min_data_in_leaf': 1,
+            'par_th': 1, 'grow_policy': 'oblivious'
+        }
+        cls.params = {
+            'control_variates': False, 'split_score_func': 'L2',
+            'generator_type': 'Quantile'
+        }
+        cls.test_dir = tempfile.mkdtemp()
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.test_dir)
+
+    def _make_trained_learner(self):
+        optimizers = [
+            {'algo': 'SGD', 'init_lr': 0.1, 'start_idx': 0, 'stop_idx': self.output_dim}
+            for _ in range(self.n_learners)
+        ]
+        learner = MultiGBTLearner(
+            input_dim=self.input_dim, output_dim=self.output_dim,
+            tree_struct=self.tree_struct, optimizers=optimizers,
+            params=self.params, n_learners=self.n_learners, verbose=0, device='cpu'
+        )
+        learner.reset()
+        targets = [np.random.randn(len(self.X), self.output_dim).astype(np.float32)
+                   for _ in range(self.n_learners)]
+        learner.fit(self.X, targets, iterations=10, shuffle=False)
+        return learner
+
+    def _attach_students(self, learner):
+        targets = [
+            np.asarray(learner.predict(self.X, tensor=False, model_idx=i))
+            for i in range(self.n_learners)
+        ]
+        params = {'min_steps': 5, 'limit_steps': 10, 'min_distillation_loss': 0.0,
+                  'distil_max_depth': 3, 'distil_lr': 0.1}
+        learner.distil(self.X, targets, params)
+
+    def test_multi_save_raises_with_students(self):
+        learner = self._make_trained_learner()
+        self._attach_students(learner)
+        with self.assertRaises(ValueError):
+            learner.save(os.path.join(self.test_dir, 'student_save'))
+
+    def test_multi_export_raises_with_students(self):
+        learner = self._make_trained_learner()
+        self._attach_students(learner)
+        with self.assertRaises(ValueError):
+            learner.export(os.path.join(self.test_dir, 'student_export'))
+
+    def test_multi_ranged_predict_raises_with_students(self):
+        learner = self._make_trained_learner()
+        self._attach_students(learner)
+        with self.assertRaises(ValueError):
+            learner.predict(self.X, start_idx=0, stop_idx=3)
+
+    def test_multi_full_predict_works_with_students(self):
+        """Default (unranged) predict must still work after distillation."""
+        learner = self._make_trained_learner()
+        self._attach_students(learner)
+        preds = learner.predict(self.X, tensor=False)
+        self.assertEqual(len(preds), self.n_learners)
+
+    def test_multi_matrix_representation_raises_with_students(self):
+        learner = self._make_trained_learner()
+        self._attach_students(learner)
+        with self.assertRaises(ValueError):
+            learner.get_matrix_representation(self.X)
+
+    def test_multi_set_device_moves_students(self):
+        """set_device must not raise for SGD models with students."""
+        learner = self._make_trained_learner()
+        self._attach_students(learner)
+        learner.set_device('cpu')
+        preds = learner.predict(self.X, tensor=False)
+        self.assertEqual(len(preds), self.n_learners)
+
+    def test_multi_distil_transactional_on_failure(self):
+        """If reset() inside distil() fails, student_models must be restored to its
+        pre-distillation value (None when no prior distillation has been run)."""
+        learner = self._make_trained_learner()
+        targets = [
+            np.asarray(learner.predict(self.X, tensor=False, model_idx=i))
+            for i in range(self.n_learners)
+        ]
+
+        # Corrupt one optimizer so that reset() (called at the end of distil())
+        # raises a ValueError when set_optimizer() receives an invalid algo name.
+        # This causes failure AFTER students are trained but BEFORE the main model
+        # is replaced, exercising the rollback path.
+        saved_cfg = learner.optimizers[0].copy()
+        learner.optimizers[0]['algo'] = 'NONEXISTENT_ALGO'
+
+        params = {'min_steps': 5, 'limit_steps': 10, 'min_distillation_loss': 0.0,
+                  'distil_max_depth': 3, 'distil_lr': 0.1}
+        try:
+            with self.assertRaises((ValueError, RuntimeError)):
+                learner.distil(self.X, targets, params)
+            # student_models must be restored to None after the failed distil
+            self.assertIsNone(learner.student_models,
+                              "student_models must be None after failed distil()")
+        finally:
+            # Always restore the valid optimizer so teardown succeeds
+            learner.optimizers[0] = saved_cfg
+
+
 if __name__ == '__main__':
     unittest.main()

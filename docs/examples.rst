@@ -353,6 +353,9 @@ both the feature attributions and a base value alongside them.
     #         relative to the expected prediction.
     # base — shape (n_samples, output_dim)
     #         The expected model output (bias + expected tree contributions).
+    #         For SGD this is one value shared by every sample. For Adam it is
+    #         sample-specific: it is the expected output of that sample's
+    #         frozen-state local surrogate, not a single global E[f(X)].
     #
     # Identity: base + phi.sum(axis=1) == predict(obs)  for every sample.
 
