@@ -31,8 +31,9 @@ from typing import Dict, List, Optional, Tuple, Union
 import numpy as np
 import torch as th
 
-from gbrl.common.utils import (NumericalData, TensorInfo, get_index_mapping,
-                               get_tensor_info, numerical_dtype, to_numpy)
+from gbrl.common.utils import (NumericalData, TensorInfo,
+                               get_tensor_info, numerical_dtype, to_numpy,
+                               normalize_device)
 
 
 class BaseLearner(ABC):
@@ -79,6 +80,10 @@ class BaseLearner(ABC):
         if isinstance(output_dim, list) and policy_dim is not None and isinstance(policy_dim, list):
             assert len(policy_dim) == len(output_dim), \
                 "policy_dim and output_dim lists must have the same length"
+        # Normalised before params is built: 'gpu' is an alias for 'cuda', and
+        # the C++ constructor calls to_device(), whose CPU fallback reallocates
+        # the ensemble.
+        device = normalize_device(device)
         self.tree_struct = tree_struct
         self.input_dim = input_dim
         self.output_dim = output_dim
@@ -135,10 +140,24 @@ class BaseLearner(ABC):
         """Resets the model, reinitializing internal states and parameters."""
         pass
 
+    def _mapping_input(self, inputs: NumericalData) -> NumericalData:
+        """Normalize input shape before deriving the feature mapping.
+
+        get_index_mapping() reads a 1-D array as one row of many features. For a
+        single-feature model, (n_samples,) means many samples of one feature, so
+        without this the mapping is built with length n_samples and C++ rejects
+        it against input_dim == 1.
+        """
+        if getattr(inputs, 'ndim', None) == 1 and self.input_dim == 1:
+            return inputs.reshape(-1, 1)
+        return inputs
+
     def step(self, inputs: NumericalData, *args, **kwargs) -> None:
-        """Performs a single update step using provided gradients."""
-        if self.feature_mapping is None:
-            self.feature_mapping = get_index_mapping(inputs)
+        """Performs a single update step using provided gradients.
+
+        The feature mapping is derived, validated and published by
+        _ensure_feature_mapping(), so that an invalid batch is never stored.
+        """
 
     @abstractmethod
     def fit(self, *args, **kwargs) -> Union[float, List[float]]:

@@ -340,6 +340,51 @@ SHAP values are calculated internally and can be plotted using the `SHAP library
 
     plt.show()
 
+GBRL's SHAP values are **optimizer-aware**. Pass ``return_base=True`` to receive
+both the feature attributions and a base value alongside them.
+
+``shap()`` explains the **entire ensemble**:
+
+.. code-block:: python
+
+    phi, base = agent.shap(obs, return_base=True)
+    # phi  — shape (n_samples, n_features, output_dim)
+    #         Each entry is the contribution of one feature to the prediction
+    #         relative to the expected prediction.
+    # base — shape (n_samples, output_dim)
+    #         The expected model output (bias + expected tree contributions).
+    #         For SGD this is one value shared by every sample. For Adam it is
+    #         sample-specific: it is the expected output of that sample's
+    #         frozen-state local surrogate, not a single global E[f(X)].
+    #
+    # Identity: base + phi.sum(axis=1) == predict(obs)  for every sample.
+
+``tree_shap()`` explains **one tree at a time**. Its ``base`` and ``phi_t`` are
+different objects that describe only that tree's contribution, not the whole model:
+
+.. code-block:: python
+
+    phi_t, base_t = agent.tree_shap(0, obs, return_base=True)
+    # phi_t  — shape (n_samples, n_features, output_dim)
+    #           Feature contributions for tree 0 only.
+    # base_t — shape (n_samples, output_dim)
+    #           Expected contribution of tree 0 alone.
+    #
+    # Identity: base_t + phi_t.sum(axis=1) == contribution of tree 0 per sample.
+    # This does NOT reconstruct predict(obs); for that, use shap().
+
+Both identities above hold for SGD and Adam.
+
+With SGD a tree's contribution is just its leaf value scaled by the learning rate,
+and ``base`` is the same for every sample by construction.
+
+With Adam a tree's contribution also depends on the optimizer state accumulated by
+all earlier trees. GBRL replays that state tree by tree and holds it fixed while
+explaining the alternative leaves of that tree, so ``base`` is per-sample. The
+returned values reconstruct that sample's own prediction, but they are not the
+exact Shapley values of the full Adam prediction function, because alternative
+earlier-tree histories are not recomputed.
+
 Learning Rate Schedulers
 ------------------------
 GBRL supports learning rate scheduling to control the learning rate throughout training. Two schedulers are available:
@@ -424,10 +469,34 @@ Monotonic constraints enforce that the model output is monotonically increasing 
 
 .. note::
 
-    Monotonic constraints are only supported for **oblivious trees** (``grow_policy='oblivious'``).
-    Constraints apply to the output dimensions defined by ``start_idx`` to ``stop_idx-1`` in the 
-    optimizer configuration. For ``GBTModel``, this typically covers all outputs. For actor-critic 
-    models, constraints affect only the policy outputs (not value function outputs).
+    Monotonic constraints are only supported for **oblivious trees** (``grow_policy='oblivious'``)
+    optimized with **SGD**. Constraints apply to the output dimensions defined by ``start_idx`` to
+    ``stop_idx-1`` in the optimizer configuration. For ``GBTModel``, this typically covers all
+    outputs. For actor-critic models, constraints affect only the policy outputs (not value
+    function outputs).
+
+.. warning::
+
+    **Adam is not supported for constrained outputs**, and GBRL raises a ``ValueError`` if you
+    try. Constraints are enforced by ordering the leaf gradients, but Adam's update
+
+    .. math::
+
+        \Delta = -\alpha \frac{\beta_1 m + (1-\beta_1) g}{\sqrt{\beta_2 v + (1-\beta_2) g^2} + \epsilon}
+
+    is non-linear in the leaf gradient :math:`g`, and :math:`m` and :math:`v` depend on the path
+    each sample took through the earlier trees. Two inputs differing in one feature therefore
+    accumulate different optimizer state, while leaf values are shared — so no ordering of leaf
+    values makes every sample's contribution monotone. With SGD the update is a fixed signed
+    scale, which preserves the ordering.
+
+    This applies to the whole model: if any optimizer uses Adam, monotonic constraints
+    are rejected. Use SGD for a model that needs constrained outputs.
+
+.. note::
+
+    ``MultiGBTLearner`` does not support monotonic constraints at all and raises a ``ValueError``
+    if any are supplied.
 
 **How Constraints Are Enforced:**
 
@@ -437,18 +506,31 @@ Monotonic constraints are enforced through two mechanisms:
    The constraint-aware scoring function pools the left and right child means when a split
    would violate the monotonic ordering, effectively reducing the score of such splits.
 
-2. **After each tree is built:** Gradient-based updates that would violate constraints are
-   projected or clipped by the optimizer for the affected output indices (``start_idx`` to
-   ``stop_idx-1``). A pool-adjacent-violators (PAVA) algorithm is applied to ensure leaf
-   values respect the specified monotonic ordering.
+2. **After each tree is built:** the leaf values for the affected output indices
+   (``start_idx`` to ``stop_idx-1``) are projected onto the monotone cone — the closest
+   set of leaf values satisfying the constraints.
+
+   The projection uses **Dykstra's cyclic projection method**. For each constrained depth,
+   leaf pairs differing only in that depth's split are averaged when they violate the
+   constraint; because those pairs are disjoint, this is already the exact projection for
+   that depth. With two or more constrained features the per-depth constraint sets overlap,
+   so simply cycling between them would land somewhere monotone but not at the *closest*
+   monotone point. Dykstra carries a correction term per depth, which recovers the true
+   isotonic projection. A short cleanup phase then clears any residual violation left by
+   Dykstra's asymptotic convergence.
+
+   Dykstra runs up to a fixed pass limit. The returned leaf values are always monotone;
+   they are the closest monotone values provided that phase converged, which it does in
+   the large majority of cases. If the limit is reached, GBRL emits a warning and the
+   result is monotone but only approximately nearest.
 
 **Practical Trade-offs:**
 
 - Split search may be slower due to constraint checking and mean pooling during scoring
 - Convergence may be affected for ``GBTModel`` and actor-critic models (policy outputs only)
   since some gradient directions are restricted
-- The constraint projection ensures predictions are monotonic but may result in suboptimal
-  fit compared to unconstrained models
+- The projection moves leaf values as little as possible while satisfying the constraints,
+  but a constrained model will still generally fit worse than an unconstrained one
 
 Setting Monotonic Constraints
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

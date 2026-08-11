@@ -57,6 +57,28 @@
 /** @brief Format specifier for categorical type based on MAX_CHAR_SIZE */
 #define CAT_TYPE TOSTRING(MAX_CHAR_SIZE) "s"
 
+/** @brief Maximum Dykstra passes per output when applying monotonic constraints.
+ *
+ *  The projection uses Dykstra's cyclic projection over pairwise halfspaces,
+ *  which converges asymptotically rather than in a fixed number of passes, so it
+ *  needs a cap. Measured worst case is ~104 passes (4 constrained depths at
+ *  depth 6). */
+#define MONOTONIC_MAX_PASSES 256
+
+/** @brief Convergence tolerance for the monotonic-constraint projection */
+#define MONOTONIC_TOLERANCE 1e-6f
+
+/** @brief Number of monotonic projections that hit MONOTONIC_MAX_PASSES.
+ *
+ *  Such a projection still returns monotone leaf values, but they are no longer
+ *  provably the closest monotone values.  step()/fit() clear the count before
+ *  training and Python reads it afterwards to raise a RuntimeWarning.
+ *  Counted per thread: the pybind wrappers release the GIL, so models training
+ *  in separate Python threads must not share the count. */
+int  get_monotonic_nonconverged();
+void reset_monotonic_nonconverged();
+void note_monotonic_nonconverged();
+
 /** @brief Forward declaration of Optimizer class */
 class Optimizer;
 

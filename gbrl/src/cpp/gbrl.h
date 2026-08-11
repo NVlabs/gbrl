@@ -34,6 +34,7 @@
 
 #include <string>
 #include <tuple>
+#include <vector>
 
 #include "node.h"
 #include "optimizer.h"
@@ -146,7 +147,7 @@ class GBRL {
         
         /**
          * @brief Compute SHAP values for a single tree
-         * 
+         *
          * @param tree_idx Index of tree to explain
          * @param obs Numerical observations
          * @param categorical_obs Categorical observations
@@ -154,7 +155,12 @@ class GBRL {
          * @param norm Normalization values
          * @param base_poly Base polynomial coefficients
          * @param offset Offset polynomial coefficients
-         * @return Pointer to SHAP values array, caller must free
+         * @param base_values Optional out-parameter (n_samples × output_dim, zero-initialised
+         *        by caller). When non-null, accumulates the per-sample SHAP base value:
+         *        sum over leaf nodes of (effective_delta × cond_prob) for this tree.
+         *        For Adam, the base is sample-specific because effective_delta depends on
+         *        the frozen pre-tree moment state of each sample.
+         * @return Pointer to SHAP values array (n_samples × n_features × output_dim), caller must free
          */
         float* tree_shap(
             const int tree_idx,
@@ -163,19 +169,27 @@ class GBRL {
             const int n_samples,
             float *norm,
             float *base_poly,
-            float *offset
+            float *offset,
+            float *base_values = nullptr
         );
-        
+
         /**
          * @brief Compute SHAP values for entire ensemble
-         * 
+         *
          * @param obs Numerical observations
          * @param categorical_obs Categorical observations
          * @param n_samples Number of samples
          * @param norm Normalization values
          * @param base_poly Base polynomial coefficients
          * @param offset Offset polynomial coefficients
-         * @return Pointer to SHAP values array, caller must free
+         * @param base_values Optional out-parameter (n_samples × output_dim, zero-initialised
+         *        by caller). When non-null, accumulates the sample-specific SHAP base:
+         *        model bias plus the sum over all trees of each tree's expected effective
+         *        contribution under the path distribution. Satisfies:
+         *        base_values[s] + sum_f(phi_f(x_s)) == predict(x_s).
+         *        For SGD, base is identical across samples. For Adam, it is sample-specific
+         *        because each tree's effective leaf values depend on the sample's Adam state.
+         * @return Pointer to SHAP values array (n_samples × n_features × output_dim), caller must free
          */
         float* ensemble_shap(
             const float *obs,
@@ -183,13 +197,17 @@ class GBRL {
             const int n_samples,
             float *norm,
             float *base_poly,
-            float *offset
+            float *offset,
+            float *base_values = nullptr
         );
         
         /**
-         * @brief Check if CUDA is available
-         * 
-         * @return true if CUDA support is compiled and device is available
+         * @brief Check whether the extension was built with CUDA support.
+         *
+         * This is compile-time only. It does not check that a usable CUDA
+         * device exists at runtime.
+         *
+         * @return true if compiled with CUDA support
          */
         static bool cuda_available();
         
@@ -404,6 +422,17 @@ class GBRL {
         void set_feature_mapping(const int *feature_mapping, const bool *mapping_numerics, const int input_dim);
         
         void set_monotonic_constraints(const int *feature_indices, const int *output_idx, const int *constraint, const int n_constraints);
+
+        /**
+         * @brief Read back the monotonic constraints into host buffers.
+         *
+         * Copies n_mono_constraints entries into each output vector, from device
+         * memory when running on GPU.  Needed so Python can reconstruct its
+         * constraint dictionary after loading a model.
+         */
+        void get_monotonic_constraints(std::vector<int> &feature_indices,
+                                       std::vector<int> &output_idx,
+                                       std::vector<int> &constraint);
         /**
          * @brief Get current bias term
          * 
@@ -546,7 +575,12 @@ class GBRL {
         deviceType device = unspecified;    /**< Current compute device */
         bool parallel_predict = true;       /**< Enable parallel prediction */
         std::string learner_name = "GBRL";  /**< Name identifier for this learner */
-        
+        /** @brief Monotonic projections in THIS model's last step()/fit() that hit
+         *  the pass limit. Copied out of the thread-local counter at the end of
+         *  each call so the value belongs to one model and cannot be observed
+         *  from another. */
+        int n_nonconverged_projections = 0;
+
 #ifdef USE_CUDA
         SGDOptimizerGPU** cuda_opt = nullptr;  /**< GPU optimizers */
         int n_cuda_opts;                       /**< Number of GPU optimizers */

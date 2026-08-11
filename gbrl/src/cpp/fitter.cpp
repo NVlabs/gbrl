@@ -34,6 +34,7 @@
 #include <fstream>
 #include <cstring>
 #include <iostream>
+#include <stdexcept>
 #include <string>
 
 #include "fitter.h"
@@ -94,6 +95,11 @@ void Fitter::step_cpu(dataSet *dataset, ensembleData *edata, ensembleMetaData *m
     dataHolder<float> build_grads_holder{build_grads, cpu};
     dataset->build_grads = &build_grads_holder; 
     
+    // The fit_*_tree call below already advances the ensemble counts, and the
+    // projection after it can throw, so snapshot them for the rollback.
+    const int trees_before_step = metadata->n_trees;
+    const int leaves_before_step = metadata->n_leaves;
+
     int added_leaves = 0;
     if (metadata->grow_policy == GREEDY)
         added_leaves = Fitter::fit_greedy_tree(dataset, edata, metadata, generator);
@@ -107,7 +113,23 @@ void Fitter::step_cpu(dataSet *dataset, ensembleData *edata, ensembleMetaData *m
         int tree_depth = edata->ensemble_info->depths[tree_idx];
         int start_leaf_idx = edata->ensemble_info->tree_indices[tree_idx];
         if (tree_depth > 0) {
-            Fitter::apply_monotonic_constraints_cpu(edata, metadata, tree_idx, tree_depth, start_leaf_idx);
+            try {
+                Fitter::apply_monotonic_constraints_cpu(edata, metadata, tree_idx, tree_depth, start_leaf_idx);
+            } catch (...) {
+                // Un-publish the tree, then release this call's temporaries since
+                // the cleanup below is skipped by the unwind.
+                metadata->n_trees = trees_before_step;
+                metadata->n_leaves = leaves_before_step;
+                if (indices != nullptr) {
+                    for (int i = 0; i < metadata->n_num_features; ++i)
+                        delete[] indices[i];
+                    delete[] indices;
+                }
+                delete[] build_grads;
+                if (norm_grads != nullptr)
+                    delete[] norm_grads;
+                throw;
+            }
         }
     }
 
@@ -125,6 +147,9 @@ void Fitter::step_cpu(dataSet *dataset, ensembleData *edata, ensembleMetaData *m
 }
 
 float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edata, ensembleMetaData *metadata, const int iterations, lossType loss_type, std::vector<Optimizer*> opts){
+    // Each tree is built on one mini-batch of at most batch_size rows, so a
+    // dataset too large to build a tree on is still trainable. The loop below
+    // advances to the next batch per tree, wrapping back to row 0.
     int batch_start_idx = 0, output_dim = metadata->output_dim;
     int batch_size = metadata->batch_size, par_th = metadata->par_th;
     int batch_n_samples = batch_start_idx + batch_size < dataset->n_samples ? batch_size : dataset->n_samples - batch_start_idx;
@@ -161,14 +186,16 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
     }
     float *full_preds = nullptr;
     if (metadata->n_cat_features > 0){
-        full_preds = init_zero_mat(dataset->n_samples*metadata->output_dim); 
-        Predictor::predict_cpu(dataset, full_preds, edata, metadata, 0, iterations, false, opts);
+        full_preds = init_zero_mat(dataset->n_samples*metadata->output_dim);
+        // 0 = every tree currently in the model; `iterations` is a per-call count, not a tree index.
+        Predictor::predict_cpu(dataset, full_preds, edata, metadata, 0, 0, false, opts);
         float *full_grads = init_zero_mat(dataset->n_samples*metadata->output_dim); 
         float *full_grad_norms = init_zero_mat(dataset->n_samples); 
         batch_loss = MultiRMSE::get_loss_and_gradients(full_preds, targets, full_grads, dataset->n_samples, metadata->output_dim, par_th);
         calculate_squared_norm(full_grad_norms, full_grads, dataset->n_samples, metadata->output_dim, metadata->par_th);
         generator.processCategoricalCandidates(dataset->categorical_obs->data, full_grad_norms);
         delete[] full_preds;
+        full_preds = nullptr;
         delete[] full_grads;
         delete[] full_grad_norms;
     }
@@ -198,13 +225,16 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
             memset(preds, 0, batch_preds_size * sizeof(float));
         }
 
-        Predictor::predict_cpu(&batch_dataset, preds, edata, metadata, 0, i, false, opts);
+        // Boost against every tree in the model; `i` only counts the ones this call added.
+        Predictor::predict_cpu(&batch_dataset, preds, edata, metadata, 0, 0, false, opts);
         grads = is_last_batch ? last_batch_grads : batch_grads;
         if (loss_type == MultiRMSE){
             batch_loss = MultiRMSE::get_loss_and_gradients(preds, shifted_targets, grads, batch_dataset.n_samples, metadata->output_dim, par_th);
         }
         batch_dataset.grads->data = grads;
-        if (metadata->use_cv && i > 0){
+        // Keyed on the model, not the loop counter, like step_cpu: `i` counts
+        // only the trees added by this call.
+        if (metadata->use_cv && metadata->n_trees > 0){
             Fitter::control_variates(&batch_dataset, edata, metadata);
         }
 
@@ -240,7 +270,31 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
             int tree_depth = edata->ensemble_info->depths[tree_idx];
             int start_leaf_idx = edata->ensemble_info->tree_indices[tree_idx];
             if (tree_depth > 0) {
-                Fitter::apply_monotonic_constraints_cpu(edata, metadata, tree_idx, tree_depth, start_leaf_idx);
+                // Roll the tree back if the projection rejects it (see step_cpu).
+                const int trees_before = metadata->n_trees - 1;
+                const int leaves_before = metadata->n_leaves - added_leaves;
+                try {
+                    Fitter::apply_monotonic_constraints_cpu(edata, metadata, tree_idx, tree_depth, start_leaf_idx);
+                } catch (...) {
+                    metadata->n_trees = trees_before;
+                    metadata->n_leaves = leaves_before;
+                    // Release everything this call allocated: the cleanup after
+                    // the loop is skipped by the unwind.
+                    if (indices != nullptr){
+                        for (int f = 0; f < metadata->n_num_features; ++f)
+                            delete[] indices[f];
+                        delete[] indices;
+                    }
+                    delete[] batch_preds;
+                    delete[] last_batch_preds;
+                    delete[] batch_grads;
+                    delete[] batch_build_grads;
+                    delete[] last_batch_grads;
+                    delete[] last_batch_build_grads;
+                    delete[] batch_grad_norms;
+                    delete[] last_batch_grad_norms;
+                    throw;
+                }
             }
         }
         
@@ -262,9 +316,10 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
         delete[] indices;
     }
     
-    full_preds = init_zero_mat(dataset->n_samples*metadata->output_dim); 
+    full_preds = init_zero_mat(dataset->n_samples*metadata->output_dim);
 
-    Predictor::predict_cpu(dataset, full_preds, edata, metadata, 0, iterations, false, opts);
+    // Loss of the model as it now stands, not of its first `iterations` trees.
+    Predictor::predict_cpu(dataset, full_preds, edata, metadata, 0, 0, false, opts);
     float full_loss = INFINITY;
     if (loss_type == MultiRMSE){
         full_loss = MultiRMSE::get_loss(full_preds, targets, dataset->n_samples, output_dim, par_th); 
@@ -349,8 +404,16 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
                 // Process the batch of candidates
                 for (int j = start_idx; j < end_idx; ++j) {
                     float score = crnt_node->getSplitScore(dataset, metadata->split_score_func, split_candidates[j], metadata->min_data_in_leaf);
-                    int feat_idx = (split_candidates[j].categorical_value == nullptr) ? split_candidates[j].feature_idx : split_candidates[j].feature_idx + metadata->n_num_features; 
-                    score = score * edata->feature_data->feature_weights[feat_idx] - parent_score;
+                    // feature_weights is indexed by ORIGINAL input column, so the
+                    // split's type-local index has to go through the reverse
+                    // mapping, as the oblivious path does.
+                    int global_feature_idx = (split_candidates[j].categorical_value == nullptr)
+                        ? edata->feature_mappings->reverse_num_feature_mapping[split_candidates[j].feature_idx]
+                        : edata->feature_mappings->reverse_cat_feature_mapping[split_candidates[j].feature_idx];
+                    // Unused reverse slots hold -1; reject rather than read out of bounds.
+                    if (global_feature_idx < 0 || global_feature_idx >= metadata->input_dim)
+                        continue;
+                    score = score * edata->feature_data->feature_weights[global_feature_idx] - parent_score;
                     
 #ifdef DEBUG
                     std::cout << " cand: " <<  j << " score: " <<  score << " parent score: " <<  parent_score << " info: " << split_candidates[j] << std::endl;
@@ -446,10 +509,15 @@ int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMe
             for (int j = start_idx; j < end_idx; ++j) {
                 float score = 0.0f;
                 // Get the global feature index for constraint lookup
-                int global_feature_idx = (split_candidates[j].categorical_value == nullptr) 
-                    ? edata->feature_mappings->reverse_num_feature_mapping[split_candidates[j].feature_idx] 
+                int global_feature_idx = (split_candidates[j].categorical_value == nullptr)
+                    ? edata->feature_mappings->reverse_num_feature_mapping[split_candidates[j].feature_idx]
                     : edata->feature_mappings->reverse_cat_feature_mapping[split_candidates[j].feature_idx];
-                
+                // set_feature_mapping fills unused reverse slots with -1, so a
+                // mapping that does not cover this split would index
+                // feature_weights out of bounds.  Reject the candidate instead.
+                if (global_feature_idx < 0 || global_feature_idx >= metadata->input_dim)
+                    continue;
+
                 for (int node_idx = 0; node_idx < (1 << depth); ++node_idx){
                     TreeNode *crnt_node = tree_nodes[node_idx];
                     // Use constraint-aware scoring if constraints exist
@@ -584,6 +652,12 @@ void Fitter::calc_leaf_value(dataSet *dataset, ensembleData *edata, ensembleMeta
     bool passed;
     int idx, row_idx, cat_row_idx;
 
+    // Start from zero: this slot may still hold values from a tree that was
+    // rolled back after a failed monotonic projection, and the loop below
+    // accumulates rather than assigns.
+    float *leaf_values = edata->leaf_data->values + leaf_idx * output_dim;
+    std::fill(leaf_values, leaf_values + output_dim, 0.0f);
+
     for (int i = 0; i < dataset->n_samples; ++i){
         row_idx = i*metadata->n_num_features;
         cat_row_idx = i*metadata->n_cat_features;
@@ -678,8 +752,10 @@ void Fitter::apply_monotonic_constraints_cpu(
     
     // Get feature indices for this tree (feature_indices[0] is root split)
     int* feature_indices = new int[tree_depth];
+    bool* split_is_numeric = new bool[tree_depth];
     for (int d = 0; d < tree_depth; ++d) {
         feature_indices[d] = edata->feature_data->feature_indices[tree_idx * metadata->max_depth + d];
+        split_is_numeric[d] = edata->feature_data->is_numerics[tree_idx * metadata->max_depth + d];
     }
     
     // Get inequality directions for this tree (from first leaf)
@@ -705,58 +781,175 @@ void Fitter::apply_monotonic_constraints_cpu(
             // CRITICAL: Convert internal feature index to global using reverse mapping
             // feature_indices[d] is the INTERNAL index used by the tree builder
             // We need to map it back to GLOBAL index to compare with constraints
+            // Monotonic constraints apply to numerical splits only.  A categorical
+            // split carries a categorical internal index, so looking it up in
+            // reverse_num_feature_mapping would either alias onto an unrelated
+            // numerical feature or read past the end of that mapping.
+            if (!split_is_numeric[d]) continue;
             int internal_idx = feature_indices[d];
+            if (internal_idx < 0 || internal_idx >= metadata->n_num_features) continue;
             int global_idx = edata->feature_mappings->reverse_num_feature_mapping[internal_idx];
             
             if (global_idx == global_feature_idx) {
-                // If inequality_direction is inverted (0), flip the constraint
-                // Standard direction (1): bit=0 has lower feature values (left)
-                // Inverted direction (0): bit=0 has higher feature values (left is now high!)
+                // inequality_directions[d] is false on the left branch
+                // (x <= threshold) and true on the right, see node.cpp. Flip the
+                // requested direction on the left branch so both sides are
+                // compared in the same orientation.
                 effective_constraints[d][constraint_output] = (inequality_directions[d] == 1) ? constraint_dir : -constraint_dir;
             }
         }
     }
     
-    // Apply constraints using single-pass PAVA
-    // Only iterate over policy_dim since monotonic constraints only apply to policy outputs
+    // Isotonic projection of the leaf values onto the monotone cone, via Dykstra's
+    // algorithm.
+    //
+    // Within one constrained depth the leaf pairs are disjoint, so averaging a
+    // violating pair is the exact L2 projection (2-point isotonic).  Across two
+    // or more constrained depths the pair sets overlap.
+    //
+    // Dykstra adds a per-depth correction term z_d: project (v + z_d) instead of v,
+    // then fold the residual back into z_d.  That converges to the true projection
+    // onto the intersection (Boyle-Dykstra).  Convergence is asymptotic, hence the
+    // tolerance test rather than an exact no-change test.
+    // Set when the final feasibility scan still finds a violation.
+    bool infeasible = false;
+    int infeasible_out = -1;
+    float worst_gap = 0.0f;
+    float *v      = new float[n_leaves];
+    float *v_prev = new float[n_leaves];
+    float *y      = new float[n_leaves];
+    float *z      = new float[tree_depth * n_leaves];
+
     for (int out_idx = 0; out_idx < policy_dim; ++out_idx) {
+        // Skip outputs with no constraint at any depth.
+        bool constrained = false;
+        for (int d = 0; d < tree_depth && !constrained; ++d)
+            if (effective_constraints[d][out_idx] != 0) constrained = true;
+        if (!constrained) continue;
+
+        for (int i = 0; i < n_leaves; ++i)
+            v[i] = edata->leaf_data->values[(start_leaf_idx + i) * output_dim + out_idx];
+        std::fill(z, z + tree_depth * n_leaves, 0.0f);
+
+        bool converged = false;
+        for (int pass = 0; pass < MONOTONIC_MAX_PASSES && !converged; ++pass) {
+            std::copy(v, v + n_leaves, v_prev);
+
+            for (int d = 0; d < tree_depth; ++d) {
+                int constraint_dir = effective_constraints[d][out_idx];
+                if (constraint_dir == 0) continue;
+                float *z_d = z + d * n_leaves;
+
+                // y = v + z_d
+                for (int i = 0; i < n_leaves; ++i) y[i] = v[i] + z_d[i];
+
+                // v = P_d(y): pool violating pairs.  CRITICAL: depth 0 (root) is
+                // the MSB, depth (tree_depth-1) the LSB.
+                std::copy(y, y + n_leaves, v);
+                int bit_mask = 1 << (tree_depth - 1 - d);
+                for (int i = 0; i < n_leaves; ++i) {
+                    if ((i & bit_mask) != 0) continue;   // handle each pair once
+                    int j = i | bit_mask;
+                    // constraint_dir == 1 means v[i] <= v[j]
+                    bool violation = (constraint_dir == 1) ? (v[i] > v[j]) : (v[i] < v[j]);
+                    if (violation) {
+                        float pooled = (v[i] + v[j]) * 0.5f;
+                        v[i] = pooled;
+                        v[j] = pooled;
+                    }
+                }
+
+                // z_d = y - P_d(y)
+                for (int i = 0; i < n_leaves; ++i) z_d[i] = y[i] - v[i];
+            }
+
+            float max_delta = 0.0f;
+            for (int i = 0; i < n_leaves; ++i)
+                max_delta = std::max(max_delta, std::fabs(v[i] - v_prev[i]));
+            if (max_delta < MONOTONIC_TOLERANCE) converged = true;
+        }
+
+        // Feasibility cleanup.  Dykstra approaches the optimum from outside the
+        // feasible set, so it can stop with violations of order MONOTONIC_TOLERANCE.
+        // Monotonicity is a hard contract, so run plain projections (z = 0) until
+        // nothing moves.  Measured shift away from the optimum is ~1e-6.
+        for (int pass = 0; pass < MONOTONIC_MAX_PASSES; ++pass) {
+            std::copy(v, v + n_leaves, v_prev);
+            for (int d = 0; d < tree_depth; ++d) {
+                int constraint_dir = effective_constraints[d][out_idx];
+                if (constraint_dir == 0) continue;
+                int bit_mask = 1 << (tree_depth - 1 - d);
+                for (int i = 0; i < n_leaves; ++i) {
+                    if ((i & bit_mask) != 0) continue;
+                    int j = i | bit_mask;
+                    bool violation = (constraint_dir == 1) ? (v[i] > v[j]) : (v[i] < v[j]);
+                    if (violation) {
+                        float pooled = (v[i] + v[j]) * 0.5f;
+                        v[i] = pooled;
+                        v[j] = pooled;
+                    }
+                }
+            }
+            if (std::equal(v, v + n_leaves, v_prev)) break;
+        }
+
+        // Final feasibility scan.  `converged` only records whether the Dykstra
+        // phase met its movement tolerance, not whether the cleanup phase
+        // removed every violation.
         for (int d = 0; d < tree_depth; ++d) {
             int constraint_dir = effective_constraints[d][out_idx];
             if (constraint_dir == 0) continue;
-            
-            // CRITICAL: Depth 0 (root) is MSB, depth (tree_depth-1) is LSB
             int bit_mask = 1 << (tree_depth - 1 - d);
-            
-            // Process all leaf pairs that differ only in this bit
             for (int i = 0; i < n_leaves; ++i) {
-                // Only process when this bit is 0 (avoid double counting)
-                if ((i & bit_mask) == 0) {
-                    int leaf0 = i;
-                    int leaf1 = i | bit_mask;
-                    
-                    int global_leaf0 = start_leaf_idx + leaf0;
-                    int global_leaf1 = start_leaf_idx + leaf1;
-                    
-                    float val0 = edata->leaf_data->values[global_leaf0 * output_dim + out_idx];
-                    float val1 = edata->leaf_data->values[global_leaf1 * output_dim + out_idx];
-                    
-                    // Check violation: constraint_dir=1 means val0 <= val1
-                    bool violation = (constraint_dir == 1) ? (val0 > val1) : (val0 < val1);
-                    
-                    if (violation) {
-                        float pooled = (val0 + val1) * 0.5f;
-                        edata->leaf_data->values[global_leaf0 * output_dim + out_idx] = pooled;
-                        edata->leaf_data->values[global_leaf1 * output_dim + out_idx] = pooled;
+                if ((i & bit_mask) != 0) continue;
+                int j = i | bit_mask;
+                float gap = (constraint_dir == 1) ? (v[i] - v[j]) : (v[j] - v[i]);
+                if (gap > MONOTONIC_TOLERANCE) {
+                    infeasible = true;
+                    // Keep the reported index paired with the reported gap.
+                    if (gap > worst_gap) {
+                        worst_gap = gap;
+                        infeasible_out = out_idx;
                     }
                 }
             }
         }
+
+        for (int i = 0; i < n_leaves; ++i)
+            edata->leaf_data->values[(start_leaf_idx + i) * output_dim + out_idx] = v[i];
+
+        // Dykstra converges to the NEAREST monotone point only if it converged.
+        // If it hit the pass limit the cleanup phase still guarantees a feasible
+        // result, but it is no longer provably the closest one.  Counted so the
+        // Python layer can raise a real RuntimeWarning after fit()/step().
+        if (!converged) {
+            note_monotonic_nonconverged();
+            std::cerr << "WARNING: monotonic projection for output " << out_idx
+                      << " reached the " << MONOTONIC_MAX_PASSES
+                      << "-pass limit; leaf values are monotone but may not be the"
+                         " closest monotone values" << std::endl;
+        }
     }
+
+    delete[] v;
+    delete[] v_prev;
+    delete[] y;
+    delete[] z;
     
     delete[] feature_indices;
+    delete[] split_is_numeric;
     delete[] inequality_directions;
     for (int d = 0; d < tree_depth; ++d) {
         delete[] effective_constraints[d];
     }
     delete[] effective_constraints;
+
+    // Monotonicity is a hard contract, so surface a failure to Python rather
+    // than leaving a silently non-monotone model behind.
+    if (infeasible) {
+        throw std::runtime_error(
+            "Monotonic constraints could not be satisfied for output " +
+            std::to_string(infeasible_out) + " (worst violation " +
+            std::to_string(worst_gap) + ")");
+    }
 }

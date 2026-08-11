@@ -128,23 +128,23 @@ class LinearScheduler : public Scheduler {
         
         /**
          * @brief Get learning rate at iteration t
-         * 
-         * Computes: lr(t) = init_lr + (1 - (T-t)/T) * (stop_lr - init_lr)
-         * 
+         *
+         * Computes: lr(t) = init_lr + clamp(t/T, 0, 1) * (stop_lr - init_lr)
+         *
+         * so lr(0) == init_lr and lr(t >= T) == stop_lr.  Clamping the progress
+         * rather than the rate keeps this correct for warmup (stop_lr > init_lr)
+         * as well as decay.
+         *
          * @param t Current iteration number
          * @return Learning rate for this iteration
          */
         inline float get_lr(int t) override {
-            float T_ = static_cast<float>(this->T);
-            float t_ = static_cast<float>(t) + 1;
-            float progress_remaining = (T_ - t_) / T_;
-            float lr = this->init_lr + 
-                      (1.0f - progress_remaining) * (this->stop_lr - this->init_lr);
-            
-            if (lr < this->stop_lr)
+            if (this->T <= 0)
                 return this->stop_lr;
-                
-            return lr;
+            float progress = static_cast<float>(t) / static_cast<float>(this->T);
+            if (progress < 0.0f) progress = 0.0f;
+            if (progress > 1.0f) progress = 1.0f;
+            return this->init_lr + progress * (this->stop_lr - this->init_lr);
         }
         
         /**

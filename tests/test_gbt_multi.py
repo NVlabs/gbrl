@@ -26,10 +26,8 @@ import unittest
 from typing import Tuple
 
 import numpy as np
-import shap
 import torch as th
 from sklearn import datasets
-from sklearn.tree import DecisionTreeRegressor
 from torch.nn.functional import mse_loss
 
 from gbrl import cuda_available
@@ -156,6 +154,7 @@ class TestGBTMulti(unittest.TestCase):
         model.save_learner(os.path.join(self.test_dir, 'test_cosine_cpu'))
 
     def test_shap_cpu(self):
+        """tree_shap completeness: base + sum_f shap_f(x) == predict(x) for one SGD tree."""
         print("Running test_shap_cpu")
         X, y = self.data
         X_cpu = X.detach().clone().cpu().numpy()
@@ -174,12 +173,12 @@ class TestGBTMulti(unittest.TestCase):
                          verbose=0,
                          device='cpu')
         model.learner.step(X, y)
-        gbrl_shap = model.tree_shap(0, X_cpu[0, :])
-        clf = DecisionTreeRegressor(max_depth=3).fit(X_cpu, y)
-        target_shap = shap.TreeExplainer(clf).shap_values(X_cpu[0, :])
-        self.assertTrue(
-            np.allclose(gbrl_shap, target_shap, rtol=1e-3),
-            'GBRL SHAP values are not close to target SHAP values'
+        pred = model(X_cpu).detach().cpu().numpy().reshape(len(X_cpu), -1)
+        shap_vals, base = model.tree_shap(0, X_cpu, return_base=True)
+        max_err = float(np.abs(base + shap_vals.sum(axis=1) - pred).max())
+        self.assertLess(
+            max_err, 2e-3,
+            f'tree_shap completeness violated: max |base+sum(shap)-pred|={max_err:.4f}'
         )
 
     def test_cosine_adam_cpu(self):

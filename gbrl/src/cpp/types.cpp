@@ -55,7 +55,10 @@ generatorType stringTogeneratorType(std::string str) {
 }
 
 growPolicy stringTogrowPolicy(std::string str) {
-    if (str == "oblivious" || str == "Oblivious") return growPolicy::OBLIVIOUS;
+    // "Oblivous" (sic) was emitted by growPolicyToString before the typo was
+    // fixed; accept it so models saved by earlier versions still round-trip.
+    if (str == "oblivious" || str == "Oblivious" ||
+        str == "oblivous"  || str == "Oblivous") return growPolicy::OBLIVIOUS;
     if (str == "greedy" || str == "Greedy") return growPolicy::GREEDY;
     throw std::runtime_error("Invalid generator function! Options are: Greedy/Oblivious");
     return growPolicy::GREEDY;
@@ -124,7 +127,7 @@ std::string generatorTypeToString(generatorType type) {
 std::string growPolicyToString(growPolicy type) {
     switch (type) {
         case growPolicy::OBLIVIOUS:
-            return "Oblivous";
+            return "Oblivious";
         case growPolicy::GREEDY:
             return "Greedy";
         default:
@@ -173,6 +176,25 @@ std::string schedulerTypeToString(schedulerFunc func) {
         default:
             throw std::runtime_error("Invalid scheduler type.");
     }
+}
+
+// Shared by the CPU and CUDA monotonic projections, which both run on the host
+// between tree builds.  thread_local, NOT a plain global: the pybind wrappers
+// release the GIL, so two models training in separate Python threads would
+// otherwise race on this and steal each other's counts.  step()/fit() cannot
+// interleave within one thread, so a per-thread count is exact.
+static thread_local int monotonic_nonconverged = 0;
+
+int get_monotonic_nonconverged(){
+    return monotonic_nonconverged;
+}
+
+void reset_monotonic_nonconverged(){
+    monotonic_nonconverged = 0;
+}
+
+void note_monotonic_nonconverged(){
+    ++monotonic_nonconverged;
 }
 
 ensembleMetaData* ensemble_metadata_alloc(
@@ -476,6 +498,10 @@ ensembleData* copy_ensemble_data(ensembleData *other_edata, ensembleMetaData *me
     edata->mono_constraints->constraint = new int[metadata->n_mono_constraints];
     data_size += sizeof(int) * metadata->n_mono_constraints;
     memcpy(edata->mono_constraints->constraint, other_edata->mono_constraints->constraint, metadata->n_mono_constraints * sizeof(int));
+    // The arrays were copied, so the active count must follow.  CUDA split
+    // scoring reads this field rather than the metadata copy, so leaving it
+    // at 0 silently disables constraints on a copied model.
+    edata->mono_constraints->n_constraints = metadata->n_mono_constraints;
 
     // Feature mappings
     edata->feature_mappings->reverse_num_feature_mapping = new int[metadata->input_dim];
@@ -596,6 +622,10 @@ ensembleData* copy_compressed_ensemble_data(ensembleData *other_edata, ensembleM
     edata->mono_constraints->constraint = new int[metadata->n_mono_constraints];
     data_size += sizeof(int) * metadata->n_mono_constraints;
     memcpy(edata->mono_constraints->constraint, other_edata->mono_constraints->constraint, metadata->n_mono_constraints * sizeof(int));
+    // The arrays were copied, so the active count must follow.  CUDA split
+    // scoring reads this field rather than the metadata copy, so leaving it
+    // at 0 silently disables constraints on a copied model.
+    edata->mono_constraints->n_constraints = metadata->n_mono_constraints;
     
     metadata->max_trees = n_compressed_trees;
     metadata->max_leaves = n_compressed_leaves;

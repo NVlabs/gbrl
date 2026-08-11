@@ -126,6 +126,11 @@ GBRL::GBRL(const std::string& filename){
 
 GBRL::GBRL(GBRL& other):  
            opts(), parallel_predict(other.parallel_predict){
+        // serializationHeader's version fields have no default initializers, so
+        // the header has to be carried over for a copied model to save.
+        this->sheader = other.sheader;
+        // Training state a copy is expected to continue from.
+        this->n_nonconverged_projections = other.n_nonconverged_projections;
         this->learner_name = other.learner_name;
         this->metadata = new ensembleMetaData;
         memcpy(this->metadata, other.metadata, sizeof(ensembleMetaData));
@@ -330,6 +335,33 @@ void GBRL::set_feature_mapping(const int *feature_mapping, const bool *mapping_n
     delete[] reverse_cat_feature_mapping;
 }
 
+
+void GBRL::get_monotonic_constraints(std::vector<int> &feature_indices,
+                                     std::vector<int> &output_idx,
+                                     std::vector<int> &constraint){
+    const int n = this->metadata->n_mono_constraints;
+    // Before assign(): a negative count from a corrupt file converts to a huge
+    // size_t and the allocation is what fails, not the check.
+    feature_indices.clear();
+    output_idx.clear();
+    constraint.clear();
+    if (n <= 0) return;
+    feature_indices.assign(n, 0);
+    output_idx.assign(n, 0);
+    constraint.assign(n, 0);
+#ifdef USE_CUDA
+    if (this->device == gpu){
+        cudaMemcpy(feature_indices.data(), this->edata->mono_constraints->feature_idx, sizeof(int)*n, cudaMemcpyDeviceToHost);
+        cudaMemcpy(output_idx.data(), this->edata->mono_constraints->output_idx, sizeof(int)*n, cudaMemcpyDeviceToHost);
+        cudaMemcpy(constraint.data(), this->edata->mono_constraints->constraint, sizeof(int)*n, cudaMemcpyDeviceToHost);
+    }
+#endif
+    if (this->device == cpu){
+        memcpy(feature_indices.data(), this->edata->mono_constraints->feature_idx, sizeof(int)*n);
+        memcpy(output_idx.data(), this->edata->mono_constraints->output_idx, sizeof(int)*n);
+        memcpy(constraint.data(), this->edata->mono_constraints->constraint, sizeof(int)*n);
+    }
+}
 
 void GBRL::set_monotonic_constraints(const int *feature_indices, const int *output_idx, const int *constraint, const int n_constraints){
     // Guard against buffer overflow: n_constraints is validated at Python layer
@@ -563,7 +595,15 @@ void GBRL::set_optimizer(optimizerAlgo algo, schedulerFunc scheduler_func, float
     if (start_idx < 0 || stop_idx <= 0 || start_idx >= this->metadata->output_dim || stop_idx > this->metadata->output_dim){
         std::cerr << "Invalid start index: "  << start_idx << " or stop index: " << stop_idx << " in range: [0, " << this->metadata->output_dim  <<  "]" << std::endl;
         throw std::runtime_error("invalid index ranges");
-        return; 
+        return;
+    }
+    for (const auto &existing : this->opts) {
+        if (start_idx < existing->stop_idx && stop_idx > existing->start_idx) {
+            std::cerr << "Optimizer output range [" << start_idx << ", " << stop_idx
+                      << ") overlaps with existing range ["
+                      << existing->start_idx << ", " << existing->stop_idx << ")." << std::endl;
+            throw std::runtime_error("Overlapping optimizer output ranges are not supported");
+        }
     }
 
     (void)shrinkage;
@@ -683,8 +723,10 @@ void GBRL::_step_gpu(dataSet *dataset){
 
     char *device_memory_block; 
     err = allocateCudaMemory((void**)&device_memory_block, alloc_size, "when trying to allocate step_gpu data");
+    // Throw rather than return: a silent return leaves Python counting a tree
+    // that was never added.
     if (err != cudaSuccess)
-        return;
+        throw std::runtime_error("CUDA allocation failed while preparing a GBRL step");
 
     cudaMemset(device_memory_block, 0, alloc_size);
     size_t trace = 0;
@@ -755,15 +797,30 @@ void GBRL::_step_gpu(dataSet *dataset){
         n_samples,           // number of samples
     };
     candidatesData candidata{n_candidates, candidate_indices, candidate_values, candidate_numerical, candidate_categories};
-    splitDataGPU *split_data = allocate_split_data(this->metadata, candidata.n_candidates);  
-    if (this->metadata->grow_policy == GREEDY)
-        fit_tree_greedy_cuda(&cuda_dataset, this->edata, this->metadata, &candidata, split_data);
-    else
-        fit_tree_oblivious_cuda(&cuda_dataset, this->edata, this->metadata, &candidata, split_data);
+    splitDataGPU *split_data = allocate_split_data(this->metadata, candidata.n_candidates);
+    // Returns nullptr on allocation failure rather than throwing, so the cleanup
+    // below would dereference it.
+    if (split_data == nullptr){
+        cudaFree(device_memory_block);
+        throw std::runtime_error("Failed to allocate split data on the GPU");
+    }
+    // A rejected monotonic projection throws out of fit_tree_*_cuda, so the
+    // device block and split data have to be released before it propagates.
+    try {
+        if (this->metadata->grow_policy == GREEDY)
+            fit_tree_greedy_cuda(&cuda_dataset, this->edata, this->metadata, &candidata, split_data);
+        else
+            fit_tree_oblivious_cuda(&cuda_dataset, this->edata, this->metadata, &candidata, split_data);
+    } catch (...) {
+        cudaFree(split_data->split_scores);
+        delete split_data;
+        cudaFree(device_memory_block);
+        throw;
+    }
     cudaFree(split_data->split_scores);
     delete split_data;
     cudaFree(device_memory_block);
-    
+
     ++this->metadata->iteration;
 }
 
@@ -982,6 +1039,9 @@ float GBRL::_fit_gpu(dataHolder<float> *obs,
         &build_grads_holder,    // build gradients on GPU
         n_samples,         // number of samples
     };
+    // obs_holder was built with trans_obs for tree fitting; the predict kernels
+    // want the untransposed layout, like the two other predict sites below.
+    cuda_dataset.obs->data = gpu_obs;
     predict_cuda_no_host(&cuda_dataset, gpu_preds, this->metadata, this->edata, this->cuda_opt, this->n_cuda_opts, 0, 0, true);
 
     MultiRMSEGrad(gpu_preds, gpu_targets, gpu_grads,  output_dim, n_samples, n_blocks, threads_per_block);
@@ -989,35 +1049,63 @@ float GBRL::_fit_gpu(dataHolder<float> *obs,
 
     preprocess_matrices(gpu_build_grads, gpu_grads_norm, n_samples, output_dim, this->metadata->split_score_func);
 
-    int n_candidates = process_candidates_cuda(gpu_obs, gpu_categorical_obs, gpu_grads_norm, candidate_indices, candidate_values, candidate_categories, candidate_numerical, n_samples, n_num_features, n_cat_features, n_bins, this->metadata->generator_type);
+    // Categorical candidate generation runs on the HOST: it builds std::strings
+    // straight from this pointer.  gpu_categorical_obs is cudaMalloc memory, so
+    // it has to come back first, after any shuffle, to match the row order of
+    // the gradient norms that function also copies to the host.
+    std::vector<char> host_categorical_obs;
+    const char *candidate_cat_obs = nullptr;
+    if (n_cat_features > 0 && gpu_categorical_obs != nullptr){
+        host_categorical_obs.resize(static_cast<size_t>(n_samples) * n_cat_features * MAX_CHAR_SIZE);
+        cudaMemcpy(host_categorical_obs.data(), gpu_categorical_obs,
+                   host_categorical_obs.size(), cudaMemcpyDeviceToHost);
+        candidate_cat_obs = host_categorical_obs.data();
+    }
+    int n_candidates = process_candidates_cuda(gpu_obs, candidate_cat_obs, gpu_grads_norm, candidate_indices, candidate_values, candidate_categories, candidate_numerical, n_samples, n_num_features, n_cat_features, n_bins, this->metadata->generator_type);
 
     candidatesData candidata{n_candidates, candidate_indices, candidate_values, candidate_numerical, candidate_categories};
-    splitDataGPU *split_data = allocate_split_data(this->metadata, candidata.n_candidates);  
-    for (int i = 0 ; i < n_iterations; ++i){
-       cuda_dataset.grads->data = gpu_grads;
-       cuda_dataset.obs->data = trans_obs;
-       cuda_dataset.build_grads->data = gpu_build_grads;
-        if (this->metadata->grow_policy == GREEDY)
-            fit_tree_greedy_cuda(&cuda_dataset, this->edata, this->metadata, &candidata, split_data);
-        else
-            fit_tree_oblivious_cuda(&cuda_dataset, this->edata, this->metadata, &candidata, split_data);
+    splitDataGPU *split_data = allocate_split_data(this->metadata, candidata.n_candidates);
+    // Returns nullptr on allocation failure rather than throwing, so the cleanup
+    // below would dereference it.
+    if (split_data == nullptr){
+        cudaFree(device_memory_block);
+        throw std::runtime_error("Failed to allocate split data on the GPU");
+    }
+    // A rejected monotonic projection throws out of fit_tree_*_cuda part-way
+    // through the loop, so the buffers have to be released before it propagates.
+    try {
+        for (int i = 0 ; i < n_iterations; ++i){
+           cuda_dataset.grads->data = gpu_grads;
+           cuda_dataset.obs->data = trans_obs;
+           cuda_dataset.build_grads->data = gpu_build_grads;
+            if (this->metadata->grow_policy == GREEDY)
+                fit_tree_greedy_cuda(&cuda_dataset, this->edata, this->metadata, &candidata, split_data);
+            else
+                fit_tree_oblivious_cuda(&cuda_dataset, this->edata, this->metadata, &candidata, split_data);
 
-        ++this->metadata->iteration;
+            ++this->metadata->iteration;
 
-        cuda_dataset.obs->data = gpu_obs;
-        predict_cuda_no_host(&cuda_dataset, gpu_preds, this->metadata, this->edata, this->cuda_opt, this->n_cuda_opts, i, 0, false);
-        cudaMemset(gpu_grads, 0, grads_size);
-        if (this->metadata->verbose == 0)
-            MultiRMSEGrad(gpu_preds, gpu_targets, gpu_grads, output_dim, n_samples, n_blocks, threads_per_block);
-        else{
-            cudaMemset(result_tmp, 0, result_tmp_size);
-            float loss = MultiRMSEGradandLoss(gpu_preds, gpu_targets, gpu_grads, result_tmp, output_dim, n_samples, n_blocks, threads_per_block);
-            std::cout << this->learner_name << " - Boosting iteration: " << this->metadata->iteration << " - MultiRMSE Loss: " << loss << std::endl;
+            cuda_dataset.obs->data = gpu_obs;
+            predict_cuda_no_host(&cuda_dataset, gpu_preds, this->metadata, this->edata, this->cuda_opt, this->n_cuda_opts,
+                                 this->metadata->n_trees - 1, this->metadata->n_trees, false);
+            cudaMemset(gpu_grads, 0, grads_size);
+            if (this->metadata->verbose == 0)
+                MultiRMSEGrad(gpu_preds, gpu_targets, gpu_grads, output_dim, n_samples, n_blocks, threads_per_block);
+            else{
+                cudaMemset(result_tmp, 0, result_tmp_size);
+                float loss = MultiRMSEGradandLoss(gpu_preds, gpu_targets, gpu_grads, result_tmp, output_dim, n_samples, n_blocks, threads_per_block);
+                std::cout << this->learner_name << " - Boosting iteration: " << this->metadata->iteration << " - MultiRMSE Loss: " << loss << std::endl;
+            }
+            cudaMemcpy(gpu_build_grads, gpu_grads, grads_size, cudaMemcpyDeviceToDevice);
+
+            preprocess_matrices(gpu_build_grads, gpu_grads_norm, n_samples, output_dim, this->metadata->split_score_func);
+
         }
-        cudaMemcpy(gpu_build_grads, gpu_grads, grads_size, cudaMemcpyDeviceToDevice);
-        
-        preprocess_matrices(gpu_build_grads, gpu_grads_norm, n_samples, output_dim, this->metadata->split_score_func);
-        
+    } catch (...) {
+        cudaFree(split_data->split_scores);
+        delete split_data;
+        cudaFree(device_memory_block);
+        throw;
     }
     cudaFree(split_data->split_scores);
     delete split_data;
@@ -1064,17 +1152,20 @@ void GBRL::step(dataHolder<const float> *obs,
 #endif
     dataSet dataset{
         obs,                // observations
-        categorical_obs,    // categorical observations  
+        categorical_obs,    // categorical observations
         grads,             // gradients
         nullptr,           // build_grads (not used in step)
         n_samples,         // number of samples
     };
+    // Cleared so Python can tell whether THIS call hit the projection pass limit.
+    reset_monotonic_nonconverged();
 #ifdef USE_CUDA
     if (this->device == gpu)
         this->_step_gpu(&dataset);
 #endif
     if (this->device == cpu)
         Fitter::step_cpu(&dataset, this->edata, this->metadata);
+    this->n_nonconverged_projections = get_monotonic_nonconverged();
 }
 
 float GBRL::fit(dataHolder<float> *obs,
@@ -1123,6 +1214,8 @@ float GBRL::fit(dataHolder<float> *obs,
     }
 
     float full_loss = -INFINITY;
+    // Cleared so Python can tell whether THIS call hit the projection pass limit.
+    reset_monotonic_nonconverged();
 #ifdef USE_CUDA
     if (this->device == gpu)
         full_loss = this->_fit_gpu(
@@ -1135,11 +1228,18 @@ float GBRL::fit(dataHolder<float> *obs,
             shuffle);
 #endif
     if (this->device == cpu){
+        // Vectors, not new[]: fit_cpu below can throw.
+        std::vector<float> shuffled_obs;
+        std::vector<char> shuffled_cat_obs;
+        std::vector<float> shuffled_targets;
         if (shuffle){
             // Allocate memory for shuffled data
-            training_obs = new float[n_samples * n_num_features];
-            training_cat_obs = new char[n_samples * n_cat_features * MAX_CHAR_SIZE];
-            training_targets = new float[n_samples * output_dim];
+            shuffled_obs.resize(static_cast<size_t>(n_samples) * n_num_features);
+            shuffled_cat_obs.resize(static_cast<size_t>(n_samples) * n_cat_features * MAX_CHAR_SIZE);
+            shuffled_targets.resize(static_cast<size_t>(n_samples) * output_dim);
+            training_obs = shuffled_obs.data();
+            training_cat_obs = shuffled_cat_obs.data();
+            training_targets = shuffled_targets.data();
 
             // Apply shuffled indices
             for (int i = 0; i < n_samples; ++i) {
@@ -1161,7 +1261,12 @@ float GBRL::fit(dataHolder<float> *obs,
                     }
                 }
                 for (int k = 0; k < n_cat_features; ++k){
-                    training_cat_obs[(i * n_cat_features + k) * MAX_CHAR_SIZE] = categorical_obs->data[(indices[i] * n_cat_features + k) * MAX_CHAR_SIZE];
+                    // Copy the whole fixed-width value; a shorter copy leaves the
+                    // remaining bytes uninitialised and categories sharing a first
+                    // byte ("apple"/"apricot") can compare equal.
+                    memcpy(training_cat_obs + (i * n_cat_features + k) * MAX_CHAR_SIZE,
+                           categorical_obs->data + (indices[i] * n_cat_features + k) * MAX_CHAR_SIZE,
+                           MAX_CHAR_SIZE);
                 }
             }
         } else {
@@ -1170,8 +1275,12 @@ float GBRL::fit(dataHolder<float> *obs,
             training_targets = targets->data;
         }
 
-        float *bias = calculate_mean(training_targets, n_samples, output_dim, metadata->par_th);
-        dataHolder<const float> bias_holder{bias, this->device};
+        // Same reason: calculate_mean returns a new[] buffer, so copy it into a
+        // vector and free it right away.
+        float *bias_raw = calculate_mean(training_targets, n_samples, output_dim, metadata->par_th);
+        std::vector<float> bias(bias_raw, bias_raw + output_dim);
+        delete[] bias_raw;
+        dataHolder<const float> bias_holder{bias.data(), this->device};
         this->set_bias(&bias_holder, this->metadata->output_dim);
 
         dataHolder<const float> tr_obs_holder{training_obs, this->device};
@@ -1188,15 +1297,9 @@ float GBRL::fit(dataHolder<float> *obs,
         if (this->device == cpu){
         full_loss = Fitter::fit_cpu(&dataset, training_targets, this->edata, this->metadata, iterations, loss_type, this->opts);
         }
-
-        if (shuffle){
-            delete[] training_obs;
-            delete[] training_cat_obs;
-            delete[] training_targets;
-        }
-        delete[] bias;
     }
 
+    this->n_nonconverged_projections = get_monotonic_nonconverged();
     return full_loss;   
 }
 
@@ -1313,15 +1416,53 @@ int GBRL::loadFromFile(const std::string& filename){
     this->metadata->max_leaves       = this->metadata->n_leaves;
     this->metadata->max_trees_batch  = TREES_BATCH;
     this->metadata->max_leaves_batch = TREES_BATCH * (1 << this->metadata->max_depth);
+    // A negative count would size every constraint buffer from a huge size_t.
+    if (this->metadata->n_mono_constraints < 0){
+        throw std::runtime_error("Serialized model has a negative monotonic constraint count");
+    }
 
     this->edata = load_ensemble_data(file, this->metadata);
+    // load_ensemble_data allocates mono_constraints with n_constraints = 0 and
+    // never restores it.  CUDA split scoring reads this field (not the metadata
+    // copy), so without this a loaded constrained model scores as unconstrained.
+    if (this->edata->mono_constraints != nullptr)
+        this->edata->mono_constraints->n_constraints = this->metadata->n_mono_constraints;
+    // Mirror the checks set_monotonic_constraints() applies: this path writes the
+    // arrays straight from the file, and the fitter and split scorers index
+    // feature_weights and leaf values with them.
+    for (int i = 0; i < this->metadata->n_mono_constraints; ++i){
+        const int feat = this->edata->mono_constraints->feature_idx[i];
+        const int out  = this->edata->mono_constraints->output_idx[i];
+        const int dir  = this->edata->mono_constraints->constraint[i];
+        if (feat < 0 || feat >= this->metadata->input_dim ||
+            out  < 0 || out  >= this->metadata->policy_dim ||
+            (dir != 1 && dir != -1)){
+            std::cerr << "Serialized monotonic constraint " << i << " is out of range: feature "
+                      << feat << ", output " << out << ", direction " << dir << std::endl;
+            throw std::runtime_error("Serialized model has an invalid monotonic constraint");
+        }
+    }
 
     for (size_t i = 0; i < this->opts.size(); i++)
         delete this->opts[i];
     this->opts.clear();
 
-    int num_opts;
+    int num_opts = 0;
     file.read(reinterpret_cast<char*>(&num_opts), sizeof(int));
+    // Checked before num_opts is used: a truncated file leaves the read
+    // incomplete and the value is whatever was on the stack.
+    if (!file.good()){
+        std::cerr << "Error occurred while reading the optimizer count." << std::endl;
+        throw std::runtime_error("Reading file error");
+    }
+    // Ranges must be disjoint and inside output_dim, so there cannot be more
+    // optimizers than outputs.  Bounded before the loop so a corrupt count
+    // cannot drive it.
+    if (num_opts < 0 || num_opts > this->metadata->output_dim){
+        std::cerr << "Serialized model claims " << num_opts << " optimizers for output_dim "
+                  << this->metadata->output_dim << std::endl;
+        throw std::runtime_error("Serialized model has an invalid optimizer count");
+    }
     // Similar procedure for loading optimizers
     for (int i = 0; i < num_opts; ++i) {  // Adjust as needed
         Optimizer* opt = Optimizer::loadFromFile(file);  // Adjust as needed
@@ -1330,6 +1471,25 @@ int GBRL::loadFromFile(const std::string& filename){
             delete opt;
             throw std::runtime_error("Optimizer load error");
             return -1;
+        }
+        // set_optimizer() range-checks what it registers, but this path writes
+        // straight into opts.  Prediction loops to stop_idx, so an out-of-range
+        // serialized range reads past the leaf values and writes past the
+        // prediction row.
+        if (opt->start_idx < 0 || opt->start_idx >= opt->stop_idx ||
+            opt->stop_idx > this->metadata->output_dim) {
+            std::cerr << "Serialized optimizer " << i << " covers outputs ["
+                      << opt->start_idx << ", " << opt->stop_idx
+                      << ") but the model has output_dim " << this->metadata->output_dim << std::endl;
+            delete opt;
+            throw std::runtime_error("Serialized optimizer has an invalid output range");
+        }
+        for (size_t j = 0; j < this->opts.size(); ++j) {
+            if (opt->start_idx < this->opts[j]->stop_idx &&
+                this->opts[j]->start_idx < opt->stop_idx) {
+                delete opt;
+                throw std::runtime_error("Serialized optimizers cover overlapping output ranges");
+            }
         }
         this->opts.push_back(opt);
     }
@@ -1374,79 +1534,497 @@ void GBRL::print_ensemble_metadata(){
     std::cout << "Model has: " << this->opts.size() << " optimizers " <<  std::endl;
 }
 
-float* GBRL::tree_shap(const int tree_idx, const float *obs, const char *categorical_obs, const int n_samples, float *norm, float *base_poly, float *offset){
+// ---------------------------------------------------------------------------
+// Adam-aware SHAP helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * @brief Reject optimizer configurations that SHAP cannot represent.
+ *
+ * SHAP assumes every output dimension is driven by at most one optimizer:
+ * the SGD path sums a single per-dimension scale and the Adam path keeps one
+ * moment state per dimension.  Overlapping ranges break both.  set_optimizer()
+ * rejects them at registration; a loaded model is re-checked here.
+ */
+static void validate_shap_optimizer_ranges(const std::vector<Optimizer*> &opts)
+{
+    for (size_t i = 0; i < opts.size(); ++i) {
+        for (size_t j = i + 1; j < opts.size(); ++j) {
+            if (opts[i]->start_idx < opts[j]->stop_idx &&
+                opts[j]->start_idx < opts[i]->stop_idx) {
+                std::cerr << "SHAP does not support overlapping optimizer output ranges: ["
+                          << opts[i]->start_idx << ", " << opts[i]->stop_idx << ") overlaps ["
+                          << opts[j]->start_idx << ", " << opts[j]->stop_idx << ")." << std::endl;
+                throw std::runtime_error(
+                    "SHAP is not supported for models with overlapping optimizer output ranges");
+            }
+        }
+    }
+}
+
+/**
+ * @brief Releases SHAP scratch state on every exit path, including exceptions.
+ *
+ * Only the GPU path allocates a host copy of the ensemble; on CPU edata_cpu
+ * aliases the live model and must NOT be freed, so ownership is explicit.
+ * shap_values is handed to the caller on success via release_values().
+ */
+struct shapScratch {
+    ensembleData *owned_edata = nullptr;
+    float *values = nullptr;
+    shapScratch() = default;
+    shapScratch(const shapScratch&) = delete;
+    shapScratch& operator=(const shapScratch&) = delete;
+    ~shapScratch(){
+        if (owned_edata != nullptr)
+            ensemble_data_dealloc(owned_edata);
+        delete[] values;
+    }
+    float* release_values(){ float *p = values; values = nullptr; return p; }
+};
+
+/**
+ * @brief Reject raw SHAP inputs that do not match what the model expects.
+ *
+ * The bindings can be called directly, so a null obs on a model with numerical
+ * features (or a negative sample count) would be dereferenced by the tree walk.
+ * Mirrors the checks predict() already performs.
+ */
+static void validate_shap_inputs(const ensembleMetaData *metadata,
+                                 const float *obs,
+                                 const char *categorical_obs,
+                                 const int n_samples)
+{
+    if (n_samples < 0) {
+        throw std::runtime_error("SHAP received a negative sample count");
+    }
+    if (metadata->n_num_features > 0 && obs == nullptr) {
+        throw std::runtime_error(
+            "SHAP requires numerical observations: the model was trained with "
+            "numerical features but none were given");
+    }
+    if (metadata->n_cat_features > 0 && categorical_obs == nullptr) {
+        throw std::runtime_error(
+            "SHAP requires categorical observations: the model was trained with "
+            "categorical features but none were given");
+    }
+}
+
+/**
+ * @brief Reject a feature mapping that cannot identify the input column of a split.
+ *
+ * SHAP maps each split's type-local index through the reverse mappings to pick the
+ * output column it attributes to.  An all-zero mapping would attribute every
+ * feature to column 0, and an out-of-range entry would index past the SHAP output
+ * array.  Check that the first n_num_features / n_cat_features entries are in
+ * range and name a distinct input column each, before anything is allocated.
+ */
+static void validate_shap_feature_mapping(const ensembleMetaData *metadata,
+                                          const ensembleData *edata,
+                                          deviceType device)
+{
+    const int input_dim = metadata->input_dim;
+    const int n_num = metadata->n_num_features;
+    const int n_cat = metadata->n_cat_features;
+    if (n_num + n_cat != input_dim) {
+        throw std::runtime_error(
+            "SHAP is not available: the model does not know how many of its inputs "
+            "are numerical and how many are categorical. Train it with step() or "
+            "fit() before asking for SHAP values.");
+    }
+
+    std::vector<int> num_map(input_dim), cat_map(input_dim);
+    if (device == gpu) {
+#ifdef USE_CUDA
+        cudaMemcpy(num_map.data(), edata->feature_mappings->reverse_num_feature_mapping,
+                   sizeof(int) * input_dim, cudaMemcpyDeviceToHost);
+        cudaMemcpy(cat_map.data(), edata->feature_mappings->reverse_cat_feature_mapping,
+                   sizeof(int) * input_dim, cudaMemcpyDeviceToHost);
+#else
+        throw std::runtime_error("GBRL was not compiled for GPU but GPU data detected!");
+#endif
+    } else {
+        memcpy(num_map.data(), edata->feature_mappings->reverse_num_feature_mapping,
+               sizeof(int) * input_dim);
+        memcpy(cat_map.data(), edata->feature_mappings->reverse_cat_feature_mapping,
+               sizeof(int) * input_dim);
+    }
+
+    std::vector<bool> seen(input_dim, false);
+    for (int i = 0; i < n_num; ++i) {
+        int global_idx = num_map[i];
+        if (global_idx < 0 || global_idx >= input_dim || seen[global_idx]) {
+            throw std::runtime_error(
+                "SHAP is not available: this model has no valid feature mapping, so "
+                "SHAP cannot tell which input column each split belongs to. Call "
+                "step() or fit() once with a representative batch to rebuild it.");
+        }
+        seen[global_idx] = true;
+    }
+    for (int i = 0; i < n_cat; ++i) {
+        int global_idx = cat_map[i];
+        if (global_idx < 0 || global_idx >= input_dim || seen[global_idx]) {
+            throw std::runtime_error(
+                "SHAP is not available: this model has no valid feature mapping, so "
+                "SHAP cannot tell which input column each split belongs to. Call "
+                "step() or fit() once with a representative batch to rebuild it.");
+        }
+        seen[global_idx] = true;
+    }
+}
+
+/**
+ * @brief Accumulate per-sample SHAP base contribution from one tree.
+ *
+ * Adds sum_{leaf nodes} predictions[node * out_dim + d] into
+ * base_values[sample_offset * out_dim + d] for every output dimension.
+ * For a broadcast case (all samples share the same predictions, e.g. SGD),
+ * call with sample_offset iterating over all samples.
+ */
+static void accumulate_base_values(
+    const shapData *shap_data,
+    float *base_row,
+    int out_dim)
+{
+    for (int node = 0; node < shap_data->n_nodes; ++node) {
+        if (shap_data->node_to_leaf_idx[node] < 0) continue;
+        for (int d = 0; d < out_dim; ++d)
+            base_row[d] += shap_data->predictions[node * out_dim + d];
+    }
+}
+
+/**
+ * @brief Set shap_data->predictions for every leaf node using the
+ *        optimizer-appropriate effective value.
+ *
+ * For SGD:   prediction = -lr_t * raw_grad * cond_prob
+ * For Adam:  prediction = -alpha_t * m_l / (sqrt(v_l) + eps) * cond_prob
+ *            where m_l and v_l are the one-step moment estimates that would
+ *            result if the sample routed to this leaf.
+ *
+ * m_prev / v_prev are the per-output-dim Adam moments accumulated before
+ * tree_idx.  Pass nullptr to treat them as zero (start of sequence).
+ */
+static void apply_optimizer_shap_predictions(
+    shapData *shap_data,
+    const ensembleMetaData *metadata,
+    const ensembleData *edata,
+    const std::vector<Optimizer*> &opts,
+    int tree_idx,
+    const float *m_prev,
+    const float *v_prev)
+{
+    const int out_dim = metadata->output_dim;
+
+    // Pre-compute the per-output-dimension SGD scale.  Overlapping ranges are
+    // rejected before this runs, so at most one optimizer contributes per
+    // dimension.  Adam dimensions are flagged separately and handled per-leaf below.
+    std::vector<float> sgd_scale(out_dim, 0.0f);
+    std::vector<bool>  dim_is_adam(out_dim, false);
+    for (size_t oi = 0; oi < opts.size(); ++oi) {
+        int d0 = opts[oi]->start_idx, d1 = opts[oi]->stop_idx;
+        if (opts[oi]->getAlgo() == SGD) {
+            float neg_lr = -opts[oi]->scheduler->get_lr(tree_idx);
+            for (int d = d0; d < d1; ++d)
+                sgd_scale[d] += neg_lr;
+        } else {
+            for (int d = d0; d < d1; ++d)
+                dim_is_adam[d] = true;
+        }
+    }
+
+    for (int node = 0; node < shap_data->n_nodes; ++node) {
+        int leaf_idx = shap_data->node_to_leaf_idx[node];
+        if (leaf_idx < 0) continue;
+        float cond_prob = shap_data->leaf_cond_probs[node];
+        const float *g = edata->leaf_data->values + leaf_idx * out_dim;
+
+        // SGD dimensions: single multiply with the accumulated scale.
+        for (int d = 0; d < out_dim; ++d) {
+            if (!dim_is_adam[d])
+                shap_data->predictions[node * out_dim + d] = sgd_scale[d] * g[d] * cond_prob;
+        }
+
+        // Adam dimensions: one-step delta under the frozen pre-tree moment state.
+        for (size_t oi = 0; oi < opts.size(); ++oi) {
+            if (opts[oi]->getAlgo() != Adam) continue;
+            AdamOptimizer *adam = static_cast<AdamOptimizer*>(opts[oi]);
+            float lr  = adam->scheduler->get_lr(tree_idx);
+            float tf  = static_cast<float>(tree_idx) + 1.0f;
+            float alpha = lr * sqrtf(1.0f - powf(adam->beta_2, tf))
+                             / (1.0f - powf(adam->beta_1, tf));
+            for (int d = opts[oi]->start_idx; d < opts[oi]->stop_idx; ++d) {
+                float mp  = (m_prev != nullptr) ? m_prev[d] : 0.0f;
+                float vp  = (v_prev != nullptr) ? v_prev[d] : 0.0f;
+                float m_l = adam->beta_1 * mp + (1.0f - adam->beta_1) * g[d];
+                float v_l = adam->beta_2 * vp + (1.0f - adam->beta_2) * g[d] * g[d];
+                shap_data->predictions[node * out_dim + d] =
+                    -alpha * m_l / (sqrtf(v_l) + adam->eps) * cond_prob;
+            }
+        }
+    }
+}
+
+/**
+ * @brief Return the absolute leaf index that sample sample_idx routes to in
+ *        tree tree_idx.  Handles both OBLIVIOUS and GREEDY grow policies.
+ */
+static int find_factual_leaf(
+    const ensembleMetaData *metadata,
+    const ensembleData *edata,
+    const float *obs,
+    const char *categorical_obs,
+    int tree_idx,
+    int sample_idx)
+{
+    int obs_row = sample_idx * metadata->n_num_features;
+    int cat_obs_row = sample_idx * metadata->n_cat_features;
+    const bool *numerics = edata->feature_data->is_numerics;
+    const float *feature_values = edata->feature_data->feature_values;
+    const int *feature_indices = edata->feature_data->feature_indices;
+    const int *tree_indices = edata->ensemble_info->tree_indices;
+    const int *depths = edata->ensemble_info->depths;
+    const char *categorical_values = edata->feature_data->categorical_values;
+    const bool *inequality_directions = edata->feature_data->inequality_directions;
+    const int max_depth = metadata->max_depth;
+
+    int initial_leaf_idx = tree_indices[tree_idx];
+
+    if (metadata->grow_policy == OBLIVIOUS) {
+        int cond_idx = tree_idx * max_depth;
+        int leaf_off = 0;
+        for (int depth_idx = 0; depth_idx < depths[tree_idx]; ++depth_idx) {
+            bool passed = (numerics[cond_idx + depth_idx])
+                ? (obs[obs_row + feature_indices[cond_idx + depth_idx]] > feature_values[cond_idx + depth_idx])
+                : (strcmp(&categorical_obs[(cat_obs_row + feature_indices[cond_idx + depth_idx]) * MAX_CHAR_SIZE],
+                           categorical_values + (cond_idx + depth_idx) * MAX_CHAR_SIZE) == 0);
+            leaf_off |= (static_cast<int>(passed) << (depths[tree_idx] - 1 - depth_idx));
+        }
+        return initial_leaf_idx + leaf_off;
+    } else {
+        // GREEDY
+        int stop_leaf_idx = (tree_idx == metadata->n_trees - 1)
+            ? metadata->n_leaves
+            : tree_indices[tree_idx + 1];
+        for (int leaf_idx = initial_leaf_idx; leaf_idx < stop_leaf_idx; ++leaf_idx) {
+            int depth = depths[leaf_idx];
+            int cond_idx = leaf_idx * max_depth;
+            bool passed = true;
+            for (int depth_idx = depth - 1; depth_idx >= 0; --depth_idx) {
+                bool cond = (numerics[cond_idx + depth_idx])
+                    ? ((obs[obs_row + feature_indices[cond_idx + depth_idx]] > feature_values[cond_idx + depth_idx]) == inequality_directions[cond_idx + depth_idx])
+                    : ((strcmp(&categorical_obs[(cat_obs_row + feature_indices[cond_idx + depth_idx]) * MAX_CHAR_SIZE],
+                               categorical_values + (cond_idx + depth_idx) * MAX_CHAR_SIZE) == 0) == inequality_directions[cond_idx + depth_idx]);
+                if (!cond) { passed = false; break; }
+            }
+            if (passed) return leaf_idx;
+        }
+        return initial_leaf_idx; // fallback (should not happen)
+    }
+}
+
+/**
+ * @brief Advance Adam moment state for one tree step given the raw gradient
+ *        stored in the leaf that sample x actually landed in.
+ */
+static void advance_adam_state(
+    const std::vector<Optimizer*> &opts,
+    float *m_state,
+    float *v_state,
+    const float *leaf_raw_grad,
+    int output_dim)
+{
+    (void)output_dim;
+    for (size_t oi = 0; oi < opts.size(); ++oi) {
+        if (opts[oi]->getAlgo() != Adam) continue;
+        AdamOptimizer *adam = static_cast<AdamOptimizer*>(opts[oi]);
+        for (int d = opts[oi]->start_idx; d < opts[oi]->stop_idx; ++d) {
+            m_state[d] = adam->beta_1 * m_state[d] + (1.0f - adam->beta_1) * leaf_raw_grad[d];
+            v_state[d] = adam->beta_2 * v_state[d] + (1.0f - adam->beta_2) * leaf_raw_grad[d] * leaf_raw_grad[d];
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+
+float* GBRL::tree_shap(const int tree_idx, const float *obs, const char *categorical_obs, const int n_samples, float *norm, float *base_poly, float *offset, float *base_values){
     valid_tree_idx(tree_idx, this->metadata);
-ensembleData *edata_cpu = nullptr;
+    validate_shap_optimizer_ranges(this->opts);
+    validate_shap_feature_mapping(this->metadata, this->edata, this->device);
+    validate_shap_inputs(this->metadata, obs, categorical_obs, n_samples);
+    // Owns whatever needs releasing, so an allocation failure or a throw from the
+    // tree walk cannot leak the host ensemble copy or the SHAP buffer.
+    shapScratch scratch;
+    ensembleData *edata_cpu = nullptr;
 #ifdef USE_CUDA
     if (this->device == gpu){
         edata_cpu = ensemble_data_copy_gpu_cpu(this->metadata, this->edata, nullptr);
+        scratch.owned_edata = edata_cpu;
     }
-#endif 
+#endif
     if (this->device == cpu)
         edata_cpu = this->edata;
-    shapData* shap_data = alloc_shap_data(this->metadata, edata_cpu, tree_idx);
-    shap_data->offset_poly = offset;
-    shap_data->base_poly = base_poly;
-    shap_data->norm_values = norm;
-    float *shap_values = init_zero_mat((this->metadata->n_num_features + this->metadata->n_cat_features)*this->metadata->output_dim * n_samples);
-    
-    dataHolder<const float> obs_holder{obs, this->device};
-    dataHolder<const char> cat_obs_holder{categorical_obs, this->device};
+
+    bool has_adam = false;
+    for (size_t oi = 0; oi < this->opts.size(); ++oi)
+        if (this->opts[oi]->getAlgo() == Adam) { has_adam = true; break; }
+
+    scratch.values = init_zero_mat((this->metadata->n_num_features + this->metadata->n_cat_features)*this->metadata->output_dim * n_samples);
+    float *shap_values = scratch.values;
+
+    dataHolder<const float> obs_holder{obs, cpu};
+    dataHolder<const char> cat_obs_holder{categorical_obs, cpu};
     dataSet dataset{
-        &obs_holder,                // observations
-        &cat_obs_holder,            // categorical observations
-        nullptr,                   // grads (not used in tree_shap)
-        nullptr,                   // build_grads (not used in tree_shap)
-        n_samples,                 // number of samples
+        &obs_holder,
+        &cat_obs_holder,
+        nullptr,
+        nullptr,
+        n_samples,
     };
-    // print_shap_data(shap_data, this->metadata);
-    get_shap_values(this->metadata, edata_cpu, shap_data, &dataset, shap_values);
-    dealloc_shap_data(shap_data);
-#ifdef USE_CUDA
-    if (this->device == gpu){
-        ensemble_data_dealloc(edata_cpu);
+
+    const int out_dim = this->metadata->output_dim;
+
+    if (!has_adam) {
+        // Pure-SGD path: predictions are the same for every sample.
+        shapData* shap_data = alloc_shap_data(this->metadata, edata_cpu, tree_idx);
+        shap_data->offset_poly = offset;
+        shap_data->base_poly = base_poly;
+        shap_data->norm_values = norm;
+        apply_optimizer_shap_predictions(shap_data, this->metadata, edata_cpu, this->opts, tree_idx, nullptr, nullptr);
+        get_shap_values(this->metadata, edata_cpu, shap_data, &dataset, shap_values);
+        if (base_values != nullptr)
+            for (int s = 0; s < n_samples; ++s)
+                accumulate_base_values(shap_data, base_values + s * out_dim, out_dim);
+        dealloc_shap_data(shap_data);
+    } else {
+        // Adam path: replay trees 0..tree_idx-1 to build per-sample Adam state,
+        // then run TreeSHAP per sample with the correct moment estimates.
+        std::vector<float> m_state(n_samples * out_dim, 0.0f);
+        std::vector<float> v_state(n_samples * out_dim, 0.0f);
+
+        // Build Adam state by replaying all preceding trees.
+        for (int t = 0; t < tree_idx; ++t) {
+            for (int s = 0; s < n_samples; ++s) {
+                int factual = find_factual_leaf(this->metadata, edata_cpu, obs, categorical_obs, t, s);
+                advance_adam_state(this->opts,
+                                   m_state.data() + s * out_dim,
+                                   v_state.data() + s * out_dim,
+                                   edata_cpu->leaf_data->values + factual * out_dim,
+                                   out_dim);
+            }
+        }
+
+        // Run SHAP for tree_idx, one sample at a time.
+        shapData* shap_data = alloc_shap_data(this->metadata, edata_cpu, tree_idx);
+        shap_data->offset_poly = offset;
+        shap_data->base_poly = base_poly;
+        shap_data->norm_values = norm;
+
+        for (int s = 0; s < n_samples; ++s) {
+            apply_optimizer_shap_predictions(shap_data, this->metadata, edata_cpu, this->opts, tree_idx,
+                                             m_state.data() + s * out_dim,
+                                             v_state.data() + s * out_dim);
+            reset_shap_arrays(shap_data, this->metadata);
+            linear_tree_shap(this->metadata, edata_cpu, shap_data, &dataset, shap_values, 0, 0, -1, s);
+            if (base_values != nullptr)
+                accumulate_base_values(shap_data, base_values + s * out_dim, out_dim);
+        }
+        dealloc_shap_data(shap_data);
     }
-#endif 
-    return shap_values;
+
+    return scratch.release_values();
 }
 
-float* GBRL::ensemble_shap(const float *obs, const char *categorical_obs, const int n_samples, float *norm, float *base_poly, float *offset){
+float* GBRL::ensemble_shap(const float *obs, const char *categorical_obs, const int n_samples, float *norm, float *base_poly, float *offset, float *base_values){
     valid_tree_idx(0, this->metadata);
-    float *shap_values = init_zero_mat((this->metadata->n_num_features + this->metadata->n_cat_features)*this->metadata->output_dim * n_samples);
+    validate_shap_optimizer_ranges(this->opts);
+    validate_shap_feature_mapping(this->metadata, this->edata, this->device);
+    validate_shap_inputs(this->metadata, obs, categorical_obs, n_samples);
+    // Owns whatever needs releasing, so a throw cannot leak the SHAP buffer or
+    // the host ensemble copy taken below.
+    shapScratch scratch;
+    scratch.values = init_zero_mat((this->metadata->n_num_features + this->metadata->n_cat_features)*this->metadata->output_dim * n_samples);
+    float *shap_values = scratch.values;
 
-    dataHolder<const float> obs_holder{obs, this->device};
-    dataHolder<const char> cat_obs_holder{categorical_obs, this->device};
+    dataHolder<const float> obs_holder{obs, cpu};
+    dataHolder<const char> cat_obs_holder{categorical_obs, cpu};
     dataSet dataset{
-        &obs_holder,                // observations
-        &cat_obs_holder,            // categorical observations
-        nullptr,                   // grads (not used in ensemble_shap)
-        nullptr,           // build_grads (not used in ensemble_shap)
-        n_samples,         // number of samples
+        &obs_holder,
+        &cat_obs_holder,
+        nullptr,
+        nullptr,
+        n_samples,
     };
     ensembleData *edata_cpu = nullptr;
 #ifdef USE_CUDA
     if (this->device == gpu){
         edata_cpu = ensemble_data_copy_gpu_cpu(this->metadata, this->edata, nullptr);
+        scratch.owned_edata = edata_cpu;
     }
-#endif 
+#endif
     if (this->device == cpu)
         edata_cpu = this->edata;
 
-    for (int tree_idx = 0; tree_idx < this->metadata->n_trees; ++tree_idx){
-        shapData* shap_data = alloc_shap_data(this->metadata, edata_cpu, tree_idx);
-        shap_data->offset_poly = offset;
-        shap_data->base_poly = base_poly;
-        shap_data->norm_values = norm;
-        get_shap_values(this->metadata, edata_cpu, shap_data, &dataset, shap_values);
-        dealloc_shap_data(shap_data);
+    bool has_adam = false;
+    for (size_t oi = 0; oi < this->opts.size(); ++oi)
+        if (this->opts[oi]->getAlgo() == Adam) { has_adam = true; break; }
+
+    const int out_dim = this->metadata->output_dim;
+
+    if (!has_adam) {
+        // Pure-SGD path: predictions are sample-independent, use get_shap_values.
+        for (int tree_idx = 0; tree_idx < this->metadata->n_trees; ++tree_idx) {
+            shapData* shap_data = alloc_shap_data(this->metadata, edata_cpu, tree_idx);
+            shap_data->offset_poly = offset;
+            shap_data->base_poly = base_poly;
+            shap_data->norm_values = norm;
+            apply_optimizer_shap_predictions(shap_data, this->metadata, edata_cpu, this->opts, tree_idx, nullptr, nullptr);
+            get_shap_values(this->metadata, edata_cpu, shap_data, &dataset, shap_values);
+            if (base_values != nullptr)
+                for (int s = 0; s < n_samples; ++s)
+                    accumulate_base_values(shap_data, base_values + s * out_dim, out_dim);
+            dealloc_shap_data(shap_data);
+        }
+    } else {
+        // Adam path: maintain per-sample moment state across trees.
+        std::vector<float> m_state(n_samples * out_dim, 0.0f);
+        std::vector<float> v_state(n_samples * out_dim, 0.0f);
+
+        for (int tree_idx = 0; tree_idx < this->metadata->n_trees; ++tree_idx) {
+            shapData* shap_data = alloc_shap_data(this->metadata, edata_cpu, tree_idx);
+            shap_data->offset_poly = offset;
+            shap_data->base_poly = base_poly;
+            shap_data->norm_values = norm;
+
+            for (int s = 0; s < n_samples; ++s) {
+                apply_optimizer_shap_predictions(shap_data, this->metadata, edata_cpu, this->opts, tree_idx,
+                                                 m_state.data() + s * out_dim,
+                                                 v_state.data() + s * out_dim);
+                reset_shap_arrays(shap_data, this->metadata);
+                linear_tree_shap(this->metadata, edata_cpu, shap_data, &dataset, shap_values, 0, 0, -1, s);
+                if (base_values != nullptr)
+                    accumulate_base_values(shap_data, base_values + s * out_dim, out_dim);
+
+                // Advance Adam state using the actual leaf this sample landed in.
+                int factual = find_factual_leaf(this->metadata, edata_cpu, obs, categorical_obs, tree_idx, s);
+                advance_adam_state(this->opts,
+                                   m_state.data() + s * out_dim,
+                                   v_state.data() + s * out_dim,
+                                   edata_cpu->leaf_data->values + factual * out_dim,
+                                   out_dim);
+            }
+            dealloc_shap_data(shap_data);
+        }
     }
-#ifdef USE_CUDA
-    if (this->device == gpu){
-        ensemble_data_dealloc(edata_cpu);
+
+    // Add bias to base_values after all trees are processed.
+    if (base_values != nullptr) {
+        for (int s = 0; s < n_samples; ++s)
+            for (int d = 0; d < out_dim; ++d)
+                base_values[s * out_dim + d] += edata_cpu->bias[d];
     }
-#endif 
-   
-    return shap_values;
+
+    return scratch.release_values();
 }
 
 ensembleData* GBRL::get_ensemble_data(){

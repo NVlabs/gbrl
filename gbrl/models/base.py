@@ -342,15 +342,17 @@ class BaseGBT(ABC):
         Sets the computation device for the GBRL model.
 
         Args:
-            device (str): Target device, must be either 'cpu' or 'cuda'.
+            device (str): Target device: 'cpu', 'cuda', or the alias 'gpu'.
 
         Raises:
-            AssertionError: If device is not 'cpu' or 'cuda', or if learner
-                is not initialized.
+            ValueError: If the device name is unknown, or CUDA is requested but
+                no usable CUDA device exists.
+            AssertionError: If the learner is not initialized.
         """
-        assert device in ['cpu', 'cuda'], "device must be in ['cpu', 'cuda']"
         assert self.learner is not None, "learner must be initialized first"
 
+        # normalize_device() in the learner accepts the documented 'gpu' alias
+        # and rejects an unusable CUDA request.
         self.learner.set_device(device)
 
     def get_device(self) -> Union[str, Tuple[str, ...]]:

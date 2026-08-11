@@ -28,8 +28,9 @@
  */
 
 #define PYBIND11_DETAILED_ERROR_MESSAGES
+#include <cstring>
 #include <pybind11/pybind11.h>
-#include <pybind11/numpy.h> 
+#include <pybind11/numpy.h>
 #ifdef USE_CUDA
 #include <cuda_runtime.h>  // For cudaMalloc, cudaFree
 #endif
@@ -51,6 +52,21 @@ namespace py = pybind11;
  * @throws std::runtime_error if object is not a valid NumPy array
  */
 template <typename T>
+/**
+ * NOT A PUBLIC API.
+ *
+ * gbrl_cpp is an internal binding. The supported entry points are the Python
+ * classes in gbrl.learners / gbrl.models; calling gbrl_cpp.GBRL directly is
+ * unsupported and its argument contract is not guaranteed across releases.
+ *
+ * Callers must pass C-contiguous arrays of the expected dtype. Every supported
+ * path already guarantees this: preprocess_features() and
+ * BaseLearner.transform_data() run np.ascontiguousarray() before anything
+ * reaches this layer.
+ *
+ * The array is borrowed rather than converted, so a violation of that contract
+ * is rejected with an exception at the call site.
+ */
 void get_numpy_array_info(
     py::object obj,
     T*& ptr,
@@ -62,11 +78,16 @@ void get_numpy_array_info(
         throw std::runtime_error("Expected a NumPy array");
     }
     
-    py::array arr = py::array::ensure(obj, py::array::c_style | py::array::forcecast);
-    if (!arr) {
-        throw std::runtime_error("Could not convert object to a contiguous NumPy array");
+    // Borrow instead of forcecasting: a converted copy would be owned by this
+    // local and freed on return, leaving the backend a dangling pointer.
+    py::array arr = py::reinterpret_borrow<py::array>(obj);
+    if (!(arr.flags() & py::array::c_style)) {
+        throw std::runtime_error(
+            "Expected a C-contiguous NumPy array. gbrl_cpp is an internal binding: "
+            "use the Python classes in gbrl.learners / gbrl.models, which normalize "
+            "inputs, or pass np.ascontiguousarray(...) yourself.");
     }
-    
+
     py::buffer_info info = arr.request();
     
     // Determine the expected format
@@ -80,7 +101,9 @@ void get_numpy_array_info(
     // Verify the data format
     if (info.format != expected) {
         std::stringstream ss;
-        ss << "Expected array of format '" << expected << "', but got '" << info.format << "'";
+        ss << "Expected array of format '" << expected << "', but got '" << info.format
+           << "'. gbrl_cpp does not cast: pass the exact dtype, or use the Python "
+              "classes in gbrl.learners / gbrl.models, which convert for you.";
         throw std::runtime_error(ss.str());
     }
     
@@ -277,6 +300,9 @@ py::object return_tensor_info(
     deviceType device,
     bool is_torch
 ) {
+#ifndef USE_CUDA
+    (void)device;   // only consulted in CUDA builds
+#endif
     // Allocate memory
     std::vector<int64_t> shape;
     if (output_dim == 1) {
@@ -310,6 +336,10 @@ py::dict metadataToDict(const ensembleMetaData* metadata){
     py::dict d;
     if (metadata != nullptr){
         d["input_dim"] = metadata->input_dim;
+        // Needed to check a loaded feature mapping: the numerical and categorical
+        // halves each index from 0, so their sizes are what makes a mapping valid.
+        d["n_num_features"] = metadata->n_num_features;
+        d["n_cat_features"] = metadata->n_cat_features;
         d["output_dim"] = metadata->output_dim;
         d["policy_dim"] = metadata->policy_dim;
         d["split_score_func"] = scoreFuncToString(metadata->split_score_func);
@@ -329,6 +359,7 @@ py::dict metadataToDict(const ensembleMetaData* metadata){
         d["max_leaves"] = metadata->max_leaves;
         d["max_trees_batch"] = metadata->max_trees_batch;
         d["max_leaves_batch"] = metadata->max_leaves_batch;
+        d["n_mono_constraints"] = metadata->n_mono_constraints;
     }
     return d;
 }
@@ -403,12 +434,12 @@ py::dict optimizerToDict(const optimizerConfig* conf){
         d["init_lr"] = conf->init_lr;
         d["start_idx"] = conf->start_idx;
         d["stop_idx"] = conf->stop_idx;
-        d["scheduler_func"] = conf->scheduler_func;
+        d["scheduler"] = conf->scheduler_func;
         d["stop_lr"] = conf->stop_lr;
         d["T"] = conf->T;
         d["beta_1"] = conf->beta_1;
         d["beta_2"] = conf->beta_2;
-        d["eps]"] = conf->eps;
+        d["eps"] = conf->eps;
         delete conf;  // Delete the struct pointer if it's no longer neede
     }
     
@@ -425,7 +456,14 @@ py::list getOptimizerConfigs(const std::vector<Optimizer*>& opts) {
 }
 
 PYBIND11_MODULE(gbrl_cpp, m) {
-    py::class_<GBRL> gbrl(m, "GBRL");
+    m.doc() = "Internal C++/CUDA binding for GBRL. NOT a public API: use the "
+              "Python classes in gbrl.learners / gbrl.models instead. Calling "
+              "this module directly is unsupported - inputs must be "
+              "C-contiguous arrays of the expected dtype, which the Python "
+              "layer guarantees and this layer does not re-establish.";
+    py::class_<GBRL> gbrl(m, "GBRL",
+        "Internal binding type. Unsupported for direct use; construct models "
+        "through gbrl.learners.GBTLearner / gbrl.models.GBTModel.");
     gbrl.def(py::init<int, int, int, int, int, int, int, float, std::string, std::string, bool, int, std::string, int, std::string, std::string, int>(),
          py::arg("input_dim")=1, 
          py::arg("output_dim")=1, 
@@ -726,6 +764,18 @@ PYBIND11_MODULE(gbrl_cpp, m) {
     // Configures per-feature monotonicity constraints: each feature can be constrained
     // to be monotonically increasing (+1) or decreasing (-1) for specific output dimensions.
     // Populates internal constraint arrays used during tree fitting and prediction.
+    gbrl.def("get_monotonic_constraints", [](GBRL &self) -> py::tuple {
+        std::vector<int> feat, out, dirs;
+        self.get_monotonic_constraints(feat, out, dirs);
+        auto to_arr = [](const std::vector<int> &v) {
+            py::array_t<int> a(static_cast<py::ssize_t>(v.size()));
+            if (!v.empty())
+                std::memcpy(a.mutable_data(), v.data(), v.size() * sizeof(int));
+            return a;
+        };
+        return py::make_tuple(to_arr(feat), to_arr(out), to_arr(dirs));
+    }, "Return (feature_indices, output_indices, directions) for the monotonic constraints");
+
     gbrl.def("set_monotonic_constraints", [](GBRL &self, const py::array_t<int> &feature_indices, const py::array_t<int> &output_indices, const py::array_t<int>& constraints) {
         if (!feature_indices.attr("flags").attr("c_contiguous").cast<bool>()) {
             throw std::runtime_error("feature_indices must be C-contiguous");
@@ -763,7 +813,29 @@ PYBIND11_MODULE(gbrl_cpp, m) {
             throw std::runtime_error("feature_indices and constraints must have the same length");
         }
         
-        py::gil_scoped_release release; 
+        // The C++ side memcpys into buffers sized by the constructor's
+        // n_mono_constraints; nothing downstream re-checks that, so a direct
+        // low-level call could otherwise write past the allocation.
+        if (n_constraints > self.metadata->n_mono_constraints) {
+            throw std::runtime_error(
+                "set_monotonic_constraints received " + std::to_string(n_constraints) +
+                " constraints but the model was allocated for " +
+                std::to_string(self.metadata->n_mono_constraints) +
+                "; pass n_mono_constraints at construction time");
+        }
+        for (int i = 0; i < n_constraints; ++i) {
+            if (feature_indices_ptr[i] < 0 || feature_indices_ptr[i] >= self.metadata->input_dim)
+                throw std::runtime_error("monotonic feature index out of range: " +
+                                         std::to_string(feature_indices_ptr[i]));
+            if (output_indices_ptr[i] < 0 || output_indices_ptr[i] >= self.metadata->policy_dim)
+                throw std::runtime_error("monotonic output index out of range: " +
+                                         std::to_string(output_indices_ptr[i]));
+            if (constraints_ptr[i] != 1 && constraints_ptr[i] != -1)
+                throw std::runtime_error("monotonic direction must be +1 or -1, got " +
+                                         std::to_string(constraints_ptr[i]));
+        }
+
+        py::gil_scoped_release release;
         self.set_monotonic_constraints(feature_indices_ptr, output_indices_ptr, constraints_ptr, n_constraints); 
     }, "Set GBRL model monotonic constraints");
     
@@ -783,7 +855,16 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         int* feature_mapping_ptr = static_cast<int*>(info.ptr);
         int input_dim = static_cast<int>(len(feature_mapping));
 
+        if (info.ndim != 1) {
+            throw std::runtime_error("feature_mapping must be a 1D array");
+        }
+
         info = mapping_numerics.request();
+        if (info.ndim != 1 || static_cast<int>(info.size) != input_dim) {
+            throw std::runtime_error(
+                "mapping_numerics must be a 1D array of length " + std::to_string(input_dim) +
+                ", got " + std::to_string(info.size));
+        }
         bool* mapping_numerics_ptr = static_cast<bool*>(info.ptr);
         py::gil_scoped_release release; 
         self.set_feature_mapping(feature_mapping_ptr, mapping_numerics_ptr, input_dim); 
@@ -849,7 +930,7 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         int start_tree_idx = start_tree_obj.is_none() ? 0 : start_tree_obj.cast<int>();
         int stop_tree_idx = stop_tree_obj.is_none() ? 0 : stop_tree_obj.cast<int>();
 
-        if (start_tree_idx < 0 || (start_tree_idx >= self.metadata->n_trees) && (self.metadata->n_trees > 0)) {
+        if (start_tree_idx < 0 || ((start_tree_idx >= self.metadata->n_trees) && (self.metadata->n_trees > 0))) {
             std::stringstream ss;
             ss << "start_tree_idx is out of bounds! Got " << start_tree_idx 
                << ", but valid range is [0, " << self.metadata->n_trees - 1 << "]";
@@ -1028,9 +1109,14 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         return self.get_learner_name(); 
     }, "Return the learner name");  
     gbrl.def("get_iteration", [](GBRL &self) ->  int {
-        py::gil_scoped_release release; 
-        return self.get_iteration(); 
-    }, "Return current ensemble iteration");  
+        py::gil_scoped_release release;
+        return self.get_iteration();
+    }, "Return current ensemble iteration");
+    gbrl.def("get_monotonic_nonconverged", [](GBRL &self) -> int {
+        return self.n_nonconverged_projections;
+    }, "Number of monotonic projections in THIS model's last step()/fit() that hit "
+       "the pass limit. Their leaf values are monotone but may not be the closest "
+       "monotone values. Per model, so concurrent training cannot cross-report.");
     gbrl.def("print_tree", [](GBRL &self, int tree_idx) {
         py::gil_scoped_release release; 
         self.print_tree(tree_idx); 
@@ -1248,144 +1334,213 @@ gbrl.def("get_matrix_representation", [](GBRL &self, py::object &obs, py::object
         self.compress_ensemble(n_compressed_leaves, n_compressed_trees, leaf_indices_ptr, tree_indices_ptr, new_tree_indices_ptr, W_ptr);  
 
     }, py::arg("n_compressed_leaves"), py::arg("n_compressed_trees"), py::arg("leaf_indices"), py::arg("tree_indices"), py::arg("new_tree_indices"), py::arg("W") , "Compress ensemble");
-    gbrl.def("tree_shap", [](GBRL &self, const int tree_idx, py::object &obs, py::object &categorical_obs, 
-                            py::object &norm_values, py::object &base_poly, py::object &offset) -> py::array_t<float> {
-        const float* obs_ptr = nullptr;
+    // Shared argument parsing for the four SHAP bindings.  ShapArgs holds the
+    // owning array objects alongside the raw pointers taken from them, so the
+    // buffers stay alive for the duration of the C++ call.
+    struct ShapArgs {
+        py::object obs_owner;
+        py::object cat_owner;
+        py::object norm_owner;
+        py::object base_poly_owner;
+        py::object offset_owner;
+
+        const float *obs_ptr     = nullptr;
+        const char  *cat_obs_ptr = nullptr;
+        float *norm_ptr          = nullptr;
+        float *base_poly_ptr     = nullptr;
+        float *offset_ptr        = nullptr;
+        int n_samples      = 0;
         int n_num_features = 0;
-        int n_samples = 0;
-        if (!obs.is_none()) {
-            py::array_t<float> obs_array = py::cast<py::array_t<float>>(obs);
-            if (!obs_array.attr("flags").attr("c_contiguous").cast<bool>())
-                throw std::runtime_error("Arrays must be C-contiguous");
-            py::buffer_info info_obs = obs_array.request();
-            obs_ptr = static_cast<const float*>(info_obs.ptr);
-            if (info_obs.shape.size() == 1) {
-                n_num_features = static_cast<int>(info_obs.shape[0]);
-                n_samples = 1;
-            } else {
-                n_num_features = static_cast<int>(info_obs.shape[1]);
-                n_samples = static_cast<int>(info_obs.shape[0]);
-            }
-        }
-
         int n_cat_features = 0;
-        const char *cat_obs_ptr = nullptr;
-        if (!categorical_obs.is_none()) {
-            py::array py_array = py::cast<py::array>(categorical_obs);
-            if (!py_array.attr("flags").attr("c_contiguous").cast<bool>())
+    };
+    auto parse_shap_args = [](const ensembleMetaData *metadata,
+                               py::object &obs, py::object &categorical_obs,
+                               py::object &norm_values, py::object &base_poly,
+                               py::object &offset) -> ShapArgs {
+        ShapArgs a;
+        int num_samples = 0, cat_samples = 0;
+        if (!obs.is_none()) {
+            py::array_t<float> arr = py::cast<py::array_t<float>>(obs);
+            if (!arr.attr("flags").attr("c_contiguous").cast<bool>())
                 throw std::runtime_error("Arrays must be C-contiguous");
-
-            py::buffer_info info_categorical_obs = py_array.request();
-            cat_obs_ptr = static_cast<const char*>(info_categorical_obs.ptr);
-            if (info_categorical_obs.shape.size() == 1) {
-                n_cat_features = static_cast<int>(info_categorical_obs.shape[0]);
-                if (n_samples == 0) n_samples = 1;
-            } else {
-                n_cat_features = static_cast<int>(info_categorical_obs.shape[1]);
-                if (n_samples == 0) n_samples = static_cast<int>(info_categorical_obs.shape[0]);
+            py::buffer_info info = arr.request();
+            if (info.shape.size() != 1 && info.shape.size() != 2)
+                throw std::runtime_error("obs must be a 1-D or 2-D array");
+            a.obs_ptr = static_cast<const float*>(info.ptr);
+            if (info.shape.size() == 1) {
+                // Same disambiguation as fit()/predict(): a 1-D array is n samples
+                // of a single feature when the model has one numerical feature,
+                // otherwise one sample of n features.
+                if (metadata->n_num_features == 1) {
+                    a.n_num_features = 1;
+                    num_samples = static_cast<int>(info.shape[0]);
+                } else {
+                    a.n_num_features = static_cast<int>(info.shape[0]);
+                    num_samples = 1;
+                }
             }
+            else { a.n_num_features = static_cast<int>(info.shape[1]); num_samples = static_cast<int>(info.shape[0]); }
+            a.n_samples = num_samples;
+            a.obs_owner = std::move(arr);
         }
-        float *norm_ptr = nullptr;
-        if (!norm_values.is_none()) {
-            py::array_t<float> norm_array = py::cast<py::array_t<float>>(norm_values);
-            if (!norm_array.attr("flags").attr("c_contiguous").cast<bool>())
+        if (!categorical_obs.is_none()) {
+            py::array arr = py::cast<py::array>(categorical_obs);
+            if (!arr.attr("flags").attr("c_contiguous").cast<bool>())
                 throw std::runtime_error("Arrays must be C-contiguous");
-            py::buffer_info info_norm = norm_array.request();
-            norm_ptr = static_cast<float*>(info_norm.ptr);
+            py::buffer_info info = arr.request();
+            if (info.shape.size() != 1 && info.shape.size() != 2)
+                throw std::runtime_error("categorical_obs must be a 1-D or 2-D array");
+            // The tree code strides this pointer by MAX_CHAR_SIZE, so a narrower
+            // dtype with the right feature count still reads past the buffer.
+            if (info.format != CAT_TYPE || info.itemsize != MAX_CHAR_SIZE)
+                throw std::runtime_error(
+                    "categorical_obs must be a C-contiguous NumPy array with dtype S" +
+                    std::to_string(MAX_CHAR_SIZE));
+            a.cat_obs_ptr = static_cast<const char*>(info.ptr);
+            if (info.shape.size() == 1) {
+                if (metadata->n_cat_features == 1) {
+                    a.n_cat_features = 1;
+                    cat_samples = static_cast<int>(info.shape[0]);
+                } else {
+                    a.n_cat_features = static_cast<int>(info.shape[0]);
+                    cat_samples = 1;
+                }
+            }
+            else { a.n_cat_features = static_cast<int>(info.shape[1]); cat_samples = static_cast<int>(info.shape[0]); }
+            if (a.n_samples == 0) a.n_samples = cat_samples;
+            a.cat_owner = std::move(arr);
         }
-        float *base_poly_ptr = nullptr;
-        if (!base_poly.is_none()) {
-            py::array_t<float> base_poly_array = py::cast<py::array_t<float>>(base_poly);
-            if (!base_poly_array.attr("flags").attr("c_contiguous").cast<bool>())
-                throw std::runtime_error("Arrays must be C-contiguous");
-            py::buffer_info info_base_poly = base_poly_array.request();
-            base_poly_ptr = static_cast<float*>(info_base_poly.ptr);
+        if (norm_values.is_none())
+            throw std::runtime_error("norm_values is required and must not be None");
+        {
+            py::array_t<float> arr = py::cast<py::array_t<float>>(norm_values);
+            if (!arr.attr("flags").attr("c_contiguous").cast<bool>()) throw std::runtime_error("Arrays must be C-contiguous");
+            py::buffer_info info = arr.request();
+            size_t expected = static_cast<size_t>(metadata->max_depth + 1) * metadata->max_depth;
+            if (static_cast<size_t>(info.size) != expected)
+                throw std::runtime_error("norm_values has " + std::to_string(info.size) +
+                                         " elements but max_depth=" + std::to_string(metadata->max_depth) +
+                                         " requires " + std::to_string(expected));
+            a.norm_ptr = static_cast<float*>(info.ptr);
+            a.norm_owner = std::move(arr);
         }
-        float *offset_ptr = nullptr;
-        if (!offset.is_none()) {
-            py::array_t<float> offset_array = py::cast<py::array_t<float>>(offset);
-            if (!offset_array.attr("flags").attr("c_contiguous").cast<bool>())
-                throw std::runtime_error("Arrays must be C-contiguous");
-            py::buffer_info info_offset = offset_array.request();
-            offset_ptr = static_cast<float*>(info_offset.ptr);
+        if (base_poly.is_none())
+            throw std::runtime_error("base_poly is required and must not be None");
+        {
+            py::array_t<float> arr = py::cast<py::array_t<float>>(base_poly);
+            if (!arr.attr("flags").attr("c_contiguous").cast<bool>()) throw std::runtime_error("Arrays must be C-contiguous");
+            py::buffer_info info = arr.request();
+            size_t expected = static_cast<size_t>(metadata->max_depth);
+            if (static_cast<size_t>(info.size) != expected)
+                throw std::runtime_error("base_poly has " + std::to_string(info.size) +
+                                         " elements but max_depth=" + std::to_string(metadata->max_depth) +
+                                         " requires " + std::to_string(expected));
+            a.base_poly_ptr = static_cast<float*>(info.ptr);
+            a.base_poly_owner = std::move(arr);
         }
-        py::gil_scoped_release release; 
-        float* shap_values = self.tree_shap(tree_idx, obs_ptr, cat_obs_ptr, n_samples, norm_ptr, base_poly_ptr, offset_ptr);
+        if (offset.is_none())
+            throw std::runtime_error("offset is required and must not be None");
+        {
+            py::array_t<float> arr = py::cast<py::array_t<float>>(offset);
+            if (!arr.attr("flags").attr("c_contiguous").cast<bool>()) throw std::runtime_error("Arrays must be C-contiguous");
+            py::buffer_info info = arr.request();
+            size_t expected = static_cast<size_t>(metadata->max_depth) * metadata->max_depth;
+            if (static_cast<size_t>(info.size) != expected)
+                throw std::runtime_error("offset has " + std::to_string(info.size) +
+                                         " elements but max_depth=" + std::to_string(metadata->max_depth) +
+                                         " requires " + std::to_string(expected));
+            a.offset_ptr = static_cast<float*>(info.ptr);
+            a.offset_owner = std::move(arr);
+        }
+        // The SHAP buffer is sized from the model metadata, so feature counts
+        // that disagree with the model would make the returned array span past
+        // the allocation.
+        if (a.n_num_features != metadata->n_num_features)
+            throw std::runtime_error("obs has " + std::to_string(a.n_num_features) +
+                                     " numerical features but model expects " +
+                                     std::to_string(metadata->n_num_features));
+        if (a.n_cat_features != metadata->n_cat_features)
+            throw std::runtime_error("categorical_obs has " + std::to_string(a.n_cat_features) +
+                                     " categorical features but model expects " +
+                                     std::to_string(metadata->n_cat_features));
+        if (num_samples > 0 && cat_samples > 0 && num_samples != cat_samples)
+            throw std::runtime_error("obs has " + std::to_string(num_samples) +
+                                     " samples but categorical_obs has " +
+                                     std::to_string(cat_samples));
+        if (a.n_samples <= 0)
+            throw std::runtime_error("SHAP requires at least one input sample");
+        return a;
+    };
+
+    gbrl.def("tree_shap", [parse_shap_args](GBRL &self, const int tree_idx,
+                            py::object &obs, py::object &categorical_obs,
+                            py::object &norm_values, py::object &base_poly,
+                            py::object &offset) -> py::array_t<float> {
+        auto a = parse_shap_args(self.metadata, obs, categorical_obs, norm_values, base_poly, offset);
+        py::gil_scoped_release release;
+        float* shap_values = self.tree_shap(tree_idx, a.obs_ptr, a.cat_obs_ptr, a.n_samples, a.norm_ptr, a.base_poly_ptr, a.offset_ptr);
         py::gil_scoped_acquire acquire;
-        auto capsule = py::capsule(shap_values, [](void* ptr) {
-        delete[] reinterpret_cast<float*>(ptr);
-        });
-        return py::array({n_samples, n_num_features + n_cat_features, self.metadata->output_dim}, shap_values, capsule);
+        auto capsule = py::capsule(shap_values, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
+        return py::array({a.n_samples, self.metadata->n_num_features + self.metadata->n_cat_features, self.metadata->output_dim}, shap_values, capsule);
     }, py::arg("tree_idx")=0, py::arg("obs"), py::arg("categorical_obs"), py::arg("norm_values"), py::arg("base_poly"), py::arg("offset"), "Calculate SHAP values of a single tree");
-    gbrl.def("ensemble_shap", [](GBRL &self, py::object &obs, py::object &categorical_obs, 
-                            py::object &norm_values, py::object &base_poly, py::object &offset) -> py::array_t<float> {
-        const float* obs_ptr = nullptr;
-        int n_num_features = 0;
-        int n_samples = 0;
-        if (!obs.is_none()) {
-            py::array_t<float> obs_array = py::cast<py::array_t<float>>(obs);
-            if (!obs_array.attr("flags").attr("c_contiguous").cast<bool>())
-                throw std::runtime_error("Arrays must be C-contiguous");
-            py::buffer_info info_obs = obs_array.request();
-            obs_ptr = static_cast<const float*>(info_obs.ptr);
-            if (info_obs.shape.size() == 1) {
-                n_num_features = static_cast<int>(info_obs.shape[0]);
-                n_samples = 1;
-            } else {
-                n_num_features = static_cast<int>(info_obs.shape[1]);
-                n_samples = static_cast<int>(info_obs.shape[0]);
-            }
-        }
 
-        int n_cat_features = 0;
-        const char *cat_obs_ptr = nullptr;
-        if (!categorical_obs.is_none()) {
-            py::array py_array = py::cast<py::array>(categorical_obs);
-            if (!py_array.attr("flags").attr("c_contiguous").cast<bool>())
-                throw std::runtime_error("Arrays must be C-contiguous");
-
-            py::buffer_info info_categorical_obs = py_array.request();
-            cat_obs_ptr = static_cast<const char*>(info_categorical_obs.ptr);
-            if (info_categorical_obs.shape.size() == 1) {
-                n_cat_features = static_cast<int>(info_categorical_obs.shape[0]);
-                if (n_samples == 0) n_samples = 1;
-            } else {
-                n_cat_features = static_cast<int>(info_categorical_obs.shape[1]);
-                if (n_samples == 0) n_samples = static_cast<int>(info_categorical_obs.shape[0]);
-            }
-        }
-        float *norm_ptr = nullptr;
-        if (!norm_values.is_none()) {
-            py::array_t<float> norm_array = py::cast<py::array_t<float>>(norm_values);
-            if (!norm_array.attr("flags").attr("c_contiguous").cast<bool>())
-                throw std::runtime_error("Arrays must be C-contiguous");
-            py::buffer_info info_norm = norm_array.request();
-            norm_ptr = static_cast<float*>(info_norm.ptr);
-        }
-        float *base_poly_ptr = nullptr;
-        if (!base_poly.is_none()) {
-            py::array_t<float> base_poly_array = py::cast<py::array_t<float>>(base_poly);
-            if (!base_poly_array.attr("flags").attr("c_contiguous").cast<bool>())
-                throw std::runtime_error("Arrays must be C-contiguous");
-            py::buffer_info info_base_poly = base_poly_array.request();
-            base_poly_ptr = static_cast<float*>(info_base_poly.ptr);
-        }
-        float *offset_ptr = nullptr;
-        if (!offset.is_none()) {
-            py::array_t<float> offset_array = py::cast<py::array_t<float>>(offset);
-            if (!offset_array.attr("flags").attr("c_contiguous").cast<bool>())
-                throw std::runtime_error("Arrays must be C-contiguous");
-            py::buffer_info info_offset = offset_array.request();
-            offset_ptr = static_cast<float*>(info_offset.ptr);
-        }
-        py::gil_scoped_release release; 
-        float* shap_values = self.ensemble_shap(obs_ptr, cat_obs_ptr, n_samples, norm_ptr, base_poly_ptr, offset_ptr);
+    gbrl.def("ensemble_shap", [parse_shap_args](GBRL &self,
+                            py::object &obs, py::object &categorical_obs,
+                            py::object &norm_values, py::object &base_poly,
+                            py::object &offset) -> py::array_t<float> {
+        auto a = parse_shap_args(self.metadata, obs, categorical_obs, norm_values, base_poly, offset);
+        py::gil_scoped_release release;
+        float* shap_values = self.ensemble_shap(a.obs_ptr, a.cat_obs_ptr, a.n_samples, a.norm_ptr, a.base_poly_ptr, a.offset_ptr);
         py::gil_scoped_acquire acquire;
-        auto capsule = py::capsule(shap_values, [](void* ptr) {
-        delete[] reinterpret_cast<float*>(ptr);
-        });
-        return py::array({n_samples, n_num_features + n_cat_features, self.metadata->output_dim}, shap_values, capsule);
-    }, py::arg("obs"), py::arg("categorical_obs"), py::arg("norm_values"), py::arg("base_poly"), py::arg("offset"), "Calculate SHAP values of a single tree");
+        auto capsule = py::capsule(shap_values, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
+        return py::array({a.n_samples, self.metadata->n_num_features + self.metadata->n_cat_features, self.metadata->output_dim}, shap_values, capsule);
+    }, py::arg("obs"), py::arg("categorical_obs"), py::arg("norm_values"), py::arg("base_poly"), py::arg("offset"), "Calculate SHAP values for the ensemble");
+
+    gbrl.def("ensemble_shap_and_base", [parse_shap_args](GBRL &self,
+                            py::object &obs, py::object &categorical_obs,
+                            py::object &norm_values, py::object &base_poly,
+                            py::object &offset) -> py::tuple {
+        auto a = parse_shap_args(self.metadata, obs, categorical_obs, norm_values, base_poly, offset);
+        float *base_values = new float[a.n_samples * self.metadata->output_dim]();
+        float* shap_values = nullptr;
+        try {
+            py::gil_scoped_release release;
+            shap_values = self.ensemble_shap(a.obs_ptr, a.cat_obs_ptr, a.n_samples, a.norm_ptr, a.base_poly_ptr, a.offset_ptr, base_values);
+        } catch (...) {
+            delete[] base_values;
+            throw;
+        }
+        py::gil_scoped_acquire acquire;
+        auto capsule_shap = py::capsule(shap_values, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
+        auto capsule_base = py::capsule(base_values, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
+        return py::make_tuple(
+            py::array({a.n_samples, self.metadata->n_num_features + self.metadata->n_cat_features, self.metadata->output_dim}, shap_values, capsule_shap),
+            py::array({a.n_samples, self.metadata->output_dim}, base_values, capsule_base));
+    }, py::arg("obs"), py::arg("categorical_obs"), py::arg("norm_values"), py::arg("base_poly"), py::arg("offset"),
+       "Calculate SHAP values and sample-specific base values for the ensemble");
+
+    gbrl.def("tree_shap_and_base", [parse_shap_args](GBRL &self, const int tree_idx,
+                            py::object &obs, py::object &categorical_obs,
+                            py::object &norm_values, py::object &base_poly,
+                            py::object &offset) -> py::tuple {
+        auto a = parse_shap_args(self.metadata, obs, categorical_obs, norm_values, base_poly, offset);
+        float *base_values = new float[a.n_samples * self.metadata->output_dim]();
+        float* shap_values = nullptr;
+        try {
+            py::gil_scoped_release release;
+            shap_values = self.tree_shap(tree_idx, a.obs_ptr, a.cat_obs_ptr, a.n_samples, a.norm_ptr, a.base_poly_ptr, a.offset_ptr, base_values);
+        } catch (...) {
+            delete[] base_values;
+            throw;
+        }
+        py::gil_scoped_acquire acquire;
+        auto capsule_shap = py::capsule(shap_values, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
+        auto capsule_base = py::capsule(base_values, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
+        return py::make_tuple(
+            py::array({a.n_samples, self.metadata->n_num_features + self.metadata->n_cat_features, self.metadata->output_dim}, shap_values, capsule_shap),
+            py::array({a.n_samples, self.metadata->output_dim}, base_values, capsule_base));
+    }, py::arg("tree_idx")=0, py::arg("obs"), py::arg("categorical_obs"), py::arg("norm_values"), py::arg("base_poly"), py::arg("offset"),
+       "Calculate SHAP values and sample-specific base values for a single tree");
     gbrl.def_static("cuda_available", &GBRL::cuda_available, "Return if CUDA is available"); 
     gbrl.def("plot_tree", [](GBRL &self, int tree_idx, const std::string &filename) {
         py::gil_scoped_release release; 

@@ -219,11 +219,12 @@ void add_leaf_node(
 );
 
 /**
- * @brief Apply monotonic constraints to leaf values using PAVA algorithm
+ * @brief Apply monotonic constraints to leaf values by isotonic projection
  * 
  * For oblivious trees only. Iteratively adjusts leaf values to satisfy
- * monotonic constraints on specified feature-output pairs. Uses Pool Adjacent
- * Violators Algorithm (PAVA) to ensure monotonicity while minimizing changes.
+ * monotonic constraints on specified feature-output pairs. Uses Dykstra's
+ * cyclic projection over pairwise halfspaces to ensure monotonicity
+ * while minimizing the change to the leaf values.
  * 
  * For each constraint (feature_idx, output_idx, direction):
  * - Identifies the depth level where the constrained feature is used
@@ -253,7 +254,7 @@ void apply_monotonic_constraints_cuda(
  * 
  * Evaluates split quality using cosine similarity. When monotonic constraints
  * are specified, splits that would violate the constraint have their scores
- * adjusted to reflect what would happen after PAVA correction, effectively
+ * adjusted to reflect what would happen after the monotonic correction, effectively
  * penalizing constraint-violating splits during tree construction.
  * 
  * @param obs Numerical observations
@@ -303,7 +304,7 @@ __global__ void split_score_cosine_cuda(
  * 
  * Evaluates split quality using L2 variance reduction. When monotonic constraints
  * are specified, splits that would violate the constraint have their scores
- * adjusted to reflect what would happen after PAVA correction, effectively
+ * adjusted to reflect what would happen after the monotonic correction, effectively
  * penalizing constraint-violating splits during tree construction.
  * 
  * @param obs Numerical observations

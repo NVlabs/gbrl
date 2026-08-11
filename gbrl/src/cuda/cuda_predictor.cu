@@ -45,11 +45,16 @@ __device__ __forceinline__ float get_lr_device(const SGDOptimizerGPU* opt, int t
     if (opt->scheduler == Const) {
         return opt->init_lr;
     } else if (opt->scheduler == Linear) {
-        float T_ = static_cast<float>(opt->T);
-        float t_ = static_cast<float>(tree_idx) + 1.0f;
-        float progress_remaining = (T_ - t_) / T_;
-        float lr = opt->init_lr + (1.0f - progress_remaining) * (opt->stop_lr - opt->init_lr);
-        return (lr < opt->stop_lr) ? opt->stop_lr : lr;
+        // Must stay identical to LinearScheduler::get_lr in cpp/scheduler.h:
+        // lr(t) = init_lr + clamp(t/T, 0, 1) * (stop_lr - init_lr).
+        // Clamping the progress keeps this correct for warmup (stop_lr > init_lr)
+        // as well as decay.
+        if (opt->T <= 0)
+            return opt->stop_lr;
+        float progress = static_cast<float>(tree_idx) / static_cast<float>(opt->T);
+        if (progress < 0.0f) progress = 0.0f;
+        if (progress > 1.0f) progress = 1.0f;
+        return opt->init_lr + progress * (opt->stop_lr - opt->init_lr);
     }
     return opt->init_lr;
 }
