@@ -41,6 +41,7 @@ from gbrl.common.utils import (NumericalData, ensure_leaf_tensor_or_array,
                                is_valid_feature_mapping,
                                normalize_vector_input, numerical_dtype,
                                preprocess_features, to_numpy,
+                               validate_cuda_request,
                                validate_monotonic_features_numerical,
                                validate_optimizer_ranges)
 from gbrl.learners.base import BaseLearner
@@ -81,8 +82,8 @@ class MultiGBTLearner(BaseLearner):
             names (Optional[Union[str, List[str]]], optional): Name(s) for the learner(s). Defaults to None.
         """
 
-        # Normalize before measuring length: a dict would otherwise be counted by
-        # its number of keys, and a one-element list was never replicated.
+        # Normalize before measuring length: a dict would otherwise be counted
+        # by its number of keys.
         if isinstance(optimizers, dict):
             optimizers = [optimizers.copy() for _ in range(n_learners)]
         elif len(optimizers) == 1:
@@ -100,8 +101,7 @@ class MultiGBTLearner(BaseLearner):
 
         if policy_dim is None:
             policy_dim = output_dim
-        # Normalize unconditionally, mirroring output_dim above: BaseLearner
-        # asserts both have the same type, so an int policy_dim would fail.
+        # BaseLearner asserts output_dim and policy_dim have the same type.
         if isinstance(policy_dim, int):
             policy_dim = [policy_dim] * n_learners
 
@@ -112,8 +112,8 @@ class MultiGBTLearner(BaseLearner):
                          policy_dim=policy_dim,
                          verbose=verbose,
                          device=device)
-        # MultiGBTLearner never forwards constraints to its sub-models, so accepting
-        # them would silently train an unconstrained model.  Reject instead.
+        # Constraints are never forwarded to the sub-models, so accepting them
+        # would silently train an unconstrained model.
         if self.monotonic_constraints:
             raise ValueError(
                 "Monotonic constraints are not supported by MultiGBTLearner. "
@@ -138,18 +138,11 @@ class MultiGBTLearner(BaseLearner):
 
     def reset(self) -> None:
         """Resets the learner to its initial state, reinitializing the C++ model and optimizers."""
-        # Scheduler state is only carried across a distillation reset, where
-        # training genuinely continues.  A plain reset() already returns
-        # total_iterations to 0, so keeping the decayed learning rate and the
-        # accumulated step count there would start the "fresh" model mid-schedule
-        # and shorten a later distillation's horizon.
+        # Scheduler state carries over only across a distillation reset, where
+        # training continues; a plain reset() starts a fresh schedule.
         continuing = self.student_models is not None
-        # Every piece of Python state this method changes is computed into a
-        # `next_*` local and assigned only after the whole rebuild succeeds.
-        # _consumed_steps in particular is a read-modify-write against models
-        # that are NOT replaced when the loop below raises, so mutating it in
-        # place made a retried reset() count the same trees twice and shorten
-        # the linear-scheduler horizon each time.
+        # State is staged in `next_*` locals and published only once the whole
+        # rebuild succeeds, so a failure below leaves the learner untouched.
         next_optimizers = [opt.copy() for opt in self.optimizers]
         next_consumed_steps = list(self._consumed_steps)
         if self._cpp_models and continuing:
@@ -167,9 +160,8 @@ class MultiGBTLearner(BaseLearner):
             for i in range(self.n_learners):
                 next_consumed_steps[i] += self._cpp_models[i].get_iteration()
         params = self.params.copy()
-        # Build locally; _cpp_models is only replaced once every sub-model
-        # succeeds.  An exception mid-loop previously discarded the old trained
-        # models while leaving _cpp_models partially populated.
+        # Build locally; _cpp_models is replaced only once every sub-model
+        # succeeds.
         new_cpp_models = []
         for i in range(self.n_learners):
             params['input_dim'] = self.input_dim   # type: ignore
@@ -188,9 +180,8 @@ class MultiGBTLearner(BaseLearner):
                     raise ValueError(
                         f"Linear scheduler for learner {i} requires 'T' "
                         f"(total number of iterations)")
-                # Persistent per-learner count: old_models are about to be
-                # discarded, so a later reset() would otherwise see only the
-                # trees built since the previous reset.
+                # Persistent per-learner count: the current models are about to
+                # be discarded along with their iteration counts.
                 remaining = horizon - next_consumed_steps[i]
                 if remaining <= 0:
                     # lr(t >= T) == stop_lr per scheduler.h, so an exhausted
@@ -204,24 +195,20 @@ class MultiGBTLearner(BaseLearner):
             try:
                 cpp_model.set_optimizer(**cfg)
             except RuntimeError as exc:
-                # No safe fallback: a learner missing its optimizer trains nothing.
                 raise ValueError(
                     f"Invalid GBRL optimizer configuration for learner {i}: {exc}") from exc
             new_cpp_models.append(cpp_model)
         if not continuing:
             next_total_iterations = 0
             # Reset with total_iterations: the linear-scheduler horizon is
-            # measured against these, so leaving them would give a later
-            # distillation a budget that has already been spent.
+            # measured against these.
             next_consumed_steps = [0] * self.n_learners
         else:
             next_total_iterations = self.total_iterations
 
-        # Everything succeeded: publish the models AND the Python state that goes
-        # with them together.  Until this point a failure above leaves the learner
-        # exactly as it was.  Fresh C++ models carry no feature mapping, and the
-        # cached layout goes with the old ones -- a fresh model reports no feature
-        # counts, so a stale mapping would be installed unchecked on the next batch.
+        # Publish the models and the Python state that goes with them together.
+        # Fresh C++ models carry no feature mapping and report no feature counts,
+        # so the cached layout is dropped along with the old models.
         self._cpp_models = new_cpp_models
         self.optimizers = next_optimizers
         self._consumed_steps = next_consumed_steps
@@ -235,20 +222,16 @@ class MultiGBTLearner(BaseLearner):
 
         The C++ reverse maps are zero-initialised, so without this SHAP attributes
         every feature to column 0 -- silently, since completeness is unaffected by
-        moving attribution between columns.  Keyed on the C++ models rather than on
-        total_iterations, because distillation recreates them while leaving
-        total_iterations non-zero.
+        moving attribution between columns.  Keyed on the C++ models, since
+        distillation recreates them while leaving total_iterations non-zero.
         """
-        # Always derived from the batch in hand, and kept local until every check
-        # and the C++ setters succeed.  Reusing a cached mapping meant a layout
-        # from an earlier dataset could be installed on fresh models, and a
-        # rejected batch stuck so the retry the error asks for never recomputed.
-        # This only runs while _feature_mapping_installed is False.
+        # Derived from the batch in hand and kept local until every check and the
+        # C++ setters succeed.
         candidate = get_index_mapping(self._mapping_input(inputs))
         feature_mapping, numerical_mask = candidate
         # Sub-models that have already trained know how many features of each kind
-        # they expect.  Rebuilding from a batch with a different mix would name the
-        # wrong column for every split, so reject it.
+        # they expect; a batch with a different mix would name the wrong column
+        # for every split.
         metadata = self._cpp_models[0].get_metadata()
         n_num = int(metadata.get('n_num_features', 0))
         n_cat = int(metadata.get('n_cat_features', 0))
@@ -338,16 +321,15 @@ class MultiGBTLearner(BaseLearner):
             inputs = inputs.detach().cpu().numpy()
         inputs = self._mapping_input(inputs)
         num_inputs, cat_inputs = preprocess_features(inputs)
-        # fit() must install the mapping too; without it SHAP collapses every
-        # feature onto column 0 (see _ensure_feature_mapping).
+        # Without the mapping SHAP collapses every feature onto column 0
+        # (see _ensure_feature_mapping).
         if not self._feature_mapping_installed:
             self._ensure_feature_mapping(inputs)
             self._feature_mapping_installed = True
 
         # Counted from what the backend actually built, in a finally block: the
         # call can throw after adding some of the requested trees (a rejected
-        # monotonic projection, for instance), and adding `iterations` up front
-        # left the Python count ahead of the C++ one.
+        # monotonic projection, for instance).
         if model_idx is not None:
             assert not isinstance(targets, list), \
                 "when model_idx is specified, targets should not be a list"
@@ -373,8 +355,7 @@ class MultiGBTLearner(BaseLearner):
             "when model_idx is not specified, targets should be a list with length equal to n_learners"
         losses = []
         # One shared count for all sub-models, which train the same number of
-        # iterations: take the first learner's progress so it is not multiplied
-        # by n_learners.
+        # iterations: take the first learner's progress.
         iters_before = self._cpp_models[0].get_iteration()
         try:
             for i in range(self.n_learners):
@@ -424,8 +405,7 @@ class MultiGBTLearner(BaseLearner):
         metadata = {
             "n_learners": self.n_learners,
             'custom_names': custom_names,
-            # Shared across sub-models and owned by Python; learner 0's C++
-            # iteration is its own local count and is not a substitute.
+            # Shared across sub-models and owned by Python.
             'total_iterations': self.total_iterations,
             }
         meta_filename = filename + ".gbrl_meta"
@@ -503,16 +483,13 @@ class MultiGBTLearner(BaseLearner):
                 cpp_model = GBRL_CPP.load(loadname)
                 model_optimizers = cpp_model.get_optimizers()
                 # One optimizer per sub-model: self.optimizers is indexed by
-                # learner in reset() and distil(), so a sub-model with a
-                # different count would silently shift every later learner onto
-                # the wrong config.
+                # learner in reset() and distil().
                 if len(model_optimizers) != 1:
                     raise ValueError(
                         f"Sub-model {i} has {len(model_optimizers)} optimizers; "
                         f"MultiGBTLearner supports exactly one per sub-model.")
-                # __new__ bypasses __init__, so the checks it runs have to be
-                # repeated here.  Per sub-model: each one covers its own outputs
-                # from 0, so checking the combined list would flag them all.
+                # __new__ bypasses __init__, so the checks it runs are repeated
+                # here, per sub-model: each one covers its own outputs from 0.
                 validate_optimizer_ranges(model_optimizers)
                 instance.optimizers.extend(model_optimizers)
                 instance._cpp_models.append(cpp_model)
@@ -520,6 +497,7 @@ class MultiGBTLearner(BaseLearner):
                 instance.output_dim.append(model_metadata['output_dim'])
                 instance.policy_dim.append(model_metadata['policy_dim'])
 
+            validate_cuda_request(device)
             if device == 'cuda' and any(
                     str(opt.get('algo', 'SGD')).lower() == 'adam'
                     for opt in instance.optimizers):
@@ -544,18 +522,18 @@ class MultiGBTLearner(BaseLearner):
                                'use_control_variates':
                                metadata['use_control_variates'],
                                'verbose': metadata['verbose'],
-                               'device': device,
+                               # set_device() above resolved the real device;
+                               # reset() rebuilds from params, so store that one.
+                               'device': instance.device,
                                **instance.tree_struct
                                }
             # Keep the lists from the loop above, don't overwrite with single values
             instance.input_dim = metadata['input_dim']
             instance.verbose = metadata['verbose']
-            # params is NOT truncated here: reset() rebuilds every C++ model from
-            # it, so dropping max_depth / n_bins / batch_size / grow_policy /
-            # device would silently recreate them with constructor defaults.
+            # params keeps max_depth / n_bins / batch_size / grow_policy /
+            # device: reset() rebuilds every C++ model from it.
 
-            # iteration is per-learner everywhere else (step/fit index into it),
-            # so a scalar here breaks any continued training after load.
+            # iteration is per-learner everywhere else (step/fit index into it).
             instance.iteration = [m.get_iteration() for m in instance._cpp_models]
             # Prefer the value save() wrote; fall back to learner 0's C++ count
             # for checkpoints written before it was serialized.
@@ -564,11 +542,9 @@ class MultiGBTLearner(BaseLearner):
             instance.student_models = None
             instance.feature_weights = instance._cpp_models[0].get_feature_weights()
             instance.feature_mapping = instance._cpp_models[0].get_feature_mapping()
-            # Models trained by versions whose fit() never installed a mapping carry
-            # an all-zero one.  Trusting it makes SHAP attribute every feature to
-            # column 0 -- invisibly, since additivity is unaffected by moving
-            # attribution between columns.  Check the mapping against the feature
-            # counts the models were trained with and force a rebuild if it fails.
+            # Models whose fit() never installed a mapping carry an all-zero one,
+            # which makes SHAP attribute every feature to column 0.  Check it
+            # against the feature counts the models were trained with.
             instance._feature_mapping_installed = is_valid_feature_mapping(
                 instance.feature_mapping, instance.input_dim,
                 int(metadata.get('n_num_features', 0)),
@@ -705,7 +681,7 @@ class MultiGBTLearner(BaseLearner):
             self.feature_weights = norm_feature_weights
         else:
             # Per-sub-model weights cannot be represented by the single shared
-            # attribute, so reset() would restore them for every learner.
+            # attribute.
             raise ValueError(
                 "MultiGBTLearner does not support per-sub-model feature weights: "
                 "reset() rebuilds every sub-model from one shared set. Call "
@@ -837,9 +813,8 @@ class MultiGBTLearner(BaseLearner):
 
         if isinstance(features, th.Tensor):
             features = features.detach().cpu().numpy()
-        # Models saved before fit() installed a mapping carry an unusable one.
-        # Rebuild it from the batch being explained, so such models can still be
-        # explained without a training call first.
+        # Models saved without a mapping carry an unusable one; rebuild it from
+        # the batch being explained.
         if not self._feature_mapping_installed:
             self._ensure_feature_mapping(features)
             self._feature_mapping_installed = True
@@ -895,9 +870,8 @@ class MultiGBTLearner(BaseLearner):
 
         if isinstance(features, th.Tensor):
             features = features.detach().cpu().numpy()
-        # Models saved before fit() installed a mapping carry an unusable one.
-        # Rebuild it from the batch being explained, so such models can still be
-        # explained without a training call first.
+        # Models saved without a mapping carry an unusable one; rebuild it from
+        # the batch being explained.
         if not self._feature_mapping_installed:
             self._ensure_feature_mapping(features)
             self._feature_mapping_installed = True
@@ -937,7 +911,7 @@ class MultiGBTLearner(BaseLearner):
 
         # One shared self.device drives transform_data() for every sub-model and
         # the output conversion in predict(), so sub-models on different devices
-        # cannot be expressed: a CUDA tensor would reach a sub-model still on CPU.
+        # cannot be expressed.
         if model_idx is not None:
             raise ValueError(
                 "Partial device placement is not supported: all MultiGBTLearner "
@@ -946,14 +920,16 @@ class MultiGBTLearner(BaseLearner):
 
         if isinstance(device, th.device):
             device = device.type
+        # Checked before to_device(): its CPU fallback reallocates the ensemble
+        # and drops the trained trees.
+        validate_cuda_request(device)
         if device == 'cuda' and any(
                 str(opt.get('algo', 'SGD')).lower() == 'adam'
                 for opt in (getattr(self, 'optimizers', None) or [])):
             raise ValueError(
                 "Adam models are CPU-only and cannot be moved to CUDA. "
                 "The GPU predictor does not implement Adam; predictions would be wrong.")
-        # load() calls set_device() before student_models is assigned; guard
-        # against the AttributeError that __new__+no-__init__ would cause.
+        # load() calls set_device() before student_models is assigned.
         _students = getattr(self, 'student_models', None)
         try:
             for i in range(self.n_learners):
@@ -976,8 +952,7 @@ class MultiGBTLearner(BaseLearner):
         actual_device = actual_devices.pop()
         self.device = actual_device
         # reset() rebuilds every sub-model with GBRL_CPP(**self.params), so params
-        # must carry the real device or a later reset() would silently move them
-        # back while transform_data() still routed tensors for the requested one.
+        # must carry the device the models actually ended up on.
         # getattr: load() calls set_device() before it builds params.
         if getattr(self, 'params', None) is not None:
             self.params['device'] = actual_device
@@ -1009,7 +984,9 @@ class MultiGBTLearner(BaseLearner):
             "Model not initialized."
         assert self.n_learners > 0, "No learners in the model."
 
-        if self.student_models is not None and (start_idx is not None or stop_idx is not None):
+        # 0 and None both mean "all trees", so they are not a real range.
+        has_range = start_idx not in (None, 0) or stop_idx not in (None, 0)
+        if self.student_models is not None and has_range:
             raise ValueError(
                 "Ranged prediction (start_idx/stop_idx) is not supported when student "
                 "models are attached. The combined tree sequence has no defined ordering. "
@@ -1095,29 +1072,24 @@ class MultiGBTLearner(BaseLearner):
                               'verbose': verbose, 'batch_size':
                               self.params.get('distil_batch_size', 2048)}
         # Built locally and published only once every learner succeeds: predict(),
-        # get_num_trees() and __copy__() all assume student_models is either
-        # absent or complete, so a throw mid-loop left them indexing a short list.
+        # get_num_trees() and __copy__() assume student_models is absent or complete.
         students = []
         tr_losses = []
-        # Separate name: base_distil_params holds the C++ model config and must
-        # not be shadowed by the per-learner results accumulator.
         out_params = []
         for i in range(self.n_learners):
             output_dim_i = (self.output_dim[i] if isinstance(self.output_dim, list)
                             else self.output_dim)
             policy_dim_i = (self.policy_dim[i] if isinstance(self.policy_dim, list)
                             else self.policy_dim)
-            # Each learner gets its own params copy: the loop mutates min_steps,
-            # so a shared dict leaked learner i's state into learner i+1 and made
-            # every returned entry alias the last learner.
+            # Each learner gets its own params copy: the loop mutates min_steps.
             learner_params = params.copy()
             student_params = {**base_distil_params,
                               'output_dim': output_dim_i,
                               'policy_dim': policy_dim_i}
             student_model = GBRL_CPP(**student_params)  # type: ignore
-            # Mirror GBTLearner.distil(): a raw C++ model starts with zero feature
-            # weights and no feature mapping, so split scores collapse and mixed
-            # numerical/categorical handling is wrong.
+            # A raw C++ model starts with zero feature weights and no feature
+            # mapping, so split scores collapse and mixed numerical/categorical
+            # handling is wrong.
             student_model.set_feature_weights(
                 np.ascontiguousarray(self.feature_weights, dtype=numerical_dtype))
             student_mapping, student_mask = get_index_mapping(obs)
@@ -1137,8 +1109,8 @@ class MultiGBTLearner(BaseLearner):
                     f"for learner {i}: {exc}") from exc
 
             bias = np.mean(targets[i], axis=0)
-            # np.mean returns a NumPy scalar (e.g. np.float32), not a Python
-            # float, so the old isinstance check never fired for 1-D targets.
+            # np.mean returns a NumPy scalar (e.g. np.float32) for 1-D targets,
+            # not a Python float.
             bias = np.atleast_1d(bias).astype(numerical_dtype, copy=False)
 
             student_model.set_bias(bias.astype(numerical_dtype))
@@ -1384,13 +1356,13 @@ class MultiGBTLearner(BaseLearner):
                                 policy_dim=self.policy_dim,
                                 verbose=self.verbose,
                                 device=self.device)
-        # params does not describe these, so a rebuild from it would drop them and
-        # copy_.reset() would restore default feature weights.
+        # params does not describe these, so copy_.reset() would otherwise
+        # restore default feature weights.
         copy_.feature_weights = np.array(self.feature_weights, copy=True)
         copy_.feature_mapping = self.feature_mapping
         copy_._feature_mapping_installed = self._feature_mapping_installed
-        # Copy, like _consumed_steps: sharing the list let training the copy
-        # advance the original's per-learner counters.
+        # Copy: sharing the list would let training the copy advance the
+        # original's per-learner counters.
         copy_.iteration = list(self.iteration)
         copy_.total_iterations = self.total_iterations
         copy_._consumed_steps = list(self._consumed_steps)
@@ -1401,9 +1373,8 @@ class MultiGBTLearner(BaseLearner):
             copy_._cpp_models = [None] * self.n_learners
             for i in range(self.n_learners):
                 copy_._cpp_models[i] = GBRL_CPP(self._cpp_models[i])
-                # Guarded separately: the enclosing check is on _cpp_models, so
-                # subscripting student_models here raised TypeError whenever no
-                # distillation had been run.
+                # Guarded separately: the enclosing check is on _cpp_models, and
+                # student_models is None until a distillation has been run.
                 if self.student_models is not None and self.student_models[i] is not None:
                     copy_.student_models[i] = GBRL_CPP(self.student_models[i])  # type: ignore
         return copy_

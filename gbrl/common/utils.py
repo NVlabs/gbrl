@@ -284,9 +284,8 @@ def setup_optimizer(optimizer: Dict, prefix: str = '') -> Dict:
     if optimizer['init_lr'] <= 0:
         raise ValueError("init_lr must be > 0")
     # A schedule crossing zero flips the sign of the leaf-value -> prediction
-    # transform partway through the ensemble, which the monotonic projection
-    # assumes is constant.  NaN/inf must be rejected explicitly: NaN fails every
-    # comparison, so a bare `<= 0` test lets it through.
+    # transform, which the monotonic projection assumes is constant. NaN needs an
+    # explicit check because it fails every comparison.
     if optimizer.get('stop_lr') is not None:
         stop_lr = float(optimizer['stop_lr'])
         if not np.isfinite(stop_lr) or stop_lr <= 0:
@@ -299,6 +298,45 @@ def setup_optimizer(optimizer: Dict, prefix: str = '') -> Dict:
         f"optimization algo has to be in {APPROVED_OPTIMIZERS}"
     return {k: v for k, v in optimizer.items() if k in VALID_OPTIMIZER_ARGS
             and v is not None}
+
+
+def cuda_usable() -> bool:
+    """Whether CUDA is compiled in AND a usable device exists at runtime.
+
+    gbrl.cuda_available() is compile-time only, so a CUDA build on a machine
+    with no GPU still reports True. Callers must check this before asking the
+    backend to move to CUDA: to_device() falls back to CPU by reallocating the
+    ensemble, which drops the trained trees.
+
+    Returns:
+        bool: True if a CUDA transfer will actually succeed.
+    """
+    # Imported here rather than at module scope: gbrl/__init__.py imports this
+    # module, so a top-level import would be circular.
+    from gbrl import cuda_available
+    if not cuda_available():
+        return False
+    try:
+        return bool(th.cuda.is_available())
+    except Exception:
+        return False
+
+
+def validate_cuda_request(device: Union[str, "th.device"]) -> None:
+    """Raise if CUDA is requested but cannot be used.
+
+    Args:
+        device (Union[str, th.device]): Requested device.
+
+    Raises:
+        ValueError: If device is 'cuda' and no usable CUDA device exists.
+    """
+    if isinstance(device, th.device):
+        device = device.type
+    if device == 'cuda' and not cuda_usable():
+        raise ValueError(
+            "CUDA is not available: GBRL was built without CUDA support or no "
+            "usable GPU was found. Use device='cpu'.")
 
 
 def validate_optimizer_ranges(optimizers: Union[Dict, List[Dict]]) -> None:
@@ -321,8 +359,8 @@ def validate_optimizer_ranges(optimizers: Union[Dict, List[Dict]]) -> None:
         start, stop = opt.get('start_idx'), opt.get('stop_idx')
         if start is None or stop is None:
             continue
-        # An empty or reversed interval never overlaps anything, so the check
-        # below would wave it through even though C++ rejects it later.
+        # An empty or reversed interval never overlaps anything, so it would slip
+        # past the check below; C++ rejects it later anyway.
         if (isinstance(start, bool) or isinstance(stop, bool)
                 or not isinstance(start, (int, np.integer))
                 or not isinstance(stop, (int, np.integer))):
@@ -349,9 +387,8 @@ def is_valid_feature_mapping(mapping, input_dim: int, n_num_features: int,
 
     Numerical and categorical features each index from 0 internally, so the
     mapping is what turns a split's internal index back into an input column.
-    Models trained by versions whose fit() never installed one carry an all-zero
-    mapping, which sends every feature to column 0 -- invisibly, since additivity
-    is unaffected by moving attribution between columns.
+    An all-zero mapping sends every feature to column 0, which additivity checks
+    cannot catch because moving attribution between columns preserves the sum.
 
     A mapping is valid when it covers every input column and the two halves are
     exactly 0..n_num_features-1 and 0..n_cat_features-1.

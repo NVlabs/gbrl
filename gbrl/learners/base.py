@@ -32,7 +32,8 @@ import numpy as np
 import torch as th
 
 from gbrl.common.utils import (NumericalData, TensorInfo,
-                               get_tensor_info, numerical_dtype, to_numpy)
+                               get_tensor_info, numerical_dtype, to_numpy,
+                               validate_cuda_request)
 
 
 class BaseLearner(ABC):
@@ -79,6 +80,9 @@ class BaseLearner(ABC):
         if isinstance(output_dim, list) and policy_dim is not None and isinstance(policy_dim, list):
             assert len(policy_dim) == len(output_dim), \
                 "policy_dim and output_dim lists must have the same length"
+        # Checked before params is built: the C++ constructor calls to_device(),
+        # which falls back to CPU by reallocating the ensemble.
+        validate_cuda_request(device)
         self.tree_struct = tree_struct
         self.input_dim = input_dim
         self.output_dim = output_dim
@@ -148,14 +152,10 @@ class BaseLearner(ABC):
         return inputs
 
     def step(self, inputs: NumericalData, *args, **kwargs) -> None:
-        """Hook for subclasses; deliberately does not touch feature_mapping.
+        """Performs a single update step using provided gradients.
 
-        It used to infer and store the mapping here, before the subclass had a
-        chance to validate it. A batch with the wrong numerical/categorical mix
-        was therefore kept even though _ensure_feature_mapping() then rejected
-        it, and because the stored mapping was no longer None the retry the
-        error message asks for reused the bad one forever. Deriving, validating
-        and publishing the mapping all belong to _ensure_feature_mapping().
+        The feature mapping is derived, validated and published by
+        _ensure_feature_mapping(), so that an invalid batch is never stored.
         """
 
     @abstractmethod

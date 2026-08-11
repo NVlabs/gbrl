@@ -488,8 +488,7 @@ __global__ void split_score_cosine_cuda(
         int tmp_idx = __ldg(&candidate_indices[cand_idx]);
         int feat_idx = (candidate_numeric[cand_idx]) ? r_num_mapping[tmp_idx] : r_cat_mapping[tmp_idx];
         // Unused reverse-mapping slots hold -1 and a stale mapping can name a
-        // column past the end, either of which reads feature_weights out of
-        // bounds.  Reject the candidate instead.
+        // column past the end, either of which reads feature_weights out of bounds.
         if (feat_idx < 0 || feat_idx >= n_num_features + node->n_cat_features){
             split_scores[cand_idx] = -CUDART_INF_F;
             return;
@@ -514,10 +513,9 @@ __global__ void split_score_cosine_cuda(
             float l_val = left_mean[out_idx];
             float r_val = right_mean[out_idx];
             
-            // SIGN: left_mean/right_mean are RAW GRADIENT means, but the
-            // constraint is about PREDICTIONS.  SGD contributes
-            // delta = -lr * g with lr > 0, so the gradient order is the
-            // reverse of the prediction order:
+            // left_mean/right_mean are raw gradient means while the constraint is
+            // on predictions, and SGD applies delta = -lr * g with lr > 0, so the
+            // gradient order is the reverse of the prediction order:
             //     increasing  =>  g_left >= g_right
             //     decreasing  =>  g_left <= g_right
             // Must match splitScoreL2WithConstraint in cpp/node.cpp.
@@ -531,11 +529,9 @@ __global__ void split_score_cosine_cuda(
                     float pooled = (l_count[0] * l_val + r_count[0] * r_val) / total_cnt;
                     left_mean[out_idx] = pooled;
                     right_mean[out_idx] = pooled;
-                    // The dot sums were accumulated against the UNPOOLED means, so
-                    // without this the cosine numerator and denominator would
-                    // describe different child vectors.  l_dot_sum holds
-                    // n*||mu||^2 after its /count, so replacing mu_d by pooled
-                    // shifts it by n * (pooled^2 - mu_d^2).
+                    // The dot sums were accumulated against the unpooled means.
+                    // l_dot_sum holds n*||mu||^2 after its /count, so replacing
+                    // mu_d by pooled shifts it by n * (pooled^2 - mu_d^2).
                     l_dot_fix += l_count[0] * (pooled * pooled - l_val * l_val);
                     r_dot_fix += r_count[0] * (pooled * pooled - r_val * r_val);
                 }
@@ -665,8 +661,7 @@ __global__ void split_score_l2_cuda(
         int tmp_idx = __ldg(&candidate_indices[cand_idx]);
         int feat_idx = (candidate_numeric[cand_idx]) ? r_num_mapping[tmp_idx] : r_cat_mapping[tmp_idx];
         // Unused reverse-mapping slots hold -1 and a stale mapping can name a
-        // column past the end, either of which reads feature_weights out of
-        // bounds.  Reject the candidate instead.
+        // column past the end, either of which reads feature_weights out of bounds.
         if (feat_idx < 0 || feat_idx >= n_num_features + node->n_cat_features){
             split_scores[cand_idx] = -CUDART_INF_F;
             return;
@@ -688,10 +683,9 @@ __global__ void split_score_l2_cuda(
             float l_val = left_mean[out_idx];
             float r_val = right_mean[out_idx];
             
-            // SIGN: left_mean/right_mean are RAW GRADIENT means, but the
-            // constraint is about PREDICTIONS.  SGD contributes
-            // delta = -lr * g with lr > 0, so the gradient order is the
-            // reverse of the prediction order:
+            // left_mean/right_mean are raw gradient means while the constraint is
+            // on predictions, and SGD applies delta = -lr * g with lr > 0, so the
+            // gradient order is the reverse of the prediction order:
             //     increasing  =>  g_left >= g_right
             //     decreasing  =>  g_left <= g_right
             // Must match splitScoreL2WithConstraint in cpp/node.cpp.
@@ -880,8 +874,7 @@ __global__ void split_cosine_score_kernel(
         int tmp_idx = __ldg(&candidate_indices[cand_idx]);
         int feat_idx = (candidate_numeric[cand_idx]) ? r_num_mapping[tmp_idx] : r_cat_mapping[tmp_idx];
         // Unused reverse-mapping slots hold -1 and a stale mapping can name a
-        // column past the end, either of which reads feature_weights out of
-        // bounds.  Reject the candidate instead.
+        // column past the end, either of which reads feature_weights out of bounds.
         if (feat_idx < 0 || feat_idx >= n_num_features + node->n_cat_features){
             split_scores[cand_idx] = -CUDART_INF_F;
             return;
@@ -955,8 +948,7 @@ __global__ void split_l2_score_kernel(
         int tmp_idx = __ldg(&candidate_indices[cand_idx]);
         int feat_idx = (candidate_numeric[cand_idx]) ? r_num_mapping[tmp_idx] : r_cat_mapping[tmp_idx];
         // Unused reverse-mapping slots hold -1 and a stale mapping can name a
-        // column past the end, either of which reads feature_weights out of
-        // bounds.  Reject the candidate instead.
+        // column past the end, either of which reads feature_weights out of bounds.
         if (feat_idx < 0 || feat_idx >= n_num_features + node->n_cat_features){
             split_scores[cand_idx] = -CUDART_INF_F;
             return;
@@ -1615,9 +1607,8 @@ void fit_tree_oblivious_cuda(
             child_tree_nodes[node_idx] = nullptr;
         }
     }
-    // Snapshot before the leaves are published: the projection below can throw,
-    // and n_leaves is already advanced by add_leaf_node.  n_trees is incremented
-    // after the projection, so only n_leaves needs unwinding.
+    // Snapshot before the leaves are published: add_leaf_node advances n_leaves
+    // and the projection below can throw.
     const int leaves_before_tree = metadata->n_leaves;
     for (int node_idx = 0; node_idx < (1 << depth); ++node_idx){
         add_leaf_node(tree_nodes[node_idx], depth, metadata, edata, dataset);
@@ -1629,8 +1620,8 @@ void fit_tree_oblivious_cuda(
         try {
             apply_monotonic_constraints_cuda(edata, metadata, tree_idx, depth, start_leaf_idx);
         } catch (...) {
-            // Un-publish the leaves and release the node arrays, since the frees
-            // below are skipped by the unwind.  n_trees was not yet incremented.
+            // Un-publish the leaves and release the node arrays; the frees below
+            // are skipped by the unwind.
             metadata->n_leaves = leaves_before_tree;
             free(tree_nodes);
             free(child_tree_nodes);
@@ -1747,23 +1738,19 @@ void fit_tree_greedy_cuda(
  *   - If DECREASING (-1): leaves with bit d=1 should have <= value than leaves with bit d=0
  * 
  * When multiple monotonic features exist, they define a partial order over the
- * hypercube of leaves. It is NOT linearized or sorted: the projection below works
- * directly on the edge-constraint sets, which is why plain PAVA does not apply.
+ * hypercube of leaves. The projection below works directly on the edge-constraint
+ * sets of that hypercube.
  *
- * Algorithm (Dykstra's cyclic projection, not classical PAVA):
+ * Algorithm (Dykstra's cyclic projection):
  * 1. Find which depths carry a monotonic constraint for a given output.
  * 2. For each such depth, project onto that depth's constraint set: the leaf pairs
  *    differing only in that depth's bit are disjoint, so averaging each violating
  *    pair is already the exact L2 projection for that set.
  * 3. Cycle over the depths carrying a per-depth Dykstra correction z_d, projecting
- *    (v + z_d) and folding the residual back into z_d.  Plain cycling would land
- *    somewhere feasible but not at the nearest monotone point; the corrections make
- *    it converge to the true isotonic projection (Boyle-Dykstra).
+ *    (v + z_d) and folding the residual back into z_d.  The corrections make the
+ *    cycle converge to the true isotonic projection (Boyle-Dykstra).
  * 4. Finish with plain projection passes (z = 0) to clear the sub-tolerance
  *    violations Dykstra's asymptotic approach can leave behind.
- *
- * Classical PAVA - a linear order with a stack of merged level sets - is NOT used;
- * the leaves form a hypercube partial order, not a chain.
  */
 
 /**
@@ -1836,7 +1823,7 @@ __global__ void monotonic_project_kernel(
     
     // For increasing constraint (+1): leaf0 (bit=0) should have value <= leaf1 (bit=1)
     // For decreasing constraint (-1): leaf0 (bit=0) should have value >= leaf1 (bit=1)
-    // Strict comparison — no epsilon — so exactly-equal pairs are not pooled.
+    // Strict comparison, so exactly-equal pairs are left alone.
     bool violation = (constraint_dir == 1 && val0 > val1) ||
                      (constraint_dir == -1 && val0 < val1);
 
@@ -1860,9 +1847,8 @@ __global__ void monotonic_project_kernel(
         atomicOr(d_changed, 1);
 }
 
-// Every CUDA call in the monotonic projection setup goes through this: a failed
-// cudaMalloc previously fell through to cudaMemset and kernel launches with an
-// invalid pointer, and a failed setup copy left host arrays uninitialised.
+// Every CUDA call in the monotonic projection setup goes through this, so a failure
+// aborts instead of running on an invalid pointer or uninitialised host arrays.
 static inline void mono_cuda_check(cudaError_t err, const char *what) {
     if (err != cudaSuccess) {
         std::cerr << "ERROR: monotonic projection setup failed at " << what
@@ -1932,8 +1918,7 @@ void apply_monotonic_constraints_cuda(
                metadata->n_mono_constraints * sizeof(int), cudaMemcpyDeviceToHost), "constraint copy");
     
     // Build map: depth -> (effective_constraint, output_idx) for this tree.
-    // Flat and owned by a vector: the device allocations below throw on failure,
-    // and a raw int** here would leak on that path.
+    // Flat and vector-owned so it is released when the device allocations below throw.
     // Only sized for policy_dim since monotonic constraints only apply to policy outputs.
     const int policy_dim = metadata->policy_dim;
     std::vector<int> effective_constraints_v(static_cast<size_t>(tree_depth) * policy_dim, 0);
@@ -1963,11 +1948,10 @@ void apply_monotonic_constraints_cuda(
         }
     }
 
-    // Dykstra's cyclic projection (see fitter.cpp for the rationale).  Each
-    // block averages one violating leaf pair; whole passes repeat until a pass
-    // makes no changes or MONOTONIC_MAX_PASSES is hit.  A single depth-ordered pass is
-    // not sufficient because pooling at one depth can re-introduce violations at
-    // a previously corrected depth when several depths are constrained.
+    // Dykstra's cyclic projection (see fitter.cpp for the rationale).  Each block
+    // averages one violating leaf pair; whole passes repeat until a pass makes no
+    // changes or MONOTONIC_MAX_PASSES is hit, since pooling at one depth can
+    // re-introduce violations at a depth already corrected in this pass.
     // Only iterate over policy_dim since monotonic constraints only apply to policy outputs.
     // Host copy of this tree's leaf values, used by the feasibility scan.
     // Allocated before the device buffers so a bad_alloc here cannot leak them.
@@ -2055,8 +2039,7 @@ void apply_monotonic_constraints_cuda(
         // into a plain projection, restoring exact monotonicity after Dykstra's
         // asymptotic approach.  See fitter.cpp for the rationale.
         for (int pass = 0; pass < MONOTONIC_MAX_PASSES && !cuda_failed; ++pass) {
-            // Checked like the Dykstra-phase memsets: an unchecked failure here
-            // would launch the next kernel against stale corrections.
+            // A failure here would launch the next kernel against stale corrections.
             cudaError_t clear_err = cudaMemset(d_z, 0, sizeof(float) * tree_depth * n_leaves_in_tree);
             if (clear_err == cudaSuccess)
                 clear_err = cudaMemset(d_any_change, 0, sizeof(int));
@@ -2141,12 +2124,11 @@ void apply_monotonic_constraints_cuda(
     cudaFree(d_any_change);
     cudaFree(d_z);
 
-    // Counted so the Python layer can raise a real RuntimeWarning after fit()/step().
+    // Counted so the Python layer can raise a RuntimeWarning after fit()/step().
     for (int i = 0; i < nonconverged; ++i)
         note_monotonic_nonconverged();
 
-    // Monotonicity is a hard contract: surface failures to Python rather than
-    // leaving a silently non-monotone model behind.
+    // Monotonicity is a hard contract, so failures are surfaced to Python.
     const bool failed = cuda_failed;
     const bool bad = infeasible;
     const int bad_out = infeasible_out;

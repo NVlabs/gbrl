@@ -95,10 +95,8 @@ void Fitter::step_cpu(dataSet *dataset, ensembleData *edata, ensembleMetaData *m
     dataHolder<float> build_grads_holder{build_grads, cpu};
     dataset->build_grads = &build_grads_holder; 
     
-    // Snapshot before the tree is appended: the projection below can throw, and
-    // the ensemble counts are already advanced by the fit_*_tree call.  Without
-    // this the model would keep a tree that failed its constraints while
-    // iteration stayed behind, leaving n_trees and iteration disagreeing.
+    // The fit_*_tree call below already advances the ensemble counts, and the
+    // projection after it can throw, so snapshot them for the rollback.
     const int trees_before_step = metadata->n_trees;
     const int leaves_before_step = metadata->n_leaves;
 
@@ -235,8 +233,7 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
         }
         batch_dataset.grads->data = grads;
         // Keyed on the model, not the loop counter, like step_cpu: `i` counts
-        // trees added by THIS call, so a fit() on a model that already had trees
-        // skipped control variates on its first iteration.
+        // only the trees added by this call.
         if (metadata->use_cv && metadata->n_trees > 0){
             Fitter::control_variates(&batch_dataset, edata, metadata);
         }
@@ -409,10 +406,7 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
                     float score = crnt_node->getSplitScore(dataset, metadata->split_score_func, split_candidates[j], metadata->min_data_in_leaf);
                     // feature_weights is indexed by ORIGINAL input column, so the
                     // split's type-local index has to go through the reverse
-                    // mapping, exactly as the oblivious path does.  Assuming the
-                    // layout is "all numerical then all categorical" gave a
-                    // numerical split a categorical column's weight (and vice
-                    // versa) whenever the columns were interleaved.
+                    // mapping, as the oblivious path does.
                     int global_feature_idx = (split_candidates[j].categorical_value == nullptr)
                         ? edata->feature_mappings->reverse_num_feature_mapping[split_candidates[j].feature_idx]
                         : edata->feature_mappings->reverse_cat_feature_mapping[split_candidates[j].feature_idx];
@@ -808,11 +802,9 @@ void Fitter::apply_monotonic_constraints_cpu(
     // Isotonic projection of the leaf values onto the monotone cone, via Dykstra's
     // algorithm.
     //
-    // For ONE constrained depth the leaf pairs are disjoint, so averaging a
-    // violating pair is already the exact L2 projection (2-point isotonic).  With two
-    // or more constrained depths the pair sets overlap: simply cycling through the
-    // depths (plain POCS) lands somewhere feasible but NOT at the nearest monotone
-    // point, distorting leaf values more than the constraint requires.
+    // Within one constrained depth the leaf pairs are disjoint, so averaging a
+    // violating pair is the exact L2 projection (2-point isotonic).  Across two
+    // or more constrained depths the pair sets overlap.
     //
     // Dykstra adds a per-depth correction term z_d: project (v + z_d) instead of v,
     // then fold the residual back into z_d.  That converges to the true projection
@@ -901,9 +893,8 @@ void Fitter::apply_monotonic_constraints_cpu(
         }
 
         // Final feasibility scan.  `converged` only records whether the Dykstra
-        // phase met its movement tolerance; it says nothing about whether the
-        // cleanup phase actually removed every violation.  Check the real
-        // property instead of inferring it.
+        // phase met its movement tolerance, not whether the cleanup phase
+        // removed every violation.
         for (int d = 0; d < tree_depth; ++d) {
             int constraint_dir = effective_constraints[d][out_idx];
             if (constraint_dir == 0) continue;

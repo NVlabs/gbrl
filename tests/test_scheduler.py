@@ -185,12 +185,11 @@ class TestScheduler(unittest.TestCase):
         )
 
     def _assert_midpoint_lr(self, device):
-        """Tree 1 must get the MIDPOINT rate, not init_lr or stop_lr.
+        """Tree 1 must get the midpoint rate, not init_lr or stop_lr.
 
-        The other linear tests use init_lr=1.0, which drives the residual for
-        samples 2,3 to exactly 0, so tree 1's leaf is 0 and its prediction is 0
-        whatever rate is applied - they cannot see the midpoint at all. With
-        init_lr=0.5 the residual survives:
+        init_lr=0.5 is required here: with init_lr=1.0 the residual for samples
+        2,3 is driven to exactly 0, so tree 1's leaf is 0 whatever rate is
+        applied. With init_lr=0.5 the residual survives:
             lr(0) = 0.5                          -> tree 0 = 0.5 * 1.0  = 0.5
             lr(1) = 0.5 + 0.5*(0.1-0.5) = 0.30   -> tree 1 = 0.30 * 0.5 = 0.15
         """

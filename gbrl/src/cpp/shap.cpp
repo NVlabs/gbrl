@@ -42,9 +42,9 @@ shapData* alloc_shap_data(const ensembleMetaData *metadata, const ensembleData *
     int start_leaf_idx = edata->ensemble_info->tree_indices[tree_idx];
     int n_leaves = stop_leaf_idx - start_leaf_idx;
 
-    // A binary tree with n_leaves leaves has 2*n_leaves-1 nodes.  The old
-    // n_leaves*max_depth expression is smaller than that at max_depth == 1,
-    // so size every node-indexed array from an explicit capacity instead.
+    // A binary tree with n_leaves leaves has 2*n_leaves-1 nodes, which exceeds
+    // n_leaves*max_depth at max_depth == 1; every node-indexed array below is
+    // sized from this capacity.
     const int node_capacity = std::max(2 * n_leaves - 1, n_leaves * metadata->max_depth);
     stack<nodeInfo> node_stack(node_capacity);
     nodeInfo root = {0, -1, 0, false, false};  // Assuming starting from root node

@@ -35,7 +35,8 @@ ROOT_PATH = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT_PATH))
 
 from gbrl import cuda_available
-from gbrl.common.utils import get_poly_vectors, numerical_dtype, preprocess_features
+from gbrl.common.utils import (cuda_usable, get_poly_vectors, numerical_dtype,
+                               preprocess_features)
 from gbrl.models.gbt import GBTModel
 from tests import CATEGORICAL_INPUTS, CATEGORICAL_OUTPUTS
 
@@ -538,11 +539,8 @@ class TestGBTSingle(unittest.TestCase):
             phi_t0, base_t0 = model.tree_shap(0, X, return_base=True)  # (n,d,out), (n,out)
             phi_t1, base_t1 = model.tree_shap(1, X, return_base=True)
 
-            # base_t1 should vary across samples (unlike base_t0 which is sample-independent)
-            # because tree 1 uses each sample's frozen Adam state from tree 0
-            # std over the sample axis only: flattening mixes in the spread
-            # between output dimensions, which is non-zero even when every
-            # sample shares the same base.
+            # base_t1 varies across samples via each sample's frozen Adam state from tree 0.
+            # std over the sample axis only: flattening mixes in the output-dim spread.
             self.assertGreater(
                 float(np.max(np.std(np.asarray(base_t1), axis=0))),
                 1e-6,
@@ -939,8 +937,7 @@ class TestGBTSingle(unittest.TestCase):
             params={'split_score_func': 'Cosine', 'generator_type': 'Quantile'},
             device='cpu', verbose=0,
         )
-        # Attach a sentinel student model — no training or distillation needed
-        # because the guard fires before any C++ call.
+        # A sentinel student model suffices: the guard fires before any C++ call.
         model.learner.student_model = object()
         self.addCleanup(setattr, model.learner, 'student_model', None)
 
@@ -951,7 +948,7 @@ class TestGBTSingle(unittest.TestCase):
             model.tree_shap(0, obs, return_base=True)
 
     def test_overlapping_optimizer_raises(self):
-        """Overlapping optimizer output ranges must raise to the caller, not be printed."""
+        """Overlapping optimizer output ranges must raise to the caller."""
         overlapping = [
             {'algo': 'SGD', 'lr': 0.1, 'start_idx': 0, 'stop_idx': 2},
             {'algo': 'SGD', 'lr': 0.05, 'start_idx': 1, 'stop_idx': 3},
@@ -1002,9 +999,8 @@ class TestGBTSingle(unittest.TestCase):
         phi32, base32 = cpp_model.ensemble_shap_and_base(
             num_inputs, cat_inputs, norm_values, base_poly, offset)
 
-        # float64 observation forces py::cast<py::array_t<float>> to create a
-        # temporary float32 copy inside parse_shap_args.  The fix stores that
-        # copy as an owner in ShapArgs so the pointer cannot dangle.
+        # float64 obs forces py::cast<py::array_t<float>> to make a temporary float32
+        # copy inside parse_shap_args; ShapArgs owns that copy so it cannot dangle.
         phi64, base64 = cpp_model.ensemble_shap_and_base(
             num_inputs.astype(np.float64), cat_inputs, norm_values, base_poly, offset)
 
@@ -1091,9 +1087,8 @@ class TestLearnerLifecycle(unittest.TestCase):
 
 class TestLinearScheduler(unittest.TestCase):
     """The linear schedule must honour its documented endpoints in BOTH
-    directions. The old clamp assumed a decaying schedule, so warmup
-    (stop_lr > lr) collapsed to a constant stop_lr and then grew past it
-    once t exceeded T."""
+    directions: decay (stop_lr < lr) and warmup (stop_lr > lr), including
+    once t exceeds T, where the lr must stay clamped at stop_lr."""
 
     def _model(self, lr, stop_lr, T):
         return GBTModel(
@@ -1135,11 +1130,10 @@ class TestLinearScheduler(unittest.TestCase):
 class TestLowLevelBindingContract(unittest.TestCase):
     """gbrl_cpp is internal and does not convert its inputs.
 
-    It used to run py::array::ensure(..., forcecast), which silently built a
-    temporary copy for a strided or wrong-dtype array. That copy was owned only
-    by the binding frame and was freed on return, so the backend read a dangling
-    pointer after releasing the GIL - producing different results for arrays
-    holding identical values. It now borrows and rejects instead.
+    It borrows the caller's buffer and rejects a strided or wrong-dtype array
+    instead of forcecasting it: a temporary copy would be owned by the binding
+    frame and freed on return, so the backend would read a dangling pointer
+    after releasing the GIL.
     """
 
     @classmethod
@@ -1177,13 +1171,11 @@ class TestLowLevelBindingContract(unittest.TestCase):
 class TestRepeatedFit(unittest.TestCase):
     """fit() must boost against every tree already in the model.
 
-    The tree range was counted from the start of the call rather than the start
-    of the ensemble, so a second fit() built its trees against a prefix of the
-    ensemble: on CPU the residual skipped both the existing trees and the ones
-    just added, and on CUDA the existing ensemble was added to the running
-    prediction a second time. Splitting a run into two calls therefore produced
-    a different model from doing it in one, and distillation - which calls fit()
-    repeatedly on the same student - trained its later chunks on wrong targets.
+    The tree range is counted from the start of the ensemble, not the start of
+    the call, so splitting a run into two calls yields the same model as doing
+    it in one. Distillation depends on this: it calls fit() repeatedly on the
+    same student, and each chunk past the first must boost against the previous
+    ones.
 
     These tests use the default batch_size, which is larger than the sample
     count, so every tree here sees the full dataset and the comparison isolates
@@ -1236,8 +1228,8 @@ class TestRepeatedFit(unittest.TestCase):
         self._assert_split_matches_single('cuda')
 
     def _assert_many_chunks_match_single(self, device):
-        """Six chunks of 5 must equal one call of 30. One extra call could match
-        by luck; drift compounds, so repeating it is the real check."""
+        """Six chunks of 5 must equal one call of 30; drift compounds across
+        chunks, so many small calls is the sharper check."""
         chunked = self._model(device)
         for _ in range(6):
             chunked.fit(self.X, self.y, iterations=5, shuffle=False)
@@ -1253,8 +1245,8 @@ class TestRepeatedFit(unittest.TestCase):
             err_msg=f'{device}: 6x5 iterations disagree with 30')
 
     def _assert_split_matches_single_cv(self, device):
-        """Control variates were keyed on the loop counter, so the first tree of
-        a second fit() skipped them even though the model already had trees."""
+        """Control variates key off the ensemble size, not the loop counter, so
+        the first tree of a second fit() still uses them."""
         def mk():
             return GBTModel(
                 input_dim=4, output_dim=1,
@@ -1281,7 +1273,7 @@ class TestRepeatedFit(unittest.TestCase):
 
     def test_categorical_fit_cpu(self):
         """Categorical candidate generation is host code; fit() must feed it a
-        host buffer. On CUDA it was handed a device pointer."""
+        host buffer, on CUDA as well as on CPU."""
         self._assert_categorical_fit('cpu')
 
     @unittest.skipUnless(cuda_available(), 'CUDA not available')
@@ -1310,9 +1302,8 @@ class TestRepeatedFit(unittest.TestCase):
 
 
     def test_failed_distillation_leaves_learner_untouched(self):
-        """distil() published the student before training it, so a failure left
-        it attached: predict() then added a bias-only student and shap() refused
-        to run, even though the caller saw an exception."""
+        """A failed distil() must leave no student attached: a half-built one
+        would add a bias-only term to predict() and block shap()."""
         model = self._model()
         model.fit(self.X, self.y, iterations=5, shuffle=False)
         before = np.asarray(model.learner.predict(self.X, requires_grad=False, tensor=False))
@@ -1329,9 +1320,9 @@ class TestRepeatedFit(unittest.TestCase):
         model.learner.shap(self.X)   # must still work
 
     def test_mapping_retry_after_rejected_batch(self):
-        """A rejected batch must not stick: BaseLearner.step() used to store the
-        inferred mapping before _ensure_feature_mapping() validated it, so the
-        retry the error message asks for reused the bad mapping forever."""
+        """A rejected batch must not stick: the inferred mapping is stored only
+        after _ensure_feature_mapping() validates it, so the retry the error
+        message asks for can succeed."""
         model = self._model()
         model.fit(self.X, self.y, iterations=3, shuffle=False)
         learner = model.learner
@@ -1354,8 +1345,8 @@ class TestRepeatedFit(unittest.TestCase):
 
     def test_copy_preserves_constraints_and_weights(self):
         """__copy__ rebuilds from params, which describes neither constraints nor
-        feature weights, so copy_.reset() used to yield an UNCONSTRAINED model
-        with default weights -- silently voiding the monotonic guarantee."""
+        feature weights, so both must be carried over separately or a reset()
+        copy silently drops the monotonic guarantee."""
         import copy as _copy
         weights = np.array([0.1, 2.0, 0.5, 1.5], dtype=np.float32)
         model = GBTModel(
@@ -1379,7 +1370,8 @@ class TestRepeatedFit(unittest.TestCase):
                                    err_msg='copy lost its feature weights')
 
     def test_set_feature_weights_survives_reset(self):
-        """The setter only wrote to C++, so reset() restored the old weights."""
+        """set_feature_weights() must also update Python state, since reset()
+        rebuilds the C++ model from it."""
         model = self._model()
         model.fit(self.X, self.y, iterations=2, shuffle=False)
         weights = np.array([0.25, 1.75, 0.5, 1.0], dtype=np.float32)
@@ -1391,7 +1383,7 @@ class TestRepeatedFit(unittest.TestCase):
 
     def test_adam_rejects_matrix_representation_and_compression(self):
         """V is -lr * raw_leaf_value, which cannot express Adam's sample-specific
-        contribution -- the same error this release fixes in SHAP."""
+        contribution."""
         model = GBTModel(
             input_dim=4, output_dim=1,
             tree_struct={'max_depth': 3, 'n_bins': 64, 'min_data_in_leaf': 0,
@@ -1532,6 +1524,16 @@ class TestDistilledModelRestrictions(unittest.TestCase):
         with self.assertRaises(ValueError):
             model.learner.get_matrix_representation(self.X)
 
+    def test_full_range_sentinels_allowed_with_student(self):
+        """stop_idx=0 means "all trees", so it is the full prediction, not a range."""
+        model = self._make_trained_model()
+        self._attach_student(model)
+        expected = model(self.X, tensor=False)
+        for kwargs in ({'stop_idx': 0}, {'start_idx': 0}, {'start_idx': 0, 'stop_idx': 0}):
+            np.testing.assert_allclose(
+                model(self.X, tensor=False, **kwargs), expected, rtol=1e-6,
+                err_msg=f'{kwargs} should equal the full prediction')
+
     def test_print_and_plot_tree_raise_with_student(self):
         """get_num_trees() counts main+student, but these only see the main model.
 
@@ -1549,7 +1551,7 @@ class TestDistilledModelRestrictions(unittest.TestCase):
     def test_failed_reset_leaves_python_state_untouched(self):
         """reset() must publish Python state only after the rebuild succeeds.
 
-        Mutating optimizers/total_iterations up front left the still-installed
+        Mutating optimizers/total_iterations up front would leave the still-installed
         old model carrying half-updated scheduler state after a failure.
         """
         model = self._make_trained_model()
@@ -1585,7 +1587,7 @@ class TestDistilledModelRestrictions(unittest.TestCase):
 
     @unittest.skipUnless(cuda_available(), 'CUDA not available')
     def test_set_device_moves_student_to_cuda(self):
-        """A real transfer, unlike set_device('cpu') on a CPU-resident model.
+        """set_device('cuda') must move a distilled model across devices.
 
         Main and student must land on the same device: predict() sums both, so a
         split placement would feed one of them the wrong buffer type.
@@ -1600,8 +1602,8 @@ class TestDistilledModelRestrictions(unittest.TestCase):
     def test_set_device_then_reset_keeps_device(self):
         """reset() rebuilds from self.params, so set_device() must update it.
 
-        Updating only self.device meant reset() silently rebuilt on the ORIGINAL
-        device while transform_data() still routed tensors for the requested one.
+        Updating only self.device would let reset() rebuild on the original
+        device while transform_data() routes tensors for the requested one.
         """
         model = self._make_trained_model()
         model.set_device('cpu')
@@ -1612,7 +1614,7 @@ class TestDistilledModelRestrictions(unittest.TestCase):
 
     @unittest.skipUnless(cuda_available(), 'CUDA not available')
     def test_set_device_cuda_then_reset_keeps_cuda(self):
-        """The failing direction of the bug: cuda must survive a reset()."""
+        """A device set to cuda must survive a reset()."""
         model = self._make_trained_model()
         model.set_device('cuda')
         model.learner.reset()
@@ -1663,8 +1665,7 @@ class TestAdamCUDAGuard(unittest.TestCase):
         return model
 
     # No CUDA skip: the Adam check is pure Python and runs before any device
-    # transfer, so it must hold on CPU-only CI too -- which is where a
-    # regression would otherwise go unnoticed.
+    # transfer, so it must hold on CPU-only machines too.
     def test_adam_set_device_to_cuda_raises(self):
         model = self._make_adam_model()
         with self.assertRaises(ValueError):
@@ -1689,6 +1690,68 @@ class TestAdamCUDAGuard(unittest.TestCase):
         self.assertEqual(model.learner.device, 'cpu')
         self.assertEqual(model.learner.params['device'], 'cpu')
         self.assertEqual(model.get_device(), 'cpu')
+
+
+class TestCudaUnavailableIsNonDestructive(unittest.TestCase):
+    """Requesting CUDA when it is unusable must raise before touching the backend.
+
+    The C++ to_device() falls back to CPU by reallocating the ensemble, which
+    drops the trained trees, so the check has to happen in Python first.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        rng = np.random.default_rng(11)
+        cls.X = rng.normal(size=(60, 4)).astype(np.float32)
+        cls.y = (cls.X[:, 0] - cls.X[:, 1]).astype(np.float32)[:, np.newaxis]
+        cls.tree_struct = {'max_depth': 3, 'n_bins': 64, 'min_data_in_leaf': 1,
+                           'par_th': 2, 'grow_policy': 'oblivious'}
+        cls.params = {'split_score_func': 'L2', 'generator_type': 'Quantile',
+                      'control_variates': False}
+        cls.test_dir = tempfile.mkdtemp()
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.test_dir)
+
+    def _trained(self):
+        model = GBTModel(
+            input_dim=4, output_dim=1, tree_struct=self.tree_struct,
+            optimizers={'algo': 'SGD', 'lr': 0.1, 'start_idx': 0, 'stop_idx': 1},
+            params=self.params, verbose=0, device='cpu')
+        model.fit(self.X, self.y, 15)
+        return model
+
+    @unittest.skipIf(cuda_usable(), 'CUDA is usable here; this covers the fallback path')
+    def test_set_device_cuda_raises_and_preserves_model(self):
+        model = self._trained()
+        before = model(self.X, tensor=False)
+        with self.assertRaises(ValueError):
+            model.set_device('cuda')
+        np.testing.assert_allclose(
+            model(self.X, tensor=False), before, rtol=1e-6,
+            err_msg='a refused CUDA move changed the model')
+        self.assertEqual(model.get_device(), 'cpu')
+
+    @unittest.skipIf(cuda_usable(), 'CUDA is usable here; this covers the fallback path')
+    def test_load_on_cuda_raises(self):
+        model = self._trained()
+        path = os.path.join(self.test_dir, 'cuda_unavailable')
+        model.save_learner(path)
+        with self.assertRaises(ValueError):
+            GBTModel.load_learner(path, device='cuda')
+
+    @unittest.skipIf(cuda_usable(), 'CUDA is usable here; this covers the fallback path')
+    def test_construction_on_cuda_raises(self):
+        with self.assertRaises(ValueError):
+            GBTModel(
+                input_dim=4, output_dim=1, tree_struct=self.tree_struct,
+                optimizers={'algo': 'SGD', 'lr': 0.1, 'start_idx': 0, 'stop_idx': 1},
+                params=self.params, verbose=0, device='cuda')
+
+    def test_cuda_usable_matches_runtime(self):
+        """cuda_usable() must reflect the runtime, not just the build."""
+        self.assertEqual(cuda_usable(), cuda_available() and th.cuda.is_available())
 
 
 if __name__ == '__main__':

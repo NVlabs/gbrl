@@ -132,10 +132,8 @@ class LinearScheduler : public Scheduler {
          * Computes: lr(t) = init_lr + clamp(t/T, 0, 1) * (stop_lr - init_lr)
          *
          * so lr(0) == init_lr and lr(t >= T) == stop_lr.  Clamping the progress
-         * rather than the rate keeps this correct in both directions: the old
-         * `if (lr < stop_lr) return stop_lr` assumed a decaying schedule, which
-         * collapsed warmup (stop_lr > init_lr) to a constant stop_lr and then
-         * let it grow past stop_lr once t exceeded T.
+         * rather than the rate keeps this correct for warmup (stop_lr > init_lr)
+         * as well as decay.
          *
          * @param t Current iteration number
          * @return Learning rate for this iteration

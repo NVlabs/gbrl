@@ -41,6 +41,7 @@ from gbrl.common.utils import (NumericalData, concatenate_arrays,
                                normalize_vector_input, numerical_dtype,
                                preprocess_features, process_monotonic_constraints,
                                get_index_mapping, to_numpy,
+                               validate_cuda_request,
                                validate_monotonic_features_numerical,
                                validate_monotonic_optimizer_compat,
                                validate_optimizer_ranges)
@@ -50,12 +51,13 @@ from gbrl.learners.base import BaseLearner
 def warn_on_projection_limit(cpp_model) -> None:
     """Raise a Python warning if a monotonic projection hit its pass limit.
 
-    The C++ side also prints to stderr, which nothing in Python can observe. The
+    The C++ side only prints to stderr, which nothing in Python can observe. The
     leaf values are still monotone; they are just no longer guaranteed to be the
     closest monotone values to the ones the trees produced.
 
-    The count is read off the model that just trained, so two models training
-    concurrently cannot report each other's projections.
+    Args:
+        cpp_model: The C++ model that just trained; the projection count is read
+            off it directly.
     """
     n_hits = cpp_model.get_monotonic_nonconverged()
     if n_hits > 0:
@@ -112,12 +114,8 @@ class GBTLearner(BaseLearner):
         Resets the learner to its initial state,
         reinitializing the C++ model and optimizers.
         """
-        # Every piece of Python state this method changes is computed into a
-        # `next_*` local first and assigned only once the rebuild has fully
-        # succeeded.  Mutating self.optimizers / self.total_iterations up front
-        # left the old (still-installed) model carrying half-updated scheduler
-        # state when set_optimizer() below raised, so a retry started from the
-        # wrong learning rate.
+        # State this method changes is computed into a `next_*` local first and
+        # assigned only once the rebuild has fully succeeded.
         next_optimizers = [opt.copy() for opt in self.optimizers]
 
         # Carry the decayed LR forward only when training continues after
@@ -128,9 +126,8 @@ class GBTLearner(BaseLearner):
             for i in range(len(next_optimizers)):
                 next_optimizers[i]['init_lr'] = lrs[i]
 
-        # Re-checked here as well as in __init__: load() builds instances via
-        # __new__ and bypasses __init__, so a model saved by an older version
-        # could otherwise resume training with Adam-driven constraints.
+        # load() builds instances via __new__ and bypasses __init__, so the
+        # Adam/monotonic check has to run here too.
         validate_monotonic_optimizer_compat(self.monotonic_constraints, next_optimizers)
 
         # Process monotonic constraints first to know size for allocation
@@ -146,9 +143,7 @@ class GBTLearner(BaseLearner):
                 n_mono_constraints = len(feat_idx)
                 mono_data = (feat_idx, out_idx, dirs)
         
-        # Built locally and published only once every optimizer is configured: a
-        # throw in the loop below used to leave the learner holding a new,
-        # optimizer-less model with the previous one already discarded.
+        # Publish only after every optimizer is set, so a failure keeps the old model.
         cpp_model = GBRL_CPP(**self.params, learner_name=self.learner_name, n_mono_constraints=n_mono_constraints)
         cpp_model.set_feature_weights(self.feature_weights)
 
@@ -160,10 +155,8 @@ class GBTLearner(BaseLearner):
         next_total_iterations = (self.total_iterations
                                  if self.student_model is not None else 0)
 
-        # Build the configs handed to C++ as copies.  Writing the reduced horizon
-        # back into the optimizers would subtract total_iterations again on every
-        # subsequent reset().  Only a linear scheduler carries 'T'; a constant one
-        # has no such key.
+        # Copy the configs handed to C++: writing the reduced horizon back into the
+        # optimizers would subtract total_iterations again on every reset().
         configs = []
         for i, opt in enumerate(next_optimizers):
             cfg = opt.copy()
@@ -176,9 +169,7 @@ class GBTLearner(BaseLearner):
                 remaining = horizon - next_total_iterations
                 if remaining <= 0:
                     # The schedule documents lr(t >= T) == stop_lr, so an exhausted
-                    # horizon is not an error: hold the final rate.  Raising here
-                    # contradicted scheduler.h and, worse, made a successful
-                    # distillation fail during the rebuild.
+                    # horizon is not an error: hold the final rate.
                     cfg['scheduler'] = 'Const'
                     cfg['init_lr'] = cfg.get('stop_lr', cfg['init_lr'])
                     cfg.pop('T', None)
@@ -190,15 +181,12 @@ class GBTLearner(BaseLearner):
             for opt in configs:
                 cpp_model.set_optimizer(**opt)
         except RuntimeError as exc:
-            # No safe fallback: a model missing its optimizer trains nothing and
-            # predicts only its bias, so this must reach the caller.  The previous
-            # model is still installed, so the learner is left usable.
+            # The previous model is still installed, so the learner stays usable.
             raise ValueError(f"Invalid GBRL optimizer configuration: {exc}") from exc
 
-        # Everything succeeded: publish the new model AND the Python state that
-        # goes with it, in one go.  The cached mapping goes with the old model --
-        # a fresh model reports no feature counts, so a stale layout would be
-        # installed unchecked on the next batch.
+        # Publish the new model and its Python state together. The cached mapping
+        # belongs to the old model: a fresh one reports no feature counts, so a
+        # stale layout would be installed unchecked on the next batch.
         self._cpp_model = cpp_model
         self.optimizers = next_optimizers
         self.total_iterations = next_total_iterations
@@ -218,16 +206,12 @@ class GBTLearner(BaseLearner):
         model rather than on total_iterations, because distillation swaps in a
         fresh model while leaving total_iterations non-zero.
         """
-        # Always derived from the batch in hand, and kept local until every check
-        # and the C++ setter succeed.  Reusing a cached mapping meant a layout
-        # from an earlier dataset could be installed on a fresh model, and a
-        # rejected batch stuck so the retry the error asks for never recomputed.
-        # This only runs while _feature_mapping_installed is False.
+        # Derived from the batch in hand and kept local until every check and the
+        # C++ setter succeed, so a rejected batch leaves no mapping behind.
         candidate = get_index_mapping(self._mapping_input(features))
         feature_mapping, numerical_mask = candidate
-        # A model that has already trained knows how many features of each kind it
-        # expects.  Rebuilding from a batch with a different mix would install a
-        # mapping that names the wrong column for every split, so reject it.
+        # A batch with a different numerical/categorical mix than the model was
+        # trained on would name the wrong column for every split, so reject it.
         metadata = self._cpp_model.get_metadata()
         n_num = int(metadata.get('n_num_features', 0))
         n_cat = int(metadata.get('n_cat_features', 0))
@@ -308,8 +292,8 @@ class GBTLearner(BaseLearner):
             features = features.detach().cpu().numpy()
         features = self._mapping_input(features)
         num_features, cat_features = preprocess_features(features)
-        # fit() must install the mapping too; without it SHAP attributes every
-        # feature to column 0 (see _ensure_feature_mapping).
+        # Without the mapping, SHAP attributes every feature to column 0
+        # (see _ensure_feature_mapping).
         if not self._feature_mapping_installed:
             self._ensure_feature_mapping(features)
             self._feature_mapping_installed = True
@@ -322,12 +306,10 @@ class GBTLearner(BaseLearner):
         else:
             targets = targets.reshape((len(targets), self.params['output_dim']))
 
-        # Accumulate the delta rather than assigning: after distillation the main
-        # C++ model restarts at zero trees while total_iterations deliberately
-        # keeps the teacher's history, so assigning would discard it.
-        # In a finally block because a rejected monotonic projection can throw
-        # after several trees were already added and kept; skipping the update
-        # would leave the Python counts behind the C++ ones.
+        # Accumulate the delta: after distillation the main C++ model restarts at
+        # zero trees while total_iterations keeps the teacher's history.
+        # In a finally block: a rejected monotonic projection can throw after
+        # trees were already added and kept.
         iters_before = self._cpp_model.get_iteration()
         try:
             loss = self._cpp_model.fit(num_features, cat_features,
@@ -400,6 +382,7 @@ class GBTLearner(BaseLearner):
         assert os.path.isfile(filename), "filename doesn't exist!"
         try:
             instance = cls.__new__(cls)
+            validate_cuda_request(device)
             instance._cpp_model = GBRL_CPP.load(filename)
             # Check Adam/CUDA before calling set_device: instance.optimizers
             # isn't populated yet, so the check in set_device() can't fire.
@@ -442,19 +425,16 @@ class GBTLearner(BaseLearner):
             instance.feature_weights = instance._cpp_model.get_feature_weights()
             instance.device = instance.params['device']
             instance.feature_mapping = instance._cpp_model.get_feature_mapping()
-            # Models trained by versions whose fit() never installed a mapping carry
-            # an all-zero one.  Trusting it makes SHAP attribute every feature to
-            # column 0 -- invisibly, since additivity is unaffected by moving
-            # attribution between columns.  Check the mapping against the feature
-            # counts the model was trained with and force a rebuild if it fails.
+            # A checkpoint without an installed mapping carries an all-zero one,
+            # which makes SHAP attribute every feature to column 0. Validate it
+            # against the trained feature counts and force a rebuild if it fails.
             instance._feature_mapping_installed = is_valid_feature_mapping(
                 instance.feature_mapping, instance.input_dim,
                 int(metadata.get('n_num_features', 0)),
                 int(metadata.get('n_cat_features', 0)))
             if not instance._feature_mapping_installed:
                 instance.feature_mapping = None
-            # __new__ bypasses __init__, so the checks it runs have to be repeated
-            # here for a model saved by a version that did not have them.
+            # __new__ bypasses __init__, so the checks it runs are repeated here.
             validate_optimizer_ranges(instance.optimizers)
             # Rebuild the Python constraint dict from the serialized arrays so
             # reset()/distil() recreate a model with the same constraints.
@@ -475,13 +455,9 @@ class GBTLearner(BaseLearner):
                     else:
                         restored[f] = (direction, [o])
                 instance.monotonic_constraints = restored
-            # The same monotonic checks __init__ runs.  reset() repeats the
-            # optimizer one, but step()/fit() can be reached straight after
-            # load(), so a model saved by a version without these checks would
-            # otherwise resume training with constraints it cannot honour.
-            # BaseLearner.__init__ rejects constraints on non-oblivious trees; the
-            # projection only exists for oblivious ones, so a checkpoint claiming
-            # otherwise would train unconstrained.
+            # The monotonic checks __init__ runs; step()/fit() can be reached
+            # straight after load(). The projection only exists for oblivious
+            # trees, so a checkpoint claiming otherwise would train unconstrained.
             if instance.monotonic_constraints and \
                     str(instance.tree_struct.get('grow_policy', '')).lower() != 'oblivious':
                 raise ValueError(
@@ -566,8 +542,8 @@ class GBTLearner(BaseLearner):
         except RuntimeError as e:
             print(f"Caught an exception in GBRL: {e}")
             return
-        # Kept in step with C++: reset(), __copy__() and distil() all rebuild from
-        # this attribute, so leaving it stale silently restored the old weights.
+        # reset(), __copy__() and distil() rebuild from this, so keep it in sync
+        # with C++.
         self.feature_weights = normalized
 
     def get_bias(self) -> np.ndarray:
@@ -668,9 +644,8 @@ class GBTLearner(BaseLearner):
             )
         if isinstance(features, th.Tensor):
             features = features.detach().cpu().numpy()
-        # A model saved before fit() installed a mapping carries an unusable one.
-        # Rebuild it from the batch being explained, so such a model can still be
-        # explained without a training call first.
+        # A model saved before fit() installed a mapping carries an unusable one;
+        # rebuild it from the batch being explained.
         if not self._feature_mapping_installed:
             self._ensure_feature_mapping(features)
             self._feature_mapping_installed = True
@@ -720,9 +695,8 @@ class GBTLearner(BaseLearner):
             )
         if isinstance(features, th.Tensor):
             features = features.detach().cpu().numpy()
-        # A model saved before fit() installed a mapping carries an unusable one.
-        # Rebuild it from the batch being explained, so such a model can still be
-        # explained without a training call first.
+        # A model saved before fit() installed a mapping carries an unusable one;
+        # rebuild it from the batch being explained.
         if not self._feature_mapping_installed:
             self._ensure_feature_mapping(features)
             self._feature_mapping_installed = True
@@ -749,6 +723,9 @@ class GBTLearner(BaseLearner):
         """
         if isinstance(device, th.device):
             device = device.type
+        # Checked before to_device(): its CPU fallback reallocates the ensemble
+        # and drops the trained trees.
+        validate_cuda_request(device)
         # Adam is CPU-only; the GPU predictor represents every optimizer as SGD
         # and discards moment state, so an Adam model on CUDA gives wrong predictions.
         # Use getattr so this is safe in GBTLearner.load(), which calls set_device
@@ -761,8 +738,8 @@ class GBTLearner(BaseLearner):
                 "The GPU predictor does not implement Adam; predictions would be wrong.")
         try:
             self._cpp_model.to_device(device)
-            # load() calls set_device() before student_model is assigned; guard
-            # against the AttributeError that __new__+no-__init__ would cause.
+            # load() calls set_device() before student_model is assigned, so use
+            # getattr to avoid an AttributeError.
             if getattr(self, 'student_model', None) is not None:
                 self.student_model.to_device(device)
         except RuntimeError as e:
@@ -774,10 +751,7 @@ class GBTLearner(BaseLearner):
         actual_device = self._cpp_model.get_device()
         self.device = actual_device
         # reset() rebuilds the C++ model with GBRL_CPP(**self.params), so params
-        # has to carry the real device too. Updating only self.device meant a
-        # reset() after set_device() rebuilt on the ORIGINAL device while
-        # transform_data() still routed tensors for the requested one -- handing
-        # a CUDA tensor to a CPU model.
+        # has to carry the real device too.
         # getattr: load() calls set_device() before it builds params, and fills
         # in the device from the C++ model itself a few lines later.
         if getattr(self, 'params', None) is not None:
@@ -808,7 +782,9 @@ class GBTLearner(BaseLearner):
             NumericalData: The predicted output.
         """
         assert self._cpp_model is not None, "No model loaded!"
-        if self.student_model is not None and (start_idx is not None or stop_idx is not None):
+        # 0 and None both mean "all trees", so they are not a real range.
+        has_range = start_idx not in (None, 0) or stop_idx not in (None, 0)
+        if self.student_model is not None and has_range:
             raise ValueError(
                 "Ranged prediction (start_idx/stop_idx) is not supported when a "
                 "student model is attached. The combined tree sequence has no defined "
@@ -858,19 +834,16 @@ class GBTLearner(BaseLearner):
         Returns:
             Tuple[float, Dict]: The final loss and updated parameters.
         """
-        # predict() adds the student's output to the main model's, so the public
-        # prediction is only monotone if the student is too.  A student trained on
-        # a monotone teacher's outputs carries no such guarantee, which would
-        # quietly break the hard monotonicity contract.
+        # predict() adds the student's output to the main model's, so the combined
+        # prediction is only monotone if the student is too, and it is not.
         if self.monotonic_constraints:
             raise ValueError(
                 "Distillation is not supported for models with monotonic "
                 "constraints. predict() adds the student model's output to the "
                 "main model's, and the student is not constrained, so the result "
                 "would not be guaranteed monotone.")
-        # Checked before anything is built: params['min_steps'] is read only after
-        # the student exists, so a missing key used to raise KeyError with a
-        # half-configured student already attached.
+        # Checked before anything is built: params['min_steps'] is only read once
+        # the student exists.
         for required in ('min_steps', 'limit_steps'):
             if required not in params:
                 raise ValueError(
@@ -887,10 +860,8 @@ class GBTLearner(BaseLearner):
                          'max_depth': params.get('distil_max_depth', 6),
                          'verbose': verbose, 'batch_size':
                          self.params.get('distil_batch_size', 2048)}
-        # Built locally and published only after training and reset() both
-        # succeed.  predict() adds any non-None student to the main prediction and
-        # shap() refuses to run while one is attached, so assigning up front left
-        # the learner visibly changed even when distil() raised.
+        # Published only after training and reset() both succeed, so a failure
+        # leaves the learner unchanged.
         student = GBRL_CPP(**distil_params)
         # A raw C++ model starts with zero feature weights and an uninitialised
         # feature mapping.  Zero weights collapse every split score, so the student
@@ -915,8 +886,8 @@ class GBTLearner(BaseLearner):
                 f"Invalid GBRL distillation optimizer configuration: {exc}") from exc
 
         bias = np.mean(targets, axis=0)
-        # np.mean returns a NumPy scalar (e.g. np.float32), not a Python
-        # float, so the old isinstance check never fired for 1-D targets.
+        # np.mean returns a NumPy scalar (e.g. np.float32), not a Python float,
+        # so 1-D targets need an explicit promotion to a vector.
         bias = np.atleast_1d(bias).astype(numerical_dtype, copy=False)
         student.set_bias(bias.astype(numerical_dtype))
         tr_loss = student.fit(num_obs, cat_obs, targets, params['min_steps'])
@@ -930,10 +901,8 @@ class GBTLearner(BaseLearner):
             else:
                 break
         # reset() reads student_model to decide whether to keep total_iterations
-        # and to shorten a linear schedule, so it has to be published first.
-        # reset() installs its new C++ model only after every optimizer is
-        # configured, so a failure here leaves the main ensemble untouched and
-        # restoring the student is enough to undo the whole call.
+        # and to shorten a linear schedule, so publish it first. reset() leaves the
+        # main ensemble untouched on failure, so restoring the student undoes all.
         previous_student = self.student_model
         self.student_model = student
         try:
@@ -947,11 +916,17 @@ class GBTLearner(BaseLearner):
         """Adam has no fixed per-leaf contribution, so it has no leaf-value matrix.
 
         get_matrix_representation() builds V with Optimizer::copy_and_scale, which
-        is -lr * raw_leaf_value. That is not virtual, so Adam uses it too -- the
-        exact error this release fixes in SHAP. An Adam tree's contribution
-        depends on each sample's accumulated moments, which one shared value per
-        leaf cannot express, so A @ V does not reconstruct predict(X) and anything
-        optimized against it is optimizing the wrong function.
+        is -lr * raw_leaf_value. That is not virtual, so Adam uses it too. An Adam
+        tree's contribution depends on each sample's accumulated moments, which one
+        shared value per leaf cannot express, so A @ V does not reconstruct
+        predict(X) and anything optimized against it is optimizing the wrong
+        function.
+
+        Args:
+            what (str): Name of the calling API, used in the error message.
+
+        Raises:
+            ValueError: If any optimizer uses Adam.
         """
         for opt in (self.optimizers or []):
             if str(opt.get('algo', 'SGD')).lower() == 'adam':
@@ -1133,9 +1108,8 @@ class GBTLearner(BaseLearner):
                            verbose=self.verbose,
                            device=self.device,
                            name=self.learner_name)
-        # params does not describe these, so a plain rebuild from it would drop
-        # them: copy_.reset() would produce an UNCONSTRAINED model with default
-        # feature weights, silently voiding the monotonic guarantee.
+        # params does not describe these, so a rebuild from it alone would drop
+        # them and copy_.reset() would produce an unconstrained model.
         copy_.monotonic_constraints = (dict(self.monotonic_constraints)
                                        if self.monotonic_constraints else None)
         copy_.feature_weights = np.array(self.feature_weights, copy=True)

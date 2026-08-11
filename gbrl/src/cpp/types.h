@@ -59,11 +59,10 @@
 
 /** @brief Maximum Dykstra passes per output when applying monotonic constraints.
  *
- *  The monotonic projection is Dykstra's cyclic projection method over pairwise
- *  halfspaces - NOT the classical Pool Adjacent Violators Algorithm, which uses a
- *  linear order and a stack of level sets.  Dykstra converges asymptotically;
- *  measured worst case is ~104 passes for 4 constrained depths at depth 6, so this
- *  leaves substantial headroom. */
+ *  The projection uses Dykstra's cyclic projection over pairwise halfspaces,
+ *  which converges asymptotically rather than in a fixed number of passes, so it
+ *  needs a cap. Measured worst case is ~104 passes (4 constrained depths at
+ *  depth 6). */
 #define MONOTONIC_MAX_PASSES 256
 
 /** @brief Convergence tolerance for the monotonic-constraint projection */
@@ -73,8 +72,7 @@
  *
  *  Such a projection still returns monotone leaf values, but they are no longer
  *  provably the closest monotone values.  step()/fit() clear the count before
- *  training and Python reads it afterwards to raise a RuntimeWarning; a plain
- *  message on stderr is invisible to warnings.catch_warnings()/pytest.warns().
+ *  training and Python reads it afterwards to raise a RuntimeWarning.
  *  Counted per thread: the pybind wrappers release the GIL, so models training
  *  in separate Python threads must not share the count. */
 int  get_monotonic_nonconverged();

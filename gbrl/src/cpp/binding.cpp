@@ -64,12 +64,8 @@ template <typename T>
  * BaseLearner.transform_data() run np.ascontiguousarray() before anything
  * reaches this layer.
  *
- * This function borrows the caller's array and rejects anything that violates
- * the contract. It deliberately does NOT convert: a conversion would produce a
- * temporary owned only by this frame, and the pointer handed to the backend
- * would dangle as soon as the function returned - which the backend then reads
- * after releasing the GIL. Rejecting turns that silent corruption into an
- * exception at the call site.
+ * The array is borrowed rather than converted, so a violation of that contract
+ * is rejected with an exception at the call site.
  */
 void get_numpy_array_info(
     py::object obj,
@@ -82,13 +78,8 @@ void get_numpy_array_info(
         throw std::runtime_error("Expected a NumPy array");
     }
     
-    // Borrowed, NOT converted.  py::array::ensure(..., forcecast) silently builds
-    // a temporary copy for a strided or wrong-dtype input; that copy is owned only
-    // by this local and is freed on return, leaving the extracted pointer dangling
-    // for the backend to read after the GIL is released.  Enforce the documented
-    // contract instead: the supported Python layer always passes C-contiguous
-    // arrays of the expected dtype, so a violation here is a caller bug and is
-    // reported as one.
+    // Borrow instead of forcecasting: a converted copy would be owned by this
+    // local and freed on return, leaving the backend a dangling pointer.
     py::array arr = py::reinterpret_borrow<py::array>(obj);
     if (!(arr.flags() & py::array::c_style)) {
         throw std::runtime_error(
@@ -1343,11 +1334,9 @@ gbrl.def("get_matrix_representation", [](GBRL &self, py::object &obs, py::object
         self.compress_ensemble(n_compressed_leaves, n_compressed_trees, leaf_indices_ptr, tree_indices_ptr, new_tree_indices_ptr, W_ptr);  
 
     }, py::arg("n_compressed_leaves"), py::arg("n_compressed_trees"), py::arg("leaf_indices"), py::arg("tree_indices"), py::arg("new_tree_indices"), py::arg("W") , "Compress ensemble");
-    // Shared argument-parsing helper for all four SHAP bindings.
-    // Caller must keep the original py::object& arguments alive for the
-    // duration of any C++ call that uses the returned pointers.
-    // ShapArgs holds both the owning array objects (keeping buffers alive through
-    // the C++ call) and the raw pointers extracted from them.
+    // Shared argument parsing for the four SHAP bindings.  ShapArgs holds the
+    // owning array objects alongside the raw pointers taken from them, so the
+    // buffers stay alive for the duration of the C++ call.
     struct ShapArgs {
         py::object obs_owner;
         py::object cat_owner;
@@ -1401,10 +1390,8 @@ gbrl.def("get_matrix_representation", [](GBRL &self, py::object &obs, py::object
             py::buffer_info info = arr.request();
             if (info.shape.size() != 1 && info.shape.size() != 2)
                 throw std::runtime_error("categorical_obs must be a 1-D or 2-D array");
-            // The tree code advances this pointer in fixed MAX_CHAR_SIZE strides,
-            // so an S1/unicode/object array with the right feature count would
-            // still read past the end of the buffer.  Match the dtype the other
-            // bindings require.
+            // The tree code strides this pointer by MAX_CHAR_SIZE, so a narrower
+            // dtype with the right feature count still reads past the buffer.
             if (info.format != CAT_TYPE || info.itemsize != MAX_CHAR_SIZE)
                 throw std::runtime_error(
                     "categorical_obs must be a C-contiguous NumPy array with dtype S" +
@@ -1465,10 +1452,9 @@ gbrl.def("get_matrix_representation", [](GBRL &self, py::object &obs, py::object
             a.offset_ptr = static_cast<float*>(info.ptr);
             a.offset_owner = std::move(arr);
         }
-        // The SHAP buffer is sized from the model metadata, and the returned
-        // NumPy shape must describe exactly that buffer.  Reject any input whose
-        // feature counts disagree with the model, otherwise the returned array
-        // would span memory past the allocation.
+        // The SHAP buffer is sized from the model metadata, so feature counts
+        // that disagree with the model would make the returned array span past
+        // the allocation.
         if (a.n_num_features != metadata->n_num_features)
             throw std::runtime_error("obs has " + std::to_string(a.n_num_features) +
                                      " numerical features but model expects " +

@@ -226,9 +226,8 @@ float TreeNode::getSplitScoreWithConstraints(
         }
     }
     
-    // Count EVERY constraint on this feature (numerical features only): a feature
-    // may be constrained on several output dimensions, and the scorers below
-    // handle all of them.
+    // A feature may be constrained on several output dimensions, so count all of
+    // its constraints (numerical features only).
     int n_feature_constraints = 0;
     if (is_numeric && mono_constraints != nullptr && n_mono_constraints > 0) {
         for (int c = 0; c < n_mono_constraints; ++c) {
@@ -241,10 +240,8 @@ float TreeNode::getSplitScoreWithConstraints(
         return this->getSplitScore(dataset, split_score_func, split_candidate, min_data_in_leaf);
     }
     
-    // Both score functions are constraint-aware: pool every violating output
-    // dimension first, then evaluate the ordinary score on the pooled means.
-    // Dispatch explicitly so an unknown scoreFunc reports the same invalid score
-    // as getSplitScore instead of being treated as Cosine.
+    // Both constrained scorers pool every violating output dimension first, then
+    // evaluate the ordinary score on the pooled means.
     if (split_score_func == L2) {
         return this->splitScoreL2WithConstraint(
             dataset->obs->data, dataset->build_grads->data,
@@ -266,7 +263,7 @@ float TreeNode::getSplitScoreWithConstraints(
 /**
  * @brief Pool every constrained output dimension that violates its direction.
  *
- * Shared by the L2 and Cosine constrained scorers so both use one definition.
+ * Shared by the L2 and Cosine constrained scorers.
  * left_mean/right_mean hold RAW GRADIENT means while the constraint is about
  * predictions; SGD contributes delta = -lr * g with lr > 0, so the gradient
  * order is the reverse of the prediction order:
@@ -337,8 +334,8 @@ float TreeNode::splitScoreL2WithConstraint(
 
     const float left_count_f = static_cast<float>(left_count);
     const float right_count_f = static_cast<float>(right_count);
-    // Guarded reciprocal, as in every other scorer: min_data_in_leaf == 0 is a
-    // supported configuration, so an empty child is legitimate and its mean is 0.
+    // min_data_in_leaf == 0 is supported, so an empty child is legitimate and
+    // its mean stays 0.
     const float left_count_recip = (left_count > 0) ? 1.0f / left_count_f : 0.0f;
     const float right_count_recip = (right_count > 0) ? 1.0f / right_count_f : 0.0f;
     #pragma omp simd
@@ -406,8 +403,8 @@ float TreeNode::splitScoreCosineWithConstraint(
 
     const float left_count_f = static_cast<float>(left_count);
     const float right_count_f = static_cast<float>(right_count);
-    // Guarded reciprocal, as in every other scorer: min_data_in_leaf == 0 is a
-    // supported configuration, so an empty child is legitimate and its mean is 0.
+    // min_data_in_leaf == 0 is supported, so an empty child is legitimate and
+    // its mean stays 0.
     const float left_count_recip = (left_count > 0) ? 1.0f / left_count_f : 0.0f;
     const float right_count_recip = (right_count > 0) ? 1.0f / right_count_f : 0.0f;
     #pragma omp simd

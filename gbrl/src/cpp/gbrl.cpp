@@ -126,10 +126,8 @@ GBRL::GBRL(const std::string& filename){
 
 GBRL::GBRL(GBRL& other):  
            opts(), parallel_predict(other.parallel_predict){
-        // Every other constructor sets sheader (create_header(), or read_header()
-        // when loading); this one did not, so saving a copied model wrote
-        // indeterminate version bytes -- serializationHeader's version fields
-        // have no default initializers.
+        // serializationHeader's version fields have no default initializers, so
+        // the header has to be carried over for a copied model to save.
         this->sheader = other.sheader;
         // Training state a copy is expected to continue from.
         this->n_nonconverged_projections = other.n_nonconverged_projections;
@@ -725,9 +723,8 @@ void GBRL::_step_gpu(dataSet *dataset){
 
     char *device_memory_block; 
     err = allocateCudaMemory((void**)&device_memory_block, alloc_size, "when trying to allocate step_gpu data");
-    // Throw rather than return: a silent return left Python believing a tree had
-    // been added, so total_iterations advanced while the backend's iteration did
-    // not and the caller saw no error at all.
+    // Throw rather than return: a silent return leaves Python counting a tree
+    // that was never added.
     if (err != cudaSuccess)
         throw std::runtime_error("CUDA allocation failed while preparing a GBRL step");
 
@@ -807,9 +804,8 @@ void GBRL::_step_gpu(dataSet *dataset){
         cudaFree(device_memory_block);
         throw std::runtime_error("Failed to allocate split data on the GPU");
     }
-    // A rejected monotonic projection throws out of fit_tree_*_cuda; without this
-    // the device block and split data below are never released, so a caller that
-    // retries after the failure leaks GPU memory on every attempt.
+    // A rejected monotonic projection throws out of fit_tree_*_cuda, so the
+    // device block and split data have to be released before it propagates.
     try {
         if (this->metadata->grow_policy == GREEDY)
             fit_tree_greedy_cuda(&cuda_dataset, this->edata, this->metadata, &candidata, split_data);
@@ -1076,8 +1072,7 @@ float GBRL::_fit_gpu(dataHolder<float> *obs,
         throw std::runtime_error("Failed to allocate split data on the GPU");
     }
     // A rejected monotonic projection throws out of fit_tree_*_cuda part-way
-    // through the loop; without this the buffers below are never released, so a
-    // caller that retries after the failure leaks GPU memory on every attempt.
+    // through the loop, so the buffers have to be released before it propagates.
     try {
         for (int i = 0 ; i < n_iterations; ++i){
            cuda_dataset.grads->data = gpu_grads;
@@ -1233,7 +1228,7 @@ float GBRL::fit(dataHolder<float> *obs,
             shuffle);
 #endif
     if (this->device == cpu){
-        // Vectors, not new[]: fit_cpu below can throw and used to leak these.
+        // Vectors, not new[]: fit_cpu below can throw.
         std::vector<float> shuffled_obs;
         std::vector<char> shuffled_cat_obs;
         std::vector<float> shuffled_targets;
@@ -1266,9 +1261,9 @@ float GBRL::fit(dataHolder<float> *obs,
                     }
                 }
                 for (int k = 0; k < n_cat_features; ++k){
-                    // Copy the WHOLE fixed-width value: assigning a single byte left
-                    // 127 bytes uninitialised, so categories sharing a first byte
-                    // ("apple"/"apricot") compared as equal or nondeterministically.
+                    // Copy the whole fixed-width value; a shorter copy leaves the
+                    // remaining bytes uninitialised and categories sharing a first
+                    // byte ("apple"/"apricot") can compare equal.
                     memcpy(training_cat_obs + (i * n_cat_features + k) * MAX_CHAR_SIZE,
                            categorical_obs->data + (indices[i] * n_cat_features + k) * MAX_CHAR_SIZE,
                            MAX_CHAR_SIZE);
@@ -1280,8 +1275,8 @@ float GBRL::fit(dataHolder<float> *obs,
             training_targets = targets->data;
         }
 
-        // Same reason: calculate_mean returns a new[] buffer that used to be freed
-        // only on the success path.
+        // Same reason: calculate_mean returns a new[] buffer, so copy it into a
+        // vector and free it right away.
         float *bias_raw = calculate_mean(training_targets, n_samples, output_dim, metadata->par_th);
         std::vector<float> bias(bias_raw, bias_raw + output_dim);
         delete[] bias_raw;
@@ -1549,8 +1544,7 @@ void GBRL::print_ensemble_metadata(){
  * SHAP assumes every output dimension is driven by at most one optimizer:
  * the SGD path sums a single per-dimension scale and the Adam path keeps one
  * moment state per dimension.  Overlapping ranges break both.  set_optimizer()
- * rejects these when they are registered, but models saved before that check
- * existed can still contain them, so they are re-checked here.
+ * rejects them at registration; a loaded model is re-checked here.
  */
 static void validate_shap_optimizer_ranges(const std::vector<Optimizer*> &opts)
 {
@@ -1620,11 +1614,10 @@ static void validate_shap_inputs(const ensembleMetaData *metadata,
  * @brief Reject a feature mapping that cannot identify the input column of a split.
  *
  * SHAP maps each split's type-local index through the reverse mappings to pick the
- * output column it attributes to.  A model trained before fit() installed the
- * mapping carries an all-zero one, which silently attributes every feature to
- * column 0; an out-of-range entry would index past the SHAP output array.  Check
- * that the first n_num_features / n_cat_features entries are in range and name a
- * distinct input column each, before anything is allocated.
+ * output column it attributes to.  An all-zero mapping would attribute every
+ * feature to column 0, and an out-of-range entry would index past the SHAP output
+ * array.  Check that the first n_num_features / n_cat_features entries are in
+ * range and name a distinct input column each, before anything is allocated.
  */
 static void validate_shap_feature_mapping(const ensembleMetaData *metadata,
                                           const ensembleData *edata,
@@ -1872,7 +1865,6 @@ float* GBRL::tree_shap(const int tree_idx, const float *obs, const char *categor
     if (this->device == cpu)
         edata_cpu = this->edata;
 
-    // Detect whether any optimizer is Adam
     bool has_adam = false;
     for (size_t oi = 0; oi < this->opts.size(); ++oi)
         if (this->opts[oi]->getAlgo() == Adam) { has_adam = true; break; }
@@ -1973,7 +1965,6 @@ float* GBRL::ensemble_shap(const float *obs, const char *categorical_obs, const 
     if (this->device == cpu)
         edata_cpu = this->edata;
 
-    // Detect whether any optimizer is Adam
     bool has_adam = false;
     for (size_t oi = 0; oi < this->opts.size(); ++oi)
         if (this->opts[oi]->getAlgo() == Adam) { has_adam = true; break; }

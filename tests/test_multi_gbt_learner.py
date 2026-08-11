@@ -533,9 +533,9 @@ class TestMultiGBTLearnerDistilRestrictions(unittest.TestCase):
             learner.plot_tree(0, os.path.join(self.test_dir, 'student_plot'))
 
     def test_multi_failed_reset_leaves_python_state_untouched(self):
-        """_consumed_steps is a read-modify-write against models that are NOT
-        replaced when reset() raises, so mutating it in place made a retried
-        reset() count the same trees twice and shrink the scheduler horizon."""
+        """_consumed_steps is a read-modify-write against models that reset()
+        does not replace when it raises, so mutating it in place would make a
+        retried reset() count the same trees twice."""
         learner = self._make_trained_learner()
         before_opts = [dict(o) for o in learner.optimizers]
         before_consumed = list(learner._consumed_steps)
@@ -560,8 +560,8 @@ class TestMultiGBTLearnerDistilRestrictions(unittest.TestCase):
             learner.optimizers[0]['algo'] = saved_algo
 
     def test_multi_ensemble_shap_completeness(self):
-        """Ensemble-level multi shap() has its own Python dispatch, separate from
-        tree_shap(); without this it ships untested."""
+        """Ensemble-level multi shap() has its own Python dispatch, separate
+        from tree_shap()."""
         learner = self._make_trained_learner()
         results = learner.shap(self.X, return_base=True)
         self.assertEqual(len(results), self.n_learners,
@@ -599,10 +599,8 @@ class TestMultiGBTLearnerDistilRestrictions(unittest.TestCase):
             for i in range(self.n_learners)
         ]
 
-        # Corrupt one optimizer so that reset() (called at the end of distil())
-        # raises a ValueError when set_optimizer() receives an invalid algo name.
-        # This causes failure AFTER students are trained but BEFORE the main model
-        # is replaced, exercising the rollback path.
+        # Corrupt one optimizer so reset() at the end of distil() raises once the
+        # students are trained but before the main model is replaced.
         saved_cfg = learner.optimizers[0].copy()
         learner.optimizers[0]['algo'] = 'NONEXISTENT_ALGO'
 
@@ -611,7 +609,6 @@ class TestMultiGBTLearnerDistilRestrictions(unittest.TestCase):
         try:
             with self.assertRaises((ValueError, RuntimeError)):
                 learner.distil(self.X, targets, params)
-            # student_models must be restored to None after the failed distil
             self.assertIsNone(learner.student_models,
                               "student_models must be None after failed distil()")
         finally:
