@@ -748,6 +748,14 @@ class GBTLearner(BaseLearner):
                 "constraints. predict() adds the student model's output to the "
                 "main model's, and the student is not constrained, so the result "
                 "would not be guaranteed monotone.")
+        # Checked before anything is built: params['min_steps'] is read only after
+        # the student exists, so a missing key used to raise KeyError with a
+        # half-configured student already attached.
+        for required in ('min_steps', 'limit_steps'):
+            if required not in params:
+                raise ValueError(
+                    f"Distillation requires '{required}' in params, got keys "
+                    f"{sorted(params)}")
         obs = self._mapping_input(obs)
         num_obs, cat_obs = preprocess_features(obs)
         distil_params = {'input_dim': self.input_dim,
@@ -759,15 +767,19 @@ class GBTLearner(BaseLearner):
                          'max_depth': params.get('distil_max_depth', 6),
                          'verbose': verbose, 'batch_size':
                          self.params.get('distil_batch_size', 2048)}
-        self.student_model = GBRL_CPP(**distil_params)
+        # Built locally and published only after training and reset() both
+        # succeed.  predict() adds any non-None student to the main prediction and
+        # shap() refuses to run while one is attached, so assigning up front left
+        # the learner visibly changed even when distil() raised.
+        student = GBRL_CPP(**distil_params)
         # A raw C++ model starts with zero feature weights and an uninitialised
         # feature mapping.  Zero weights collapse every split score, so the student
         # would train on essentially no signal.
-        self.student_model.set_feature_weights(
+        student.set_feature_weights(
             np.ascontiguousarray(self.feature_weights, dtype=numerical_dtype))
         student_mapping, student_mask = get_index_mapping(obs)
-        self.student_model.set_feature_mapping(np.ascontiguousarray(student_mapping),
-                                               np.ascontiguousarray(student_mask))
+        student.set_feature_mapping(np.ascontiguousarray(student_mapping),
+                                    np.ascontiguousarray(student_mask))
         targets = np.ascontiguousarray(targets, dtype=numerical_dtype)
         # start_idx/stop_idx are required: stop_idx defaults to 0 in the binding
         # and C++ rejects stop_idx <= 0, which would leave the student with no
@@ -777,7 +789,7 @@ class GBTLearner(BaseLearner):
                             'start_idx': 0,
                             'stop_idx': self.output_dim}
         try:
-            self.student_model.set_optimizer(**distil_optimizer)
+            student.set_optimizer(**distil_optimizer)
         except RuntimeError as exc:
             raise ValueError(
                 f"Invalid GBRL distillation optimizer configuration: {exc}") from exc
@@ -786,19 +798,27 @@ class GBTLearner(BaseLearner):
         # np.mean returns a NumPy scalar (e.g. np.float32), not a Python
         # float, so the old isinstance check never fired for 1-D targets.
         bias = np.atleast_1d(bias).astype(numerical_dtype, copy=False)
-        self.student_model.set_bias(bias.astype(numerical_dtype))
-        tr_loss = self.student_model.fit(num_obs, cat_obs,
-                                         targets, params['min_steps'])
+        student.set_bias(bias.astype(numerical_dtype))
+        tr_loss = student.fit(num_obs, cat_obs, targets, params['min_steps'])
         while tr_loss > params.get('min_distillation_loss', 0.1):
             if params['min_steps'] < params['limit_steps']:
                 steps_to_add = min(500, params['limit_steps'] - params['min_steps'])
-                tr_loss = self.student_model.fit(num_obs, cat_obs,
-                                                 targets, steps_to_add,
-                                                 shuffle=False)
+                tr_loss = student.fit(num_obs, cat_obs,
+                                      targets, steps_to_add,
+                                      shuffle=False)
                 params['min_steps'] += steps_to_add
             else:
                 break
-        self.reset()
+        # reset() reads student_model to decide whether to keep total_iterations
+        # and to shorten a linear schedule, so publish before resetting; restore
+        # the previous student if the rebuild itself fails.
+        previous_student = self.student_model
+        self.student_model = student
+        try:
+            self.reset()
+        except Exception:
+            self.student_model = previous_student
+            raise
         return tr_loss, params
 
     def get_matrix_representation(self, features: NumericalData) -> \

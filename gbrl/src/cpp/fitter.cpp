@@ -148,9 +148,16 @@ void Fitter::step_cpu(dataSet *dataset, ensembleData *edata, ensembleMetaData *m
     metadata->iteration++;
 }
 
-float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edata, ensembleMetaData *metadata, const int iterations, lossType loss_type, std::vector<Optimizer*> opts, int &batch_start_idx){
+float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edata, ensembleMetaData *metadata, const int iterations, lossType loss_type, std::vector<Optimizer*> opts, int &batch_start_idx, int &batch_start_n_samples){
     // batch_start_idx is owned by the caller so successive fit() calls continue
-    // the pass over the data.  A dataset of a different size invalidates it.
+    // the pass over the data.  It only means anything for the dataset it came
+    // from: a cursor of 64 from a 256-row dataset is still in range for a
+    // 128-row one and would skip that dataset's first half, so compare sizes
+    // rather than just bounds-checking the cursor.
+    if (batch_start_n_samples != dataset->n_samples){
+        batch_start_idx = 0;
+        batch_start_n_samples = dataset->n_samples;
+    }
     if (batch_start_idx < 0 || batch_start_idx >= dataset->n_samples)
         batch_start_idx = 0;
     int output_dim = metadata->output_dim;

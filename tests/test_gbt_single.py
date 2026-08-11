@@ -1129,6 +1129,48 @@ class TestLinearScheduler(unittest.TestCase):
         self.assertLessEqual(lr, 0.1 + 1e-6, f'decay lr {lr} above init_lr')
 
 
+class TestLowLevelBindingContract(unittest.TestCase):
+    """gbrl_cpp is internal and does not convert its inputs.
+
+    It used to run py::array::ensure(..., forcecast), which silently built a
+    temporary copy for a strided or wrong-dtype array. That copy was owned only
+    by the binding frame and was freed on return, so the backend read a dangling
+    pointer after releasing the GIL - producing different results for arrays
+    holding identical values. It now borrows and rejects instead.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        rng = np.random.default_rng(0)
+        cls.X = rng.normal(size=(64, 4)).astype(np.float32)
+        cls.y = (cls.X[:, 0] * 2.0).reshape(-1, 1).astype(np.float32)
+        cls.model = GBTModel(
+            input_dim=4, output_dim=1,
+            tree_struct={'max_depth': 3, 'n_bins': 32, 'min_data_in_leaf': 0,
+                         'par_th': 2, 'grow_policy': 'greedy'},
+            optimizers={'algo': 'SGD', 'lr': 0.1, 'start_idx': 0, 'stop_idx': 1},
+            params={'split_score_func': 'L2', 'generator_type': 'Quantile'},
+            device='cpu', verbose=0)
+        cls.model.fit(cls.X, cls.y, iterations=3, shuffle=False)
+
+    def test_non_contiguous_is_rejected_not_silently_copied(self):
+        strided = np.ascontiguousarray(self.X[:, ::-1])[:, ::-1]
+        self.assertFalse(strided.flags['C_CONTIGUOUS'])
+        self.assertTrue(np.array_equal(strided, self.X))   # same values
+        with self.assertRaises(Exception):
+            self.model.learner._cpp_model.predict(strided, None, 0, 0)
+
+    def test_wrong_dtype_is_rejected(self):
+        with self.assertRaises(Exception):
+            self.model.learner._cpp_model.predict(
+                np.ascontiguousarray(self.X, dtype=np.float64), None, 0, 0)
+
+    def test_contiguous_float32_still_works(self):
+        preds = np.asarray(
+            self.model.learner._cpp_model.predict(np.ascontiguousarray(self.X), None, 0, 0))
+        self.assertTrue(np.all(np.isfinite(preds)))
+
+
 class TestRepeatedFit(unittest.TestCase):
     """fit() must boost against every tree already in the model.
 
@@ -1296,6 +1338,37 @@ class TestRepeatedFit(unittest.TestCase):
         # 256 / 100 -> batches of 100, 100, 56: also exercises the short tail.
         self._assert_split_matches_single_minibatch('cpu', batch_size=100)
 
+    def test_batch_cursor_resets_when_size_changes_but_cursor_in_range(self):
+        """The cursor is tied to the dataset it came from, not just to its own
+        bounds. After 256 rows at batch_size 64 the cursor is 64, which is still
+        'in range' for a 128-row dataset - bounds-checking alone would skip that
+        dataset's first half. Fitting 128 rows must match a fresh model."""
+        def mk():
+            return GBTModel(
+                input_dim=4, output_dim=1,
+                tree_struct={'max_depth': 3, 'n_bins': 64, 'min_data_in_leaf': 0,
+                             'par_th': 2, 'grow_policy': 'greedy', 'batch_size': 64},
+                optimizers={'algo': 'SGD', 'lr': 0.1, 'start_idx': 0, 'stop_idx': 1},
+                params={'split_score_func': 'L2', 'generator_type': 'Quantile'},
+                device='cpu', verbose=0)
+
+        half_X, half_y = self.X[:128], self.y[:128]
+
+        # Cursor left at 64 (in range for 128 rows) by a pass over 256 rows.
+        reused = mk()
+        reused.fit(self.X, self.y, iterations=1, shuffle=False)
+        reused.learner.reset()          # drop the trees, keep the C++ cursor state
+        reused.fit(half_X, half_y, iterations=4, shuffle=False)
+
+        fresh = mk()
+        fresh.fit(half_X, half_y, iterations=4, shuffle=False)
+
+        np.testing.assert_allclose(
+            np.asarray(reused.learner.predict(half_X, requires_grad=False, tensor=False)),
+            np.asarray(fresh.learner.predict(half_X, requires_grad=False, tensor=False)),
+            rtol=1e-4, atol=1e-5,
+            err_msg='a stale in-range cursor changed the pass over a smaller dataset')
+
     def test_batch_cursor_resets_when_dataset_size_changes(self):
         """A cursor left past the end of a smaller dataset must not be used."""
         model = GBTModel(
@@ -1311,6 +1384,52 @@ class TestRepeatedFit(unittest.TestCase):
         self.assertTrue(np.isfinite(loss), 'fit on a smaller dataset returned a non-finite loss')
         preds = np.asarray(model.learner.predict(small_X, requires_grad=False, tensor=False))
         self.assertTrue(np.all(np.isfinite(preds)))
+
+    def test_failed_distillation_leaves_learner_untouched(self):
+        """distil() published the student before training it, so a failure left
+        it attached: predict() then added a bias-only student and shap() refused
+        to run, even though the caller saw an exception."""
+        model = self._model()
+        model.fit(self.X, self.y, iterations=5, shuffle=False)
+        before = np.asarray(model.learner.predict(self.X, requires_grad=False, tensor=False))
+        targets = before.copy()
+
+        with self.assertRaises(ValueError):
+            model.learner.distil(self.X, targets, {'limit_steps': 20})   # no min_steps
+
+        self.assertIsNone(model.learner.student_model,
+                          'a failed distillation left a student attached')
+        after = np.asarray(model.learner.predict(self.X, requires_grad=False, tensor=False))
+        np.testing.assert_allclose(before, after, rtol=0, atol=0,
+                                   err_msg='a failed distillation changed predictions')
+        model.learner.shap(self.X)   # must still work
+
+    def test_mapping_retry_after_rejected_batch(self):
+        """A rejected batch must not stick: BaseLearner.step() used to store the
+        inferred mapping before _ensure_feature_mapping() validated it, so the
+        retry the error message asks for reused the bad mapping forever."""
+        model = self._model()
+        model.fit(self.X, self.y, iterations=3, shuffle=False)
+        learner = model.learner
+        # Look like a legacy model with no usable mapping.
+        learner.feature_mapping = None
+        learner._feature_mapping_installed = False
+
+        # Wrong mix: 3 numerical + 1 categorical against 4 numerical.
+        bad = np.column_stack([
+            self.X[:8, 0].astype(object), self.X[:8, 1].astype(object),
+            self.X[:8, 2].astype(object),
+            np.array(['a', 'b'] * 4, dtype=object),
+        ])
+        with self.assertRaises(ValueError):
+            learner.shap(bad)
+        self.assertIsNone(learner.feature_mapping,
+                          'the rejected mapping was kept and poisons the retry')
+
+        # The retry the error message asks for must now succeed.
+        phi = learner.shap(self.X)
+        self.assertTrue(learner._feature_mapping_installed)
+        self.assertTrue(np.all(np.isfinite(np.asarray(phi))))
 
     def test_many_chunks_match_single_fit_cpu(self):
         self._assert_many_chunks_match_single('cpu')

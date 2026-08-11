@@ -1746,9 +1746,10 @@ void fit_tree_greedy_cuda(
  *   - If INCREASING (+1): leaves with bit d=1 should have >= value than leaves with bit d=0
  *   - If DECREASING (-1): leaves with bit d=1 should have <= value than leaves with bit d=0
  * 
- * When multiple monotonic features exist, they define a partial order.
- * We linearize this by treating the monotonic bits as a number and sorting.
- * 
+ * When multiple monotonic features exist, they define a partial order over the
+ * hypercube of leaves. It is NOT linearized or sorted: the projection below works
+ * directly on the edge-constraint sets, which is why plain PAVA does not apply.
+ *
  * Algorithm (Dykstra's cyclic projection, not classical PAVA):
  * 1. Find which depths carry a monotonic constraint for a given output.
  * 2. For each such depth, project onto that depth's constraint set: the leaf pairs

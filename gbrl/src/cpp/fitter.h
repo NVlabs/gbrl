@@ -77,6 +77,8 @@ class Fitter {
          * @param batch_start_idx Row to start taking mini-batches from; advanced
          *        in place so a later fit() continues the pass instead of
          *        restarting at row 0
+         * @param batch_start_n_samples Dataset size batch_start_idx belongs to;
+         *        a different size restarts the pass
          * @return Final loss value after training
          */
         static float fit_cpu(
@@ -87,7 +89,8 @@ class Fitter {
             const int iterations,
             lossType loss_type,
             std::vector<Optimizer*> opts,
-            int &batch_start_idx
+            int &batch_start_idx,
+            int &batch_start_n_samples
         );
         
         /**

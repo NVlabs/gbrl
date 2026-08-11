@@ -580,6 +580,14 @@ class GBRL {
          *  loaded model starts a fresh pass. Only the CPU path batches; the
          *  CUDA path always fits on the full dataset. */
         int batch_cursor = 0;
+        /** @brief n_samples of the dataset batch_cursor refers to.
+         *
+         *  A cursor is only meaningful for the dataset it was produced from.
+         *  Testing the cursor against the new n_samples is not enough: after
+         *  256 rows with batch_size 64 the cursor is 64, which is still "in
+         *  range" for a 128-row dataset, so the first half of it would be
+         *  skipped. -1 means no pass is in progress. */
+        int batch_cursor_n_samples = -1;
         
 #ifdef USE_CUDA
         SGDOptimizerGPU** cuda_opt = nullptr;  /**< GPU optimizers */

@@ -31,7 +31,7 @@ from typing import Dict, List, Optional, Tuple, Union
 import numpy as np
 import torch as th
 
-from gbrl.common.utils import (NumericalData, TensorInfo, get_index_mapping,
+from gbrl.common.utils import (NumericalData, TensorInfo,
                                get_tensor_info, numerical_dtype, to_numpy)
 
 
@@ -148,9 +148,15 @@ class BaseLearner(ABC):
         return inputs
 
     def step(self, inputs: NumericalData, *args, **kwargs) -> None:
-        """Performs a single update step using provided gradients."""
-        if self.feature_mapping is None:
-            self.feature_mapping = get_index_mapping(self._mapping_input(inputs))
+        """Hook for subclasses; deliberately does not touch feature_mapping.
+
+        It used to infer and store the mapping here, before the subclass had a
+        chance to validate it. A batch with the wrong numerical/categorical mix
+        was therefore kept even though _ensure_feature_mapping() then rejected
+        it, and because the stored mapping was no longer None the retry the
+        error message asks for reused the bad one forever. Deriving, validating
+        and publishing the mapping all belong to _ensure_feature_mapping().
+        """
 
     @abstractmethod
     def fit(self, *args, **kwargs) -> Union[float, List[float]]:

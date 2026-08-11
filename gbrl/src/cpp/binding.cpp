@@ -62,14 +62,14 @@ template <typename T>
  * Callers must pass C-contiguous arrays of the expected dtype. Every supported
  * path already guarantees this: preprocess_features() and
  * BaseLearner.transform_data() run np.ascontiguousarray() before anything
- * reaches this layer. py::array::ensure() below is therefore a no-op that
- * returns the caller's own object, which stays alive for the duration of the
- * call.
+ * reaches this layer.
  *
- * A non-contiguous or wrong-dtype array would instead make ensure() build a
- * temporary copy owned only by the local `arr`, leaving the extracted pointer
- * dangling once this function returns. That is why the contract above is a
- * requirement and not a convenience.
+ * This function borrows the caller's array and rejects anything that violates
+ * the contract. It deliberately does NOT convert: a conversion would produce a
+ * temporary owned only by this frame, and the pointer handed to the backend
+ * would dangle as soon as the function returned - which the backend then reads
+ * after releasing the GIL. Rejecting turns that silent corruption into an
+ * exception at the call site.
  */
 void get_numpy_array_info(
     py::object obj,
@@ -82,11 +82,21 @@ void get_numpy_array_info(
         throw std::runtime_error("Expected a NumPy array");
     }
     
-    py::array arr = py::array::ensure(obj, py::array::c_style | py::array::forcecast);
-    if (!arr) {
-        throw std::runtime_error("Could not convert object to a contiguous NumPy array");
+    // Borrowed, NOT converted.  py::array::ensure(..., forcecast) silently builds
+    // a temporary copy for a strided or wrong-dtype input; that copy is owned only
+    // by this local and is freed on return, leaving the extracted pointer dangling
+    // for the backend to read after the GIL is released.  Enforce the documented
+    // contract instead: the supported Python layer always passes C-contiguous
+    // arrays of the expected dtype, so a violation here is a caller bug and is
+    // reported as one.
+    py::array arr = py::reinterpret_borrow<py::array>(obj);
+    if (!(arr.flags() & py::array::c_style)) {
+        throw std::runtime_error(
+            "Expected a C-contiguous NumPy array. gbrl_cpp is an internal binding: "
+            "use the Python classes in gbrl.learners / gbrl.models, which normalize "
+            "inputs, or pass np.ascontiguousarray(...) yourself.");
     }
-    
+
     py::buffer_info info = arr.request();
     
     // Determine the expected format
@@ -100,7 +110,9 @@ void get_numpy_array_info(
     // Verify the data format
     if (info.format != expected) {
         std::stringstream ss;
-        ss << "Expected array of format '" << expected << "', but got '" << info.format << "'";
+        ss << "Expected array of format '" << expected << "', but got '" << info.format
+           << "'. gbrl_cpp does not cast: pass the exact dtype, or use the Python "
+              "classes in gbrl.learners / gbrl.models, which convert for you.";
         throw std::runtime_error(ss.str());
     }
     

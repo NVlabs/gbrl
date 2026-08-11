@@ -718,8 +718,11 @@ void GBRL::_step_gpu(dataSet *dataset){
 
     char *device_memory_block; 
     err = allocateCudaMemory((void**)&device_memory_block, alloc_size, "when trying to allocate step_gpu data");
+    // Throw rather than return: a silent return left Python believing a tree had
+    // been added, so total_iterations advanced while the backend's iteration did
+    // not and the caller saw no error at all.
     if (err != cudaSuccess)
-        return;
+        throw std::runtime_error("CUDA allocation failed while preparing a GBRL step");
 
     cudaMemset(device_memory_block, 0, alloc_size);
     size_t trace = 0;
@@ -1291,7 +1294,7 @@ float GBRL::fit(dataHolder<float> *obs,
         if (this->device == cpu){
         // batch_cursor persists on the model so a second fit() continues the
         // pass over the data instead of re-training the first batches.
-        full_loss = Fitter::fit_cpu(&dataset, training_targets, this->edata, this->metadata, iterations, loss_type, this->opts, this->batch_cursor);
+        full_loss = Fitter::fit_cpu(&dataset, training_targets, this->edata, this->metadata, iterations, loss_type, this->opts, this->batch_cursor, this->batch_cursor_n_samples);
         }
     }
 
