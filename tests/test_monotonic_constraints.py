@@ -1333,11 +1333,20 @@ class TestProjectionWarning(unittest.TestCase):
             self._train(self._model({0: ("increasing", 0)}))
 
     def test_constrained_model_does_not_leak_count_to_next_model(self):
-        """The count is cleared at the start of every step()/fit(), so a
-        constrained model cannot make a later unconstrained one warn."""
+        """The count belongs to the model that trained, so a constrained model
+        cannot make a later unconstrained one warn -- via step()."""
         self._train(self._model({0: ("increasing", 0)}))
         with warnings.catch_warnings():
             warnings.simplefilter("error", RuntimeWarning)
+            self._train(self._model())
+
+    def test_constrained_fit_does_not_leak_count_to_next_model(self):
+        """Same for fit(), which resets and reports the count on its own path."""
+        self._model({0: ("increasing", 0)}).fit(
+            self.X.numpy(), self.y.numpy(), iterations=10)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", RuntimeWarning)
+            self._model().fit(self.X.numpy(), self.y.numpy(), iterations=10)
             self._train(self._model())
 
 

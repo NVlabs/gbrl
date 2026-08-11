@@ -148,16 +148,10 @@ void Fitter::step_cpu(dataSet *dataset, ensembleData *edata, ensembleMetaData *m
     metadata->iteration++;
 }
 
-float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edata, ensembleMetaData *metadata, const int iterations, lossType loss_type, std::vector<Optimizer*> opts, int &batch_start_idx, int &batch_start_n_samples){
+float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edata, ensembleMetaData *metadata, const int iterations, lossType loss_type, std::vector<Optimizer*> opts, int &batch_start_idx){
     // batch_start_idx is owned by the caller so successive fit() calls continue
-    // the pass over the data.  It only means anything for the dataset it came
-    // from: a cursor of 64 from a 256-row dataset is still in range for a
-    // 128-row one and would skip that dataset's first half, so compare sizes
-    // rather than just bounds-checking the cursor.
-    if (batch_start_n_samples != dataset->n_samples){
-        batch_start_idx = 0;
-        batch_start_n_samples = dataset->n_samples;
-    }
+    // the pass over the data.  GBRL::fit decides whether it still refers to this
+    // dataset; this is only a bounds guard.
     if (batch_start_idx < 0 || batch_start_idx >= dataset->n_samples)
         batch_start_idx = 0;
     int output_dim = metadata->output_dim;
@@ -415,8 +409,19 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
                 // Process the batch of candidates
                 for (int j = start_idx; j < end_idx; ++j) {
                     float score = crnt_node->getSplitScore(dataset, metadata->split_score_func, split_candidates[j], metadata->min_data_in_leaf);
-                    int feat_idx = (split_candidates[j].categorical_value == nullptr) ? split_candidates[j].feature_idx : split_candidates[j].feature_idx + metadata->n_num_features; 
-                    score = score * edata->feature_data->feature_weights[feat_idx] - parent_score;
+                    // feature_weights is indexed by ORIGINAL input column, so the
+                    // split's type-local index has to go through the reverse
+                    // mapping, exactly as the oblivious path does.  Assuming the
+                    // layout is "all numerical then all categorical" gave a
+                    // numerical split a categorical column's weight (and vice
+                    // versa) whenever the columns were interleaved.
+                    int global_feature_idx = (split_candidates[j].categorical_value == nullptr)
+                        ? edata->feature_mappings->reverse_num_feature_mapping[split_candidates[j].feature_idx]
+                        : edata->feature_mappings->reverse_cat_feature_mapping[split_candidates[j].feature_idx];
+                    // Unused reverse slots hold -1; reject rather than read out of bounds.
+                    if (global_feature_idx < 0 || global_feature_idx >= metadata->input_dim)
+                        continue;
+                    score = score * edata->feature_data->feature_weights[global_feature_idx] - parent_score;
                     
 #ifdef DEBUG
                     std::cout << " cand: " <<  j << " score: " <<  score << " parent score: " <<  parent_score << " info: " << split_candidates[j] << std::endl;

@@ -540,8 +540,11 @@ class TestGBTSingle(unittest.TestCase):
 
             # base_t1 should vary across samples (unlike base_t0 which is sample-independent)
             # because tree 1 uses each sample's frozen Adam state from tree 0
+            # std over the sample axis only: flattening mixes in the spread
+            # between output dimensions, which is non-zero even when every
+            # sample shares the same base.
             self.assertGreater(
-                float(base_t1.std()),
+                float(np.max(np.std(np.asarray(base_t1), axis=0))),
                 1e-6,
                 f'Adam tree_shap(1) base should be sample-specific for output_dim={output_dim}')
 
@@ -1369,21 +1372,45 @@ class TestRepeatedFit(unittest.TestCase):
             rtol=1e-4, atol=1e-5,
             err_msg='a stale in-range cursor changed the pass over a smaller dataset')
 
-    def test_batch_cursor_resets_when_dataset_size_changes(self):
-        """A cursor left past the end of a smaller dataset must not be used."""
+    def test_batch_cursor_resets_for_a_different_dataset(self):
+        """The cursor is tied to the dataset it came from, not just its row count.
+
+        Row count alone cannot tell two datasets apart, so a cursor left at 64 by
+        one 128-row dataset would make the next 128-row dataset start its pass
+        halfway in. B is built so the answer is unambiguous: its first batch has
+        target +10 and its second -10, and A trains to all-zero targets so its
+        tree contributes nothing. A single boosting iteration on B therefore
+        moves predictions positive if the pass started at row 0 and negative if
+        it carried over to row 64.
+
+        Note this deliberately does NOT call reset() in between: reset() builds a
+        new C++ model, which discards the cursor and would make the test vacuous.
+        """
+        n, batch = 128, 64
+        rng = np.random.default_rng(7)
+        a_x = rng.normal(size=(n, 4)).astype(np.float32)
+        a_y = np.zeros((n, 1), dtype=np.float32)
+        b_x = rng.normal(size=(n, 4)).astype(np.float32)
+        b_y = np.concatenate([np.full((batch, 1), 10.0),
+                              np.full((n - batch, 1), -10.0)]).astype(np.float32)
+
         model = GBTModel(
             input_dim=4, output_dim=1,
             tree_struct={'max_depth': 3, 'n_bins': 64, 'min_data_in_leaf': 0,
-                         'par_th': 2, 'grow_policy': 'greedy', 'batch_size': 64},
-            optimizers={'algo': 'SGD', 'lr': 0.1, 'start_idx': 0, 'stop_idx': 1},
+                         'par_th': 2, 'grow_policy': 'greedy', 'batch_size': batch},
+            optimizers={'algo': 'SGD', 'lr': 0.5, 'start_idx': 0, 'stop_idx': 1},
             params={'split_score_func': 'L2', 'generator_type': 'Quantile'},
             device='cpu', verbose=0)
-        model.fit(self.X, self.y, iterations=3, shuffle=False)
-        small_X, small_y = self.X[:32], self.y[:32]
-        loss = model.fit(small_X, small_y, iterations=2, shuffle=False)
-        self.assertTrue(np.isfinite(loss), 'fit on a smaller dataset returned a non-finite loss')
-        preds = np.asarray(model.learner.predict(small_X, requires_grad=False, tensor=False))
-        self.assertTrue(np.all(np.isfinite(preds)))
+
+        model.fit(a_x, a_y, iterations=1, shuffle=False)   # leaves the cursor at 64
+        model.fit(b_x, b_y, iterations=1, shuffle=False)
+
+        mean_pred = float(np.mean(
+            np.asarray(model.learner.predict(b_x, requires_grad=False, tensor=False))))
+        self.assertGreater(
+            mean_pred, 0.0,
+            f'mean prediction {mean_pred:+.4f} means the second fit trained on '
+            f"B's y=-10 half: the cursor carried over from a different dataset")
 
     def test_failed_distillation_leaves_learner_untouched(self):
         """distil() published the student before training it, so a failure left
@@ -1411,11 +1438,9 @@ class TestRepeatedFit(unittest.TestCase):
         model = self._model()
         model.fit(self.X, self.y, iterations=3, shuffle=False)
         learner = model.learner
-        # Look like a legacy model with no usable mapping.
         learner.feature_mapping = None
         learner._feature_mapping_installed = False
 
-        # Wrong mix: 3 numerical + 1 categorical against 4 numerical.
         bad = np.column_stack([
             self.X[:8, 0].astype(object), self.X[:8, 1].astype(object),
             self.X[:8, 2].astype(object),
@@ -1426,10 +1451,76 @@ class TestRepeatedFit(unittest.TestCase):
         self.assertIsNone(learner.feature_mapping,
                           'the rejected mapping was kept and poisons the retry')
 
-        # The retry the error message asks for must now succeed.
         phi = learner.shap(self.X)
         self.assertTrue(learner._feature_mapping_installed)
         self.assertTrue(np.all(np.isfinite(np.asarray(phi))))
+
+    def test_copy_preserves_constraints_and_weights(self):
+        """__copy__ rebuilds from params, which describes neither constraints nor
+        feature weights, so copy_.reset() used to yield an UNCONSTRAINED model
+        with default weights -- silently voiding the monotonic guarantee."""
+        import copy as _copy
+        weights = np.array([0.1, 2.0, 0.5, 1.5], dtype=np.float32)
+        model = GBTModel(
+            input_dim=4, output_dim=1,
+            tree_struct={'max_depth': 3, 'n_bins': 64, 'min_data_in_leaf': 0,
+                         'par_th': 2, 'grow_policy': 'oblivious'},
+            optimizers={'algo': 'SGD', 'lr': 0.1, 'start_idx': 0, 'stop_idx': 1},
+            params={'split_score_func': 'L2', 'generator_type': 'Quantile',
+                    'feature_weights': weights,
+                    'monotonic_constraints': {0: ('increasing', 0)}},
+            device='cpu', verbose=0)
+        model.fit(self.X, self.y, iterations=3, shuffle=False)
+
+        copied = _copy.copy(model.learner)
+        copied.reset()      # rebuilds from Python state
+
+        self.assertEqual(copied.monotonic_constraints, {0: ('increasing', 0)},
+                         'copy lost its monotonic constraints')
+        np.testing.assert_allclose(np.asarray(copied.get_feature_weights()).ravel(),
+                                   weights, rtol=1e-6,
+                                   err_msg='copy lost its feature weights')
+
+    def test_set_feature_weights_survives_reset(self):
+        """The setter only wrote to C++, so reset() restored the old weights."""
+        model = self._model()
+        model.fit(self.X, self.y, iterations=2, shuffle=False)
+        weights = np.array([0.25, 1.75, 0.5, 1.0], dtype=np.float32)
+        model.learner.set_feature_weights(weights)
+        model.learner.reset()
+        np.testing.assert_allclose(np.asarray(model.learner.get_feature_weights()).ravel(),
+                                   weights, rtol=1e-6,
+                                   err_msg='reset() restored stale feature weights')
+
+    def test_adam_rejects_matrix_representation_and_compression(self):
+        """V is -lr * raw_leaf_value, which cannot express Adam's sample-specific
+        contribution -- the same error this release fixes in SHAP."""
+        model = GBTModel(
+            input_dim=4, output_dim=1,
+            tree_struct={'max_depth': 3, 'n_bins': 64, 'min_data_in_leaf': 0,
+                         'par_th': 2, 'grow_policy': 'greedy'},
+            optimizers={'algo': 'Adam', 'lr': 0.1, 'start_idx': 0, 'stop_idx': 1},
+            params={'split_score_func': 'L2', 'generator_type': 'Quantile'},
+            device='cpu', verbose=0)
+        with self.assertRaises(ValueError) as ctx:
+            model.learner.get_matrix_representation(self.X)
+        self.assertIn('Adam', str(ctx.exception))
+
+    def test_constrained_model_rejects_compression(self):
+        """Compression rewrites leaf values and never re-projects them, so the
+        compressed model would advertise constraints it no longer satisfies."""
+        model = GBTModel(
+            input_dim=4, output_dim=1,
+            tree_struct={'max_depth': 3, 'n_bins': 64, 'min_data_in_leaf': 0,
+                         'par_th': 2, 'grow_policy': 'oblivious'},
+            optimizers={'algo': 'SGD', 'lr': 0.1, 'start_idx': 0, 'stop_idx': 1},
+            params={'split_score_func': 'L2', 'generator_type': 'Quantile',
+                    'monotonic_constraints': {0: ('increasing', 0)}},
+            device='cpu', verbose=0)
+        model.fit(self.X, self.y, iterations=5, shuffle=False)
+        with self.assertRaises(ValueError) as ctx:
+            model.learner.compress(trees_to_keep=2, gradient_steps=1, features=self.X)
+        self.assertIn('monotonic', str(ctx.exception).lower())
 
     def test_many_chunks_match_single_fit_cpu(self):
         self._assert_many_chunks_match_single('cpu')

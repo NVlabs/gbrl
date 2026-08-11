@@ -126,6 +126,16 @@ GBRL::GBRL(const std::string& filename){
 
 GBRL::GBRL(GBRL& other):  
            opts(), parallel_predict(other.parallel_predict){
+        // Every other constructor sets sheader (create_header(), or read_header()
+        // when loading); this one did not, so saving a copied model wrote
+        // indeterminate version bytes -- serializationHeader's version fields
+        // have no default initializers.
+        this->sheader = other.sheader;
+        // Training state a copy is expected to continue from.
+        this->batch_cursor = other.batch_cursor;
+        this->batch_cursor_n_samples = other.batch_cursor_n_samples;
+        this->batch_cursor_obs = other.batch_cursor_obs;
+        this->n_nonconverged_projections = other.n_nonconverged_projections;
         this->learner_name = other.learner_name;
         this->metadata = new ensembleMetaData;
         memcpy(this->metadata, other.metadata, sizeof(ensembleMetaData));
@@ -1163,6 +1173,7 @@ void GBRL::step(dataHolder<const float> *obs,
 #endif
     if (this->device == cpu)
         Fitter::step_cpu(&dataset, this->edata, this->metadata);
+    this->n_nonconverged_projections = get_monotonic_nonconverged();
 }
 
 float GBRL::fit(dataHolder<float> *obs,
@@ -1293,11 +1304,23 @@ float GBRL::fit(dataHolder<float> *obs,
 
         if (this->device == cpu){
         // batch_cursor persists on the model so a second fit() continues the
-        // pass over the data instead of re-training the first batches.
-        full_loss = Fitter::fit_cpu(&dataset, training_targets, this->edata, this->metadata, iterations, loss_type, this->opts, this->batch_cursor, this->batch_cursor_n_samples);
+        // pass over the data instead of re-training the first batches.  It is
+        // only valid for the dataset it came from, so restart whenever the row
+        // count or the observation buffer changes.  Shuffling reorders the rows
+        // on every call, so there is no pass to continue: always restart.
+        const void *dataset_id = shuffle ? nullptr
+                                         : static_cast<const void*>(training_obs);
+        if (shuffle || this->batch_cursor_obs != dataset_id ||
+            this->batch_cursor_n_samples != n_samples){
+            this->batch_cursor = 0;
+            this->batch_cursor_obs = dataset_id;
+            this->batch_cursor_n_samples = n_samples;
+        }
+        full_loss = Fitter::fit_cpu(&dataset, training_targets, this->edata, this->metadata, iterations, loss_type, this->opts, this->batch_cursor);
         }
     }
 
+    this->n_nonconverged_projections = get_monotonic_nonconverged();
     return full_loss;   
 }
 
@@ -1425,13 +1448,34 @@ int GBRL::loadFromFile(const std::string& filename){
     // copy), so without this a loaded constrained model scores as unconstrained.
     if (this->edata->mono_constraints != nullptr)
         this->edata->mono_constraints->n_constraints = this->metadata->n_mono_constraints;
+    // Mirror the checks set_monotonic_constraints() applies: this path writes the
+    // arrays straight from the file, and the fitter and split scorers index
+    // feature_weights and leaf values with them.
+    for (int i = 0; i < this->metadata->n_mono_constraints; ++i){
+        const int feat = this->edata->mono_constraints->feature_idx[i];
+        const int out  = this->edata->mono_constraints->output_idx[i];
+        const int dir  = this->edata->mono_constraints->constraint[i];
+        if (feat < 0 || feat >= this->metadata->input_dim ||
+            out  < 0 || out  >= this->metadata->policy_dim ||
+            (dir != 1 && dir != -1)){
+            std::cerr << "Serialized monotonic constraint " << i << " is out of range: feature "
+                      << feat << ", output " << out << ", direction " << dir << std::endl;
+            throw std::runtime_error("Serialized model has an invalid monotonic constraint");
+        }
+    }
 
     for (size_t i = 0; i < this->opts.size(); i++)
         delete this->opts[i];
     this->opts.clear();
 
-    int num_opts;
+    int num_opts = 0;
     file.read(reinterpret_cast<char*>(&num_opts), sizeof(int));
+    // Checked before num_opts is used: a truncated file leaves the read
+    // incomplete and the value is whatever was on the stack.
+    if (!file.good()){
+        std::cerr << "Error occurred while reading the optimizer count." << std::endl;
+        throw std::runtime_error("Reading file error");
+    }
     // Ranges must be disjoint and inside output_dim, so there cannot be more
     // optimizers than outputs.  Bounded before the loop so a corrupt count
     // cannot drive it.

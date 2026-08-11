@@ -137,7 +137,13 @@ class MultiGBTLearner(BaseLearner):
 
     def reset(self) -> None:
         """Resets the learner to its initial state, reinitializing the C++ model and optimizers."""
-        if self._cpp_models:
+        # Scheduler state is only carried across a distillation reset, where
+        # training genuinely continues.  A plain reset() already returns
+        # total_iterations to 0, so keeping the decayed learning rate and the
+        # accumulated step count there would start the "fresh" model mid-schedule
+        # and shorten a later distillation's horizon.
+        continuing = self.student_models is not None
+        if self._cpp_models and continuing:
             for i in range(self.n_learners):
                 # get_scheduler_lrs() returns one entry per optimizer as an array;
                 # storing the array itself would break the next set_optimizer call.
@@ -147,9 +153,8 @@ class MultiGBTLearner(BaseLearner):
                         f"Expected exactly one optimizer for learner {i}, got {len(lrs)}")
                 self.optimizers[i]['init_lr'] = float(lrs[0])
 
-        # Fold this generation's trees into the persistent counts before the
-        # models are replaced.
-        if self._cpp_models:
+            # Fold this generation's trees into the persistent counts before the
+            # models are replaced.
             for i in range(self.n_learners):
                 self._consumed_steps[i] += self._cpp_models[i].get_iteration()
         self._cpp_models = []
@@ -178,9 +183,14 @@ class MultiGBTLearner(BaseLearner):
                 # trees built since the previous reset.
                 remaining = horizon - self._consumed_steps[i]
                 if remaining <= 0:
-                    raise ValueError(
-                        f"Linear scheduler for learner {i} has no remaining iterations")
-                cfg['T'] = remaining
+                    # lr(t >= T) == stop_lr per scheduler.h, so an exhausted
+                    # horizon holds the final rate rather than failing the rebuild.
+                    cfg['scheduler'] = 'Const'
+                    cfg['init_lr'] = cfg.get('stop_lr', cfg['init_lr'])
+                    cfg.pop('T', None)
+                    cfg.pop('stop_lr', None)
+                else:
+                    cfg['T'] = remaining
             try:
                 cpp_model.set_optimizer(**cfg)
             except RuntimeError as exc:
@@ -189,8 +199,12 @@ class MultiGBTLearner(BaseLearner):
                     f"Invalid GBRL optimizer configuration for learner {i}: {exc}") from exc
             self._cpp_models.append(cpp_model)
 
-        if self.student_models is None:
+        if not continuing:
             self.total_iterations = 0
+            # Reset with total_iterations: the linear-scheduler horizon is
+            # measured against these, so leaving them would give a later
+            # distillation a budget that has already been spent.
+            self._consumed_steps = [0] * self.n_learners
         self.iteration = [0] * self.n_learners
 
     def _ensure_feature_mapping(self, inputs) -> None:
@@ -381,6 +395,9 @@ class MultiGBTLearner(BaseLearner):
         metadata = {
             "n_learners": self.n_learners,
             'custom_names': custom_names,
+            # Shared across sub-models and owned by Python; learner 0's C++
+            # iteration is its own local count and is not a substitute.
+            'total_iterations': self.total_iterations,
             }
         meta_filename = filename + ".gbrl_meta"
         with open(meta_filename, "w") as meta_file:
@@ -428,10 +445,10 @@ class MultiGBTLearner(BaseLearner):
         meta_filename = filename + ".gbrl_meta"
         assert os.path.exists(meta_filename), f"Metadata file {meta_filename} not found!"
         with open(meta_filename, "r") as meta_file:
-            metadata = json.load(meta_file)
+            file_metadata = json.load(meta_file)
 
-        n_learners = metadata['n_learners']
-        custom_names = metadata['custom_names']
+        n_learners = file_metadata['n_learners']
+        custom_names = file_metadata['custom_names']
         assert custom_names is None or len(custom_names) == n_learners, "Custom names must be per learner"
         try:
             instance = cls.__new__(cls)
@@ -500,7 +517,10 @@ class MultiGBTLearner(BaseLearner):
             # iteration is per-learner everywhere else (step/fit index into it),
             # so a scalar here breaks any continued training after load.
             instance.iteration = [m.get_iteration() for m in instance._cpp_models]
-            instance.total_iterations = metadata['iteration']
+            # Prefer the value save() wrote; fall back to learner 0's C++ count
+            # for checkpoints written before it was serialized.
+            instance.total_iterations = int(
+                file_metadata.get('total_iterations', metadata['iteration']))
             instance.student_models = None
             instance.feature_weights = instance._cpp_models[0].get_feature_weights()
             instance.feature_mapping = instance._cpp_models[0].get_feature_mapping()
@@ -639,11 +659,17 @@ class MultiGBTLearner(BaseLearner):
                     self._cpp_models[i].set_feature_weights(norm_feature_weights)
                 except RuntimeError as e:
                     print(f"Caught an exception in GBRL for model index {i}: {e}")
+                    return
+            # Kept in step with C++: reset() and __copy__() rebuild every
+            # sub-model from this attribute.
+            self.feature_weights = norm_feature_weights
         else:
-            try:
-                self._cpp_models[model_idx].set_feature_weights(norm_feature_weights)
-            except RuntimeError as e:
-                print(f"Caught an exception in GBRL for model index {model_idx}: {e}")
+            # Per-sub-model weights cannot be represented by the single shared
+            # attribute, so reset() would restore them for every learner.
+            raise ValueError(
+                "MultiGBTLearner does not support per-sub-model feature weights: "
+                "reset() rebuilds every sub-model from one shared set. Call "
+                "set_feature_weights() without model_idx.")
 
     def get_bias(self, model_idx: Optional[int] = None) -> Union[np.ndarray, Tuple[np.ndarray, ...]]:
         """
@@ -1032,6 +1058,16 @@ class MultiGBTLearner(BaseLearner):
         self.reset()
         return tr_losses, out_params
 
+    def _reject_unsupported_matrix_representation(self, what: str) -> None:
+        """See GBTLearner: V is built with -lr * raw_leaf_value, which is wrong
+        for Adam because its contribution is sample-specific."""
+        for opt in (self.optimizers or []):
+            if str(opt.get('algo', 'SGD')).lower() == 'adam':
+                raise ValueError(
+                    f"{what} is not supported for models using the Adam optimizer. "
+                    f"Adam's per-tree contribution is sample-specific, so it cannot "
+                    f"be represented as one value per leaf. Use SGD.")
+
     def get_matrix_representation(self, features: NumericalData, model_idx: Optional[int] = None) -> \
             Tuple[Union[np.ndarray, List[np.ndarray]], Union[np.ndarray, List[np.ndarray]],
                   Union[np.ndarray, List[np.ndarray]], Union[int, List[int]],
@@ -1054,9 +1090,10 @@ class MultiGBTLearner(BaseLearner):
         """
         assert self._cpp_models is not None and isinstance(self._cpp_models, list), \
             "Model not initialized."
+        self._reject_unsupported_matrix_representation("get_matrix_representation()")
         if isinstance(features, th.Tensor):
             features = features.detach().cpu().numpy().astype(np.single)
-        
+
         features = self._mapping_input(features)
         num_features, cat_features = preprocess_features(features)
         if model_idx is None:
@@ -1236,6 +1273,11 @@ class MultiGBTLearner(BaseLearner):
                                 policy_dim=self.policy_dim,
                                 verbose=self.verbose,
                                 device=self.device)
+        # params does not describe these, so a rebuild from it would drop them and
+        # copy_.reset() would restore default feature weights.
+        copy_.feature_weights = np.array(self.feature_weights, copy=True)
+        copy_.feature_mapping = self.feature_mapping
+        copy_._feature_mapping_installed = self._feature_mapping_installed
         # Copy, like _consumed_steps: sharing the list let training the copy
         # advance the original's per-learner counters.
         copy_.iteration = list(self.iteration)

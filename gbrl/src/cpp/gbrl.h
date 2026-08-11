@@ -579,15 +579,24 @@ class GBRL {
          *  over-trained the first batches.  Deliberately not serialized: a
          *  loaded model starts a fresh pass. Only the CPU path batches; the
          *  CUDA path always fits on the full dataset. */
+        /** @brief Monotonic projections in THIS model's last step()/fit() that hit
+         *  the pass limit. Copied out of the thread-local counter at the end of
+         *  each call so the value belongs to one model and cannot be observed
+         *  from another. */
+        int n_nonconverged_projections = 0;
         int batch_cursor = 0;
-        /** @brief n_samples of the dataset batch_cursor refers to.
+        /** @brief Identity of the dataset batch_cursor refers to.
          *
-         *  A cursor is only meaningful for the dataset it was produced from.
-         *  Testing the cursor against the new n_samples is not enough: after
-         *  256 rows with batch_size 64 the cursor is 64, which is still "in
-         *  range" for a 128-row dataset, so the first half of it would be
-         *  skipped. -1 means no pass is in progress. */
+         *  A cursor only means anything for the dataset it came from. Testing it
+         *  against the new n_samples is not enough: after 256 rows with
+         *  batch_size 64 the cursor is 64, which is still "in range" for a
+         *  128-row dataset, so that dataset's first half would be skipped. Both
+         *  the row count and the observation buffer are compared. -1 / nullptr
+         *  means no pass is in progress.
+         *
+         *  batch_cursor_obs is only ever compared, never dereferenced. */
         int batch_cursor_n_samples = -1;
+        const void *batch_cursor_obs = nullptr;
         
 #ifdef USE_CUDA
         SGDOptimizerGPU** cuda_opt = nullptr;  /**< GPU optimizers */

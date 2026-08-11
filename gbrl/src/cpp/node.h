@@ -190,9 +190,10 @@ class TreeNode {
          * @param grads Gradient values
          * @param split_candidate Split to evaluate
          * @param min_data_in_leaf Minimum samples per leaf
-         * @param constraint_dir Constraint direction for this feature (-1, 0, or 1)
-         * @param output_idx The specific output dimension to constrain
-         * @return L2-based split score with pooled means for constrained dimension
+         * @param global_feature_idx Original input column of this split
+         * @param mono_constraints Constraint arrays (may be nullptr)
+         * @param n_mono_constraints Number of constraints
+         * @return L2-based split score with pooled means for constrained dimensions
          */
         float splitScoreL2WithConstraint(
             const float *obs,

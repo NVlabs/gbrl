@@ -47,14 +47,17 @@ from gbrl.common.utils import (NumericalData, concatenate_arrays,
 from gbrl.learners.base import BaseLearner
 
 
-def warn_on_projection_limit() -> None:
+def warn_on_projection_limit(cpp_model) -> None:
     """Raise a Python warning if a monotonic projection hit its pass limit.
 
     The C++ side also prints to stderr, which nothing in Python can observe. The
     leaf values are still monotone; they are just no longer guaranteed to be the
     closest monotone values to the ones the trees produced.
+
+    The count is read off the model that just trained, so two models training
+    concurrently cannot report each other's projections.
     """
-    n_hits = GBRL_CPP.get_monotonic_nonconverged()
+    n_hits = cpp_model.get_monotonic_nonconverged()
     if n_hits > 0:
         warnings.warn(
             f"{n_hits} monotonic projection(s) hit the pass limit. Leaf values "
@@ -132,16 +135,17 @@ class GBTLearner(BaseLearner):
                 n_mono_constraints = len(feat_idx)
                 mono_data = (feat_idx, out_idx, dirs)
         
-        # Create C++ model with correct constraint buffer size
-        self._cpp_model = GBRL_CPP(**self.params, learner_name=self.learner_name, n_mono_constraints=n_mono_constraints)
-        self._feature_mapping_installed = False
-        self._cpp_model.set_feature_weights(self.feature_weights)
-        
+        # Built locally and published only once every optimizer is configured: a
+        # throw in the loop below used to leave the learner holding a new,
+        # optimizer-less model with the previous one already discarded.
+        cpp_model = GBRL_CPP(**self.params, learner_name=self.learner_name, n_mono_constraints=n_mono_constraints)
+        cpp_model.set_feature_weights(self.feature_weights)
+
         # Set monotonic constraint data if provided
         if mono_data is not None:
             feat_idx, out_idx, dirs = mono_data
-            self._cpp_model.set_monotonic_constraints(feat_idx, out_idx, dirs)
-        
+            cpp_model.set_monotonic_constraints(feat_idx, out_idx, dirs)
+
         if self.student_model is None:
             self.total_iterations = 0
 
@@ -160,17 +164,32 @@ class GBTLearner(BaseLearner):
                         "Linear scheduler requires 'T' (total number of iterations)")
                 remaining = horizon - self.total_iterations
                 if remaining <= 0:
-                    raise ValueError(
-                        "Linear scheduler has no remaining iterations after distillation")
-                cfg['T'] = remaining
+                    # The schedule documents lr(t >= T) == stop_lr, so an exhausted
+                    # horizon is not an error: hold the final rate.  Raising here
+                    # contradicted scheduler.h and, worse, made a successful
+                    # distillation fail during the rebuild.
+                    cfg['scheduler'] = 'Const'
+                    cfg['init_lr'] = cfg.get('stop_lr', cfg['init_lr'])
+                    cfg.pop('T', None)
+                    cfg.pop('stop_lr', None)
+                else:
+                    cfg['T'] = remaining
             configs.append(cfg)
         try:
             for opt in configs:
-                self._cpp_model.set_optimizer(**opt)
+                cpp_model.set_optimizer(**opt)
         except RuntimeError as exc:
             # No safe fallback: a model missing its optimizer trains nothing and
-            # predicts only its bias, so this must reach the caller.
+            # predicts only its bias, so this must reach the caller.  The previous
+            # model is still installed, so the learner is left usable.
             raise ValueError(f"Invalid GBRL optimizer configuration: {exc}") from exc
+
+        # Everything succeeded: swap in the new model.  The cached mapping goes
+        # with the old one -- a fresh model reports no feature counts, so a stale
+        # layout would be installed unchecked on the next batch.
+        self._cpp_model = cpp_model
+        self.feature_mapping = None
+        self._feature_mapping_installed = False
 
     def _ensure_feature_mapping(self, features) -> None:
         """Compute and install the numerical/categorical feature mapping.
@@ -185,12 +204,12 @@ class GBTLearner(BaseLearner):
         model rather than on total_iterations, because distillation swaps in a
         fresh model while leaving total_iterations non-zero.
         """
-        # Kept local until every check and the C++ setter succeed: publishing the
-        # candidate first meant a rejected batch stuck to the model, so the retry
-        # the error message asks for could never recompute it.
-        candidate = self.feature_mapping
-        if candidate is None:
-            candidate = get_index_mapping(self._mapping_input(features))
+        # Always derived from the batch in hand, and kept local until every check
+        # and the C++ setter succeed.  Reusing a cached mapping meant a layout
+        # from an earlier dataset could be installed on a fresh model, and a
+        # rejected batch stuck so the retry the error asks for never recomputed.
+        # This only runs while _feature_mapping_installed is False.
+        candidate = get_index_mapping(self._mapping_input(features))
         feature_mapping, numerical_mask = candidate
         # A model that has already trained knows how many features of each kind it
         # expects.  Rebuilding from a batch with a different mix would install a
@@ -252,7 +271,7 @@ class GBTLearner(BaseLearner):
 
         self.iteration = self._cpp_model.get_iteration()
         self.total_iterations += 1
-        warn_on_projection_limit()
+        warn_on_projection_limit(self._cpp_model)
 
     def fit(self, features: NumericalData,
             targets: NumericalData, iterations: int,
@@ -303,7 +322,7 @@ class GBTLearner(BaseLearner):
         finally:
             self.iteration = self._cpp_model.get_iteration()
             self.total_iterations += self.iteration - iters_before
-        warn_on_projection_limit()
+        warn_on_projection_limit(self._cpp_model)
         return loss
 
     def save(self, filename: str) -> None:
@@ -426,6 +445,14 @@ class GBTLearner(BaseLearner):
             # optimizer one, but step()/fit() can be reached straight after
             # load(), so a model saved by a version without these checks would
             # otherwise resume training with constraints it cannot honour.
+            # BaseLearner.__init__ rejects constraints on non-oblivious trees; the
+            # projection only exists for oblivious ones, so a checkpoint claiming
+            # otherwise would train unconstrained.
+            if instance.monotonic_constraints and \
+                    str(instance.tree_struct.get('grow_policy', '')).lower() != 'oblivious':
+                raise ValueError(
+                    f"Monotonic constraints require oblivious grow_policy, got "
+                    f"'{instance.tree_struct.get('grow_policy')}'")
             validate_monotonic_optimizer_compat(instance.monotonic_constraints,
                                                 instance.optimizers)
             if instance._feature_mapping_installed and instance.feature_mapping is not None:
@@ -499,10 +526,15 @@ class GBTLearner(BaseLearner):
         else:
             assert feature_weights >= 0, "feature weights contains non-positive values"
 
+        normalized = normalize_vector_input(feature_weights)
         try:
-            self._cpp_model.set_feature_weights(normalize_vector_input(feature_weights))
+            self._cpp_model.set_feature_weights(normalized)
         except RuntimeError as e:
             print(f"Caught an exception in GBRL: {e}")
+            return
+        # Kept in step with C++: reset(), __copy__() and distil() all rebuild from
+        # this attribute, so leaving it stale silently restored the old weights.
+        self.feature_weights = normalized
 
     def get_bias(self) -> np.ndarray:
         """
@@ -810,8 +842,10 @@ class GBTLearner(BaseLearner):
             else:
                 break
         # reset() reads student_model to decide whether to keep total_iterations
-        # and to shorten a linear schedule, so publish before resetting; restore
-        # the previous student if the rebuild itself fails.
+        # and to shorten a linear schedule, so it has to be published first.
+        # reset() installs its new C++ model only after every optimizer is
+        # configured, so a failure here leaves the main ensemble untouched and
+        # restoring the student is enough to undo the whole call.
         previous_student = self.student_model
         self.student_model = student
         try:
@@ -820,6 +854,35 @@ class GBTLearner(BaseLearner):
             self.student_model = previous_student
             raise
         return tr_loss, params
+
+    def _reject_unsupported_matrix_representation(self, what: str) -> None:
+        """Adam has no fixed per-leaf contribution, so it has no leaf-value matrix.
+
+        get_matrix_representation() builds V with Optimizer::copy_and_scale, which
+        is -lr * raw_leaf_value. That is not virtual, so Adam uses it too -- the
+        exact error this release fixes in SHAP. An Adam tree's contribution
+        depends on each sample's accumulated moments, which one shared value per
+        leaf cannot express, so A @ V does not reconstruct predict(X) and anything
+        optimized against it is optimizing the wrong function.
+        """
+        for opt in (self.optimizers or []):
+            if str(opt.get('algo', 'SGD')).lower() == 'adam':
+                raise ValueError(
+                    f"{what} is not supported for models using the Adam optimizer. "
+                    f"Adam's per-tree contribution is sample-specific, so it cannot "
+                    f"be represented as one value per leaf. Use SGD.")
+
+    def _reject_constrained_compression(self) -> None:
+        """Compression rewrites leaf values through the learned W matrix and never
+        re-projects them, while the compressed model keeps advertising the
+        constraints. The result would claim a monotonicity it no longer has.
+        """
+        if self.monotonic_constraints:
+            raise ValueError(
+                "Compression is not supported for models with monotonic "
+                "constraints. Compression rewrites leaf values and does not "
+                "re-apply the monotonic projection, so the compressed model "
+                "would no longer satisfy them.")
 
     def get_matrix_representation(self, features: NumericalData) -> \
             Tuple[np.ndarray, np.ndarray, np.ndarray, int, int]:
@@ -838,6 +901,7 @@ class GBTLearner(BaseLearner):
                 - n_leaves (int): Total number of leaves.
                 - n_trees (int): Total number of trees.
         """
+        self._reject_unsupported_matrix_representation("get_matrix_representation()")
         if isinstance(features, th.Tensor):
             features = features.detach().cpu().numpy().astype(np.single)
         features = self._mapping_input(features)
@@ -875,6 +939,8 @@ class GBTLearner(BaseLearner):
         """
         assert actions is not None or dist_type == 'supervised_learning', \
             "Cannot compress a policy without actions unless using supervised_learning mode"
+        self._reject_constrained_compression()
+        self._reject_unsupported_matrix_representation("compress()")
         
         # Validate model state and trees_to_keep before expensive matrix computation
         assert self._cpp_model is not None, "Cannot compress: no model has been trained"
@@ -974,6 +1040,14 @@ class GBTLearner(BaseLearner):
                            verbose=self.verbose,
                            device=self.device,
                            name=self.learner_name)
+        # params does not describe these, so a plain rebuild from it would drop
+        # them: copy_.reset() would produce an UNCONSTRAINED model with default
+        # feature weights, silently voiding the monotonic guarantee.
+        copy_.monotonic_constraints = (dict(self.monotonic_constraints)
+                                       if self.monotonic_constraints else None)
+        copy_.feature_weights = np.array(self.feature_weights, copy=True)
+        copy_.feature_mapping = self.feature_mapping
+        copy_._feature_mapping_installed = self._feature_mapping_installed
         copy_.iteration = self.iteration
         copy_.total_iterations = self.total_iterations
         if self._cpp_model is not None:

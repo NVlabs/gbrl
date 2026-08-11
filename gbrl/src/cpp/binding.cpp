@@ -1121,10 +1121,11 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         py::gil_scoped_release release;
         return self.get_iteration();
     }, "Return current ensemble iteration");
-    gbrl.def_static("get_monotonic_nonconverged", []() -> int {
-        return get_monotonic_nonconverged();
-    }, "Number of monotonic projections in the last step()/fit() that hit the pass "
-       "limit. Their leaf values are monotone but may not be the closest monotone values.");
+    gbrl.def("get_monotonic_nonconverged", [](GBRL &self) -> int {
+        return self.n_nonconverged_projections;
+    }, "Number of monotonic projections in THIS model's last step()/fit() that hit "
+       "the pass limit. Their leaf values are monotone but may not be the closest "
+       "monotone values. Per model, so concurrent training cannot cross-report.");
     gbrl.def("print_tree", [](GBRL &self, int tree_idx) {
         py::gil_scoped_release release; 
         self.print_tree(tree_idx); 
