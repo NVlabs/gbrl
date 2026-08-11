@@ -112,18 +112,26 @@ class GBTLearner(BaseLearner):
         Resets the learner to its initial state,
         reinitializing the C++ model and optimizers.
         """
+        # Every piece of Python state this method changes is computed into a
+        # `next_*` local first and assigned only once the rebuild has fully
+        # succeeded.  Mutating self.optimizers / self.total_iterations up front
+        # left the old (still-installed) model carrying half-updated scheduler
+        # state when set_optimizer() below raised, so a retry started from the
+        # wrong learning rate.
+        next_optimizers = [opt.copy() for opt in self.optimizers]
+
         # Carry the decayed LR forward only when training continues after
         # distillation.  A plain reset must restart the scheduler from the
         # originally configured init_lr, not from wherever the last run left it.
         if self._cpp_model is not None and self.student_model is not None:
             lrs = self._cpp_model.get_scheduler_lrs()
-            for i in range(len(self.optimizers)):
-                self.optimizers[i]['init_lr'] = lrs[i]
+            for i in range(len(next_optimizers)):
+                next_optimizers[i]['init_lr'] = lrs[i]
 
         # Re-checked here as well as in __init__: load() builds instances via
         # __new__ and bypasses __init__, so a model saved by an older version
         # could otherwise resume training with Adam-driven constraints.
-        validate_monotonic_optimizer_compat(self.monotonic_constraints, self.optimizers)
+        validate_monotonic_optimizer_compat(self.monotonic_constraints, next_optimizers)
 
         # Process monotonic constraints first to know size for allocation
         n_mono_constraints = 0
@@ -149,15 +157,15 @@ class GBTLearner(BaseLearner):
             feat_idx, out_idx, dirs = mono_data
             cpp_model.set_monotonic_constraints(feat_idx, out_idx, dirs)
 
-        if self.student_model is None:
-            self.total_iterations = 0
+        next_total_iterations = (self.total_iterations
+                                 if self.student_model is not None else 0)
 
         # Build the configs handed to C++ as copies.  Writing the reduced horizon
-        # back into self.optimizers would subtract total_iterations again on every
+        # back into the optimizers would subtract total_iterations again on every
         # subsequent reset().  Only a linear scheduler carries 'T'; a constant one
         # has no such key.
         configs = []
-        for i, opt in enumerate(self.optimizers):
+        for i, opt in enumerate(next_optimizers):
             cfg = opt.copy()
             if (self.student_model is not None and
                     str(cfg.get('scheduler', 'Const')).lower() == 'linear'):
@@ -165,7 +173,7 @@ class GBTLearner(BaseLearner):
                 if horizon is None:
                     raise ValueError(
                         "Linear scheduler requires 'T' (total number of iterations)")
-                remaining = horizon - self.total_iterations
+                remaining = horizon - next_total_iterations
                 if remaining <= 0:
                     # The schedule documents lr(t >= T) == stop_lr, so an exhausted
                     # horizon is not an error: hold the final rate.  Raising here
@@ -187,10 +195,13 @@ class GBTLearner(BaseLearner):
             # model is still installed, so the learner is left usable.
             raise ValueError(f"Invalid GBRL optimizer configuration: {exc}") from exc
 
-        # Everything succeeded: swap in the new model.  The cached mapping goes
-        # with the old one -- a fresh model reports no feature counts, so a stale
-        # layout would be installed unchecked on the next batch.
+        # Everything succeeded: publish the new model AND the Python state that
+        # goes with it, in one go.  The cached mapping goes with the old model --
+        # a fresh model reports no feature counts, so a stale layout would be
+        # installed unchecked on the next batch.
         self._cpp_model = cpp_model
+        self.optimizers = next_optimizers
+        self.total_iterations = next_total_iterations
         self.feature_mapping = None
         self._feature_mapping_installed = False
 
@@ -586,6 +597,20 @@ class GBTLearner(BaseLearner):
         """
         return self._cpp_model.get_device()
 
+    def _reject_student_tree_access(self, what: str) -> None:
+        """get_num_trees() counts main + student, but these only see the main model.
+
+        distil() resets the main ensemble to zero trees, so straight after it
+        get_num_trees() reports the student's count while the main model is
+        empty: an index that is valid per the public count raises "Invalid tree
+        index" here. Reject rather than answer for a different ensemble.
+        """
+        if self.student_model is not None:
+            raise ValueError(
+                f"{what} is not supported when a student model is attached: it "
+                f"only sees the main ensemble, while get_num_trees() counts both, "
+                f"so tree indices do not line up.")
+
     def print_tree(self, tree_idx: int) -> None:
         """
         Prints the tree at the given index.
@@ -593,6 +618,7 @@ class GBTLearner(BaseLearner):
         Args:
             tree_idx (int): The index of the tree to print.
         """
+        self._reject_student_tree_access("print_tree()")
         self._cpp_model.print_tree(tree_idx)
 
     def plot_tree(self, tree_idx: int, filename: str) -> None:
@@ -603,6 +629,7 @@ class GBTLearner(BaseLearner):
             tree_idx (int): The index of the tree to plot.
             filename (str): The filename to save the plot to.
         """
+        self._reject_student_tree_access("plot_tree()")
         filename = filename.rstrip('.')
         try:
             self._cpp_model.plot_tree(tree_idx, filename)
@@ -738,10 +765,28 @@ class GBTLearner(BaseLearner):
             # against the AttributeError that __new__+no-__init__ would cause.
             if getattr(self, 'student_model', None) is not None:
                 self.student_model.to_device(device)
-            self.device = device
         except RuntimeError as e:
             raise RuntimeError(
                 f"Failed to move model to device '{device}': {e}") from e
+        # to_device() falls back to CPU (printing to stderr) when CUDA is
+        # unavailable rather than raising, so the requested string is not
+        # authoritative. Take the device the backend actually ended up on.
+        actual_device = self._cpp_model.get_device()
+        self.device = actual_device
+        # reset() rebuilds the C++ model with GBRL_CPP(**self.params), so params
+        # has to carry the real device too. Updating only self.device meant a
+        # reset() after set_device() rebuilt on the ORIGINAL device while
+        # transform_data() still routed tensors for the requested one -- handing
+        # a CUDA tensor to a CPU model.
+        # getattr: load() calls set_device() before it builds params, and fills
+        # in the device from the C++ model itself a few lines later.
+        if getattr(self, 'params', None) is not None:
+            self.params['device'] = actual_device
+        if actual_device != device:
+            warnings.warn(
+                f"Requested device '{device}' but GBRL is on '{actual_device}'. "
+                f"The model and all future reset() calls will use "
+                f"'{actual_device}'.", RuntimeWarning, stacklevel=2)
 
     def predict(self,
                 inputs: NumericalData,

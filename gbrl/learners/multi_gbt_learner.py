@@ -28,6 +28,7 @@ architectures with separate models.
 """
 import json
 import os
+import warnings
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
@@ -143,6 +144,14 @@ class MultiGBTLearner(BaseLearner):
         # accumulated step count there would start the "fresh" model mid-schedule
         # and shorten a later distillation's horizon.
         continuing = self.student_models is not None
+        # Every piece of Python state this method changes is computed into a
+        # `next_*` local and assigned only after the whole rebuild succeeds.
+        # _consumed_steps in particular is a read-modify-write against models
+        # that are NOT replaced when the loop below raises, so mutating it in
+        # place made a retried reset() count the same trees twice and shorten
+        # the linear-scheduler horizon each time.
+        next_optimizers = [opt.copy() for opt in self.optimizers]
+        next_consumed_steps = list(self._consumed_steps)
         if self._cpp_models and continuing:
             for i in range(self.n_learners):
                 # get_scheduler_lrs() returns one entry per optimizer as an array;
@@ -151,17 +160,12 @@ class MultiGBTLearner(BaseLearner):
                 if len(lrs) != 1:
                     raise RuntimeError(
                         f"Expected exactly one optimizer for learner {i}, got {len(lrs)}")
-                self.optimizers[i]['init_lr'] = float(lrs[0])
+                next_optimizers[i]['init_lr'] = float(lrs[0])
 
             # Fold this generation's trees into the persistent counts before the
             # models are replaced.
             for i in range(self.n_learners):
-                self._consumed_steps[i] += self._cpp_models[i].get_iteration()
-        # Fresh C++ models carry no feature mapping, and the cached layout goes
-        # with the old ones: a fresh model reports no feature counts, so a stale
-        # mapping from a previous dataset would be installed unchecked.
-        self._feature_mapping_installed = False
-        self.feature_mapping = None
+                next_consumed_steps[i] += self._cpp_models[i].get_iteration()
         params = self.params.copy()
         # Build locally; _cpp_models is only replaced once every sub-model
         # succeeds.  An exception mid-loop previously discarded the old trained
@@ -176,7 +180,7 @@ class MultiGBTLearner(BaseLearner):
             cpp_model.set_feature_weights(self.feature_weights)
             # Copy: writing the reduced horizon back would subtract
             # total_iterations again on every subsequent reset().
-            cfg = self.optimizers[i].copy()
+            cfg = next_optimizers[i].copy()
             if (self.student_models is not None and
                     str(cfg.get('scheduler', 'Const')).lower() == 'linear'):
                 horizon = cfg.get('T')
@@ -187,7 +191,7 @@ class MultiGBTLearner(BaseLearner):
                 # Persistent per-learner count: old_models are about to be
                 # discarded, so a later reset() would otherwise see only the
                 # trees built since the previous reset.
-                remaining = horizon - self._consumed_steps[i]
+                remaining = horizon - next_consumed_steps[i]
                 if remaining <= 0:
                     # lr(t >= T) == stop_lr per scheduler.h, so an exhausted
                     # horizon holds the final rate rather than failing the rebuild.
@@ -204,15 +208,26 @@ class MultiGBTLearner(BaseLearner):
                 raise ValueError(
                     f"Invalid GBRL optimizer configuration for learner {i}: {exc}") from exc
             new_cpp_models.append(cpp_model)
-        # Atomic publish: previous models are still intact until here.
-        self._cpp_models = new_cpp_models
-
         if not continuing:
-            self.total_iterations = 0
+            next_total_iterations = 0
             # Reset with total_iterations: the linear-scheduler horizon is
             # measured against these, so leaving them would give a later
             # distillation a budget that has already been spent.
-            self._consumed_steps = [0] * self.n_learners
+            next_consumed_steps = [0] * self.n_learners
+        else:
+            next_total_iterations = self.total_iterations
+
+        # Everything succeeded: publish the models AND the Python state that goes
+        # with them together.  Until this point a failure above leaves the learner
+        # exactly as it was.  Fresh C++ models carry no feature mapping, and the
+        # cached layout goes with the old ones -- a fresh model reports no feature
+        # counts, so a stale mapping would be installed unchecked on the next batch.
+        self._cpp_models = new_cpp_models
+        self.optimizers = next_optimizers
+        self._consumed_steps = next_consumed_steps
+        self.total_iterations = next_total_iterations
+        self._feature_mapping_installed = False
+        self.feature_mapping = None
         self.iteration = [0] * self.n_learners
 
     def _ensure_feature_mapping(self, inputs) -> None:
@@ -738,6 +753,15 @@ class MultiGBTLearner(BaseLearner):
             return tuple(cpp_model.get_device() for cpp_model in self._cpp_models)
         return self._cpp_models[model_idx].get_device()  # type: ignore
 
+    def _reject_student_tree_access(self, what: str) -> None:
+        """See GBTLearner: get_num_trees() counts main + student, but these only
+        see the main ensembles, which distil() resets to zero trees."""
+        if self.student_models is not None:
+            raise ValueError(
+                f"{what} is not supported when student models are attached: it "
+                f"only sees the main ensembles, while get_num_trees() counts both, "
+                f"so tree indices do not line up.")
+
     def print_tree(self, tree_idx: int,
                    model_idx: Optional[int] = None) -> None:
         """
@@ -749,6 +773,7 @@ class MultiGBTLearner(BaseLearner):
         """
         assert self._cpp_models is not None and isinstance(self._cpp_models, list), \
             "Model not initialized."
+        self._reject_student_tree_access("print_tree()")
         if model_idx is None:
             for i in range(self.n_learners):
                 self._cpp_models[i].print_tree(tree_idx)
@@ -766,6 +791,7 @@ class MultiGBTLearner(BaseLearner):
         """
         assert self._cpp_models is not None and isinstance(self._cpp_models, list), \
             "Model not initialized."
+        self._reject_student_tree_access("plot_tree()")
 
         filename = filename.rstrip('.')
         try:
@@ -900,10 +926,23 @@ class MultiGBTLearner(BaseLearner):
 
         Args:
             device (Union[str, th.device]): The device to set.
-            model_idx (int, optional): The index of the model to print.
+            model_idx (int, optional): Not supported; see below.
+
+        Raises:
+            ValueError: If model_idx is given, or if the models end up on
+                different devices.
         """
         assert self._cpp_models is not None and isinstance(self._cpp_models, list), \
             "Model not initialized."
+
+        # One shared self.device drives transform_data() for every sub-model and
+        # the output conversion in predict(), so sub-models on different devices
+        # cannot be expressed: a CUDA tensor would reach a sub-model still on CPU.
+        if model_idx is not None:
+            raise ValueError(
+                "Partial device placement is not supported: all MultiGBTLearner "
+                "sub-models must share one device, because predict() feeds them "
+                "the same input buffers. Call set_device() without model_idx.")
 
         if isinstance(device, th.device):
             device = device.type
@@ -917,19 +956,36 @@ class MultiGBTLearner(BaseLearner):
         # against the AttributeError that __new__+no-__init__ would cause.
         _students = getattr(self, 'student_models', None)
         try:
-            if model_idx is not None:
-                self._cpp_models[model_idx].to_device(device)
-                if _students is not None and _students[model_idx] is not None:
-                    _students[model_idx].to_device(device)
-            else:
-                for i in range(self.n_learners):
-                    self._cpp_models[i].to_device(device)
-                    if _students is not None and _students[i] is not None:
-                        _students[i].to_device(device)
-            self.device = device
+            for i in range(self.n_learners):
+                self._cpp_models[i].to_device(device)
+                if _students is not None and _students[i] is not None:
+                    _students[i].to_device(device)
         except RuntimeError as e:
             raise RuntimeError(
                 f"Failed to move model to device '{device}': {e}") from e
+        # to_device() falls back to CPU (printing to stderr) when CUDA is
+        # unavailable rather than raising, so take what the backend actually did.
+        actual_devices = {m.get_device() for m in self._cpp_models}
+        if _students is not None:
+            actual_devices.update(s.get_device() for s in _students if s is not None)
+        if len(actual_devices) != 1:
+            raise RuntimeError(
+                f"Sub-models ended up on different devices: {sorted(actual_devices)}. "
+                f"predict() feeds them all the same input buffers, so this state "
+                f"cannot be used.")
+        actual_device = actual_devices.pop()
+        self.device = actual_device
+        # reset() rebuilds every sub-model with GBRL_CPP(**self.params), so params
+        # must carry the real device or a later reset() would silently move them
+        # back while transform_data() still routed tensors for the requested one.
+        # getattr: load() calls set_device() before it builds params.
+        if getattr(self, 'params', None) is not None:
+            self.params['device'] = actual_device
+        if actual_device != device:
+            warnings.warn(
+                f"Requested device '{device}' but GBRL is on '{actual_device}'. "
+                f"The models and all future reset() calls will use "
+                f"'{actual_device}'.", RuntimeWarning, stacklevel=2)
 
     def predict(self, features: NumericalData,  # type: ignore
                 requires_grad: bool = True, start_idx: Optional[int] = None,

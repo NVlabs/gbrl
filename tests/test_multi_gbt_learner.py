@@ -522,6 +522,74 @@ class TestMultiGBTLearnerDistilRestrictions(unittest.TestCase):
         preds = learner.predict(self.X, tensor=False)
         self.assertEqual(len(preds), self.n_learners)
 
+    def test_multi_print_and_plot_tree_raise_with_students(self):
+        """Tree indices from get_num_trees() do not line up with the main-only
+        ensembles once students are attached."""
+        learner = self._make_trained_learner()
+        self._attach_students(learner)
+        with self.assertRaises(ValueError):
+            learner.print_tree(0)
+        with self.assertRaises(ValueError):
+            learner.plot_tree(0, os.path.join(self.test_dir, 'student_plot'))
+
+    def test_multi_failed_reset_leaves_python_state_untouched(self):
+        """_consumed_steps is a read-modify-write against models that are NOT
+        replaced when reset() raises, so mutating it in place made a retried
+        reset() count the same trees twice and shrink the scheduler horizon."""
+        learner = self._make_trained_learner()
+        before_opts = [dict(o) for o in learner.optimizers]
+        before_consumed = list(learner._consumed_steps)
+        before_total = learner.total_iterations
+        before_models = learner._cpp_models
+
+        saved_algo = learner.optimizers[0]['algo']
+        learner.optimizers[0]['algo'] = 'NONEXISTENT_ALGO'
+        try:
+            with self.assertRaises((ValueError, RuntimeError)):
+                learner.reset()
+            learner.optimizers[0]['algo'] = saved_algo
+            self.assertEqual([dict(o) for o in learner.optimizers], before_opts,
+                             'failed reset() mutated self.optimizers')
+            self.assertEqual(learner._consumed_steps, before_consumed,
+                             'failed reset() mutated _consumed_steps')
+            self.assertEqual(learner.total_iterations, before_total,
+                             'failed reset() mutated total_iterations')
+            self.assertIs(learner._cpp_models, before_models,
+                          'failed reset() replaced the trained models')
+        finally:
+            learner.optimizers[0]['algo'] = saved_algo
+
+    def test_multi_ensemble_shap_completeness(self):
+        """Ensemble-level multi shap() has its own Python dispatch, separate from
+        tree_shap(); without this it ships untested."""
+        learner = self._make_trained_learner()
+        results = learner.shap(self.X, return_base=True)
+        self.assertEqual(len(results), self.n_learners,
+                         'shap() with model_idx=None returns one entry per sub-model')
+        for i, (phi, base) in enumerate(results):
+            pred = np.asarray(learner.predict(self.X, tensor=False, model_idx=i))
+            pred = pred.reshape(len(self.X), self.output_dim)
+            max_err = float(np.abs(base + phi.sum(axis=1) - pred).max())
+            self.assertLess(max_err, 1e-3,
+                            f'sub-model {i}: base+sum(shap) != predict, err={max_err:.5f}')
+
+    def test_multi_set_device_rejects_model_idx(self):
+        """Partial placement cannot be expressed: one shared self.device drives
+        transform_data() for every sub-model, so a CUDA tensor would reach a
+        sub-model still on CPU."""
+        learner = self._make_trained_learner()
+        with self.assertRaises(ValueError):
+            learner.set_device('cpu', model_idx=0)
+
+    def test_multi_set_device_then_reset_keeps_device(self):
+        """reset() rebuilds every sub-model from self.params, so set_device()
+        must update params too."""
+        learner = self._make_trained_learner()
+        learner.set_device('cpu')
+        learner.reset()
+        self.assertEqual(learner.params['device'], 'cpu')
+        self.assertEqual(learner.get_device(), tuple(['cpu'] * self.n_learners))
+
     def test_multi_distil_transactional_on_failure(self):
         """If reset() inside distil() fails, student_models must be restored to its
         pre-distillation value (None when no prior distillation has been run)."""

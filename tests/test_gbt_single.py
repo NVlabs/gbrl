@@ -1532,6 +1532,49 @@ class TestDistilledModelRestrictions(unittest.TestCase):
         with self.assertRaises(ValueError):
             model.learner.get_matrix_representation(self.X)
 
+    def test_print_and_plot_tree_raise_with_student(self):
+        """get_num_trees() counts main+student, but these only see the main model.
+
+        distil() resets the main ensemble to zero trees, so an index that is
+        valid per get_num_trees() would otherwise raise "Invalid tree index".
+        """
+        model = self._make_trained_model()
+        self._attach_student(model)
+        self.assertGreater(model.learner.get_num_trees(), 0)
+        with self.assertRaises(ValueError):
+            model.learner.print_tree(0)
+        with self.assertRaises(ValueError):
+            model.learner.plot_tree(0, os.path.join(self.test_dir, 'student_plot'))
+
+    def test_failed_reset_leaves_python_state_untouched(self):
+        """reset() must publish Python state only after the rebuild succeeds.
+
+        Mutating optimizers/total_iterations up front left the still-installed
+        old model carrying half-updated scheduler state after a failure.
+        """
+        model = self._make_trained_model()
+        learner = model.learner
+        before_opts = [dict(o) for o in learner.optimizers]
+        before_total = learner.total_iterations
+        before_pred = np.asarray(learner.predict(self.X, requires_grad=False, tensor=False))
+
+        saved_algo = learner.optimizers[0]['algo']
+        learner.optimizers[0]['algo'] = 'NONEXISTENT_ALGO'
+        try:
+            with self.assertRaises((ValueError, RuntimeError)):
+                learner.reset()
+            learner.optimizers[0]['algo'] = saved_algo
+            self.assertEqual([dict(o) for o in learner.optimizers], before_opts,
+                             'failed reset() mutated self.optimizers')
+            self.assertEqual(learner.total_iterations, before_total,
+                             'failed reset() mutated total_iterations')
+            np.testing.assert_allclose(
+                np.asarray(learner.predict(self.X, requires_grad=False, tensor=False)),
+                before_pred, rtol=1e-6,
+                err_msg='failed reset() disturbed the installed model')
+        finally:
+            learner.optimizers[0]['algo'] = saved_algo
+
     def test_set_device_moves_student(self):
         """set_device on an SGD model with a student must not raise and must move both."""
         model = self._make_trained_model()
@@ -1539,6 +1582,44 @@ class TestDistilledModelRestrictions(unittest.TestCase):
         model.set_device('cpu')
         pred = model(self.X, tensor=False)
         self.assertEqual(pred.size, self.y.size)
+
+    @unittest.skipUnless(cuda_available(), 'CUDA not available')
+    def test_set_device_moves_student_to_cuda(self):
+        """A real transfer, unlike set_device('cpu') on a CPU-resident model.
+
+        Main and student must land on the same device: predict() sums both, so a
+        split placement would feed one of them the wrong buffer type.
+        """
+        model = self._make_trained_model()
+        self._attach_student(model)
+        model.set_device('cuda')
+        self.assertEqual(model.learner._cpp_model.get_device(), 'cuda')
+        self.assertEqual(model.learner.student_model.get_device(), 'cuda')
+        self.assertEqual(model.learner.device, 'cuda')
+
+    def test_set_device_then_reset_keeps_device(self):
+        """reset() rebuilds from self.params, so set_device() must update it.
+
+        Updating only self.device meant reset() silently rebuilt on the ORIGINAL
+        device while transform_data() still routed tensors for the requested one.
+        """
+        model = self._make_trained_model()
+        model.set_device('cpu')
+        model.learner.reset()
+        self.assertEqual(model.learner.params['device'], 'cpu')
+        self.assertEqual(model.get_device(), 'cpu')
+        self.assertEqual(model.learner.device, model.learner._cpp_model.get_device())
+
+    @unittest.skipUnless(cuda_available(), 'CUDA not available')
+    def test_set_device_cuda_then_reset_keeps_cuda(self):
+        """The failing direction of the bug: cuda must survive a reset()."""
+        model = self._make_trained_model()
+        model.set_device('cuda')
+        model.learner.reset()
+        self.assertEqual(model.learner.params['device'], 'cuda')
+        self.assertEqual(model.get_device(), 'cuda',
+                         'reset() rebuilt on the stale device from params')
+        self.assertEqual(model.learner.device, model.learner._cpp_model.get_device())
 
 
 class TestAdamCUDAGuard(unittest.TestCase):
@@ -1581,19 +1662,33 @@ class TestAdamCUDAGuard(unittest.TestCase):
             model.step()
         return model
 
-    @unittest.skipIf(not cuda_available(), "CUDA not available")
+    # No CUDA skip: the Adam check is pure Python and runs before any device
+    # transfer, so it must hold on CPU-only CI too -- which is where a
+    # regression would otherwise go unnoticed.
     def test_adam_set_device_to_cuda_raises(self):
         model = self._make_adam_model()
         with self.assertRaises(ValueError):
             model.set_device('cuda')
 
-    @unittest.skipIf(not cuda_available(), "CUDA not available")
     def test_adam_load_on_cuda_raises(self):
         model = self._make_adam_model()
         path = os.path.join(self.test_dir, 'adam_cuda_test')
         model.save_learner(path)
         with self.assertRaises((ValueError, RuntimeError)):
             GBTModel.load_learner(path, device='cuda')
+
+    def test_rejected_cuda_request_leaves_device_on_cpu(self):
+        """A refused CUDA move must not leave Python claiming 'cuda'.
+
+        transform_data() routes tensors on self.device, so a stale 'cuda' here
+        would hand a CUDA tensor to a CPU model.
+        """
+        model = self._make_adam_model()
+        with self.assertRaises(ValueError):
+            model.set_device('cuda')
+        self.assertEqual(model.learner.device, 'cpu')
+        self.assertEqual(model.learner.params['device'], 'cpu')
+        self.assertEqual(model.get_device(), 'cpu')
 
 
 if __name__ == '__main__':
