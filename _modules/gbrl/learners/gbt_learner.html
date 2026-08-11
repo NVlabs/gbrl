@@ -1,0 +1,1322 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>gbrl.learners.gbt_learner &mdash; GBRL 1.1.9 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=7b68ca77"></script>
+      <script src="../../../_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            GBRL
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">User Guide:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../quickstart.html">Quickstart</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../quickstart.html#source-compilation">Source Compilation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../examples.html">Examples</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Documentation:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../models/index.html">Models</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../learners/index.html">Learners</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">GBRL</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">gbrl.learners.gbt_learner</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for gbrl.learners.gbt_learner</h1><div class="highlight"><pre>
+<span></span><span class="c1">##############################################################################</span>
+<span class="c1"># Copyright (c) 2024-2026, NVIDIA Corporation. All rights reserved.</span>
+<span class="c1">#</span>
+<span class="c1"># Permission is hereby granted, free of charge, to any person obtaining a</span>
+<span class="c1"># copy of this software and associated documentation files (the &quot;Software&quot;),</span>
+<span class="c1"># to deal in the Software without restriction, including without limitation</span>
+<span class="c1"># the rights to use, copy, modify, merge, publish, distribute, sublicense,</span>
+<span class="c1"># and/or sell copies of the Software, and to permit persons to whom the</span>
+<span class="c1"># Software is furnished to do so, subject to the following conditions:</span>
+<span class="c1">#</span>
+<span class="c1"># The above copyright notice and this permission notice shall be included in</span>
+<span class="c1"># all copies or substantial portions of the Software.</span>
+<span class="c1">#</span>
+<span class="c1"># THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR</span>
+<span class="c1"># IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,</span>
+<span class="c1"># FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL</span>
+<span class="c1"># THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER</span>
+<span class="c1"># LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING</span>
+<span class="c1"># FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER</span>
+<span class="c1"># DEALINGS IN THE SOFTWARE.</span>
+<span class="c1">##############################################################################</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">Gradient Boosted Tree Learner Module</span>
+
+<span class="sd">This module provides the GBTLearner class, which wraps the C++ GBRL backend</span>
+<span class="sd">for single gradient boosted tree models. It supports training, prediction,</span>
+<span class="sd">SHAP computation, and model serialization.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">warnings</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Any</span><span class="p">,</span> <span class="n">Dict</span><span class="p">,</span> <span class="n">List</span><span class="p">,</span> <span class="n">Optional</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">,</span> <span class="n">Union</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">torch</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">th</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">gbrl</span><span class="w"> </span><span class="kn">import</span> <span class="n">GBRL_CPP</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">gbrl.common.compression</span><span class="w"> </span><span class="kn">import</span> <span class="n">ParametricActorCompression</span><span class="p">,</span> <span class="n">TreeCompression</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">gbrl.common.utils</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span><span class="n">NumericalData</span><span class="p">,</span> <span class="n">concatenate_arrays</span><span class="p">,</span>
+                               <span class="n">ensure_leaf_tensor_or_array</span><span class="p">,</span> <span class="n">get_poly_vectors</span><span class="p">,</span>
+                               <span class="n">is_valid_feature_mapping</span><span class="p">,</span>
+                               <span class="n">normalize_vector_input</span><span class="p">,</span> <span class="n">numerical_dtype</span><span class="p">,</span>
+                               <span class="n">preprocess_features</span><span class="p">,</span> <span class="n">process_monotonic_constraints</span><span class="p">,</span>
+                               <span class="n">get_index_mapping</span><span class="p">,</span> <span class="n">to_numpy</span><span class="p">,</span>
+                               <span class="n">normalize_device</span><span class="p">,</span>
+                               <span class="n">validate_monotonic_features_numerical</span><span class="p">,</span>
+                               <span class="n">validate_monotonic_optimizer_compat</span><span class="p">,</span>
+                               <span class="n">validate_optimizer_ranges</span><span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">gbrl.learners.base</span><span class="w"> </span><span class="kn">import</span> <span class="n">BaseLearner</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">warn_on_projection_limit</span><span class="p">(</span><span class="n">cpp_model</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Raise a Python warning if a monotonic projection hit its pass limit.</span>
+
+<span class="sd">    The C++ side only prints to stderr, which nothing in Python can observe. The</span>
+<span class="sd">    leaf values are still monotone; they are just no longer guaranteed to be the</span>
+<span class="sd">    closest monotone values to the ones the trees produced.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        cpp_model: The C++ model that just trained; the projection count is read</span>
+<span class="sd">            off it directly.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">n_hits</span> <span class="o">=</span> <span class="n">cpp_model</span><span class="o">.</span><span class="n">get_monotonic_nonconverged</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">n_hits</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">n_hits</span><span class="si">}</span><span class="s2"> monotonic projection(s) hit the pass limit. Leaf values &quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;satisfy the constraints but may not be the closest values that do.&quot;</span><span class="p">,</span>
+            <span class="ne">RuntimeWarning</span><span class="p">,</span> <span class="n">stacklevel</span><span class="o">=</span><span class="mi">3</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="GBTLearner">
+<a class="viewcode-back" href="../../../learners/gbt_learner.html#gbrl.learners.gbt_learner.GBTLearner">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">GBTLearner</span><span class="p">(</span><span class="n">BaseLearner</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    GBTLearner is a gradient boosted tree learner that utilizes a C++ backend</span>
+<span class="sd">    for efficient computation.</span>
+<span class="sd">    It supports training, prediction, saving, loading,</span>
+<span class="sd">    and SHAP value computation.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span>
+                 <span class="n">input_dim</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+                 <span class="n">output_dim</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+                 <span class="n">tree_struct</span><span class="p">:</span> <span class="n">Dict</span><span class="p">,</span>
+                 <span class="n">optimizers</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="n">Dict</span><span class="p">,</span> <span class="n">List</span><span class="p">],</span>
+                 <span class="n">params</span><span class="p">:</span> <span class="n">Dict</span><span class="p">,</span>
+                 <span class="n">policy_dim</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+                 <span class="n">verbose</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span>
+                 <span class="n">device</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;cpu&#39;</span><span class="p">,</span>
+                 <span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;GBRL&#39;</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Initializes the GBTLearner.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            input_dim (int): The number of input features.</span>
+<span class="sd">            output_dim (int): The number of output dimensions.</span>
+<span class="sd">            tree_struct (Dict): A dictionary containing tree structure parameters.</span>
+<span class="sd">            optimizers (Union[Dict, List]): A dictionary or list of dictionaries containing optimizer parameters.</span>
+<span class="sd">            params (Dict): A dictionary containing model parameters.</span>
+<span class="sd">            policy_dim (Optional[int]): The dimension of the policy output. Defaults to None -&gt; if None</span>
+<span class="sd">                assumes to equal output dim.</span>
+<span class="sd">            verbose (int, optional): Verbosity level. Defaults to 0.</span>
+<span class="sd">            device (str, optional): The device to run the model on. Defaults to &#39;cpu&#39;.</span>
+<span class="sd">            name (str, optional): Name identifier for this learner. Defaults to &#39;GBRL&#39;.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">input_dim</span><span class="p">,</span> <span class="n">output_dim</span><span class="p">,</span> <span class="n">tree_struct</span><span class="p">,</span> <span class="n">params</span><span class="p">,</span> <span class="n">policy_dim</span><span class="p">,</span> <span class="n">verbose</span><span class="p">,</span> <span class="n">device</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">optimizers</span><span class="p">,</span> <span class="nb">list</span><span class="p">):</span>
+            <span class="n">optimizers</span> <span class="o">=</span> <span class="p">[</span><span class="n">optimizers</span><span class="p">]</span>
+        <span class="n">validate_optimizer_ranges</span><span class="p">(</span><span class="n">optimizers</span><span class="p">)</span>
+        <span class="n">validate_monotonic_optimizer_compat</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">monotonic_constraints</span><span class="p">,</span> <span class="n">optimizers</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">optimizers</span> <span class="o">=</span> <span class="n">optimizers</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">student_model</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_feature_mapping_installed</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">learner_name</span> <span class="o">=</span> <span class="n">name</span>
+
+<div class="viewcode-block" id="GBTLearner.reset">
+<a class="viewcode-back" href="../../../learners/gbt_learner.html#gbrl.learners.gbt_learner.GBTLearner.reset">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">reset</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Resets the learner to its initial state,</span>
+<span class="sd">        reinitializing the C++ model and optimizers.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># State this method changes is computed into a `next_*` local first and</span>
+        <span class="c1"># assigned only once the rebuild has fully succeeded.</span>
+        <span class="n">next_optimizers</span> <span class="o">=</span> <span class="p">[</span><span class="n">opt</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span> <span class="k">for</span> <span class="n">opt</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">optimizers</span><span class="p">]</span>
+
+        <span class="c1"># Carry the decayed LR forward only when training continues after</span>
+        <span class="c1"># distillation.  A plain reset must restart the scheduler from the</span>
+        <span class="c1"># originally configured init_lr, not from wherever the last run left it.</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cpp_model</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">student_model</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">lrs</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cpp_model</span><span class="o">.</span><span class="n">get_scheduler_lrs</span><span class="p">()</span>
+            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">next_optimizers</span><span class="p">)):</span>
+                <span class="n">next_optimizers</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="s1">&#39;init_lr&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">lrs</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+
+        <span class="c1"># load() builds instances via __new__ and bypasses __init__, so the</span>
+        <span class="c1"># Adam/monotonic check has to run here too.</span>
+        <span class="n">validate_monotonic_optimizer_compat</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">monotonic_constraints</span><span class="p">,</span> <span class="n">next_optimizers</span><span class="p">)</span>
+
+        <span class="c1"># Process monotonic constraints first to know size for allocation</span>
+        <span class="n">n_mono_constraints</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="n">mono_data</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">monotonic_constraints</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">feat_idx</span><span class="p">,</span> <span class="n">out_idx</span><span class="p">,</span> <span class="n">dirs</span> <span class="o">=</span> <span class="n">process_monotonic_constraints</span><span class="p">(</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">monotonic_constraints</span><span class="p">,</span>
+                <span class="n">policy_dim</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">policy_dim</span><span class="p">,</span>
+                <span class="n">input_dim</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">input_dim</span>
+            <span class="p">)</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">feat_idx</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">n_mono_constraints</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">feat_idx</span><span class="p">)</span>
+                <span class="n">mono_data</span> <span class="o">=</span> <span class="p">(</span><span class="n">feat_idx</span><span class="p">,</span> <span class="n">out_idx</span><span class="p">,</span> <span class="n">dirs</span><span class="p">)</span>
+        
+        <span class="c1"># Publish only after every optimizer is set, so a failure keeps the old model.</span>
+        <span class="n">cpp_model</span> <span class="o">=</span> <span class="n">GBRL_CPP</span><span class="p">(</span><span class="o">**</span><span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="p">,</span> <span class="n">learner_name</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">learner_name</span><span class="p">,</span> <span class="n">n_mono_constraints</span><span class="o">=</span><span class="n">n_mono_constraints</span><span class="p">)</span>
+        <span class="n">cpp_model</span><span class="o">.</span><span class="n">set_feature_weights</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">feature_weights</span><span class="p">)</span>
+
+        <span class="c1"># Set monotonic constraint data if provided</span>
+        <span class="k">if</span> <span class="n">mono_data</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">feat_idx</span><span class="p">,</span> <span class="n">out_idx</span><span class="p">,</span> <span class="n">dirs</span> <span class="o">=</span> <span class="n">mono_data</span>
+            <span class="n">cpp_model</span><span class="o">.</span><span class="n">set_monotonic_constraints</span><span class="p">(</span><span class="n">feat_idx</span><span class="p">,</span> <span class="n">out_idx</span><span class="p">,</span> <span class="n">dirs</span><span class="p">)</span>
+
+        <span class="n">next_total_iterations</span> <span class="o">=</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">total_iterations</span>
+                                 <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">student_model</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="mi">0</span><span class="p">)</span>
+
+        <span class="c1"># Copy the configs handed to C++: writing the reduced horizon back into the</span>
+        <span class="c1"># optimizers would subtract total_iterations again on every reset().</span>
+        <span class="n">configs</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">opt</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">next_optimizers</span><span class="p">):</span>
+            <span class="n">cfg</span> <span class="o">=</span> <span class="n">opt</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+            <span class="k">if</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">student_model</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span>
+                    <span class="nb">str</span><span class="p">(</span><span class="n">cfg</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;scheduler&#39;</span><span class="p">,</span> <span class="s1">&#39;Const&#39;</span><span class="p">))</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span> <span class="o">==</span> <span class="s1">&#39;linear&#39;</span><span class="p">):</span>
+                <span class="n">horizon</span> <span class="o">=</span> <span class="n">cfg</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;T&#39;</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">horizon</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                        <span class="s2">&quot;Linear scheduler requires &#39;T&#39; (total number of iterations)&quot;</span><span class="p">)</span>
+                <span class="n">remaining</span> <span class="o">=</span> <span class="n">horizon</span> <span class="o">-</span> <span class="n">next_total_iterations</span>
+                <span class="k">if</span> <span class="n">remaining</span> <span class="o">&lt;=</span> <span class="mi">0</span><span class="p">:</span>
+                    <span class="c1"># The schedule documents lr(t &gt;= T) == stop_lr, so an exhausted</span>
+                    <span class="c1"># horizon is not an error: hold the final rate.</span>
+                    <span class="n">cfg</span><span class="p">[</span><span class="s1">&#39;scheduler&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;Const&#39;</span>
+                    <span class="n">cfg</span><span class="p">[</span><span class="s1">&#39;init_lr&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">cfg</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;stop_lr&#39;</span><span class="p">,</span> <span class="n">cfg</span><span class="p">[</span><span class="s1">&#39;init_lr&#39;</span><span class="p">])</span>
+                    <span class="n">cfg</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="s1">&#39;T&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+                    <span class="n">cfg</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="s1">&#39;stop_lr&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">cfg</span><span class="p">[</span><span class="s1">&#39;T&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">remaining</span>
+            <span class="n">configs</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">cfg</span><span class="p">)</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">opt</span> <span class="ow">in</span> <span class="n">configs</span><span class="p">:</span>
+                <span class="n">cpp_model</span><span class="o">.</span><span class="n">set_optimizer</span><span class="p">(</span><span class="o">**</span><span class="n">opt</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">RuntimeError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+            <span class="c1"># The previous model is still installed, so the learner stays usable.</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Invalid GBRL optimizer configuration: </span><span class="si">{</span><span class="n">exc</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span> <span class="kn">from</span><span class="w"> </span><span class="nn">exc</span>
+
+        <span class="c1"># Publish the new model and its Python state together. The cached mapping</span>
+        <span class="c1"># belongs to the old model: a fresh one reports no feature counts, so a</span>
+        <span class="c1"># stale layout would be installed unchecked on the next batch.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_cpp_model</span> <span class="o">=</span> <span class="n">cpp_model</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">optimizers</span> <span class="o">=</span> <span class="n">next_optimizers</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">total_iterations</span> <span class="o">=</span> <span class="n">next_total_iterations</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">feature_mapping</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_feature_mapping_installed</span> <span class="o">=</span> <span class="kc">False</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_ensure_feature_mapping</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">features</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Compute and install the numerical/categorical feature mapping.</span>
+
+<span class="sd">        SHAP maps each split&#39;s type-local index through the reverse mappings to</span>
+<span class="sd">        recover the original input column.  Those arrays are zero-initialised in</span>
+<span class="sd">        C++, so without this every feature collapses onto column 0 -- silently,</span>
+<span class="sd">        because completeness is unaffected by moving attribution between columns.</span>
+<span class="sd">        Monotonic constraints and feature-weighted scoring read them too.</span>
+
+<span class="sd">        Called from step(), fit() and the SHAP entry points; keyed on the C++</span>
+<span class="sd">        model rather than on total_iterations, because distillation swaps in a</span>
+<span class="sd">        fresh model while leaving total_iterations non-zero.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># Derived from the batch in hand and kept local until every check and the</span>
+        <span class="c1"># C++ setter succeed, so a rejected batch leaves no mapping behind.</span>
+        <span class="n">candidate</span> <span class="o">=</span> <span class="n">get_index_mapping</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_mapping_input</span><span class="p">(</span><span class="n">features</span><span class="p">))</span>
+        <span class="n">feature_mapping</span><span class="p">,</span> <span class="n">numerical_mask</span> <span class="o">=</span> <span class="n">candidate</span>
+        <span class="c1"># A batch with a different numerical/categorical mix than the model was</span>
+        <span class="c1"># trained on would name the wrong column for every split, so reject it.</span>
+        <span class="n">metadata</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cpp_model</span><span class="o">.</span><span class="n">get_metadata</span><span class="p">()</span>
+        <span class="n">n_num</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">metadata</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;n_num_features&#39;</span><span class="p">,</span> <span class="mi">0</span><span class="p">))</span>
+        <span class="n">n_cat</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">metadata</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;n_cat_features&#39;</span><span class="p">,</span> <span class="mi">0</span><span class="p">))</span>
+        <span class="k">if</span> <span class="n">n_num</span> <span class="o">+</span> <span class="n">n_cat</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">is_valid_feature_mapping</span><span class="p">(</span>
+                <span class="p">(</span><span class="n">feature_mapping</span><span class="p">,</span> <span class="n">numerical_mask</span><span class="p">),</span> <span class="bp">self</span><span class="o">.</span><span class="n">input_dim</span><span class="p">,</span> <span class="n">n_num</span><span class="p">,</span> <span class="n">n_cat</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;The given batch does not match the data this model was trained &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;on: it expects </span><span class="si">{</span><span class="n">n_num</span><span class="si">}</span><span class="s2"> numerical and </span><span class="si">{</span><span class="n">n_cat</span><span class="si">}</span><span class="s2"> categorical &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;columns. Pass a representative batch.&quot;</span><span class="p">)</span>
+        <span class="n">validate_monotonic_features_numerical</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">monotonic_constraints</span><span class="p">,</span> <span class="n">numerical_mask</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_cpp_model</span><span class="o">.</span><span class="n">set_feature_mapping</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ascontiguousarray</span><span class="p">(</span><span class="n">feature_mapping</span><span class="p">),</span>
+                                            <span class="n">np</span><span class="o">.</span><span class="n">ascontiguousarray</span><span class="p">(</span><span class="n">numerical_mask</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">feature_mapping</span> <span class="o">=</span> <span class="n">candidate</span>
+
+<div class="viewcode-block" id="GBTLearner.step">
+<a class="viewcode-back" href="../../../learners/gbt_learner.html#gbrl.learners.gbt_learner.GBTLearner.step">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">step</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span>
+             <span class="n">inputs</span><span class="p">:</span> <span class="n">NumericalData</span><span class="p">,</span>
+             <span class="n">grads</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="n">NumericalData</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">NumericalData</span><span class="p">,</span> <span class="o">...</span><span class="p">]],</span>
+             <span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Performs a single gradient update step by adding a decision tree to the ensemble.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            inputs (NumericalData): Input features (NumPy array or PyTorch tensor).</span>
+<span class="sd">            grads (NumericalData or Tuple[NumericalData, ...]): Gradients for the update step.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            None</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cpp_model</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;Model not initialized!&quot;</span>
+        <span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">grads</span><span class="p">,</span> <span class="p">(</span><span class="nb">list</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">th</span><span class="o">.</span><span class="n">Tensor</span><span class="p">)),</span> \
+            <span class="s2">&quot;Invalid gradients type&quot;</span>
+
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">step</span><span class="p">(</span><span class="n">inputs</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_feature_mapping_installed</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_ensure_feature_mapping</span><span class="p">(</span><span class="n">inputs</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_feature_mapping_installed</span> <span class="o">=</span> <span class="kc">True</span>
+
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">grads</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">):</span>
+            <span class="n">grads</span> <span class="o">=</span> <span class="n">concatenate_arrays</span><span class="p">(</span><span class="n">grads</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">inputs</span><span class="o">.</span><span class="n">ndim</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="n">inputs</span> <span class="o">=</span> <span class="n">inputs</span><span class="o">.</span><span class="n">reshape</span><span class="p">((</span><span class="mi">1</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">input_dim</span><span class="p">))</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">input_dim</span> <span class="o">&gt;</span> <span class="mi">1</span> <span class="k">else</span> <span class="n">inputs</span><span class="o">.</span><span class="n">reshape</span><span class="p">((</span><span class="nb">len</span><span class="p">(</span><span class="n">inputs</span><span class="p">),</span> <span class="mi">1</span><span class="p">))</span>   <span class="c1"># type: ignore</span>
+
+        <span class="n">grads</span> <span class="o">=</span> <span class="n">grads</span><span class="o">.</span><span class="n">reshape</span><span class="p">((</span><span class="nb">len</span><span class="p">(</span><span class="n">inputs</span><span class="p">),</span> <span class="bp">self</span><span class="o">.</span><span class="n">output_dim</span><span class="p">))</span>  <span class="c1"># type: ignore</span>
+        <span class="n">inputs</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mapping_input</span><span class="p">(</span><span class="n">inputs</span><span class="p">)</span>
+        <span class="n">num_inputs</span><span class="p">,</span> <span class="n">cat_inputs</span> <span class="o">=</span> <span class="n">preprocess_features</span><span class="p">(</span><span class="n">inputs</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_memory</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_cpp_model</span><span class="o">.</span><span class="n">step</span><span class="p">(</span><span class="n">obs</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">transform_data</span><span class="p">(</span><span class="n">num_inputs</span><span class="p">),</span>
+                             <span class="n">categorical_obs</span><span class="o">=</span><span class="n">cat_inputs</span><span class="p">,</span>
+                             <span class="n">grads</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">transform_data</span><span class="p">(</span><span class="n">grads</span><span class="p">),</span>  <span class="c1"># type: ignore</span>
+                             <span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_memory</span> <span class="o">=</span> <span class="p">[]</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">iteration</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cpp_model</span><span class="o">.</span><span class="n">get_iteration</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">total_iterations</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="n">warn_on_projection_limit</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_cpp_model</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="GBTLearner.fit">
+<a class="viewcode-back" href="../../../learners/gbt_learner.html#gbrl.learners.gbt_learner.GBTLearner.fit">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">fit</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">features</span><span class="p">:</span> <span class="n">NumericalData</span><span class="p">,</span>
+            <span class="n">targets</span><span class="p">:</span> <span class="n">NumericalData</span><span class="p">,</span> <span class="n">iterations</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+            <span class="n">shuffle</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span> <span class="n">loss_type</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;MultiRMSE&#39;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Fits the model to the provided features and targets for a</span>
+<span class="sd">        given number of iterations.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            features (NumericalData): Input features.</span>
+<span class="sd">            targets (NumericalData): Target values.</span>
+<span class="sd">            iterations (int): Number of training iterations.</span>
+<span class="sd">            shuffle (bool, optional): Whether to shuffle the data. Defaults to True.</span>
+<span class="sd">            loss_type (str, optional): Type of loss function. Defaults to &#39;MultiRMSE&#39;.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            float: The final loss value.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">features</span><span class="p">,</span> <span class="n">th</span><span class="o">.</span><span class="n">Tensor</span><span class="p">):</span>
+            <span class="n">features</span> <span class="o">=</span> <span class="n">features</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span><span class="o">.</span><span class="n">numpy</span><span class="p">()</span>
+        <span class="n">features</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mapping_input</span><span class="p">(</span><span class="n">features</span><span class="p">)</span>
+        <span class="n">num_features</span><span class="p">,</span> <span class="n">cat_features</span> <span class="o">=</span> <span class="n">preprocess_features</span><span class="p">(</span><span class="n">features</span><span class="p">)</span>
+        <span class="c1"># Without the mapping, SHAP attributes every feature to column 0</span>
+        <span class="c1"># (see _ensure_feature_mapping).</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_feature_mapping_installed</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_ensure_feature_mapping</span><span class="p">(</span><span class="n">features</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_feature_mapping_installed</span> <span class="o">=</span> <span class="kc">True</span>
+        <span class="n">targets</span> <span class="o">=</span> <span class="n">to_numpy</span><span class="p">(</span><span class="n">targets</span><span class="p">)</span>
+
+        <span class="c1"># Handle 1D targets</span>
+        <span class="k">if</span> <span class="n">targets</span><span class="o">.</span><span class="n">ndim</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="n">n_samples</span> <span class="o">=</span> <span class="mi">1</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="p">[</span><span class="s1">&#39;output_dim&#39;</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">1</span> <span class="k">else</span> <span class="nb">len</span><span class="p">(</span><span class="n">targets</span><span class="p">)</span>
+            <span class="n">targets</span> <span class="o">=</span> <span class="n">targets</span><span class="o">.</span><span class="n">reshape</span><span class="p">((</span><span class="n">n_samples</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="p">[</span><span class="s1">&#39;output_dim&#39;</span><span class="p">]))</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">targets</span> <span class="o">=</span> <span class="n">targets</span><span class="o">.</span><span class="n">reshape</span><span class="p">((</span><span class="nb">len</span><span class="p">(</span><span class="n">targets</span><span class="p">),</span> <span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="p">[</span><span class="s1">&#39;output_dim&#39;</span><span class="p">]))</span>
+
+        <span class="c1"># Accumulate the delta: after distillation the main C++ model restarts at</span>
+        <span class="c1"># zero trees while total_iterations keeps the teacher&#39;s history.</span>
+        <span class="c1"># In a finally block: a rejected monotonic projection can throw after</span>
+        <span class="c1"># trees were already added and kept.</span>
+        <span class="n">iters_before</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cpp_model</span><span class="o">.</span><span class="n">get_iteration</span><span class="p">()</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">loss</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cpp_model</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">num_features</span><span class="p">,</span> <span class="n">cat_features</span><span class="p">,</span>
+                                       <span class="n">targets</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">numerical_dtype</span><span class="p">),</span>
+                                       <span class="n">iterations</span><span class="p">,</span> <span class="n">shuffle</span><span class="p">,</span> <span class="n">loss_type</span><span class="p">)</span>
+        <span class="k">finally</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">iteration</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cpp_model</span><span class="o">.</span><span class="n">get_iteration</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">total_iterations</span> <span class="o">+=</span> <span class="bp">self</span><span class="o">.</span><span class="n">iteration</span> <span class="o">-</span> <span class="n">iters_before</span>
+        <span class="n">warn_on_projection_limit</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_cpp_model</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">loss</span></div>
+
+
+<div class="viewcode-block" id="GBTLearner.save">
+<a class="viewcode-back" href="../../../learners/gbt_learner.html#gbrl.learners.gbt_learner.GBTLearner.save">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">save</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">filename</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Saves the model to a file.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            filename (str): The filename to save the model to.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">filename</span> <span class="o">=</span> <span class="n">filename</span><span class="o">.</span><span class="n">rstrip</span><span class="p">(</span><span class="s1">&#39;.&#39;</span><span class="p">)</span>
+        <span class="n">filename</span> <span class="o">+=</span> <span class="s1">&#39;.gbrl_model&#39;</span>
+        <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cpp_model</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;Can&#39;t save non-existent model!&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">student_model</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="s2">&quot;save() is not supported when a student model is attached. &quot;</span>
+                <span class="s2">&quot;The student contributes to every prediction but would be omitted &quot;</span>
+                <span class="s2">&quot;from the file, causing a silent prediction mismatch after load. &quot;</span>
+                <span class="s2">&quot;Resolve distillation before saving.&quot;</span><span class="p">)</span>
+        <span class="n">status</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cpp_model</span><span class="o">.</span><span class="n">save</span><span class="p">(</span><span class="n">filename</span><span class="p">)</span>
+        <span class="k">assert</span> <span class="n">status</span> <span class="o">==</span> <span class="mi">0</span><span class="p">,</span> <span class="s2">&quot;Failed to save model&quot;</span></div>
+
+
+<div class="viewcode-block" id="GBTLearner.export">
+<a class="viewcode-back" href="../../../learners/gbt_learner.html#gbrl.learners.gbt_learner.GBTLearner.export">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">export</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">filename</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">modelname</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Exports the model to a C header file.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            filename (str): The filename to export the model to.</span>
+<span class="sd">            modelname (str, optional): The name of the model in the C code. Defaults to None.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">filename</span> <span class="o">=</span> <span class="n">filename</span><span class="o">.</span><span class="n">rstrip</span><span class="p">(</span><span class="s1">&#39;.&#39;</span><span class="p">)</span>
+        <span class="n">filename</span> <span class="o">+=</span> <span class="s1">&#39;.h&#39;</span>
+        <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cpp_model</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;Can&#39;t export non-existent model!&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">student_model</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="s2">&quot;export() is not supported when a student model is attached. &quot;</span>
+                <span class="s2">&quot;The student contributes to every prediction but would be omitted &quot;</span>
+                <span class="s2">&quot;from the export.&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">modelname</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">modelname</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">status</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cpp_model</span><span class="o">.</span><span class="n">export</span><span class="p">(</span><span class="n">filename</span><span class="p">,</span> <span class="n">modelname</span><span class="p">)</span>
+            <span class="k">assert</span> <span class="n">status</span> <span class="o">==</span> <span class="mi">0</span><span class="p">,</span> <span class="s2">&quot;Failed to export model&quot;</span>
+        <span class="k">except</span> <span class="ne">RuntimeError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Caught an exception in GBRL: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="GBTLearner.load">
+<a class="viewcode-back" href="../../../learners/gbt_learner.html#gbrl.learners.gbt_learner.GBTLearner.load">[docs]</a>
+    <span class="nd">@classmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">load</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">filename</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">device</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;GBTLearner&quot;</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Loads a GBTLearner model from a file.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            filename (str): The filename to load the model from.</span>
+<span class="sd">            device (str): The device to load the model onto.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            GBTLearner: The loaded GBTLearner instance.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">filename</span> <span class="o">=</span> <span class="n">filename</span><span class="o">.</span><span class="n">rstrip</span><span class="p">(</span><span class="s1">&#39;.&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="s1">&#39;.gbrl_model&#39;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">filename</span><span class="p">:</span>
+            <span class="n">filename</span> <span class="o">+=</span> <span class="s1">&#39;.gbrl_model&#39;</span>
+        <span class="k">assert</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isfile</span><span class="p">(</span><span class="n">filename</span><span class="p">),</span> <span class="s2">&quot;filename doesn&#39;t exist!&quot;</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">instance</span> <span class="o">=</span> <span class="bp">cls</span><span class="o">.</span><span class="fm">__new__</span><span class="p">(</span><span class="bp">cls</span><span class="p">)</span>
+            <span class="n">device</span> <span class="o">=</span> <span class="n">normalize_device</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
+            <span class="n">instance</span><span class="o">.</span><span class="n">_cpp_model</span> <span class="o">=</span> <span class="n">GBRL_CPP</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">filename</span><span class="p">)</span>
+            <span class="c1"># Check Adam/CUDA before calling set_device: instance.optimizers</span>
+            <span class="c1"># isn&#39;t populated yet, so the check in set_device() can&#39;t fire.</span>
+            <span class="n">_temp_opts</span> <span class="o">=</span> <span class="n">instance</span><span class="o">.</span><span class="n">_cpp_model</span><span class="o">.</span><span class="n">get_optimizers</span><span class="p">()</span>
+            <span class="k">if</span> <span class="n">device</span> <span class="o">==</span> <span class="s1">&#39;cuda&#39;</span> <span class="ow">and</span> <span class="nb">any</span><span class="p">(</span>
+                    <span class="nb">str</span><span class="p">(</span><span class="n">opt</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;algo&#39;</span><span class="p">,</span> <span class="s1">&#39;SGD&#39;</span><span class="p">))</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span> <span class="o">==</span> <span class="s1">&#39;adam&#39;</span>
+                    <span class="k">for</span> <span class="n">opt</span> <span class="ow">in</span> <span class="n">_temp_opts</span><span class="p">):</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                    <span class="s2">&quot;Adam models are CPU-only and cannot be loaded onto CUDA. &quot;</span>
+                    <span class="s2">&quot;Load with device=&#39;cpu&#39; instead.&quot;</span><span class="p">)</span>
+            <span class="n">instance</span><span class="o">.</span><span class="n">set_device</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
+            <span class="n">metadata</span> <span class="o">=</span> <span class="n">instance</span><span class="o">.</span><span class="n">_cpp_model</span><span class="o">.</span><span class="n">get_metadata</span><span class="p">()</span>
+            <span class="n">instance</span><span class="o">.</span><span class="n">tree_struct</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;max_depth&#39;</span><span class="p">:</span> <span class="n">metadata</span><span class="p">[</span><span class="s1">&#39;max_depth&#39;</span><span class="p">],</span>
+                                    <span class="s1">&#39;min_data_in_leaf&#39;</span><span class="p">:</span>
+                                    <span class="n">metadata</span><span class="p">[</span><span class="s1">&#39;min_data_in_leaf&#39;</span><span class="p">],</span>
+                                    <span class="s1">&#39;n_bins&#39;</span><span class="p">:</span> <span class="n">metadata</span><span class="p">[</span><span class="s1">&#39;n_bins&#39;</span><span class="p">],</span>
+                                    <span class="s1">&#39;par_th&#39;</span><span class="p">:</span> <span class="n">metadata</span><span class="p">[</span><span class="s1">&#39;par_th&#39;</span><span class="p">],</span>
+                                    <span class="s1">&#39;batch_size&#39;</span><span class="p">:</span> <span class="n">metadata</span><span class="p">[</span><span class="s1">&#39;batch_size&#39;</span><span class="p">],</span>
+                                    <span class="s1">&#39;grow_policy&#39;</span><span class="p">:</span> <span class="n">metadata</span><span class="p">[</span><span class="s1">&#39;grow_policy&#39;</span><span class="p">]}</span>
+            <span class="n">instance</span><span class="o">.</span><span class="n">params</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;input_dim&#39;</span><span class="p">:</span> <span class="n">metadata</span><span class="p">[</span><span class="s1">&#39;input_dim&#39;</span><span class="p">],</span>
+                               <span class="s1">&#39;output_dim&#39;</span><span class="p">:</span> <span class="n">metadata</span><span class="p">[</span><span class="s1">&#39;output_dim&#39;</span><span class="p">],</span>
+                               <span class="s1">&#39;policy_dim&#39;</span><span class="p">:</span> <span class="n">metadata</span><span class="p">[</span><span class="s1">&#39;policy_dim&#39;</span><span class="p">],</span>
+                               <span class="s1">&#39;split_score_func&#39;</span><span class="p">:</span>
+                               <span class="n">metadata</span><span class="p">[</span><span class="s1">&#39;split_score_func&#39;</span><span class="p">],</span>
+                               <span class="s1">&#39;generator_type&#39;</span><span class="p">:</span> <span class="n">metadata</span><span class="p">[</span><span class="s1">&#39;generator_type&#39;</span><span class="p">],</span>
+                               <span class="s1">&#39;use_control_variates&#39;</span><span class="p">:</span>
+                               <span class="n">metadata</span><span class="p">[</span><span class="s1">&#39;use_control_variates&#39;</span><span class="p">],</span>
+                               <span class="s1">&#39;verbose&#39;</span><span class="p">:</span> <span class="n">metadata</span><span class="p">[</span><span class="s1">&#39;verbose&#39;</span><span class="p">],</span>
+                               <span class="s1">&#39;device&#39;</span><span class="p">:</span> <span class="n">instance</span><span class="o">.</span><span class="n">_cpp_model</span><span class="o">.</span><span class="n">get_device</span><span class="p">(),</span>
+                               <span class="o">**</span><span class="n">instance</span><span class="o">.</span><span class="n">tree_struct</span>
+                               <span class="p">}</span>
+            <span class="n">instance</span><span class="o">.</span><span class="n">output_dim</span> <span class="o">=</span> <span class="n">metadata</span><span class="p">[</span><span class="s1">&#39;output_dim&#39;</span><span class="p">]</span>
+            <span class="n">instance</span><span class="o">.</span><span class="n">input_dim</span> <span class="o">=</span> <span class="n">metadata</span><span class="p">[</span><span class="s1">&#39;input_dim&#39;</span><span class="p">]</span>
+            <span class="n">instance</span><span class="o">.</span><span class="n">policy_dim</span> <span class="o">=</span> <span class="n">metadata</span><span class="p">[</span><span class="s1">&#39;policy_dim&#39;</span><span class="p">]</span>
+            <span class="n">instance</span><span class="o">.</span><span class="n">verbose</span> <span class="o">=</span> <span class="n">metadata</span><span class="p">[</span><span class="s1">&#39;verbose&#39;</span><span class="p">]</span>
+            <span class="n">instance</span><span class="o">.</span><span class="n">optimizers</span> <span class="o">=</span> <span class="n">instance</span><span class="o">.</span><span class="n">_cpp_model</span><span class="o">.</span><span class="n">get_optimizers</span><span class="p">()</span>
+            <span class="n">instance</span><span class="o">.</span><span class="n">iteration</span> <span class="o">=</span> <span class="n">metadata</span><span class="p">[</span><span class="s1">&#39;iteration&#39;</span><span class="p">]</span>
+            <span class="n">instance</span><span class="o">.</span><span class="n">total_iterations</span> <span class="o">=</span> <span class="n">metadata</span><span class="p">[</span><span class="s1">&#39;iteration&#39;</span><span class="p">]</span>
+            <span class="n">instance</span><span class="o">.</span><span class="n">student_model</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="n">instance</span><span class="o">.</span><span class="n">feature_weights</span> <span class="o">=</span> <span class="n">instance</span><span class="o">.</span><span class="n">_cpp_model</span><span class="o">.</span><span class="n">get_feature_weights</span><span class="p">()</span>
+            <span class="n">instance</span><span class="o">.</span><span class="n">device</span> <span class="o">=</span> <span class="n">instance</span><span class="o">.</span><span class="n">params</span><span class="p">[</span><span class="s1">&#39;device&#39;</span><span class="p">]</span>
+            <span class="n">instance</span><span class="o">.</span><span class="n">feature_mapping</span> <span class="o">=</span> <span class="n">instance</span><span class="o">.</span><span class="n">_cpp_model</span><span class="o">.</span><span class="n">get_feature_mapping</span><span class="p">()</span>
+            <span class="c1"># A checkpoint without an installed mapping carries an all-zero one,</span>
+            <span class="c1"># which makes SHAP attribute every feature to column 0. Validate it</span>
+            <span class="c1"># against the trained feature counts and force a rebuild if it fails.</span>
+            <span class="n">instance</span><span class="o">.</span><span class="n">_feature_mapping_installed</span> <span class="o">=</span> <span class="n">is_valid_feature_mapping</span><span class="p">(</span>
+                <span class="n">instance</span><span class="o">.</span><span class="n">feature_mapping</span><span class="p">,</span> <span class="n">instance</span><span class="o">.</span><span class="n">input_dim</span><span class="p">,</span>
+                <span class="nb">int</span><span class="p">(</span><span class="n">metadata</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;n_num_features&#39;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)),</span>
+                <span class="nb">int</span><span class="p">(</span><span class="n">metadata</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;n_cat_features&#39;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)))</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">instance</span><span class="o">.</span><span class="n">_feature_mapping_installed</span><span class="p">:</span>
+                <span class="n">instance</span><span class="o">.</span><span class="n">feature_mapping</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="c1"># __new__ bypasses __init__, so the checks it runs are repeated here.</span>
+            <span class="n">validate_optimizer_ranges</span><span class="p">(</span><span class="n">instance</span><span class="o">.</span><span class="n">optimizers</span><span class="p">)</span>
+            <span class="c1"># Rebuild the Python constraint dict from the serialized arrays so</span>
+            <span class="c1"># reset()/distil() recreate a model with the same constraints.</span>
+            <span class="n">instance</span><span class="o">.</span><span class="n">monotonic_constraints</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="k">if</span> <span class="nb">int</span><span class="p">(</span><span class="n">metadata</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;n_mono_constraints&#39;</span><span class="p">,</span> <span class="mi">0</span><span class="p">))</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">feats</span><span class="p">,</span> <span class="n">outs</span><span class="p">,</span> <span class="n">dirs</span> <span class="o">=</span> <span class="n">instance</span><span class="o">.</span><span class="n">_cpp_model</span><span class="o">.</span><span class="n">get_monotonic_constraints</span><span class="p">()</span>
+                <span class="n">restored</span> <span class="o">=</span> <span class="p">{}</span>
+                <span class="k">for</span> <span class="n">f</span><span class="p">,</span> <span class="n">o</span><span class="p">,</span> <span class="n">d</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">feats</span><span class="o">.</span><span class="n">tolist</span><span class="p">(),</span> <span class="n">outs</span><span class="o">.</span><span class="n">tolist</span><span class="p">(),</span> <span class="n">dirs</span><span class="o">.</span><span class="n">tolist</span><span class="p">()):</span>
+                    <span class="n">direction</span> <span class="o">=</span> <span class="s1">&#39;increasing&#39;</span> <span class="k">if</span> <span class="n">d</span> <span class="o">==</span> <span class="mi">1</span> <span class="k">else</span> <span class="s1">&#39;decreasing&#39;</span>
+                    <span class="k">if</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">restored</span><span class="p">:</span>
+                        <span class="c1"># Same feature, more output dims: extend the existing entry.</span>
+                        <span class="n">prev_dir</span><span class="p">,</span> <span class="n">prev_outs</span> <span class="o">=</span> <span class="n">restored</span><span class="p">[</span><span class="n">f</span><span class="p">]</span>
+                        <span class="k">if</span> <span class="n">prev_dir</span> <span class="o">!=</span> <span class="n">direction</span><span class="p">:</span>
+                            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+                                <span class="sa">f</span><span class="s2">&quot;Loaded model has conflicting monotonic directions &quot;</span>
+                                <span class="sa">f</span><span class="s2">&quot;for feature </span><span class="si">{</span><span class="n">f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                        <span class="n">prev_outs</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">o</span><span class="p">)</span>
+                    <span class="k">else</span><span class="p">:</span>
+                        <span class="n">restored</span><span class="p">[</span><span class="n">f</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">direction</span><span class="p">,</span> <span class="p">[</span><span class="n">o</span><span class="p">])</span>
+                <span class="n">instance</span><span class="o">.</span><span class="n">monotonic_constraints</span> <span class="o">=</span> <span class="n">restored</span>
+            <span class="c1"># The monotonic checks __init__ runs; step()/fit() can be reached</span>
+            <span class="c1"># straight after load(). The projection only exists for oblivious</span>
+            <span class="c1"># trees, so a checkpoint claiming otherwise would train unconstrained.</span>
+            <span class="k">if</span> <span class="n">instance</span><span class="o">.</span><span class="n">monotonic_constraints</span> <span class="ow">and</span> \
+                    <span class="nb">str</span><span class="p">(</span><span class="n">instance</span><span class="o">.</span><span class="n">tree_struct</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;grow_policy&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">))</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span> <span class="o">!=</span> <span class="s1">&#39;oblivious&#39;</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;Monotonic constraints require oblivious grow_policy, got &quot;</span>
+                    <span class="sa">f</span><span class="s2">&quot;&#39;</span><span class="si">{</span><span class="n">instance</span><span class="o">.</span><span class="n">tree_struct</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;grow_policy&#39;</span><span class="p">)</span><span class="si">}</span><span class="s2">&#39;&quot;</span><span class="p">)</span>
+            <span class="n">validate_monotonic_optimizer_compat</span><span class="p">(</span><span class="n">instance</span><span class="o">.</span><span class="n">monotonic_constraints</span><span class="p">,</span>
+                                                <span class="n">instance</span><span class="o">.</span><span class="n">optimizers</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">instance</span><span class="o">.</span><span class="n">_feature_mapping_installed</span> <span class="ow">and</span> <span class="n">instance</span><span class="o">.</span><span class="n">feature_mapping</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="c1"># Feature types are only known once a mapping exists; a rebuilt</span>
+                <span class="c1"># mapping is checked in _ensure_feature_mapping instead.</span>
+                <span class="n">validate_monotonic_features_numerical</span><span class="p">(</span><span class="n">instance</span><span class="o">.</span><span class="n">monotonic_constraints</span><span class="p">,</span>
+                                                      <span class="n">instance</span><span class="o">.</span><span class="n">feature_mapping</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+            <span class="n">instance</span><span class="o">.</span><span class="n">_memory</span> <span class="o">=</span> <span class="p">[]</span>
+            <span class="n">instance</span><span class="o">.</span><span class="n">learner_name</span> <span class="o">=</span> <span class="n">instance</span><span class="o">.</span><span class="n">_cpp_model</span><span class="o">.</span><span class="n">get_learner_name</span><span class="p">()</span>
+            <span class="k">return</span> <span class="n">instance</span>
+        <span class="k">except</span> <span class="ne">RuntimeError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Caught an exception in GBRL: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="k">raise</span> <span class="n">e</span></div>
+
+
+<div class="viewcode-block" id="GBTLearner.get_schedule_learning_rates">
+<a class="viewcode-back" href="../../../learners/gbt_learner.html#gbrl.learners.gbt_learner.GBTLearner.get_schedule_learning_rates">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_schedule_learning_rates</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Union</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
+                                                   <span class="n">Tuple</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="o">...</span><span class="p">]]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Returns the learning rates of the schedulers.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            Union[int, Tuple[int, int]]: The learning rates.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cpp_model</span><span class="o">.</span><span class="n">get_scheduler_lrs</span><span class="p">()</span></div>
+
+
+<div class="viewcode-block" id="GBTLearner.get_iteration">
+<a class="viewcode-back" href="../../../learners/gbt_learner.html#gbrl.learners.gbt_learner.GBTLearner.get_iteration">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_iteration</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Returns the current iteration number.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            int: The current iteration number.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cpp_model</span><span class="o">.</span><span class="n">get_iteration</span><span class="p">()</span></div>
+
+
+<div class="viewcode-block" id="GBTLearner.get_num_trees">
+<a class="viewcode-back" href="../../../learners/gbt_learner.html#gbrl.learners.gbt_learner.GBTLearner.get_num_trees">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_num_trees</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Returns the total number of trees in the ensemble.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            int: The total number of trees.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">num_trees</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cpp_model</span><span class="o">.</span><span class="n">get_num_trees</span><span class="p">()</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">student_model</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">num_trees</span> <span class="o">+=</span> <span class="bp">self</span><span class="o">.</span><span class="n">student_model</span><span class="o">.</span><span class="n">get_num_trees</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">num_trees</span></div>
+
+
+<div class="viewcode-block" id="GBTLearner.set_bias">
+<a class="viewcode-back" href="../../../learners/gbt_learner.html#gbrl.learners.gbt_learner.GBTLearner.set_bias">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">set_bias</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">bias</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="n">NumericalData</span><span class="p">,</span> <span class="nb">float</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Sets the bias of the model.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            bias (Union[NumericalData, float]): The bias value.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_cpp_model</span><span class="o">.</span><span class="n">set_bias</span><span class="p">(</span><span class="n">normalize_vector_input</span><span class="p">(</span><span class="n">bias</span><span class="p">))</span>
+        <span class="k">except</span> <span class="ne">RuntimeError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Caught an exception in GBRL: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="GBTLearner.set_feature_weights">
+<a class="viewcode-back" href="../../../learners/gbt_learner.html#gbrl.learners.gbt_learner.GBTLearner.set_feature_weights">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">set_feature_weights</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">feature_weights</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="n">NumericalData</span><span class="p">,</span> <span class="nb">float</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Sets the feature weights of the model.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            feature_weights (Union[NumericalData, float]): The feature weights.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cpp_model</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;Model not initialized!&quot;</span>
+        <span class="c1"># Normalize to 1D vector (handles float, numpy, torch, 0D, and multi-D)</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">feature_weights</span><span class="p">,</span> <span class="n">th</span><span class="o">.</span><span class="n">Tensor</span><span class="p">):</span>
+            <span class="k">assert</span> <span class="p">(</span><span class="n">feature_weights</span> <span class="o">&gt;=</span> <span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">all</span><span class="p">(),</span> <span class="s2">&quot;feature weights contains non-positive values&quot;</span>
+        <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">feature_weights</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">):</span>
+            <span class="k">assert</span> <span class="n">np</span><span class="o">.</span><span class="n">all</span><span class="p">(</span><span class="n">feature_weights</span> <span class="o">&gt;=</span> <span class="mi">0</span><span class="p">),</span> <span class="s2">&quot;feature weights contains non-positive values&quot;</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">assert</span> <span class="n">feature_weights</span> <span class="o">&gt;=</span> <span class="mi">0</span><span class="p">,</span> <span class="s2">&quot;feature weights contains non-positive values&quot;</span>
+
+        <span class="n">normalized</span> <span class="o">=</span> <span class="n">normalize_vector_input</span><span class="p">(</span><span class="n">feature_weights</span><span class="p">)</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_cpp_model</span><span class="o">.</span><span class="n">set_feature_weights</span><span class="p">(</span><span class="n">normalized</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">RuntimeError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Caught an exception in GBRL: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="k">return</span>
+        <span class="c1"># reset(), __copy__() and distil() rebuild from this, so keep it in sync</span>
+        <span class="c1"># with C++.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">feature_weights</span> <span class="o">=</span> <span class="n">normalized</span></div>
+
+
+<div class="viewcode-block" id="GBTLearner.get_bias">
+<a class="viewcode-back" href="../../../learners/gbt_learner.html#gbrl.learners.gbt_learner.GBTLearner.get_bias">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_bias</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Returns the bias of the model.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            np.ndarray: The bias.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cpp_model</span><span class="o">.</span><span class="n">get_bias</span><span class="p">()</span></div>
+
+
+<div class="viewcode-block" id="GBTLearner.get_feature_weights">
+<a class="viewcode-back" href="../../../learners/gbt_learner.html#gbrl.learners.gbt_learner.GBTLearner.get_feature_weights">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_feature_weights</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Returns the feature weights of the model.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            np.ndarray: The feature weights.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cpp_model</span><span class="o">.</span><span class="n">get_feature_weights</span><span class="p">()</span></div>
+
+
+<div class="viewcode-block" id="GBTLearner.get_device">
+<a class="viewcode-back" href="../../../learners/gbt_learner.html#gbrl.learners.gbt_learner.GBTLearner.get_device">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_device</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Returns the device the model is running on.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            str: The device.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cpp_model</span><span class="o">.</span><span class="n">get_device</span><span class="p">()</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_reject_student_tree_access</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">what</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;get_num_trees() counts main + student, but these only see the main model.</span>
+
+<span class="sd">        distil() resets the main ensemble to zero trees, so straight after it</span>
+<span class="sd">        get_num_trees() reports the student&#39;s count while the main model is</span>
+<span class="sd">        empty: an index that is valid per the public count raises &quot;Invalid tree</span>
+<span class="sd">        index&quot; here. Reject rather than answer for a different ensemble.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">student_model</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">what</span><span class="si">}</span><span class="s2"> is not supported when a student model is attached: it &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;only sees the main ensemble, while get_num_trees() counts both, &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;so tree indices do not line up.&quot;</span><span class="p">)</span>
+
+<div class="viewcode-block" id="GBTLearner.print_tree">
+<a class="viewcode-back" href="../../../learners/gbt_learner.html#gbrl.learners.gbt_learner.GBTLearner.print_tree">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">print_tree</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tree_idx</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Prints the tree at the given index.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            tree_idx (int): The index of the tree to print.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_reject_student_tree_access</span><span class="p">(</span><span class="s2">&quot;print_tree()&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_cpp_model</span><span class="o">.</span><span class="n">print_tree</span><span class="p">(</span><span class="n">tree_idx</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="GBTLearner.plot_tree">
+<a class="viewcode-back" href="../../../learners/gbt_learner.html#gbrl.learners.gbt_learner.GBTLearner.plot_tree">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">plot_tree</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tree_idx</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">filename</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Plots the tree at the given index and saves it to a file.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            tree_idx (int): The index of the tree to plot.</span>
+<span class="sd">            filename (str): The filename to save the plot to.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_reject_student_tree_access</span><span class="p">(</span><span class="s2">&quot;plot_tree()&quot;</span><span class="p">)</span>
+        <span class="n">filename</span> <span class="o">=</span> <span class="n">filename</span><span class="o">.</span><span class="n">rstrip</span><span class="p">(</span><span class="s1">&#39;.&#39;</span><span class="p">)</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_cpp_model</span><span class="o">.</span><span class="n">plot_tree</span><span class="p">(</span><span class="n">tree_idx</span><span class="p">,</span> <span class="n">filename</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">RuntimeError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Caught an exception in GBRL: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="GBTLearner.tree_shap">
+<a class="viewcode-back" href="../../../learners/gbt_learner.html#gbrl.learners.gbt_learner.GBTLearner.tree_shap">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">tree_shap</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tree_idx</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">features</span><span class="p">:</span>
+                  <span class="n">NumericalData</span><span class="p">,</span> <span class="n">return_base</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Union</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Computes SHAP values for a single tree.</span>
+
+<span class="sd">        Implementation based on - https://github.com/yupbank/linear_tree_shap</span>
+<span class="sd">        See Linear TreeShap, Yu et al, 2023, https://arxiv.org/pdf/2209.08192</span>
+
+<span class="sd">        For Adam models, tree_shap(tree_idx, x) explains tree tree_idx using the</span>
+<span class="sd">        Adam optimizer state as it actually was before that tree was applied</span>
+<span class="sd">        (built up by all preceding trees), not tree tree_idx in isolation.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            tree_idx (int): tree index</span>
+<span class="sd">            features (NumericalData): input data</span>
+<span class="sd">            return_base (bool): if True, return (phi, base) where base has shape</span>
+<span class="sd">                (n_samples, output_dim). base[s] + phi[s].sum(axis=0) equals the</span>
+<span class="sd">                actual contribution of tree tree_idx for sample s. For Adam,</span>
+<span class="sd">                base is sample-specific.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            np.ndarray or tuple: shap values, or (shap_values, base_values) if</span>
+<span class="sd">                return_base=True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">student_model</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+                <span class="s2">&quot;tree_shap() is not supported when a student model is attached. &quot;</span>
+                <span class="s2">&quot;predict() sums both the main and student ensembles, so a single-model &quot;</span>
+                <span class="s2">&quot;SHAP result would not reconstruct the prediction.&quot;</span>
+            <span class="p">)</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">features</span><span class="p">,</span> <span class="n">th</span><span class="o">.</span><span class="n">Tensor</span><span class="p">):</span>
+            <span class="n">features</span> <span class="o">=</span> <span class="n">features</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span><span class="o">.</span><span class="n">numpy</span><span class="p">()</span>
+        <span class="c1"># A model saved before fit() installed a mapping carries an unusable one;</span>
+        <span class="c1"># rebuild it from the batch being explained.</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_feature_mapping_installed</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_ensure_feature_mapping</span><span class="p">(</span><span class="n">features</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_feature_mapping_installed</span> <span class="o">=</span> <span class="kc">True</span>
+        <span class="n">features</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mapping_input</span><span class="p">(</span><span class="n">features</span><span class="p">)</span>
+        <span class="n">num_features</span><span class="p">,</span> <span class="n">cat_features</span> <span class="o">=</span> <span class="n">preprocess_features</span><span class="p">(</span><span class="n">features</span><span class="p">)</span>
+        <span class="n">poly_vectors</span> <span class="o">=</span> <span class="n">get_poly_vectors</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="p">[</span><span class="s1">&#39;max_depth&#39;</span><span class="p">],</span> <span class="n">numerical_dtype</span><span class="p">)</span>
+        <span class="n">base_poly</span><span class="p">,</span> <span class="n">norm_values</span><span class="p">,</span> <span class="n">offset</span> <span class="o">=</span> <span class="n">poly_vectors</span>
+
+        <span class="n">base_poly</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">ascontiguousarray</span><span class="p">(</span><span class="n">base_poly</span><span class="p">)</span>
+        <span class="n">norm_values</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">ascontiguousarray</span><span class="p">(</span><span class="n">norm_values</span><span class="p">)</span>
+        <span class="n">offset</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">ascontiguousarray</span><span class="p">(</span><span class="n">offset</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">return_base</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cpp_model</span><span class="o">.</span><span class="n">tree_shap_and_base</span><span class="p">(</span><span class="n">tree_idx</span><span class="p">,</span> <span class="n">num_features</span><span class="p">,</span> <span class="n">cat_features</span><span class="p">,</span>
+                                                      <span class="n">norm_values</span><span class="p">,</span> <span class="n">base_poly</span><span class="p">,</span> <span class="n">offset</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cpp_model</span><span class="o">.</span><span class="n">tree_shap</span><span class="p">(</span><span class="n">tree_idx</span><span class="p">,</span> <span class="n">num_features</span><span class="p">,</span> <span class="n">cat_features</span><span class="p">,</span>
+                                         <span class="n">norm_values</span><span class="p">,</span> <span class="n">base_poly</span><span class="p">,</span> <span class="n">offset</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="GBTLearner.shap">
+<a class="viewcode-back" href="../../../learners/gbt_learner.html#gbrl.learners.gbt_learner.GBTLearner.shap">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">shap</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">features</span><span class="p">:</span> <span class="n">NumericalData</span><span class="p">,</span> <span class="n">return_base</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Union</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Computes SHAP values for the entire ensemble.</span>
+
+<span class="sd">        Uses Linear tree shap for each tree in the ensemble (sequentially)</span>
+<span class="sd">        Implementation based on - https://github.com/yupbank/linear_tree_shap</span>
+<span class="sd">        See Linear TreeShap, Yu et al, 2023, https://arxiv.org/pdf/2209.08192</span>
+
+<span class="sd">        For Adam models, GBRL explains each tree using the Adam optimizer state</span>
+<span class="sd">        as it actually was before that tree was applied. The numbers always add up:</span>
+<span class="sd">        base + phi.sum(axis=1) == predict(x). Per-feature scores are approximate</span>
+<span class="sd">        because GBRL uses the optimizer state from the real path, not from</span>
+<span class="sd">        hypothetical alternative paths.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            features: input data</span>
+<span class="sd">            return_base: if True, return (phi, base) where base has shape</span>
+<span class="sd">                (n_samples, output_dim) and satisfies base[s] + phi[s].sum(axis=0) == predict(x_s).</span>
+<span class="sd">                For Adam, base is sample-specific. For SGD, it is shared across samples by construction.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            np.ndarray or tuple: shap values, or (shap_values, base_values) if</span>
+<span class="sd">                return_base=True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">student_model</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+                <span class="s2">&quot;shap() is not supported when a student model is attached. &quot;</span>
+                <span class="s2">&quot;predict() sums both the main and student ensembles, so a single-model &quot;</span>
+                <span class="s2">&quot;SHAP result would not reconstruct the prediction.&quot;</span>
+            <span class="p">)</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">features</span><span class="p">,</span> <span class="n">th</span><span class="o">.</span><span class="n">Tensor</span><span class="p">):</span>
+            <span class="n">features</span> <span class="o">=</span> <span class="n">features</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span><span class="o">.</span><span class="n">numpy</span><span class="p">()</span>
+        <span class="c1"># A model saved before fit() installed a mapping carries an unusable one;</span>
+        <span class="c1"># rebuild it from the batch being explained.</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_feature_mapping_installed</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_ensure_feature_mapping</span><span class="p">(</span><span class="n">features</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_feature_mapping_installed</span> <span class="o">=</span> <span class="kc">True</span>
+        <span class="n">features</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mapping_input</span><span class="p">(</span><span class="n">features</span><span class="p">)</span>
+        <span class="n">num_features</span><span class="p">,</span> <span class="n">cat_features</span> <span class="o">=</span> <span class="n">preprocess_features</span><span class="p">(</span><span class="n">features</span><span class="p">)</span>
+        <span class="n">poly_vectors</span> <span class="o">=</span> <span class="n">get_poly_vectors</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="p">[</span><span class="s1">&#39;max_depth&#39;</span><span class="p">],</span> <span class="n">numerical_dtype</span><span class="p">)</span>
+        <span class="n">base_poly</span><span class="p">,</span> <span class="n">norm_values</span><span class="p">,</span> <span class="n">offset</span> <span class="o">=</span> <span class="n">poly_vectors</span>
+
+        <span class="n">base_poly</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">ascontiguousarray</span><span class="p">(</span><span class="n">base_poly</span><span class="p">)</span>
+        <span class="n">norm_values</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">ascontiguousarray</span><span class="p">(</span><span class="n">norm_values</span><span class="p">)</span>
+        <span class="n">offset</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">ascontiguousarray</span><span class="p">(</span><span class="n">offset</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">return_base</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cpp_model</span><span class="o">.</span><span class="n">ensemble_shap_and_base</span><span class="p">(</span><span class="n">num_features</span><span class="p">,</span> <span class="n">cat_features</span><span class="p">,</span>
+                                                          <span class="n">norm_values</span><span class="p">,</span> <span class="n">base_poly</span><span class="p">,</span> <span class="n">offset</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cpp_model</span><span class="o">.</span><span class="n">ensemble_shap</span><span class="p">(</span><span class="n">num_features</span><span class="p">,</span> <span class="n">cat_features</span><span class="p">,</span>
+                                             <span class="n">norm_values</span><span class="p">,</span> <span class="n">base_poly</span><span class="p">,</span> <span class="n">offset</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="GBTLearner.set_device">
+<a class="viewcode-back" href="../../../learners/gbt_learner.html#gbrl.learners.gbt_learner.GBTLearner.set_device">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">set_device</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">device</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">th</span><span class="o">.</span><span class="n">device</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Sets the device the model should run on.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            device (Union[str, th.device]): The device to set.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># Normalised before to_device(): &#39;gpu&#39; is an alias for &#39;cuda&#39;, and the</span>
+        <span class="c1"># CPU fallback reallocates the ensemble, dropping the trained trees.</span>
+        <span class="n">device</span> <span class="o">=</span> <span class="n">normalize_device</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
+        <span class="c1"># Adam is CPU-only; the GPU predictor represents every optimizer as SGD</span>
+        <span class="c1"># and discards moment state, so an Adam model on CUDA gives wrong predictions.</span>
+        <span class="c1"># Use getattr so this is safe in GBTLearner.load(), which calls set_device</span>
+        <span class="c1"># before instance.optimizers is assigned.</span>
+        <span class="k">if</span> <span class="n">device</span> <span class="o">==</span> <span class="s1">&#39;cuda&#39;</span> <span class="ow">and</span> <span class="nb">any</span><span class="p">(</span>
+                <span class="nb">str</span><span class="p">(</span><span class="n">opt</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;algo&#39;</span><span class="p">,</span> <span class="s1">&#39;SGD&#39;</span><span class="p">))</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span> <span class="o">==</span> <span class="s1">&#39;adam&#39;</span>
+                <span class="k">for</span> <span class="n">opt</span> <span class="ow">in</span> <span class="p">(</span><span class="nb">getattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="s1">&#39;optimizers&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span> <span class="ow">or</span> <span class="p">[])):</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="s2">&quot;Adam models are CPU-only and cannot be moved to CUDA. &quot;</span>
+                <span class="s2">&quot;The GPU predictor does not implement Adam; predictions would be wrong.&quot;</span><span class="p">)</span>
+        <span class="c1"># load() calls set_device() before student_model is assigned, so use</span>
+        <span class="c1"># getattr to avoid an AttributeError.</span>
+        <span class="n">student</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="s1">&#39;student_model&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+        <span class="n">origin</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cpp_model</span><span class="o">.</span><span class="n">get_device</span><span class="p">()</span>
+        <span class="n">moved</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_cpp_model</span><span class="o">.</span><span class="n">to_device</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
+            <span class="n">moved</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_cpp_model</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">student</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">student</span><span class="o">.</span><span class="n">to_device</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
+                <span class="n">moved</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">student</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">RuntimeError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="c1"># predict() sums the main and student models, so leaving them on</span>
+            <span class="c1"># different devices would feed one of them the wrong buffer. Put</span>
+            <span class="c1"># back whatever already moved.</span>
+            <span class="k">for</span> <span class="n">component</span> <span class="ow">in</span> <span class="n">moved</span><span class="p">:</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="n">component</span><span class="o">.</span><span class="n">to_device</span><span class="p">(</span><span class="n">origin</span><span class="p">)</span>
+                <span class="k">except</span> <span class="ne">RuntimeError</span> <span class="k">as</span> <span class="n">rollback_error</span><span class="p">:</span>
+                    <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+                        <span class="sa">f</span><span class="s2">&quot;Failed to move model to device &#39;</span><span class="si">{</span><span class="n">device</span><span class="si">}</span><span class="s2">&#39; (</span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">), and &quot;</span>
+                        <span class="sa">f</span><span class="s2">&quot;could not restore it to &#39;</span><span class="si">{</span><span class="n">origin</span><span class="si">}</span><span class="s2">&#39; (</span><span class="si">{</span><span class="n">rollback_error</span><span class="si">}</span><span class="s2">). &quot;</span>
+                        <span class="sa">f</span><span class="s2">&quot;The learner is now inconsistent and should be reloaded.&quot;</span>
+                    <span class="p">)</span> <span class="kn">from</span><span class="w"> </span><span class="nn">e</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Failed to move model to device &#39;</span><span class="si">{</span><span class="n">device</span><span class="si">}</span><span class="s2">&#39;: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span> <span class="kn">from</span><span class="w"> </span><span class="nn">e</span>
+        <span class="c1"># to_device() falls back to CPU (printing to stderr) when CUDA is</span>
+        <span class="c1"># unavailable rather than raising, so the requested string is not</span>
+        <span class="c1"># authoritative. Take the device the backend actually ended up on.</span>
+        <span class="n">actual_device</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cpp_model</span><span class="o">.</span><span class="n">get_device</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">device</span> <span class="o">=</span> <span class="n">actual_device</span>
+        <span class="c1"># reset() rebuilds the C++ model with GBRL_CPP(**self.params), so params</span>
+        <span class="c1"># has to carry the real device too.</span>
+        <span class="c1"># getattr: load() calls set_device() before it builds params, and fills</span>
+        <span class="c1"># in the device from the C++ model itself a few lines later.</span>
+        <span class="k">if</span> <span class="nb">getattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="s1">&#39;params&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="p">[</span><span class="s1">&#39;device&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">actual_device</span>
+        <span class="k">if</span> <span class="n">actual_device</span> <span class="o">!=</span> <span class="n">device</span><span class="p">:</span>
+            <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Requested device &#39;</span><span class="si">{</span><span class="n">device</span><span class="si">}</span><span class="s2">&#39; but GBRL is on &#39;</span><span class="si">{</span><span class="n">actual_device</span><span class="si">}</span><span class="s2">&#39;. &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;The model and all future reset() calls will use &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;&#39;</span><span class="si">{</span><span class="n">actual_device</span><span class="si">}</span><span class="s2">&#39;.&quot;</span><span class="p">,</span> <span class="ne">RuntimeWarning</span><span class="p">,</span> <span class="n">stacklevel</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="GBTLearner.predict">
+<a class="viewcode-back" href="../../../learners/gbt_learner.html#gbrl.learners.gbt_learner.GBTLearner.predict">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">predict</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span>
+                <span class="n">inputs</span><span class="p">:</span> <span class="n">NumericalData</span><span class="p">,</span>
+                <span class="n">requires_grad</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+                <span class="n">start_idx</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+                <span class="n">stop_idx</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+                <span class="n">tensor</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NumericalData</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Predicts the output for the given features.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            inputs (NumericalData): Input features.</span>
+<span class="sd">            requires_grad (bool, optional): Whether to compute gradients. Defaults to True.</span>
+<span class="sd">            start_idx (int, optional): Start index for prediction. Defaults to 0.</span>
+<span class="sd">            stop_idx (int, optional): Stop index for prediction. Defaults to None.</span>
+<span class="sd">            tensor (bool, optional): Whether to return a tensor. Defaults to True.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            NumericalData: The predicted output.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cpp_model</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;No model loaded!&quot;</span>
+        <span class="c1"># 0 and None both mean &quot;all trees&quot;, so they are not a real range.</span>
+        <span class="n">has_range</span> <span class="o">=</span> <span class="n">start_idx</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span> <span class="ow">or</span> <span class="n">stop_idx</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">student_model</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">has_range</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="s2">&quot;Ranged prediction (start_idx/stop_idx) is not supported when a &quot;</span>
+                <span class="s2">&quot;student model is attached. The combined tree sequence has no defined &quot;</span>
+                <span class="s2">&quot;ordering. Call predict() without range arguments.&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">stop_idx</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">stop_idx</span> <span class="o">=</span> <span class="mi">0</span>
+
+        <span class="n">inputs</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mapping_input</span><span class="p">(</span><span class="n">inputs</span><span class="p">)</span>
+        <span class="n">num_inputs</span><span class="p">,</span> <span class="n">cat_inputs</span> <span class="o">=</span> <span class="n">preprocess_features</span><span class="p">(</span><span class="n">inputs</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_memory</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">preds</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cpp_model</span><span class="o">.</span><span class="n">predict</span><span class="p">(</span><span class="n">obs</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">transform_data</span><span class="p">(</span><span class="n">num_inputs</span><span class="p">),</span>
+                                        <span class="n">categorical_obs</span><span class="o">=</span><span class="n">cat_inputs</span><span class="p">,</span>
+                                        <span class="n">start_tree_idx</span><span class="o">=</span><span class="n">start_idx</span><span class="p">,</span>
+                                        <span class="n">stop_tree_idx</span><span class="o">=</span><span class="n">stop_idx</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_memory</span> <span class="o">=</span> <span class="p">[]</span>
+
+        <span class="n">preds</span> <span class="o">=</span> <span class="n">th</span><span class="o">.</span><span class="n">from_dlpack</span><span class="p">(</span><span class="n">preds</span><span class="p">)</span> <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">preds</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span> <span class="k">else</span> <span class="n">preds</span>  <span class="c1"># type: ignore</span>
+
+        <span class="c1"># Add student model predictions if available</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">student_model</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">student_preds</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">student_model</span><span class="o">.</span><span class="n">predict</span><span class="p">(</span><span class="n">obs</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">transform_data</span><span class="p">(</span><span class="n">num_inputs</span><span class="p">),</span>
+                                                       <span class="n">categorical_obs</span><span class="o">=</span><span class="n">cat_inputs</span><span class="p">,</span>
+                                                       <span class="n">start_tree_idx</span><span class="o">=</span><span class="n">start_idx</span><span class="p">,</span>
+                                                       <span class="n">stop_tree_idx</span><span class="o">=</span><span class="n">stop_idx</span><span class="p">)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">student_preds</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">):</span>
+                <span class="n">student_preds</span> <span class="o">=</span> <span class="n">th</span><span class="o">.</span><span class="n">from_dlpack</span><span class="p">(</span><span class="n">student_preds</span><span class="p">)</span>  <span class="c1"># type: ignore</span>
+            <span class="n">preds</span> <span class="o">+=</span> <span class="n">student_preds</span>
+
+        <span class="n">preds</span> <span class="o">=</span> <span class="n">ensure_leaf_tensor_or_array</span><span class="p">(</span><span class="n">preds</span><span class="p">,</span> <span class="n">tensor</span><span class="p">,</span> <span class="n">requires_grad</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">preds</span></div>
+
+
+<div class="viewcode-block" id="GBTLearner.distil">
+<a class="viewcode-back" href="../../../learners/gbt_learner.html#gbrl.learners.gbt_learner.GBTLearner.distil">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">distil</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span>
+               <span class="n">obs</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
+               <span class="n">targets</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
+               <span class="n">params</span><span class="p">:</span> <span class="n">Dict</span><span class="p">,</span>
+               <span class="n">verbose</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="n">Dict</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Distills the model into a student model.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            obs (np.ndarray): Input observations.</span>
+<span class="sd">            targets (np.ndarray): Target values.</span>
+<span class="sd">            params (Dict): Distillation parameters.</span>
+<span class="sd">            verbose (int, optional): Verbosity level. Defaults to 0.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            Tuple[float, Dict]: The final loss and updated parameters.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># predict() adds the student&#39;s output to the main model&#39;s, so the combined</span>
+        <span class="c1"># prediction is only monotone if the student is too, and it is not.</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">monotonic_constraints</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="s2">&quot;Distillation is not supported for models with monotonic &quot;</span>
+                <span class="s2">&quot;constraints. predict() adds the student model&#39;s output to the &quot;</span>
+                <span class="s2">&quot;main model&#39;s, and the student is not constrained, so the result &quot;</span>
+                <span class="s2">&quot;would not be guaranteed monotone.&quot;</span><span class="p">)</span>
+        <span class="c1"># Checked before anything is built: params[&#39;min_steps&#39;] is only read once</span>
+        <span class="c1"># the student exists.</span>
+        <span class="k">for</span> <span class="n">required</span> <span class="ow">in</span> <span class="p">(</span><span class="s1">&#39;min_steps&#39;</span><span class="p">,</span> <span class="s1">&#39;limit_steps&#39;</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">required</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">params</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;Distillation requires &#39;</span><span class="si">{</span><span class="n">required</span><span class="si">}</span><span class="s2">&#39; in params, got keys &quot;</span>
+                    <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">sorted</span><span class="p">(</span><span class="n">params</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">obs</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mapping_input</span><span class="p">(</span><span class="n">obs</span><span class="p">)</span>
+        <span class="n">num_obs</span><span class="p">,</span> <span class="n">cat_obs</span> <span class="o">=</span> <span class="n">preprocess_features</span><span class="p">(</span><span class="n">obs</span><span class="p">)</span>
+        <span class="n">distil_params</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;input_dim&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">input_dim</span><span class="p">,</span>
+                         <span class="s1">&#39;output_dim&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">output_dim</span><span class="p">,</span>
+                         <span class="s1">&#39;policy_dim&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">policy_dim</span><span class="p">,</span>
+                         <span class="s1">&#39;split_score_func&#39;</span><span class="p">:</span> <span class="s1">&#39;L2&#39;</span><span class="p">,</span>
+                         <span class="s1">&#39;generator_type&#39;</span><span class="p">:</span> <span class="s1">&#39;Quantile&#39;</span><span class="p">,</span>
+                         <span class="s1">&#39;use_control_variates&#39;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span> <span class="s1">&#39;device&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">,</span>
+                         <span class="s1">&#39;max_depth&#39;</span><span class="p">:</span> <span class="n">params</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;distil_max_depth&#39;</span><span class="p">,</span> <span class="mi">6</span><span class="p">),</span>
+                         <span class="s1">&#39;verbose&#39;</span><span class="p">:</span> <span class="n">verbose</span><span class="p">,</span> <span class="s1">&#39;batch_size&#39;</span><span class="p">:</span>
+                         <span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;distil_batch_size&#39;</span><span class="p">,</span> <span class="mi">2048</span><span class="p">)}</span>
+        <span class="c1"># Published only after training and reset() both succeed, so a failure</span>
+        <span class="c1"># leaves the learner unchanged.</span>
+        <span class="n">student</span> <span class="o">=</span> <span class="n">GBRL_CPP</span><span class="p">(</span><span class="o">**</span><span class="n">distil_params</span><span class="p">)</span>
+        <span class="c1"># A raw C++ model starts with zero feature weights and an uninitialised</span>
+        <span class="c1"># feature mapping.  Zero weights collapse every split score, so the student</span>
+        <span class="c1"># would train on essentially no signal.</span>
+        <span class="n">student</span><span class="o">.</span><span class="n">set_feature_weights</span><span class="p">(</span>
+            <span class="n">np</span><span class="o">.</span><span class="n">ascontiguousarray</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">feature_weights</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">numerical_dtype</span><span class="p">))</span>
+        <span class="n">student_mapping</span><span class="p">,</span> <span class="n">student_mask</span> <span class="o">=</span> <span class="n">get_index_mapping</span><span class="p">(</span><span class="n">obs</span><span class="p">)</span>
+        <span class="n">student</span><span class="o">.</span><span class="n">set_feature_mapping</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ascontiguousarray</span><span class="p">(</span><span class="n">student_mapping</span><span class="p">),</span>
+                                    <span class="n">np</span><span class="o">.</span><span class="n">ascontiguousarray</span><span class="p">(</span><span class="n">student_mask</span><span class="p">))</span>
+        <span class="n">targets</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">ascontiguousarray</span><span class="p">(</span><span class="n">targets</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">numerical_dtype</span><span class="p">)</span>
+        <span class="c1"># start_idx/stop_idx are required: stop_idx defaults to 0 in the binding</span>
+        <span class="c1"># and C++ rejects stop_idx &lt;= 0, which would leave the student with no</span>
+        <span class="c1"># optimizer and make it predict only its bias.</span>
+        <span class="n">distil_optimizer</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;algo&#39;</span><span class="p">:</span> <span class="s1">&#39;SGD&#39;</span><span class="p">,</span>
+                            <span class="s1">&#39;init_lr&#39;</span><span class="p">:</span> <span class="n">params</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;distil_lr&#39;</span><span class="p">,</span> <span class="mf">0.1</span><span class="p">),</span>
+                            <span class="s1">&#39;start_idx&#39;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
+                            <span class="s1">&#39;stop_idx&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">output_dim</span><span class="p">}</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">student</span><span class="o">.</span><span class="n">set_optimizer</span><span class="p">(</span><span class="o">**</span><span class="n">distil_optimizer</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">RuntimeError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Invalid GBRL distillation optimizer configuration: </span><span class="si">{</span><span class="n">exc</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span> <span class="kn">from</span><span class="w"> </span><span class="nn">exc</span>
+
+        <span class="n">bias</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">targets</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+        <span class="c1"># np.mean returns a NumPy scalar (e.g. np.float32), not a Python float,</span>
+        <span class="c1"># so 1-D targets need an explicit promotion to a vector.</span>
+        <span class="n">bias</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">atleast_1d</span><span class="p">(</span><span class="n">bias</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">numerical_dtype</span><span class="p">,</span> <span class="n">copy</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="n">student</span><span class="o">.</span><span class="n">set_bias</span><span class="p">(</span><span class="n">bias</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">numerical_dtype</span><span class="p">))</span>
+        <span class="n">tr_loss</span> <span class="o">=</span> <span class="n">student</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">num_obs</span><span class="p">,</span> <span class="n">cat_obs</span><span class="p">,</span> <span class="n">targets</span><span class="p">,</span> <span class="n">params</span><span class="p">[</span><span class="s1">&#39;min_steps&#39;</span><span class="p">])</span>
+        <span class="k">while</span> <span class="n">tr_loss</span> <span class="o">&gt;</span> <span class="n">params</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;min_distillation_loss&#39;</span><span class="p">,</span> <span class="mf">0.1</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">params</span><span class="p">[</span><span class="s1">&#39;min_steps&#39;</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">params</span><span class="p">[</span><span class="s1">&#39;limit_steps&#39;</span><span class="p">]:</span>
+                <span class="n">steps_to_add</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="mi">500</span><span class="p">,</span> <span class="n">params</span><span class="p">[</span><span class="s1">&#39;limit_steps&#39;</span><span class="p">]</span> <span class="o">-</span> <span class="n">params</span><span class="p">[</span><span class="s1">&#39;min_steps&#39;</span><span class="p">])</span>
+                <span class="n">tr_loss</span> <span class="o">=</span> <span class="n">student</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">num_obs</span><span class="p">,</span> <span class="n">cat_obs</span><span class="p">,</span>
+                                      <span class="n">targets</span><span class="p">,</span> <span class="n">steps_to_add</span><span class="p">,</span>
+                                      <span class="n">shuffle</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+                <span class="n">params</span><span class="p">[</span><span class="s1">&#39;min_steps&#39;</span><span class="p">]</span> <span class="o">+=</span> <span class="n">steps_to_add</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="k">break</span>
+        <span class="c1"># reset() reads student_model to decide whether to keep total_iterations</span>
+        <span class="c1"># and to shorten a linear schedule, so publish it first. reset() leaves the</span>
+        <span class="c1"># main ensemble untouched on failure, so restoring the student undoes all.</span>
+        <span class="n">previous_student</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">student_model</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">student_model</span> <span class="o">=</span> <span class="n">student</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">reset</span><span class="p">()</span>
+        <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">student_model</span> <span class="o">=</span> <span class="n">previous_student</span>
+            <span class="k">raise</span>
+        <span class="k">return</span> <span class="n">tr_loss</span><span class="p">,</span> <span class="n">params</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_reject_unsupported_matrix_representation</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">what</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Adam has no fixed per-leaf contribution, so it has no leaf-value matrix.</span>
+
+<span class="sd">        get_matrix_representation() builds V with Optimizer::copy_and_scale, which</span>
+<span class="sd">        is -lr * raw_leaf_value. That is not virtual, so Adam uses it too. An Adam</span>
+<span class="sd">        tree&#39;s contribution depends on each sample&#39;s accumulated moments, which one</span>
+<span class="sd">        shared value per leaf cannot express, so A @ V does not reconstruct</span>
+<span class="sd">        predict(X) and anything optimized against it is optimizing the wrong</span>
+<span class="sd">        function.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            what (str): Name of the calling API, used in the error message.</span>
+
+<span class="sd">        Raises:</span>
+<span class="sd">            ValueError: If any optimizer uses Adam.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">for</span> <span class="n">opt</span> <span class="ow">in</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">optimizers</span> <span class="ow">or</span> <span class="p">[]):</span>
+            <span class="k">if</span> <span class="nb">str</span><span class="p">(</span><span class="n">opt</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;algo&#39;</span><span class="p">,</span> <span class="s1">&#39;SGD&#39;</span><span class="p">))</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span> <span class="o">==</span> <span class="s1">&#39;adam&#39;</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">what</span><span class="si">}</span><span class="s2"> is not supported for models using the Adam optimizer. &quot;</span>
+                    <span class="sa">f</span><span class="s2">&quot;Adam&#39;s per-tree contribution is sample-specific, so it cannot &quot;</span>
+                    <span class="sa">f</span><span class="s2">&quot;be represented as one value per leaf. Use SGD.&quot;</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_reject_constrained_compression</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Compression rewrites leaf values through the learned W matrix and never</span>
+<span class="sd">        re-projects them, while the compressed model keeps advertising the</span>
+<span class="sd">        constraints. The result would claim a monotonicity it no longer has.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">monotonic_constraints</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="s2">&quot;Compression is not supported for models with monotonic &quot;</span>
+                <span class="s2">&quot;constraints. Compression rewrites leaf values and does not &quot;</span>
+                <span class="s2">&quot;re-apply the monotonic projection, so the compressed model &quot;</span>
+                <span class="s2">&quot;would no longer satisfy them.&quot;</span><span class="p">)</span>
+
+<div class="viewcode-block" id="GBTLearner.get_matrix_representation">
+<a class="viewcode-back" href="../../../learners/gbt_learner.html#gbrl.learners.gbt_learner.GBTLearner.get_matrix_representation">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_matrix_representation</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">features</span><span class="p">:</span> <span class="n">NumericalData</span><span class="p">)</span> <span class="o">-&gt;</span> \
+            <span class="n">Tuple</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Converts input features into matrix representations required for compression.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            features (NumericalData): Input feature batch of shape (n_samples, n_features),</span>
+<span class="sd">                either as a NumPy array or a PyTorch tensor.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            Tuple[np.ndarray, np.ndarray, np.ndarray, int, int]: A tuple containing:</span>
+<span class="sd">                - A (np.ndarray): Feature-to-leaf assignment matrix.</span>
+<span class="sd">                - V (np.ndarray): Leaf value matrix.</span>
+<span class="sd">                - n_leaves_per_tree (np.ndarray): Number of leaves in each tree.</span>
+<span class="sd">                - n_leaves (int): Total number of leaves.</span>
+<span class="sd">                - n_trees (int): Total number of trees.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_reject_unsupported_matrix_representation</span><span class="p">(</span><span class="s2">&quot;get_matrix_representation()&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">student_model</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="s2">&quot;get_matrix_representation() is not supported when a student model &quot;</span>
+                <span class="s2">&quot;is attached. The matrix A@V would not match predict(), which also &quot;</span>
+                <span class="s2">&quot;sums the student ensemble.&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">features</span><span class="p">,</span> <span class="n">th</span><span class="o">.</span><span class="n">Tensor</span><span class="p">):</span>
+            <span class="n">features</span> <span class="o">=</span> <span class="n">features</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span><span class="o">.</span><span class="n">numpy</span><span class="p">()</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">single</span><span class="p">)</span>
+        <span class="n">features</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mapping_input</span><span class="p">(</span><span class="n">features</span><span class="p">)</span>
+        <span class="n">num_features</span><span class="p">,</span> <span class="n">cat_features</span> <span class="o">=</span> <span class="n">preprocess_features</span><span class="p">(</span><span class="n">features</span><span class="p">)</span>
+        <span class="c1"># Ensure float32 dtype for C++ backend</span>
+        <span class="k">if</span> <span class="n">num_features</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">num_features</span> <span class="o">=</span> <span class="n">num_features</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">single</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cpp_model</span><span class="o">.</span><span class="n">get_matrix_representation</span><span class="p">(</span><span class="n">num_features</span><span class="p">,</span> <span class="n">cat_features</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="GBTLearner.compress">
+<a class="viewcode-back" href="../../../learners/gbt_learner.html#gbrl.learners.gbt_learner.GBTLearner.compress">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">compress</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">trees_to_keep</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">gradient_steps</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">features</span><span class="p">:</span> <span class="n">NumericalData</span><span class="p">,</span>
+                 <span class="n">actions</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">th</span><span class="o">.</span><span class="n">Tensor</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">log_std</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">th</span><span class="o">.</span><span class="n">Tensor</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+                 <span class="n">method</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;first_k&#39;</span><span class="p">,</span> <span class="n">dist_type</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;supervised_learning&#39;</span><span class="p">,</span>
+                 <span class="n">optimizer_kwargs</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+                 <span class="n">least_squares_W</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span> <span class="n">temperature</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1.0</span><span class="p">,</span> <span class="n">lambda_reg</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1.0</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Compresses the tree ensemble by selecting and retraining a subset of trees.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            trees_to_keep (int): Number of trees to retain in the compressed model.</span>
+<span class="sd">            gradient_steps (int): Number of optimization steps during compression.</span>
+<span class="sd">            features (NumericalData): Input feature matrix (n_samples, n_features).</span>
+<span class="sd">            actions (th.Tensor, optional): Target actions (for policy compression). Required if dist_type</span>
+<span class="sd">                is not &#39;supervised_learning&#39;.</span>
+<span class="sd">            log_std (th.Tensor, optional): Log standard deviation (only used for certain policy types).</span>
+<span class="sd">            method (str): Tree selection method. Defaults to &#39;first_k&#39;.</span>
+<span class="sd">            dist_type (str): Compression type (&#39;supervised_learning&#39;, &#39;actor&#39;, etc.).</span>
+<span class="sd">            optimizer_kwargs (dict, optional): Optimizer configuration.</span>
+<span class="sd">            least_squares_W (bool): Whether to use least-squares to estimate weights (for supervised compression).</span>
+<span class="sd">            temperature (float): Temperature parameter for soft selection.</span>
+<span class="sd">            lambda_reg (float): L2 regularization coefficient on weights.</span>
+<span class="sd">            **kwargs: Additional keyword arguments passed to the compressor.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            float: Final loss value after compression.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">assert</span> <span class="n">actions</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">dist_type</span> <span class="o">==</span> <span class="s1">&#39;supervised_learning&#39;</span><span class="p">,</span> \
+            <span class="s2">&quot;Cannot compress a policy without actions unless using supervised_learning mode&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_reject_constrained_compression</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_reject_unsupported_matrix_representation</span><span class="p">(</span><span class="s2">&quot;compress()&quot;</span><span class="p">)</span>
+        
+        <span class="c1"># Validate model state and trees_to_keep before expensive matrix computation</span>
+        <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cpp_model</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;Cannot compress: no model has been trained&quot;</span>
+        <span class="n">total_trees</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cpp_model</span><span class="o">.</span><span class="n">get_num_trees</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">trees_to_keep</span> <span class="o">&lt;=</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;trees_to_keep must be &gt; 0, got </span><span class="si">{</span><span class="n">trees_to_keep</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">trees_to_keep</span> <span class="o">&gt;=</span> <span class="n">total_trees</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;trees_to_keep must be &lt; total number of trees (</span><span class="si">{</span><span class="n">total_trees</span><span class="si">}</span><span class="s2">), got </span><span class="si">{</span><span class="n">trees_to_keep</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        
+        <span class="n">A</span><span class="p">,</span> <span class="n">V</span><span class="p">,</span> <span class="n">n_leaves_per_tree</span><span class="p">,</span> <span class="n">n_leaves</span><span class="p">,</span> <span class="n">n_trees</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_matrix_representation</span><span class="p">(</span><span class="n">features</span><span class="p">)</span>
+        
+        <span class="c1"># Convert to tensors with explicit dtype</span>
+        <span class="n">A</span> <span class="o">=</span> <span class="n">th</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span><span class="n">A</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">th</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+        <span class="n">V</span> <span class="o">=</span> <span class="n">th</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span><span class="n">V</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">th</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+        <span class="n">n_leaves_per_tree</span> <span class="o">=</span> <span class="n">th</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span><span class="n">n_leaves_per_tree</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">th</span><span class="o">.</span><span class="n">int64</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+        <span class="n">trees_to_remove</span> <span class="o">=</span> <span class="n">total_trees</span> <span class="o">-</span> <span class="n">trees_to_keep</span>
+        <span class="n">compression_params</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;k&#39;</span><span class="p">:</span> <span class="n">trees_to_remove</span><span class="p">,</span> <span class="s1">&#39;gradient_steps&#39;</span><span class="p">:</span> <span class="n">gradient_steps</span><span class="p">,</span>
+                              <span class="s1">&#39;method&#39;</span><span class="p">:</span> <span class="n">method</span><span class="p">,</span>
+                              <span class="s1">&#39;optimizer_kwargs&#39;</span><span class="p">:</span> <span class="n">optimizer_kwargs</span><span class="p">,</span>
+                              <span class="s1">&#39;temperature&#39;</span><span class="p">:</span> <span class="n">temperature</span><span class="p">,</span> <span class="s1">&#39;n_leaves&#39;</span><span class="p">:</span> <span class="n">n_leaves</span><span class="p">,</span> <span class="s1">&#39;n_trees&#39;</span><span class="p">:</span> <span class="n">n_trees</span><span class="p">,</span>
+                              <span class="s1">&#39;n_leaves_per_tree&#39;</span><span class="p">:</span> <span class="n">n_leaves_per_tree</span><span class="p">,</span>
+                              <span class="s1">&#39;lambda_reg&#39;</span><span class="p">:</span> <span class="n">lambda_reg</span><span class="p">,</span>
+                              <span class="s1">&#39;output_dim&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">output_dim</span><span class="p">,</span>
+                              <span class="s1">&#39;device&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">}</span>
+        <span class="n">compression_params</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">kwargs</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">actions</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="c1"># Only require log_std for Gaussian-like distributions</span>
+            <span class="k">if</span> <span class="n">dist_type</span> <span class="ow">in</span> <span class="p">(</span><span class="s1">&#39;gaussian&#39;</span><span class="p">,</span> <span class="s1">&#39;normal&#39;</span><span class="p">,</span> <span class="s1">&#39;diag_gaussian&#39;</span><span class="p">):</span>
+                <span class="k">assert</span> <span class="n">log_std</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;log_std must be provided for Gaussian policy compression&quot;</span>
+            <span class="n">compression_params</span><span class="p">[</span><span class="s1">&#39;dist_type&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">dist_type</span>
+            <span class="n">compressor</span> <span class="o">=</span> <span class="n">ParametricActorCompression</span><span class="p">(</span><span class="o">**</span><span class="n">compression_params</span><span class="p">)</span>
+            <span class="n">parameters</span><span class="p">,</span> <span class="n">losses</span> <span class="o">=</span> <span class="n">compressor</span><span class="o">.</span><span class="n">compress</span><span class="p">(</span><span class="n">A</span><span class="p">,</span> <span class="n">V</span><span class="p">,</span> <span class="n">actions</span><span class="p">,</span> <span class="n">log_std</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">compression_params</span><span class="p">[</span><span class="s1">&#39;least_squares_W&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">least_squares_W</span>
+            <span class="n">compressor</span> <span class="o">=</span> <span class="n">TreeCompression</span><span class="p">(</span><span class="o">**</span><span class="n">compression_params</span><span class="p">)</span>
+            <span class="n">parameters</span><span class="p">,</span> <span class="n">losses</span> <span class="o">=</span> <span class="n">compressor</span><span class="o">.</span><span class="n">compress</span><span class="p">(</span><span class="n">A</span><span class="p">,</span> <span class="n">V</span><span class="p">)</span>
+        
+        <span class="n">leaves_selection</span><span class="p">,</span> <span class="n">tree_selection</span><span class="p">,</span> <span class="n">W</span><span class="p">,</span> <span class="n">n_compressed_trees</span><span class="p">,</span> <span class="n">n_compressed_leaves</span> <span class="o">=</span> <span class="n">parameters</span>
+        
+        <span class="c1"># Get indices of selected leaves/trees using nonzero (more efficient than where)</span>
+        <span class="n">compressed_leaf_indices</span> <span class="o">=</span> <span class="n">leaves_selection</span><span class="o">.</span><span class="n">nonzero</span><span class="p">()[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">int32</span><span class="p">)</span>
+        <span class="n">compressed_tree_indices</span> <span class="o">=</span> <span class="n">tree_selection</span><span class="o">.</span><span class="n">nonzero</span><span class="p">()[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">int32</span><span class="p">)</span>
+        
+        <span class="c1"># Reorder W from original leaf order to compressed leaf order</span>
+        <span class="c1"># W has shape (n_leaves+1, output_dim): row 0 is bias, rows 1+ are leaves</span>
+        <span class="c1"># Select bias row (0) plus rows for compressed leaves (indices+1)</span>
+        <span class="n">W_indices</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">concatenate</span><span class="p">([[</span><span class="mi">0</span><span class="p">],</span> <span class="n">compressed_leaf_indices</span> <span class="o">+</span> <span class="mi">1</span><span class="p">])</span>
+        <span class="n">W_compressed</span> <span class="o">=</span> <span class="n">W</span><span class="p">[</span><span class="n">W_indices</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">single</span><span class="p">)</span>
+        
+        <span class="c1"># Compute new tree indices for compressed model</span>
+        <span class="n">new_tree_indices</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">n_compressed_trees</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int32</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">n_compressed_trees</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="c1"># Convert tensor to CPU numpy before indexing with numpy array</span>
+            <span class="n">n_leaves_per_tree_np</span> <span class="o">=</span> <span class="n">n_leaves_per_tree</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span><span class="o">.</span><span class="n">numpy</span><span class="p">()</span>
+            <span class="n">new_tree_indices</span><span class="p">[</span><span class="mi">1</span><span class="p">:]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">cumsum</span><span class="p">(</span>
+                <span class="n">n_leaves_per_tree_np</span><span class="p">[</span><span class="n">compressed_tree_indices</span><span class="p">]</span>
+            <span class="p">)[:</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">int32</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_cpp_model</span><span class="o">.</span><span class="n">compress</span><span class="p">(</span><span class="n">n_compressed_leaves</span><span class="p">,</span> <span class="n">n_compressed_trees</span><span class="p">,</span> <span class="n">compressed_leaf_indices</span><span class="p">,</span>
+                                 <span class="n">compressed_tree_indices</span><span class="p">,</span> <span class="n">new_tree_indices</span><span class="p">,</span> <span class="n">W_compressed</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">verbose</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Finished compressing - compressed model has </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">get_num_trees</span><span class="p">()</span><span class="si">}</span><span class="s2"> trees&quot;</span><span class="p">)</span>
+        
+        <span class="c1"># Defensive check for empty losses</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">losses</span><span class="p">:</span>
+            <span class="k">del</span> <span class="n">compressor</span><span class="p">,</span> <span class="n">A</span><span class="p">,</span> <span class="n">V</span><span class="p">,</span> <span class="n">n_leaves_per_tree</span>
+            <span class="k">del</span> <span class="n">leaves_selection</span><span class="p">,</span> <span class="n">tree_selection</span><span class="p">,</span> <span class="n">W</span><span class="p">,</span> <span class="n">parameters</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;No losses computed by compressor during compression operation&quot;</span><span class="p">)</span>
+        
+        <span class="n">final_loss</span> <span class="o">=</span> <span class="n">losses</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+        <span class="c1"># Clean up large tensors</span>
+        <span class="k">del</span> <span class="n">compressor</span><span class="p">,</span> <span class="n">A</span><span class="p">,</span> <span class="n">V</span><span class="p">,</span> <span class="n">n_leaves_per_tree</span>
+        <span class="k">del</span> <span class="n">leaves_selection</span><span class="p">,</span> <span class="n">tree_selection</span><span class="p">,</span> <span class="n">W</span><span class="p">,</span> <span class="n">W_compressed</span><span class="p">,</span> <span class="n">parameters</span><span class="p">,</span> <span class="n">losses</span>
+        
+        <span class="k">return</span> <span class="n">final_loss</span></div>
+
+
+<div class="viewcode-block" id="GBTLearner.print_ensemble_metadata">
+<a class="viewcode-back" href="../../../learners/gbt_learner.html#gbrl.learners.gbt_learner.GBTLearner.print_ensemble_metadata">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">print_ensemble_metadata</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Prints the metadata of the ensemble.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cpp_model</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;No model loaded!&quot;</span><span class="p">)</span>
+            <span class="k">return</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_cpp_model</span><span class="o">.</span><span class="n">print_ensemble_metadata</span><span class="p">()</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">__copy__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Creates a copy of the GBTLearner instance.&quot;&quot;&quot;</span>
+        <span class="n">opts</span> <span class="o">=</span> <span class="p">[</span><span class="n">opt</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span> <span class="k">if</span> <span class="n">opt</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">opt</span>
+                <span class="k">for</span> <span class="n">opt</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">optimizers</span>
+                <span class="p">]</span>
+
+        <span class="n">copy_</span> <span class="o">=</span> <span class="n">GBTLearner</span><span class="p">(</span><span class="n">input_dim</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">input_dim</span><span class="p">,</span>  <span class="c1"># type: ignore</span>
+                           <span class="n">output_dim</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">output_dim</span><span class="p">,</span>  <span class="c1"># type: ignore</span>
+                           <span class="n">tree_struct</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">tree_struct</span><span class="o">.</span><span class="n">copy</span><span class="p">(),</span>
+                           <span class="n">optimizers</span><span class="o">=</span><span class="n">opts</span><span class="p">,</span>
+                           <span class="n">params</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="p">,</span>
+                           <span class="n">policy_dim</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">policy_dim</span><span class="p">,</span>  <span class="c1"># type: ignore</span>
+                           <span class="n">verbose</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">verbose</span><span class="p">,</span>
+                           <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">,</span>
+                           <span class="n">name</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">learner_name</span><span class="p">)</span>
+        <span class="c1"># params does not describe these, so a rebuild from it alone would drop</span>
+        <span class="c1"># them and copy_.reset() would produce an unconstrained model.</span>
+        <span class="n">copy_</span><span class="o">.</span><span class="n">monotonic_constraints</span> <span class="o">=</span> <span class="p">(</span><span class="nb">dict</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">monotonic_constraints</span><span class="p">)</span>
+                                       <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">monotonic_constraints</span> <span class="k">else</span> <span class="kc">None</span><span class="p">)</span>
+        <span class="n">copy_</span><span class="o">.</span><span class="n">feature_weights</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">feature_weights</span><span class="p">,</span> <span class="n">copy</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">copy_</span><span class="o">.</span><span class="n">feature_mapping</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">feature_mapping</span>
+        <span class="n">copy_</span><span class="o">.</span><span class="n">_feature_mapping_installed</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_feature_mapping_installed</span>
+        <span class="n">copy_</span><span class="o">.</span><span class="n">iteration</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">iteration</span>
+        <span class="n">copy_</span><span class="o">.</span><span class="n">total_iterations</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">total_iterations</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cpp_model</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">copy_</span><span class="o">.</span><span class="n">_cpp_model</span> <span class="o">=</span> <span class="n">GBRL_CPP</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_cpp_model</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">student_model</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">copy_</span><span class="o">.</span><span class="n">student_model</span> <span class="o">=</span> <span class="n">GBRL_CPP</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">student_model</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">copy_</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024-2026, NVIDIA Corporation.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
