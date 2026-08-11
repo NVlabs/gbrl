@@ -49,7 +49,6 @@ float MultiRMSEGradandLoss(const float *preds, const float *targets, float *grad
     float loss = 0.0f;
     float *result = new float[n_blocks];
     cudaMemcpy(result, loss_tmp, sizeof(float)*n_blocks, cudaMemcpyDeviceToHost);
-    #pragma omp simd
     for (int i = 0; i < n_blocks; ++i){
         loss += result[i];
     }

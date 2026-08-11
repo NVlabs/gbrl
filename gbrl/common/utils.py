@@ -26,7 +26,7 @@ This module provides utility functions for data preprocessing, array manipulatio
 tensor operations, optimizer setup, and SHAP value computation used throughout
 the GBRL library.
 """
-from typing import Dict, Sequence, Optional, Tuple, Union
+from typing import Dict, List, Sequence, Optional, Tuple, Union
 
 import numpy as np
 import torch as th
@@ -272,17 +272,240 @@ def setup_optimizer(optimizer: Dict, prefix: str = '') -> Dict:
         optimizer['scheduler'] = 'Const'
     else:
         raise ValueError(f"Unknown scheduler '{sched}'. Must be 'linear', 'const', or 'constant'.")
-    # Validate 'T' is present for Linear scheduler
-    if optimizer['scheduler'] == 'Linear' and 'T' not in optimizer:
-        raise ValueError("Linear scheduler requires 'T' (total number of iterations) to be specified.")
+    # Validate 'T' is present and usable for Linear scheduler
+    if optimizer['scheduler'] == 'Linear':
+        if 'T' not in optimizer:
+            raise ValueError("Linear scheduler requires 'T' (total number of iterations) to be specified.")
+        # T divides in get_lr(), so a non-positive or non-integer T is unusable.
+        T = optimizer['T']
+        if isinstance(T, bool) or not isinstance(T, (int, np.integer)) or T < 1:
+            raise ValueError(f"Linear scheduler 'T' must be an integer >= 1, got {T!r}")
     optimizer['init_lr'] = float(lr)
     if optimizer['init_lr'] <= 0:
         raise ValueError("init_lr must be > 0")
+    # A schedule crossing zero flips the sign of the leaf-value -> prediction
+    # transform, which the monotonic projection assumes is constant. NaN needs an
+    # explicit check because it fails every comparison.
+    if optimizer.get('stop_lr') is not None:
+        stop_lr = float(optimizer['stop_lr'])
+        if not np.isfinite(stop_lr) or stop_lr <= 0:
+            raise ValueError(f"stop_lr must be a finite value > 0, got {optimizer['stop_lr']}")
+        optimizer['stop_lr'] = stop_lr
+    if not np.isfinite(optimizer['init_lr']):
+        raise ValueError(f"init_lr must be finite, got {optimizer['init_lr']}")
     optimizer['algo'] = optimizer.get('algo', 'SGD')
     assert optimizer['algo'] in APPROVED_OPTIMIZERS, \
         f"optimization algo has to be in {APPROVED_OPTIMIZERS}"
     return {k: v for k, v in optimizer.items() if k in VALID_OPTIMIZER_ARGS
             and v is not None}
+
+
+def cuda_usable() -> bool:
+    """Whether CUDA is compiled in AND a usable device exists at runtime.
+
+    gbrl.cuda_available() is compile-time only, so a CUDA build on a machine
+    with no GPU still reports True. Callers must check this before asking the
+    backend to move to CUDA: to_device() falls back to CPU by reallocating the
+    ensemble, which drops the trained trees.
+
+    Returns:
+        bool: True if a CUDA transfer will actually succeed.
+    """
+    # Imported here rather than at module scope: gbrl/__init__.py imports this
+    # module, so a top-level import would be circular.
+    from gbrl import cuda_available
+    if not cuda_available():
+        return False
+    try:
+        return bool(th.cuda.is_available())
+    except Exception:
+        return False
+
+
+def normalize_device(device: Union[str, "th.device"]) -> str:
+    """Canonicalise a device string and reject one that cannot be used.
+
+    'gpu' is a documented alias for 'cuda' that the C++ layer accepts, so it has
+    to be normalised here or every later `device == 'cuda'` check silently misses
+    it. Returns 'cpu' or 'cuda' only.
+
+    Args:
+        device (Union[str, th.device]): Requested device.
+
+    Returns:
+        str: 'cpu' or 'cuda'.
+
+    Raises:
+        TypeError: If device is neither a string nor a torch.device.
+        ValueError: If the name is unknown, or CUDA is asked for but unusable.
+    """
+    if isinstance(device, th.device):
+        device = device.type
+    if not isinstance(device, str):
+        raise TypeError(
+            f"device must be a string or torch.device, got "
+            f"{type(device).__name__}")
+    normalized = device.lower()
+    if normalized == 'gpu':
+        normalized = 'cuda'
+    if normalized not in ('cpu', 'cuda'):
+        raise ValueError(
+            f"Unknown device {device!r}; expected 'cpu', 'cuda' or 'gpu'.")
+    if normalized == 'cuda' and not cuda_usable():
+        raise ValueError(
+            "CUDA is not available: GBRL was built without CUDA support or no "
+            "usable GPU was found. Use device='cpu'.")
+    return normalized
+
+
+def validate_optimizer_ranges(optimizers: Union[Dict, List[Dict]]) -> None:
+    """Reject optimizers whose output ranges overlap.
+
+    Each output dimension must be covered by at most one optimizer. Overlapping
+    ranges make the per-dimension update ambiguous and produce incorrect SHAP
+    values, so they are rejected before the C++ model is built.
+
+    Args:
+        optimizers (Union[Dict, List[Dict]]): One optimizer dict or a list of them.
+
+    Raises:
+        ValueError: If any two optimizers cover the same output dimension.
+    """
+    if isinstance(optimizers, dict):
+        optimizers = [optimizers]
+    seen = []
+    for opt in optimizers:
+        start, stop = opt.get('start_idx'), opt.get('stop_idx')
+        if start is None or stop is None:
+            continue
+        # An empty or reversed interval never overlaps anything, so it would slip
+        # past the check below; C++ rejects it later anyway.
+        if (isinstance(start, bool) or isinstance(stop, bool)
+                or not isinstance(start, (int, np.integer))
+                or not isinstance(stop, (int, np.integer))):
+            raise ValueError(
+                f"optimizer start_idx/stop_idx must be integers, got "
+                f"{start!r}/{stop!r}")
+        if start < 0 or start >= stop:
+            raise ValueError(
+                f"optimizer output range must satisfy 0 <= start_idx < stop_idx, "
+                f"got [{start}, {stop})")
+        for prev_start, prev_stop in seen:
+            if start < prev_stop and stop > prev_start:
+                raise ValueError(
+                    f"Overlapping optimizer output ranges are not supported: "
+                    f"[{start}, {stop}) overlaps [{prev_start}, {prev_stop}). "
+                    f"Each output dimension may be covered by at most one optimizer."
+                )
+        seen.append((start, stop))
+
+
+def is_valid_feature_mapping(mapping, input_dim: int, n_num_features: int,
+                             n_cat_features: int) -> bool:
+    """Check that a feature mapping can identify the input column of every split.
+
+    Numerical and categorical features each index from 0 internally, so the
+    mapping is what turns a split's internal index back into an input column.
+    An all-zero mapping sends every feature to column 0, which additivity checks
+    cannot catch because moving attribution between columns preserves the sum.
+
+    A mapping is valid when it covers every input column and the two halves are
+    exactly 0..n_num_features-1 and 0..n_cat_features-1.
+
+    Args:
+        mapping: (feature_mapping, numerical_mask) as returned by
+            get_feature_mapping(), or None.
+        input_dim (int): number of input columns.
+        n_num_features (int): number of numerical columns the model was trained on.
+        n_cat_features (int): number of categorical columns the model was trained on.
+
+    Returns:
+        bool: True if the mapping is usable.
+    """
+    if mapping is None:
+        return False
+    # A model that has never seen data reports 0 features of both kinds, so there
+    # is nothing to check the mapping against.
+    if n_num_features + n_cat_features != input_dim:
+        return False
+    try:
+        indices = np.asarray(mapping[0]).ravel()
+        mask = np.asarray(mapping[1]).ravel().astype(bool)
+    except (TypeError, ValueError, IndexError):
+        return False
+    if indices.size != input_dim or mask.size != input_dim:
+        return False
+    if int(mask.sum()) != n_num_features or int((~mask).sum()) != n_cat_features:
+        return False
+    numerical = np.sort(indices[mask])
+    categorical = np.sort(indices[~mask])
+    return (np.array_equal(numerical, np.arange(n_num_features))
+            and np.array_equal(categorical, np.arange(n_cat_features)))
+
+
+def validate_monotonic_features_numerical(constraints, numerical_mask) -> None:
+    """Reject monotonic constraints placed on categorical features.
+
+    Monotonicity is an ordering property, so it is only defined for numerical
+    features; a categorical feature has no order to be monotone in. Feature types
+    are not known until the first batch is seen, so this runs then rather than at
+    construction time.
+
+    Args:
+        constraints (Dict): feature index -> (direction, output_dims), or None.
+        numerical_mask (np.ndarray): per-global-column bool, True for numerical.
+
+    Raises:
+        ValueError: If any constrained feature is categorical.
+    """
+    if not constraints:
+        return
+    bad = [int(f) for f in constraints
+           if 0 <= int(f) < len(numerical_mask) and not bool(numerical_mask[int(f)])]
+    if bad:
+        raise ValueError(
+            f"Monotonic constraints were set on categorical feature(s) {bad}. "
+            f"Monotonicity requires an ordering, so it is only defined for "
+            f"numerical features."
+        )
+
+
+def validate_monotonic_optimizer_compat(constraints, optimizers) -> None:
+    """Reject monotonic constraints on any model using Adam.
+
+    The projection orders the raw leaf gradients g, but the contribution Adam
+    actually adds is
+
+        delta = -alpha * (b1*m + (1-b1)*g) / (sqrt(b2*v + (1-b2)*g^2) + eps)
+
+    whose derivative w.r.t. g has sign proportional to
+
+        (1-b1)*b2*v - (1-b2)*b1*m*g
+
+    so a larger gradient does not reliably give a larger contribution. m and v are
+    also sample-specific (they depend on the path each sample took through the
+    earlier trees), while leaf values are shared, so no ordering of leaf values can
+    make every sample's contribution monotone. Only SGD, whose transform is a fixed
+    signed scale, preserves the ordering.
+
+    Args:
+        constraints (Dict): feature index -> (direction, output_dims), or None.
+        optimizers (Union[Dict, List[Dict]]): optimizer configuration(s).
+
+    Raises:
+        ValueError: If any optimizer uses Adam.
+    """
+    if not constraints:
+        return
+    if isinstance(optimizers, dict):
+        optimizers = [optimizers]
+    if any(str(opt.get('algo', 'SGD')).lower() == 'adam' for opt in optimizers):
+        raise ValueError(
+            "Monotonic constraints are not supported with the Adam optimizer. "
+            "Adam's update is non-linear in the leaf gradient and depends on "
+            "per-sample optimizer state, so ordering leaf values does not make "
+            "predictions monotone. Use SGD when applying monotonic constraints."
+        )
 
 
 def clip_grad_norm(grads: NumericalData, grad_clip: Optional[float]) ->\

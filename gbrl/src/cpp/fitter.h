@@ -74,6 +74,12 @@ class Fitter {
          * @param iterations Number of boosting iterations
          * @param loss_type Loss function to use
          * @param opts Vector of optimizers for leaf value updates
+         *
+         * Each tree is built on a single mini-batch of at most batch_size rows,
+         * so datasets too large to fit a tree on are still trainable. Successive
+         * trees take successive batches, wrapping back to the first row once the
+         * data runs out.
+         *
          * @return Final loss value after training
          */
         static float fit_cpu(

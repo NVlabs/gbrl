@@ -54,7 +54,7 @@ For a detailed usage example, see `tutorial.ipynb`
     - MultiRMSE loss (only)
 - Categorical inputs
 - Input feature weights - (CPU/GPU)
-- Monotonic constraints - (CPU/GPU, policy only)
+- Monotonic constraints - (CPU/GPU, oblivious trees; the whole model must use SGD, Adam is not allowed on any output)
 
 ### GBT Inference
 
@@ -63,8 +63,8 @@ For a detailed usage example, see `tutorial.ipynb`
 - Control Variates (gradient variance reduction technique) - (CPU only)
 - Shared Tree for policy and value function - (CPU/GPU)
 - Linear and constant learning rate scheduler - (CPU/GPU, linear scheduler GPU only for Oblivious trees)
-- Support for up to two different optimizers (e.g, policy/value) - **(CPU/GPU if both are SGD)
-- SHAP value calculation
+- Support for up to two different optimizers (e.g., policy/value) - (CPU/GPU if both are SGD)
+- SHAP value calculation (optimizer-aware; `return_base=True` gives values that reconstruct the prediction)
 
 # Documentation 
 For comprehensive documentation, visit the [GBRL documentation](https://nvlabs.github.io/gbrl/).
@@ -86,5 +86,5 @@ url={https://arxiv.org/abs/2407.08250}
 # Licenses
 Copyright © 2024-2026, NVIDIA Corporation. All rights reserved.
 
-This work is made available under the NVIDIA The MIT License. Click [here](https://github.com/NVlabs/gbrl/blob/master/LICENSE). to view a copy of this license.
+This work is made available under the NVIDIA MIT License. Click [here](https://github.com/NVlabs/gbrl/blob/master/LICENSE) to view a copy of this license.
 
