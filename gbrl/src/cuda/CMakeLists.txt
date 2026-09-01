@@ -34,6 +34,11 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/gbrl/src/cpp
 
 set(CMAKE_CUDA_STANDARD 14)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+
+# Pre-Turing architectures are still built deliberately on CUDA < 13 (see the
+# CUDA_ARCHS list in the top-level CMakeLists.txt); silence nvcc's deprecation
+# notice for them so it does not drown out real diagnostics.
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Wno-deprecated-gpu-targets")
 # -I/usr/include/boost
 if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --extended-lambda -O3 -Xcompiler -fPIC")

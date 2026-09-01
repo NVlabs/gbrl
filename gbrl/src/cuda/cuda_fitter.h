@@ -34,6 +34,19 @@
 #include "cuda_types.h"
 #include "node.h"
 
+/**
+ * @brief Marks an extern "C" entry point that may propagate a C++ exception.
+ *
+ * MSVC assumes extern "C" functions are nothrow under /EHsc (C4297) and skips
+ * their unwind code, which would turn a throw into a terminate. Declaring the
+ * exception specification explicitly restores correct unwinding.
+ */
+#ifdef __cplusplus
+#define GBRL_MAY_THROW noexcept(false)
+#else
+#define GBRL_MAY_THROW
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -182,7 +195,7 @@ void fit_tree_oblivious_cuda(
     ensembleMetaData *metadata,
     candidatesData *candidata,
     splitDataGPU *split_data
-);
+) GBRL_MAY_THROW;
 
 /**
  * @brief Fit greedy tree on GPU
@@ -245,7 +258,7 @@ void apply_monotonic_constraints_cuda(
     int tree_idx,
     int tree_depth,
     int start_leaf_idx
-);
+) GBRL_MAY_THROW;
 
 #ifdef __CUDACC__
 

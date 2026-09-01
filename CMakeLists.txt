@@ -116,7 +116,9 @@ if (USE_CUDA AND NOT APPLE)
         list(APPEND CUDA_ARCHS "${CUDA_LAST_SUPPORTED_ARCH}-virtual")
         set(CMAKE_CUDA_ARCHITECTURES ${CUDA_ARCHS})
 
-        if(NOT DEFINED CMAKE_CUDA_HOST_COMPILER AND NOT DEFINED ENV{CUDAHOSTCXX})
+        # The Visual Studio generator always uses the C++ compiler VS provides and
+        # warns if a CUDA host compiler is requested, so only set one elsewhere.
+        if(NOT MSVC AND NOT DEFINED CMAKE_CUDA_HOST_COMPILER AND NOT DEFINED ENV{CUDAHOSTCXX})
             set(CMAKE_CUDA_HOST_COMPILER ${CMAKE_CXX_COMPILER} CACHE FILEPATH
                 "The compiler executable to use when compiling host code for CUDA")
             mark_as_advanced(CMAKE_CUDA_HOST_COMPILER)
@@ -280,11 +282,23 @@ elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
     link_directories(${LLVM_LIBRARY_DIRS})
     target_link_libraries(gbrl_cpp PRIVATE ${LLVM_LIBRARIES} OpenMP::OpenMP_CXX)
 elseif (WIN32)
-    target_link_libraries(gbrl_cpp PRIVATE OpenMP::OpenMP_CXX)
+    if (MSVC)
+        # Deliberately not linking OpenMP::OpenMP_CXX here: its interface adds
+        # plain /openmp, which conflicts with the /openmp:experimental in
+        # CMAKE_CXX_FLAGS (warning D9025). MSVC auto-links vcomp from the
+        # compile flag, so the runtime is still pulled in.
+    else()
+        target_link_libraries(gbrl_cpp PRIVATE OpenMP::OpenMP_CXX)
+    endif()
     if (USE_CUDA)
         set(cuda_lib_path "${CUDAToolkit_ROOT_DIR}/lib/x64")
         message(STATUS "cuda_lib_path: ${cuda_lib_path}")
         target_link_libraries(gbrl_cpp PRIVATE CUDA::cudart_static)
+        if (MSVC)
+            # cudart_static is built against the static CRT; everything else
+            # here uses /MD, so drop its LIBCMT default-lib request (LNK4098).
+            target_link_options(gbrl_cpp PRIVATE /NODEFAULTLIB:LIBCMT)
+        endif()
     endif()
 endif()
 
