@@ -21,7 +21,7 @@
 ##############################################################################
 cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 # Set project details
-project(gbrl LANGUAGES C CXX VERSION 1.1.9)
+project(gbrl LANGUAGES C CXX VERSION 1.1.10)
 # Set C++14
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -66,6 +66,7 @@ find_package(Python3 COMPONENTS Interpreter Development.Module REQUIRED)
 #-- Options
 include(CMakeDependentOption)
 option(USE_CUDA  "Build with GPU acceleration" OFF)
+option(USE_GRAPHVIZ  "Build with Graphviz tree-plotting support (adds a runtime dependency on libgvc/libcgraph)" OFF)
 option(COVERAGE  "Run coverage report" OFF)
 option(ASAN  "Use address-santizier" OFF)
 
@@ -179,15 +180,19 @@ if(NOT pybind11_FOUND)
     find_package(pybind11 CONFIG REQUIRED)
 endif()
 
-find_path(GRAPHVIZ_INCLUDE_DIR         NAMES graphviz/cgraph.h
-          HINTS ${GRAPHVIZ_INCLUDE_DIR})
-find_library(GRAPHVIZ_GVC_LIBRARY      NAMES gvc 
-             HINTS ${GRAPHVIZ_LIBRARY_DIR})
-find_library(GRAPHVIZ_CGRAPH_LIBRARY   NAMES cgraph
-             HINTS ${GRAPHVIZ_LIBRARY_DIR})
-            
-if(GRAPHVIZ_INCLUDE_DIR AND GRAPHVIZ_GVC_LIBRARY AND GRAPHVIZ_CGRAPH_LIBRARY)
-    set(GRAPHVIZ_FOUND TRUE)
+if(USE_GRAPHVIZ)
+    find_path(GRAPHVIZ_INCLUDE_DIR         NAMES graphviz/cgraph.h
+              HINTS ${GRAPHVIZ_INCLUDE_DIR})
+    find_library(GRAPHVIZ_GVC_LIBRARY      NAMES gvc
+                 HINTS ${GRAPHVIZ_LIBRARY_DIR})
+    find_library(GRAPHVIZ_CGRAPH_LIBRARY   NAMES cgraph
+                 HINTS ${GRAPHVIZ_LIBRARY_DIR})
+
+    if(GRAPHVIZ_INCLUDE_DIR AND GRAPHVIZ_GVC_LIBRARY AND GRAPHVIZ_CGRAPH_LIBRARY)
+        set(GRAPHVIZ_FOUND TRUE)
+    else()
+        set(GRAPHVIZ_FOUND FALSE)
+    endif()
 else()
     set(GRAPHVIZ_FOUND FALSE)
 endif()
@@ -267,7 +272,7 @@ endif()
 if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_libraries(gbrl_cpp PRIVATE OpenMP::OpenMP_CXX)
     if (USE_CUDA)
-        target_link_libraries(gbrl_cpp PRIVATE CUDA::cudart)
+        target_link_libraries(gbrl_cpp PRIVATE CUDA::cudart_static)
     endif()
 elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
     find_package(LLVM REQUIRED)
@@ -279,7 +284,7 @@ elseif (WIN32)
     if (USE_CUDA)
         set(cuda_lib_path "${CUDAToolkit_ROOT_DIR}/lib/x64")
         message(STATUS "cuda_lib_path: ${cuda_lib_path}")
-        target_link_libraries(gbrl_cpp PRIVATE CUDA::cudart)
+        target_link_libraries(gbrl_cpp PRIVATE CUDA::cudart_static)
     endif()
 endif()
 
