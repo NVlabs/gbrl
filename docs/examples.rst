@@ -213,7 +213,8 @@ GBRL supports training multiple boosting iterations with targets similar to othe
 
 .. important::
 
-    Only the RMSE loss function is supported for the `fit` method
+    Only the MultiRMSE loss function is supported for the `fit` method, and all
+    registered optimizers must use SGD (Adam is not supported, on CPU or GPU).
 
 .. code-block:: python
 

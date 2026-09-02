@@ -26,7 +26,7 @@ The following results, obtained using the `GBRL_SB3` repository, demonstrate the
 
 ## Getting started
 ### Dependencies
-- Python 3.9 or higher
+- Python 3.9 - 3.13
 
 ### Installation
 GBRL provides pre-compiled binaries for easy installation. Choose **one** of the following options:
@@ -34,7 +34,7 @@ GBRL provides pre-compiled binaries for easy installation. Choose **one** of the
 **CPU-only installation** (default):  
 ```pip install gbrl```
 
-**GPU-enabled installation** (requires CUDA 12 runtime libraries):  
+**GPU-enabled installation** (supports CUDA 11 - 13):  
 ```pip install gbrl-gpu```
 
 For further installation details and dependencies see the documentation. 
@@ -52,6 +52,7 @@ For a detailed usage example, see `tutorial.ipynb`
 - Quantile based candidate generation - (CPU/GPU)
 - Supervised learning fitting / Multi-iteration fitting - (CPU/GPU)
     - MultiRMSE loss (only)
+    - All registered optimizers must use SGD (Adam is not supported, on CPU or GPU)
 - Categorical inputs
 - Input feature weights - (CPU/GPU)
 - Monotonic constraints - (CPU/GPU, oblivious trees; the whole model must use SGD, Adam is not allowed on any output)
