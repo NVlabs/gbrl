@@ -3,9 +3,9 @@ Quickstart
 
 Prerequisites
 -------------
-Python 3.9 or higher
+Python 3.9 - 3.13
 
-CUDA 12 runtime libraries (for GPU-enabled installation)
+CUDA 11 - 13 (for GPU-enabled installation)
 
 Installation
 ------------
@@ -17,7 +17,7 @@ GBRL provides pre-compiled binaries for easy installation. Choose **one** of the
 
    pip install gbrl
 
-**GPU-enabled installation** (requires CUDA 12 runtime libraries):
+**GPU-enabled installation** (supports CUDA 11 - 13):
 
 .. code-block:: console
 
@@ -36,10 +36,10 @@ Source Compilation
 Prerequisites
 -------------
 
-- Python 3.9 or higher
+- Python 3.9 - 3.13
 - LLVM/OpenMP (macOS)
-- CUDA Toolkit 11 or 12 (optional, for GPU acceleration; requires NVCC)
-- Graphviz (Optional)
+- CUDA Toolkit 11 - 13 (optional, for GPU acceleration; requires NVCC)
+- Graphviz (Optional; must also pass ``-DUSE_GRAPHVIZ=ON`` to CMake to enable tree-plotting support)
 
 Platform-specific Dependencies
 ------------------------------

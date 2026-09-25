@@ -1373,7 +1373,7 @@ __global__ void split_cosine_score_kernel(
     int sum_offset = obj_idx * n_candidates * n_cols + cand_row;
     float lvalue, rvalue;
 
-    if (split_scores[cand_offset] == -INFINITY)
+    if (split_scores[cancand_offsetd_idx] == -CUDART_INF_F)
         return;
 
     if (global_idx < n_candidates * n_objs){
@@ -1465,7 +1465,7 @@ __global__ void split_l2_score_kernel(
     int cand_offset = obj_idx * n_candidates + cand_idx;
     int sum_offset = obj_idx * n_candidates * n_cols + cand_row;
 
-    if (split_scores[cand_offset] == -INFINITY)
+    if (split_scores[cand_offset] == -CUDART_INF_F)
         return;
         
     if (global_idx < n_candidates * n_objs){
@@ -2388,7 +2388,7 @@ void fit_tree_oblivious_cuda(
     ensembleData *edata,
     ensembleMetaData *metadata,
     candidatesData *candidata,
-    splitDataGPU *split_data){
+    splitDataGPU *split_data) GBRL_MAY_THROW {
 
     allocate_ensemble_memory_cuda(metadata, edata);
     cudaMemcpy(edata->ensemble_info->tree_indices + metadata->n_trees, &metadata->n_leaves, sizeof(int), cudaMemcpyHostToDevice);
@@ -2710,7 +2710,7 @@ void apply_monotonic_constraints_cuda(
     int tree_idx,
     int tree_depth,
     int start_leaf_idx
-) {
+) GBRL_MAY_THROW {
     if (metadata->n_mono_constraints <= 0 || tree_depth <= 0) return;
     
     int n_leaves_in_tree = 1 << tree_depth;
