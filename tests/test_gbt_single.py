@@ -1875,10 +1875,25 @@ class TestLambdaObjsRoundTrip(unittest.TestCase):
             optimizers={'algo': 'SGD', 'lr': 0.1, 'start_idx': 0, 'stop_idx': 1},
             params=params, verbose=0, device='cpu')
 
+    def _train_multi_obj(self, model, n_steps=5):
+        """fit() rejects n_objs > 1, so multi-objective models are built with step()."""
+        rng = np.random.default_rng(7)
+        labels = np.zeros(len(self.X), dtype=np.float32)
+        labels[len(self.X) // 2:] = 1.0
+        for _ in range(n_steps):
+            grads = rng.normal(size=(2, len(self.X), 1)).astype(np.float32)
+            model.step(X=self.X, grads=grads, obj_labels=labels)
+
+    def test_fit_rejects_multi_objective(self):
+        model = self._model(2)
+        with self.assertRaises(RuntimeError):
+            model.fit(self.X, self.y, 5)
+        self.assertEqual(model.get_num_trees(), 0)
+
     def test_custom_lambda_objs_survive_save_load(self):
         lambdas = [0.25, 0.75]
         model = self._model(2, lambdas)
-        model.fit(self.X, self.y, 5)
+        self._train_multi_obj(model)
         path = os.path.join(self.test_dir, 'lambda_roundtrip')
         model.save_learner(path)
 
@@ -1900,7 +1915,7 @@ class TestLambdaObjsRoundTrip(unittest.TestCase):
     def test_loaded_model_can_reset(self):
         """reset() reads self.lambda_objs, so load() must have set it."""
         model = self._model(2, [0.25, 0.75])
-        model.fit(self.X, self.y, 5)
+        self._train_multi_obj(model)
         path = os.path.join(self.test_dir, 'lambda_reset')
         model.save_learner(path)
 

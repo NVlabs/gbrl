@@ -339,10 +339,11 @@ class SeparateCostActorCriticLearner(SeparateActorCriticLearner):
                 for opt in self.optimizers
                 ]
         assert isinstance(self.input_dim, int), "input_dim should be an integer"
-        assert isinstance(self.output_dim, int), "output_dim should be an integer"
+        # MultiGBTLearner stores [policy_dim, 1, 1]; the constructor takes the total.
+        output_dim = sum(self.output_dim)  # type: ignore
 
         copy_ = SeparateCostActorCriticLearner(input_dim=self.input_dim,
-                                               output_dim=self.output_dim,
+                                               output_dim=output_dim,
                                                tree_struct=self.tree_struct.copy(),
                                                policy_optimizer=opts[0],
                                                value_optimizer=opts[1],

@@ -263,6 +263,10 @@ void add_tree_data(const treeData *tdata, ensembleMetaData *metadata, ensembleDa
     if (tdata->max_depth != metadata->max_depth){
         throw std::runtime_error("treeData max_depth does not match ensemble max_depth");
     }
+    // Densities are copied with the ensemble's n_objs stride.
+    if (tdata->n_objs != metadata->n_objs){
+        throw std::runtime_error("treeData n_objs does not match ensemble n_objs");
+    }
 
     if (device == cpu){
         add_tree_data_cpu(tdata, metadata, edata);
@@ -349,6 +353,11 @@ void add_tree_data(const treeData *tdata, ensembleMetaData *metadata, ensembleDa
  * learning rate to produce final inference-ready predictions.
  */
 exportData* get_export_data(ensembleMetaData *metadata, ensembleData *edata, deviceType device, std::vector<Optimizer*> opts){
+    // GREEDY stores depths and split conditions per leaf, but the export layout
+    // below reads them per tree.
+    if (metadata->grow_policy == GREEDY){
+        throw std::runtime_error("Export is only supported for oblivious trees");
+    }
     exportData *exp_data = new exportData;
 
     ensembleData *edata_cpu = nullptr;
@@ -385,13 +394,11 @@ exportData* get_export_data(ensembleMetaData *metadata, ensembleData *edata, dev
     }
 
     int tree_idx = 0;
-    int limit_leaf_idx = edata_cpu->ensemble_info->tree_indices[tree_idx];
     float value;
     for (int i  = 0; i < metadata->n_leaves; ++i){
-        if (i > limit_leaf_idx){
+        // Advance once leaf i reaches the start of the next tree.
+        while (tree_idx + 1 < metadata->n_trees && i >= edata_cpu->ensemble_info->tree_indices[tree_idx + 1])
             tree_idx += 1;
-            limit_leaf_idx = edata_cpu->ensemble_info->tree_indices[tree_idx];
-        }
         int value_idx = i*metadata->output_dim;
         for (size_t opt_idx = 0; opt_idx < opts.size(); ++opt_idx){
             for (int j=opts[opt_idx]->start_idx; j < opts[opt_idx]->stop_idx; ++j){
@@ -432,6 +439,12 @@ void export_ensemble_data(std::ofstream& header_file, const std::string& model_n
             return; // Exit the function if the format is invalid
     }
 
+    // GREEDY stores depths and split conditions per leaf; the generated code
+    // walks them per tree.
+    if (metadata->grow_policy == GREEDY){
+        header_file.close();
+        throw std::runtime_error("Export is only supported for oblivious trees");
+    }
     if (export_type == exportType::COMPACT){
         if (metadata->max_depth > 6 || metadata->grow_policy != growPolicy::OBLIVIOUS){
             std::cerr << "Cannot only compact export with max depth <= 6 and oblivious trees" << std::endl;
@@ -610,13 +623,11 @@ void export_ensemble_data(std::ofstream& header_file, const std::string& model_n
 
     header_file << "\tconst " << type_name << " leaf_values[" << prefix << "N_LEAVES*" << prefix << "N_OUTPUTS]  = {";
     int tree_idx = 0;
-    int limit_leaf_idx = edata_cpu->ensemble_info->tree_indices[tree_idx];
     float value;
     for (int i  = 0; i < metadata->n_leaves; ++i){
-        if (i > limit_leaf_idx){
+        // Advance once leaf i reaches the start of the next tree.
+        while (tree_idx + 1 < metadata->n_trees && i >= edata_cpu->ensemble_info->tree_indices[tree_idx + 1])
             tree_idx += 1;
-            limit_leaf_idx = edata_cpu->ensemble_info->tree_indices[tree_idx];
-        }
         int value_idx = i*metadata->output_dim;
         for (size_t opt_idx = 0; opt_idx < opts.size(); ++opt_idx){
             for (int j=opts[opt_idx]->start_idx; j < opts[opt_idx]->stop_idx; ++j){

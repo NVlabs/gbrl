@@ -744,57 +744,91 @@ py::dict treeDataToDict(treeData* tdata) {
  * @param d Python dict as returned by treeDataToDict or constructed by the user
  * @return Newly allocated treeData with copies of all arrays
  */
+template <typename T>
+using TreeArray = py::array_t<T, py::array::c_style | py::array::forcecast>;
+
+/**
+ * @brief Cast d[key] to a C-contiguous array and check its element count
+ *
+ * dictToTreeData memcpy's a fixed number of elements out of each array, so a
+ * short or mis-shaped array would otherwise be read out of bounds.
+ */
+template <typename T>
+static TreeArray<T> tree_dict_array(const py::dict& d, const char* key, py::ssize_t expected) {
+    TreeArray<T> arr = d[key].cast<TreeArray<T>>();
+    if (arr.size() != expected) {
+        std::stringstream ss;
+        ss << "tree dict '" << key << "' has " << arr.size()
+           << " elements, expected " << expected;
+        throw std::runtime_error(ss.str());
+    }
+    return arr;
+}
+
 treeData* dictToTreeData(const py::dict& d) {
+    const int n_leaves = d["n_leaves"].cast<int>();
+    const int tree_depth = d["tree_depth"].cast<int>();
+    const int output_dim = d["output_dim"].cast<int>();
+    const int max_depth = d["max_depth"].cast<int>();
+    const int n_objs = d["n_objs"].cast<int>();
+    const int split_count = d["split_count"].cast<int>();
+    const bool is_oblivious = d["is_oblivious"].cast<bool>();
+
+    if (n_leaves <= 0 || output_dim <= 0 || max_depth < 0 || n_objs <= 0 ||
+        tree_depth < 0 || tree_depth > max_depth) {
+        throw std::runtime_error("tree dict has invalid n_leaves/output_dim/max_depth/n_objs/tree_depth");
+    }
+    // add_tree_data writes split_count rows at the tree (oblivious) or leaf
+    // (greedy) offset, so any other count overruns the ensemble arrays.
+    if (split_count != (is_oblivious ? 1 : n_leaves)) {
+        throw std::runtime_error("tree dict split_count does not match its grow policy");
+    }
+    const int depth_count = is_oblivious ? 1 : n_leaves;
+
+    // Validate every array before allocating anything, so a bad dict cannot leak.
+    auto depths_arr = tree_dict_array<int>(d, "depths", depth_count);
+    auto values_arr = tree_dict_array<float>(d, "values", static_cast<py::ssize_t>(n_leaves) * output_dim);
+    auto ew_arr = tree_dict_array<float>(d, "edge_weights", static_cast<py::ssize_t>(n_leaves) * max_depth);
+    auto fi_arr = tree_dict_array<int>(d, "feature_indices", static_cast<py::ssize_t>(split_count) * max_depth);
+    auto fv_arr = tree_dict_array<float>(d, "feature_values", static_cast<py::ssize_t>(split_count) * max_depth);
+    auto in_arr = tree_dict_array<bool>(d, "is_numerics", static_cast<py::ssize_t>(split_count) * max_depth);
+    auto id_arr = tree_dict_array<bool>(d, "inequality_directions", static_cast<py::ssize_t>(n_leaves) * max_depth);
+    auto cv_arr = tree_dict_array<char>(d, "categorical_values", static_cast<py::ssize_t>(split_count) * max_depth * MAX_CHAR_SIZE);
+    auto dens_arr = tree_dict_array<float>(d, "densities", static_cast<py::ssize_t>(n_leaves) * n_objs);
+
     treeData *tdata = new treeData;
+    tdata->n_leaves = n_leaves;
+    tdata->tree_depth = tree_depth;
+    tdata->output_dim = output_dim;
+    tdata->max_depth = max_depth;
+    tdata->n_objs = n_objs;
+    tdata->split_count = split_count;
+    tdata->is_oblivious = is_oblivious;
 
-    tdata->n_leaves = d["n_leaves"].cast<int>();
-    tdata->tree_depth = d["tree_depth"].cast<int>();
-    tdata->output_dim = d["output_dim"].cast<int>();
-    tdata->max_depth = d["max_depth"].cast<int>();
-    tdata->n_objs = d["n_objs"].cast<int>();
-    tdata->split_count = d["split_count"].cast<int>();
-    tdata->is_oblivious = d["is_oblivious"].cast<bool>();
-
-    int n_leaves = tdata->n_leaves;
-    int max_depth = tdata->max_depth;
-    int output_dim = tdata->output_dim;
-    int split_count = tdata->split_count;
-    int n_objs = tdata->n_objs;
-    int depth_count = tdata->is_oblivious ? 1 : n_leaves;
-
-    py::array_t<int> depths_arr = d["depths"].cast<py::array_t<int>>();
     tdata->depths = new int[depth_count];
     memcpy(tdata->depths, depths_arr.data(), depth_count * sizeof(int));
 
-    py::array_t<float> values_arr = d["values"].cast<py::array_t<float>>();
     tdata->values = new float[n_leaves * output_dim];
     memcpy(tdata->values, values_arr.data(), n_leaves * output_dim * sizeof(float));
 
-    py::array_t<float> ew_arr = d["edge_weights"].cast<py::array_t<float>>();
     tdata->edge_weights = new float[n_leaves * max_depth];
     memcpy(tdata->edge_weights, ew_arr.data(), n_leaves * max_depth * sizeof(float));
 
-    py::array_t<int> fi_arr = d["feature_indices"].cast<py::array_t<int>>();
     tdata->feature_indices = new int[split_count * max_depth];
     memcpy(tdata->feature_indices, fi_arr.data(), split_count * max_depth * sizeof(int));
 
-    py::array_t<float> fv_arr = d["feature_values"].cast<py::array_t<float>>();
     tdata->feature_values = new float[split_count * max_depth];
     memcpy(tdata->feature_values, fv_arr.data(), split_count * max_depth * sizeof(float));
 
-    py::array_t<bool> in_arr = d["is_numerics"].cast<py::array_t<bool>>();
     tdata->is_numerics = new bool[split_count * max_depth];
     memcpy(tdata->is_numerics, in_arr.data(), split_count * max_depth * sizeof(bool));
 
-    py::array_t<bool> id_arr = d["inequality_directions"].cast<py::array_t<bool>>();
     tdata->inequality_directions = new bool[n_leaves * max_depth];
     memcpy(tdata->inequality_directions, id_arr.data(), n_leaves * max_depth * sizeof(bool));
 
-    py::array_t<char> cv_arr = d["categorical_values"].cast<py::array_t<char>>();
     tdata->categorical_values = new char[split_count * max_depth * MAX_CHAR_SIZE];
     memcpy(tdata->categorical_values, cv_arr.data(), split_count * max_depth * MAX_CHAR_SIZE * sizeof(char));
 
-    py::array_t<float> dens_arr = d["densities"].cast<py::array_t<float>>();
     tdata->densities = new float[n_leaves * n_objs];
     memcpy(tdata->densities, dens_arr.data(), n_leaves * n_objs * sizeof(float));
 
@@ -1146,9 +1180,9 @@ PYBIND11_MODULE(gbrl_cpp, m) {
     
 
         dataHolder<const float> lambda_holder{lambdas_ptr, stringTodeviceType(lambda_device)};
-        int n_objs = static_cast<int>(len(lambdas));
-        py::gil_scoped_release release; 
-        self.set_lambda_objs(&lambda_holder, n_objs); 
+        // lambda_dim, not len(lambdas): len() of a (1, n_objs) row vector is 1.
+        py::gil_scoped_release release;
+        self.set_lambda_objs(&lambda_holder, lambda_dim);
     }, "Set GBRL model bias");
     
     // Set per-feature importance weights
@@ -1515,9 +1549,13 @@ PYBIND11_MODULE(gbrl_cpp, m) {
        "    values, edge_weights, etc.) and scalar metadata.");
     gbrl.def("add_tree", [](GBRL &self, const py::dict& tree_dict) {
         treeData *tdata = dictToTreeData(tree_dict);
-        {
+        try {
             py::gil_scoped_release release;
             self.add_tree(tdata);
+        } catch (...) {
+            // add_tree rejects incompatible trees by throwing.
+            tree_data_dealloc(tdata);
+            throw;
         }
         tree_data_dealloc(tdata);
     }, py::arg("tree_dict"),

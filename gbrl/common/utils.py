@@ -694,6 +694,9 @@ def pad_array(array: NumericalData, n_dims: int, pad_value: float = 0.0, axis: i
     Returns:
         NumericalData: Padded array with the same type as the input.
     """
+    # concatenate_arrays needs at least two arrays.
+    if n_dims <= 0:
+        return array
     if isinstance(array, th.Tensor):
         padded_array = [pad_value*th.ones_like(array, dtype=array.dtype, device=array.device) for _ in range(n_dims)]
         return concatenate_arrays([array] + padded_array, axis=axis)

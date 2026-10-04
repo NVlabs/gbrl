@@ -473,7 +473,8 @@ class BaseGBT(ABC):
             return None
 
         if isinstance(self.params, tuple):
-            assert all((isinstance(p, th.Tensor)) for p in self.params), \
+            # predict_policy()/predict_values() store (x, None) / (None, x).
+            assert all((p is None or isinstance(p, th.Tensor)) for p in self.params), \
                 "All elements of params tuple must be torch.Tensor or None."
             return tuple(
                 p.grad.clone().detach() if (p is not None and p.grad is not None) else None  # type: ignore

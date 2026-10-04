@@ -295,9 +295,11 @@ class ActorCritic(BaseGBT):
         validate_array(policy_grads)
         validate_array(value_grads)
 
+        # Separate learners need to know which model the labels belong to (the actor).
+        label_kwargs = {} if self.shared_tree_struct else {'obj_idx': 0}
         self.learner.step(inputs=observations,
                           grads=(policy_grads, value_grads),
-                          obj_labels=obj_labels)
+                          obj_labels=obj_labels, **label_kwargs)
         self.policy_grads = policy_grads
         self.value_grads = value_grads
 
@@ -592,7 +594,9 @@ class CostActorCritic(ActorCritic):
                                          start_idx, stop_idx, tensor)
         if requires_grad:
             self.cost_grads = None
-            self.params = cost
+            # cost_critic_step() reads params[2] and falls back to self.inputs.
+            self.params = (None, None, cost)
+            self.inputs = observations
         return cost
 
     def __call__(self, observations: NumericalData,  # type: ignore
@@ -655,7 +659,12 @@ class CostActorCritic(ActorCritic):
             assert self.inputs is not None, ("Cannot update trees without input."
                                             "Make sure model is called with requires_grad=True")
             observations = self.inputs
-        n_samples = len(observations)
+
+        # Handle 1D observations
+        if observations.ndim == 1:
+            n_samples = 1 if self.learner.input_dim > 1 else len(observations)
+        else:
+            n_samples = len(observations)
 
         if policy_grads is None:
             assert self.params is not None, "params must be set to compute gradients."
@@ -691,9 +700,11 @@ class CostActorCritic(ActorCritic):
         validate_array(value_grads)
         validate_array(cost_grads)
 
+        # Separate learners need to know which model the labels belong to (the actor).
+        label_kwargs = {} if self.shared_tree_struct else {'obj_idx': 0}
         self.learner.step(inputs=observations,
                           grads=(policy_grads, value_grads, cost_grads),
-                          obj_labels=obj_labels)
+                          obj_labels=obj_labels, **label_kwargs)
         self.grads = (policy_grads, value_grads, cost_grads)
         self.inputs = None
 
@@ -719,7 +730,12 @@ class CostActorCritic(ActorCritic):
             assert self.inputs is not None, ("Cannot update trees without input."
                                             "Make sure model is called with requires_grad=True")
             observations = self.inputs
-        n_samples = len(observations)
+
+        # Handle 1D observations
+        if observations.ndim == 1:
+            n_samples = 1 if self.learner.input_dim > 1 else len(observations)
+        else:
+            n_samples = len(observations)
 
         if cost_grads is None:
             assert self.params is not None, "params must be set to compute gradients."

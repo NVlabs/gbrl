@@ -111,7 +111,8 @@ class GBTLearner(BaseLearner):
 
         # Validate: Linear LR scheduler is not supported with greedy trees on GPU
         grow_policy = tree_struct.get('grow_policy', 'greedy').lower()
-        if device == 'cuda' and grow_policy != 'oblivious':
+        # self.device is normalized by BaseLearner, so the 'gpu' alias is caught too.
+        if self.device == 'cuda' and grow_policy != 'oblivious':
             for opt in self.optimizers:
                 sched = opt.get('scheduler', 'Const')
                 init_lr = opt.get('init_lr', opt.get('lr', 1.0))
@@ -1020,13 +1021,16 @@ class GBTLearner(BaseLearner):
         if stop_idx is None:
             stop_idx = 0
 
+        inputs = self._mapping_input(inputs)
         num_inputs, cat_inputs = preprocess_features(inputs)
 
+        self._memory = []
         densities = self._cpp_model.predict_densities(
             obs=self.transform_data(num_inputs),
             categorical_obs=cat_inputs,
             start_tree_idx=start_idx,
             stop_tree_idx=stop_idx)
+        self._memory = []
 
         if not isinstance(densities, np.ndarray):
             densities = th.from_dlpack(densities)  # type: ignore

@@ -1285,6 +1285,11 @@ float GBRL::fit(dataHolder<float> *obs,
 
     lossType loss_type = stringTolossType(_loss_type);
     int output_dim = metadata->output_dim;
+    // fit() has no objective labels and builds single-objective gradients, while
+    // the multi-objective tree/leaf code reads one gradient block per objective.
+    if (this->metadata->n_objs > 1){
+        throw std::runtime_error("fit() does not support multi-objective models (n_objs > 1). Use step() with per-objective gradients.");
+    }
     if (this->metadata->iteration == 0){
         this->metadata->n_num_features = n_num_features;
         this->metadata->n_cat_features = n_cat_features;

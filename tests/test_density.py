@@ -71,23 +71,27 @@ def _train(model, n_steps=N_STEPS, label_fn=_mixed_labels):
     return X
 
 
-def _density_row_sums(model, X):
-    """Return per-sample density row sums from predict_densities."""
+def _predicted_densities(model, X):
+    """Return per-sample densities (n_samples, n_objs) from predict_densities."""
     densities = model.learner.predict_densities(th.tensor(X))
     if isinstance(densities, th.Tensor):
-        densities = densities.numpy()
-    return densities.sum(axis=1)
+        densities = densities.cpu().numpy()
+    return densities
 
 
-def _leaf_density_row_sums(model):
-    """Return all per-leaf density row sums across every tree."""
+def _leaf_densities(model):
+    """Return every leaf's density vector across all trees, (n_leaves, n_objs)."""
     n_trees = model.learner.get_num_trees()
-    sums = []
-    for t in range(n_trees):
-        tree = model.learner.get_tree(t)
-        d = tree['densities']          # (n_leaves, n_objs)
-        sums.append(d.sum(axis=1))
-    return np.concatenate(sums)
+    return np.concatenate([model.learner.get_tree(t)['densities']
+                           for t in range(n_trees)], axis=0)
+
+
+def _assert_valid_distributions(test, densities, msg):
+    """Each row must be non-negative and sum to 1."""
+    test.assertTrue(np.all(densities >= -TOL),
+                    f"{msg}: negative density (min={densities.min():.4g})")
+    np.testing.assert_allclose(densities.sum(axis=1), 1.0, atol=TOL,
+                               err_msg=f"{msg}: rows don't sum to 1")
 
 
 class TestDensityRowSumInvariant(unittest.TestCase):
@@ -98,14 +102,9 @@ class TestDensityRowSumInvariant(unittest.TestCase):
 
     def _check(self, device, grow_policy, max_depth=4):
         model = _make_model(device, grow_policy, max_depth)
-        X = _train(model)
-        sums = _leaf_density_row_sums(model)
-        frac_valid = np.mean(np.abs(sums - 1.0) < TOL)
-        self.assertAlmostEqual(
-            frac_valid, 1.0, delta=0.001,
-            msg=f"{device}/{grow_policy}/depth={max_depth}: "
-                f"only {frac_valid*100:.1f}% of leaves sum to 1",
-        )
+        _train(model)
+        _assert_valid_distributions(self, _leaf_densities(model),
+                                    f"{device}/{grow_policy}/depth={max_depth}")
 
     def test_cpu_greedy(self):
         self._check('cpu', 'greedy')
@@ -141,44 +140,36 @@ class TestDefaultObjIdx(unittest.TestCase):
         """All label-0 minibatch → density should be [1, 0], not [1, 1]."""
         model = _make_model('cuda', 'oblivious')
         _train(model, label_fn=lambda n: np.zeros(n, dtype=np.float32))
-        sums = _leaf_density_row_sums(model)
-        frac_valid = np.mean(np.abs(sums - 1.0) < TOL)
-        self.assertAlmostEqual(frac_valid, 1.0, delta=0.001,
-            msg=f"All-reward labels: {frac_valid*100:.1f}% valid (expected 100%)")
+        _assert_valid_distributions(self, _leaf_densities(model), "All-reward labels")
 
     @unittest.skipIf(not cuda_available(), "CUDA not available")
     def test_all_safety_labels_cuda_oblivious(self):
         """All label-1 minibatch → density should be [0, 1], not [1, 1]."""
         model = _make_model('cuda', 'oblivious')
         _train(model, label_fn=lambda n: np.ones(n, dtype=np.float32))
-        sums = _leaf_density_row_sums(model)
-        frac_valid = np.mean(np.abs(sums - 1.0) < TOL)
-        self.assertAlmostEqual(frac_valid, 1.0, delta=0.001,
-            msg=f"All-safety labels: {frac_valid*100:.1f}% valid (expected 100%)")
+        _assert_valid_distributions(self, _leaf_densities(model), "All-safety labels")
 
     @unittest.skipIf(not cuda_available(), "CUDA not available")
     def test_default_obj_idx_value_all_reward(self):
         """All label-0 → each leaf's density[0] should be 1.0, density[1] = 0.0."""
         model = _make_model('cuda', 'oblivious')
         _train(model, n_steps=1, label_fn=lambda n: np.zeros(n, dtype=np.float32))
-        n_trees = model.learner.get_num_trees()
-        for t in range(n_trees):
-            d = model.learner.get_tree(t)['densities']  # (n_leaves, 2)
-            # Each row must be either [1,0] (non-empty leaf) or [1,0] (empty, inherited/defaulted)
-            # No row should be [1,1]
-            bad = np.any(d > 1.0 + TOL)
-            self.assertFalse(bad, f"Tree {t} has density > 1 in some leaf (got [1,1] init)")
+        # Every leaf, empty or not, must be exactly [1, 0]; a swapped index gives [0, 1].
+        densities = _leaf_densities(model)
+        # assert_allclose does not broadcast, so tile the expected row.
+        np.testing.assert_allclose(densities, np.tile([1.0, 0.0], (len(densities), 1)), atol=TOL,
+                                   err_msg="All label-0: leaf densities are not [1, 0]")
 
     @unittest.skipIf(not cuda_available(), "CUDA not available")
     def test_default_obj_idx_value_all_safety(self):
         """All label-1 → density[1] should be 1.0 for leaves where default applies."""
         model = _make_model('cuda', 'oblivious')
         _train(model, n_steps=1, label_fn=lambda n: np.ones(n, dtype=np.float32))
-        n_trees = model.learner.get_num_trees()
-        for t in range(n_trees):
-            d = model.learner.get_tree(t)['densities']
-            bad = np.any(d > 1.0 + TOL)
-            self.assertFalse(bad, f"Tree {t} has density > 1 (got [1,1] init for all-safety case)")
+        # Every leaf, empty or not, must be exactly [0, 1]; a swapped index gives [1, 0].
+        densities = _leaf_densities(model)
+        # assert_allclose does not broadcast, so tile the expected row.
+        np.testing.assert_allclose(densities, np.tile([0.0, 1.0], (len(densities), 1)), atol=TOL,
+                                   err_msg="All label-1: leaf densities are not [0, 1]")
 
 
 class TestPredictDensitiesSumToOne(unittest.TestCase):
@@ -187,11 +178,8 @@ class TestPredictDensitiesSumToOne(unittest.TestCase):
     def _check(self, device, grow_policy):
         model = _make_model(device, grow_policy)
         X = _train(model)
-        row_sums = _density_row_sums(model, X)
-        np.testing.assert_allclose(
-            row_sums, np.ones_like(row_sums), atol=TOL,
-            err_msg=f"predict_densities rows don't sum to 1 ({device}/{grow_policy})",
-        )
+        _assert_valid_distributions(self, _predicted_densities(model, X),
+                                    f"predict_densities ({device}/{grow_policy})")
 
     def test_cpu_greedy(self):
         self._check('cpu', 'greedy')
@@ -214,16 +202,16 @@ class TestDensitySaveLoad(unittest.TestCase):
     def _check(self, device, grow_policy):
         model = _make_model(device, grow_policy)
         X = _train(model)
-        sums_before = _leaf_density_row_sums(model)
+        before = _leaf_densities(model)
 
         with tempfile.TemporaryDirectory() as tmpdir:
             path = f"{tmpdir}/model"
             model.save_learner(path)
             model2 = GBTModel.load_learner(path, device=device)
 
-        sums_after = _leaf_density_row_sums(model2)
-        np.testing.assert_allclose(sums_before, sums_after, atol=TOL,
-            err_msg=f"Density row sums changed after save/load ({device}/{grow_policy})")
+        after = _leaf_densities(model2)
+        np.testing.assert_allclose(before, after, atol=TOL,
+            err_msg=f"Densities changed after save/load ({device}/{grow_policy})")
 
     def test_cpu_greedy(self):
         self._check('cpu', 'greedy')

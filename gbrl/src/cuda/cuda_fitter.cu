@@ -1373,7 +1373,11 @@ __global__ void split_cosine_score_kernel(
     int sum_offset = obj_idx * n_candidates * n_cols + cand_row;
     float lvalue, rvalue;
 
-    if (split_scores[cancand_offsetd_idx] == -CUDART_INF_F)
+    // Out-of-range threads must not touch split_scores at all.
+    if (global_idx >= n_candidates * n_objs)
+        return;
+
+    if (split_scores[cand_offset] == -CUDART_INF_F)
         return;
 
     if (global_idx < n_candidates * n_objs){
@@ -1465,9 +1469,13 @@ __global__ void split_l2_score_kernel(
     int cand_offset = obj_idx * n_candidates + cand_idx;
     int sum_offset = obj_idx * n_candidates * n_cols + cand_row;
 
+    // Out-of-range threads must not touch split_scores at all.
+    if (global_idx >= n_candidates * n_objs)
+        return;
+
     if (split_scores[cand_offset] == -CUDART_INF_F)
         return;
-        
+
     if (global_idx < n_candidates * n_objs){
         if (node->depth > 0 && min_data_in_leaf == 0){
             if (candidate_numeric[cand_idx]){
@@ -2051,11 +2059,14 @@ void add_leaf_node(
     ensembleMetaData *metadata,
     ensembleData *edata,
     dataSet *dataset){
-    int leaf_idx = metadata->n_leaves, tree_idx = metadata->n_trees; 
-    if (depth > 0){
+    int leaf_idx = metadata->n_leaves, tree_idx = metadata->n_trees;
+    {
+        // Launched even at depth 0: block 0 writes the leaf's depth and densities,
+        // and the kernel only copies split conditions for blockIdx.x < depth.
         int n_threads = WARP_SIZE*((MAX_CHAR_SIZE + WARP_SIZE - 1) / WARP_SIZE);
         int global_idx = (metadata->grow_policy == GREEDY) ? leaf_idx : tree_idx;
-        copy_node_to_data<<<depth, n_threads>>>(node, edata->ensemble_info->depths, edata->feature_data->feature_indices, edata->feature_data->feature_values, edata->leaf_data->edge_weights, edata->feature_data->inequality_directions, edata->feature_data->is_numerics, edata->feature_data->categorical_values,
+        int n_blocks = (depth > 0) ? depth : 1;
+        copy_node_to_data<<<n_blocks, n_threads>>>(node, edata->ensemble_info->depths, edata->feature_data->feature_indices, edata->feature_data->feature_values, edata->leaf_data->edge_weights, edata->feature_data->inequality_directions, edata->feature_data->is_numerics, edata->feature_data->categorical_values,
             edata->multi_objective_data->densities, 
 #ifdef DEBUG
             edata->n_samples,

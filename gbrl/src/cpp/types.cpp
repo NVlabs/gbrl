@@ -736,7 +736,7 @@ void allocate_ensemble_memory(ensembleMetaData *metadata, ensembleData *edata){
         memcpy(new_data->leaf_data->values, edata->leaf_data->values, leaf_idx * metadata->output_dim * sizeof(float));
         memcpy(new_data->ensemble_info->tree_indices, edata->ensemble_info->tree_indices, tree_idx * sizeof(int));
         memcpy(new_data->feature_data->inequality_directions, edata->feature_data->inequality_directions, leaf_idx * metadata->max_depth * sizeof(bool));
-        memcpy(new_data->leaf_data->edge_weights, edata->leaf_data->edge_weights, leaf_idx * sizeof(float));
+        memcpy(new_data->leaf_data->edge_weights, edata->leaf_data->edge_weights, leaf_idx * metadata->max_depth * sizeof(float));
         memcpy(new_data->multi_objective_data->densities, edata->multi_objective_data->densities, leaf_idx * metadata->n_objs * sizeof(float));
         memcpy(new_data->feature_mappings->reverse_cat_feature_mapping, edata->feature_mappings->reverse_cat_feature_mapping, metadata->input_dim * sizeof(int));
         memcpy(new_data->feature_mappings->reverse_num_feature_mapping, edata->feature_mappings->reverse_num_feature_mapping, metadata->input_dim * sizeof(int));
