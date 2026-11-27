@@ -124,6 +124,17 @@ __global__ void selective_copyc(const int n_elements, const int* __restrict__ in
 // - reverse_num_feature_mapping: Internal numerical to original mapping (used in computation)
 // - reverse_cat_feature_mapping: Internal categorical to original mapping (used in computation)
 // Only reverse mappings are actively used; forward mappings maintained for serialization.
+// Default objective weights to 1 (allocations are zero-filled). A weight of 0
+// would zero every split score and policy leaf until set_lambda_objs runs, which
+// never happens for internally created models such as a distillation student.
+static void init_lambda_objs_cuda(float *lambda_objs, const int n_objs){
+    if (lambda_objs == nullptr || n_objs <= 0) return;
+    float *ones = new float[n_objs];
+    for (int k = 0; k < n_objs; ++k) ones[k] = 1.0f;
+    cudaMemcpy(lambda_objs, ones, sizeof(float) * n_objs, cudaMemcpyHostToDevice);
+    delete[] ones;
+}
+
 ensembleData* ensemble_data_alloc_cuda(ensembleMetaData *metadata){
     ensembleData *edata = new ensembleData;
     if (metadata == nullptr){
@@ -202,6 +213,7 @@ ensembleData* ensemble_data_alloc_cuda(ensembleMetaData *metadata){
     trace += value_sizes;
     edata->multi_objective_data->lambda_objs = (float *)(data + trace);
     trace += lambda_objs_size;
+    init_lambda_objs_cuda(edata->multi_objective_data->lambda_objs, metadata->n_objs);
     edata->feature_data->feature_indices = (int *)(data + trace);
     trace += cond_sizes * sizeof(int);
     edata->mono_constraints->feature_idx = (int *)(data + trace);
@@ -307,6 +319,7 @@ ensembleData* ensemble_copy_data_alloc_cuda(ensembleMetaData *metadata){
     trace += value_sizes;
     edata->multi_objective_data->lambda_objs = (float *)(data + trace);
     trace += lambda_objs_size;
+    init_lambda_objs_cuda(edata->multi_objective_data->lambda_objs, metadata->n_objs);
     edata->feature_data->feature_indices = (int *)(data + trace);
     trace += cond_sizes * sizeof(int);
     edata->mono_constraints->feature_idx = (int *)(data + trace);
@@ -425,6 +438,7 @@ ensembleData* ensemble_compressed_data_alloc_cuda(ensembleMetaData *metadata, co
     trace += densities_size;
     edata->multi_objective_data->lambda_objs = (float *)(data + trace);
     trace += lambda_objs_size;
+    init_lambda_objs_cuda(edata->multi_objective_data->lambda_objs, metadata->n_objs);
     edata->feature_data->is_numerics = (bool *)(data + trace);
     trace += cond_sizes * sizeof(bool);
     edata->feature_data->inequality_directions = (bool *)(data + trace);
@@ -621,6 +635,18 @@ ensembleData* ensemble_compressed_data_copy_gpu_gpu(ensembleMetaData *metadata, 
     selective_copyf<<<n_blocks, THREADS_PER_BLOCK>>>(n_compressed_leaves, leaf_indices_gpu, edata->leaf_data->values, other_edata->leaf_data->values, metadata->output_dim);
     selective_copyf<<<n_blocks, THREADS_PER_BLOCK>>>(n_compressed_leaves, leaf_indices_gpu, edata->leaf_data->edge_weights, other_edata->leaf_data->edge_weights, metadata->max_depth);
     selective_copyb<<<n_blocks, THREADS_PER_BLOCK>>>(n_compressed_leaves, leaf_indices_gpu, edata->feature_data->inequality_directions, other_edata->feature_data->inequality_directions, metadata->max_depth);
+    // Multi-objective data and monotonic constraints, matching the CPU
+    // copy_compressed_ensemble_data. Without these, later trees train with
+    // zero objective weights (zero policy leaves) and no constraints.
+    selective_copyf<<<n_blocks, THREADS_PER_BLOCK>>>(n_compressed_leaves, leaf_indices_gpu, edata->multi_objective_data->densities, other_edata->multi_objective_data->densities, metadata->n_objs);
+    cudaMemcpy(edata->multi_objective_data->lambda_objs, other_edata->multi_objective_data->lambda_objs, metadata->n_objs * sizeof(float), cudaMemcpyDeviceToDevice);
+    size_t mono_size = metadata->n_mono_constraints * sizeof(int);
+    if (mono_size > 0){
+        cudaMemcpy(edata->mono_constraints->feature_idx, other_edata->mono_constraints->feature_idx, mono_size, cudaMemcpyDeviceToDevice);
+        cudaMemcpy(edata->mono_constraints->output_idx, other_edata->mono_constraints->output_idx, mono_size, cudaMemcpyDeviceToDevice);
+        cudaMemcpy(edata->mono_constraints->constraint, other_edata->mono_constraints->constraint, mono_size, cudaMemcpyDeviceToDevice);
+    }
+    edata->mono_constraints->n_constraints = metadata->n_mono_constraints;
     cudaDeviceSynchronize();
     cudaFree(data);
     return edata;

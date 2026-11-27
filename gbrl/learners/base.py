@@ -106,6 +106,12 @@ class BaseLearner(ABC):
                        'verbose': verbose, 'device': device, **tree_struct}
 
         self.n_objs = self.params['n_objs']
+        self.validate_obj_labels = params.get('validate_obj_labels')
+        if not isinstance(self.n_objs, int) or self.n_objs < 1:
+            raise ValueError("n_objs must be a positive integer")
+        if self.params['use_control_variates'] and self.n_objs > 1:
+            # Fitter::control_variates only corrects objective block 0.
+            raise ValueError("control_variates is not supported with n_objs > 1")
 
         if 'lambda_objs' in params:
             lambda_objs = params['lambda_objs']

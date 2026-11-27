@@ -1,10 +1,23 @@
 ##############################################################################
 # Copyright (c) 2024-2026, NVIDIA Corporation. All rights reserved.
 #
-# This work is made available under the Nvidia Source Code License-NC.
-# To view a copy of this license, visit
-# https://nvlabs.github.io/gbrl/license.html
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the "Software"),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
 #
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
 ##############################################################################
 """
 Tests for per-leaf density correctness in multi-objective GBRL.
@@ -203,6 +216,7 @@ class TestDensitySaveLoad(unittest.TestCase):
         model = _make_model(device, grow_policy)
         X = _train(model)
         before = _leaf_densities(model)
+        predicted_before = _predicted_densities(model, X)
 
         with tempfile.TemporaryDirectory() as tmpdir:
             path = f"{tmpdir}/model"
@@ -212,6 +226,9 @@ class TestDensitySaveLoad(unittest.TestCase):
         after = _leaf_densities(model2)
         np.testing.assert_allclose(before, after, atol=TOL,
             err_msg=f"Densities changed after save/load ({device}/{grow_policy})")
+        # Also check routing: same leaf arrays but different splits would differ here.
+        np.testing.assert_allclose(predicted_before, _predicted_densities(model2, X), atol=TOL,
+            err_msg=f"predict_densities changed after save/load ({device}/{grow_policy})")
 
     def test_cpu_greedy(self):
         self._check('cpu', 'greedy')

@@ -35,7 +35,7 @@ from gbrl.learners.actor_critic_learner import (SeparateActorCriticLearner,
                                                 SharedActorCriticLearner)
 from gbrl.learners.cost_actor_critic_learner import SharedCostActorCriticLearner, SeparateCostActorCriticLearner
 from gbrl.models.base import BaseGBT
-from gbrl.common.utils import (clip_grad_norm, numerical_dtype,
+from gbrl.common.utils import (normalize_objective_gradients, expand_critic_gradients, clip_grad_norm, numerical_dtype,
                                setup_optimizer, NumericalData,
                                pad_array, concatenate_arrays,
                                validate_array)
@@ -82,6 +82,13 @@ class ActorCritic(BaseGBT):
             generator_type- (str): candidate generation method "Quantile" or "Uniform".
             feature_weights - (list[float]): Per-feature multiplication
             weights used when choosing the best split. Weights should be >= 0
+            Split-RL (multi-objective) parameters, see https://nvlabs.github.io/gbrl/split_rl.html:
+            n_objs (int): number of objectives. Defaults to 1.
+            lambda_objs (list[float]): one weight per objective. Defaults to ones.
+            lambda_penalty (float): conflict/label-impurity split penalty.
+                Defaults to 1.0; 0.0 disables it.
+            validate_obj_labels (Optional[bool]): validate objective label
+                values (default: CPU yes, CUDA no).
         bias (np.ndarray, optional): manually set a bias. Defaults to None = np.zeros.
         verbose (int, optional): verbosity level. Defaults to 0.
         device (str, optional): GBRL device 'cpu' or 'cuda/gpu'. Defaults to 'cpu'.
@@ -108,7 +115,6 @@ class ActorCritic(BaseGBT):
             bias = bias * np.ones(output_dim if shared_tree_struct else output_dim - 1,
                                   dtype=numerical_dtype)
 
-        # init model
         if self.shared_tree_struct:
             self.learner = SharedActorCriticLearner(input_dim=input_dim,
                                                     output_dim=output_dim,
@@ -142,6 +148,7 @@ class ActorCritic(BaseGBT):
         value_file = load_name + '_value.gbrl_model'
 
         instance = cls.__new__(cls)
+        BaseGBT.__init__(instance)
         if os.path.isfile(policy_file) and os.path.isfile(value_file):
             instance.learner = SeparateActorCriticLearner.load(load_name,
                                                                device)
@@ -265,7 +272,6 @@ class ActorCritic(BaseGBT):
                                              "Make sure model is called with requires_grad=True")
             observations = self.inputs
 
-        # Handle 1D observations
         if observations.ndim == 1:
             n_samples = 1 if self.learner.input_dim > 1 else len(observations)
         else:
@@ -285,9 +291,9 @@ class ActorCritic(BaseGBT):
             assert self.params[1].grad is not None, "params[1].grad must be set to compute gradients."  # type: ignore
             value_grads = self.params[1].grad.detach() * n_samples  # type: ignore
 
-        if isinstance(policy_grads, tuple):
-            policy_grads = concatenate_arrays(tuple(g.unsqueeze(0) for g in policy_grads), axis=0)
-            value_grads = pad_array(value_grads.unsqueeze(0), n_dims=policy_grads.shape[0] - 1, axis=0)  # type: ignore
+        policy_dim = self.learner.output_dim - 1 if self.shared_tree_struct else self.learner.output_dim[0]
+        policy_grads = normalize_objective_gradients(policy_grads, self.learner.n_objs, n_samples, policy_dim)
+        value_grads = expand_critic_gradients(value_grads, self.learner.n_objs if self.shared_tree_struct else 1, n_samples)
 
         policy_grads = clip_grad_norm(policy_grads, policy_grad_clip)  # type: ignore
         value_grads = clip_grad_norm(value_grads, value_grad_clip)  # type: ignore
@@ -330,7 +336,6 @@ class ActorCritic(BaseGBT):
                                             "Make sure model is called with requires_grad=True")
             observations = self.inputs
 
-        # Handle 1D observations
         if observations.ndim == 1:
             n_samples = 1 if self.learner.input_dim > 1 else len(observations)
         else:
@@ -343,8 +348,7 @@ class ActorCritic(BaseGBT):
             assert self.params[0].grad is not None, "params[0].grad must be set to compute gradients."  # type: ignore
             policy_grads = self.params[0].grad.detach() * n_samples  # type: ignore
 
-        if isinstance(policy_grads, tuple):
-            policy_grads = concatenate_arrays(tuple(g.unsqueeze(0) for g in policy_grads), axis=0)
+        policy_grads = normalize_objective_gradients(policy_grads, self.learner.n_objs, n_samples, self.learner.output_dim[0])
 
         policy_grads = clip_grad_norm(policy_grads, policy_grad_clip)
         validate_array(policy_grads)
@@ -377,7 +381,6 @@ class ActorCritic(BaseGBT):
                                             "Make sure model is called with requires_grad=True")
             observations = self.inputs
 
-        # Handle 1D observations
         if observations.ndim == 1:
             n_samples = 1 if self.learner.input_dim > 1 else len(observations)
         else:
@@ -429,30 +432,24 @@ class ActorCritic(BaseGBT):
         """
         return self.__copy__()
 
-    def __copy__(self) -> "ActorCritic":
-        assert self.learner is not None, "learner must be initialized first."
-        learner = self.learner.copy()
-        assert learner.optimizers is not None, "learner.optimizers must be initialized"
-        assert len(learner.optimizers) == 2, "learner.optimizers must be initialized"
-        copy_ = ActorCritic(tree_struct=learner.tree_struct,
-                            input_dim=learner.input_dim,  # type: ignore
-                            output_dim=learner.output_dim,  # type: ignore
-                            policy_optimizer=learner.optimizers[0],
-                            value_optimizer=learner.optimizers[1],
-                            shared_tree_struct=self.shared_tree_struct,
-                            params=learner.params,
-                            bias=learner.get_bias(),  # type: ignore
-                            verbose=learner.verbose,
-                            device=learner.device)
-        copy_.learner = learner
-        return copy_
+    def __copy__(self):
+        result = type(self).__new__(type(self))
+        BaseGBT.__init__(result)
+        result.learner = self.learner.copy()
+        result.shared_tree_struct = self.shared_tree_struct
+        result.policy_grads = None
+        result.value_grads = None
+        return result
 
 
 class CostActorCritic(ActorCritic):
     """
     GBRL model for a shared Actor, value Critic, and cost Critic ensemble.
 
-    Supports both shared and separate actor-critic tree structures.
+    Supports both shared and separate actor-critic tree structures. Used for
+    reward/cost objectives in Split-RL (Fuhrer, Tessler & Dalal, NeurIPS 2026,
+    https://arxiv.org/abs/2611.34799); see https://nvlabs.github.io/gbrl/split_rl.html and
+    https://github.com/NVlabs/split_rl.
     """
     def __init__(self,
                  tree_struct: Dict,
@@ -467,7 +464,8 @@ class CostActorCritic(ActorCritic):
                  verbose: int = 0,
                  device: str = 'cpu'):
         """
-        GBRL model for a shared Actor and Critic ensemble.
+        GBRL model for an Actor, reward Critic, and cost Critic.
+        Outputs are (policy, reward_value, cost_value).
 
         Args:
          tree_struct (Dict): Dictionary containing tree structure information:
@@ -476,8 +474,9 @@ class CostActorCritic(ActorCritic):
                 n_bins (int): number of bins per feature for candidate generation.
                 min_data_in_leaf (int): minimum number of samples in a leaf.
                 par_th (int): minimum number of samples for parallelizing on CPU.
-        output_dim (int): output dimension.
-            policy_optimizer Dict: dictionary containing policy optimizer
+        output_dim (int): output dimension. For a shared tree this is the
+        policy width plus two (reward and cost value columns).
+        policy_optimizer Dict: dictionary containing policy optimizer
         parameters (see GBRL class for optimizer details).
         value_optimizer Dict: dictionary containing value optimizer parameters
             (see GBRL class for optimizer details).
@@ -491,6 +490,13 @@ class CostActorCritic(ActorCritic):
             generator_type- (str): candidate generation method "Quantile" or "Uniform".
             feature_weights - (list[float]): Per-feature multiplication
             weights used when choosing the best split. Weights should be >= 0
+            Split-RL (multi-objective) parameters, see https://nvlabs.github.io/gbrl/split_rl.html:
+            n_objs (int): number of objectives. Defaults to 1.
+            lambda_objs (list[float]): one weight per objective. Defaults to ones.
+            lambda_penalty (float): conflict/label-impurity split penalty.
+                Defaults to 1.0; 0.0 disables it.
+            validate_obj_labels (Optional[bool]): validate objective label
+                values (default: CPU yes, CUDA no).
         bias (np.ndarray, optional): manually set a bias. Defaults to None = np.zeros.
         verbose (int, optional): verbosity level. Defaults to 0.
         device (str, optional): GBRL device 'cpu' or 'cuda/gpu'. Defaults to 'cpu'.
@@ -511,7 +517,6 @@ class CostActorCritic(ActorCritic):
             bias = bias * np.ones(output_dim if shared_tree_struct else output_dim - 2,
                                   dtype=numerical_dtype)
 
-        # init model
         if self.shared_tree_struct:
             self.learner = SharedCostActorCriticLearner(input_dim=input_dim,
                                                         output_dim=output_dim,
@@ -553,6 +558,7 @@ class CostActorCritic(ActorCritic):
         cost_file = load_name + '_cost.gbrl_model'
 
         instance = cls.__new__(cls)
+        BaseGBT.__init__(instance)
         if os.path.isfile(policy_file) and os.path.isfile(value_file) and os.path.isfile(cost_file):
             instance.learner = SeparateCostActorCriticLearner.load(load_name,
                                                                    device)
@@ -594,7 +600,6 @@ class CostActorCritic(ActorCritic):
                                          start_idx, stop_idx, tensor)
         if requires_grad:
             self.cost_grads = None
-            # cost_critic_step() reads params[2] and falls back to self.inputs.
             self.params = (None, None, cost)
             self.inputs = observations
         return cost
@@ -660,7 +665,6 @@ class CostActorCritic(ActorCritic):
                                             "Make sure model is called with requires_grad=True")
             observations = self.inputs
 
-        # Handle 1D observations
         if observations.ndim == 1:
             n_samples = 1 if self.learner.input_dim > 1 else len(observations)
         else:
@@ -687,10 +691,11 @@ class CostActorCritic(ActorCritic):
             assert self.params[2].grad is not None, "params[2].grad must be set to compute gradients."  # type: ignore
             cost_grads = self.params[2].grad.detach() * n_samples  # type: ignore
 
-        if isinstance(policy_grads, tuple):
-            policy_grads = concatenate_arrays(tuple(g.unsqueeze(0) for g in policy_grads), axis=0)
-            value_grads = pad_array(value_grads.unsqueeze(0), n_dims=policy_grads.shape[0] - 1, axis=0)  # type: ignore
-            cost_grads = pad_array(cost_grads.unsqueeze(0), n_dims=policy_grads.shape[0] - 1, axis=0)  # type: ignore
+        policy_dim = self.learner.output_dim - 2 if self.shared_tree_struct else self.learner.output_dim[0]
+        policy_grads = normalize_objective_gradients(policy_grads, self.learner.n_objs, n_samples, policy_dim)
+        critic_objs = self.learner.n_objs if self.shared_tree_struct else 1
+        value_grads = expand_critic_gradients(value_grads, critic_objs, n_samples)
+        cost_grads = expand_critic_gradients(cost_grads, critic_objs, n_samples)
 
         policy_grads = clip_grad_norm(policy_grads, policy_grad_clip)  # type: ignore
         value_grads = clip_grad_norm(value_grads, value_grad_clip)  # type: ignore
@@ -705,6 +710,7 @@ class CostActorCritic(ActorCritic):
         self.learner.step(inputs=observations,
                           grads=(policy_grads, value_grads, cost_grads),
                           obj_labels=obj_labels, **label_kwargs)
+        self.policy_grads, self.value_grads, self.cost_grads = policy_grads, value_grads, cost_grads
         self.grads = (policy_grads, value_grads, cost_grads)
         self.inputs = None
 
@@ -731,7 +737,6 @@ class CostActorCritic(ActorCritic):
                                             "Make sure model is called with requires_grad=True")
             observations = self.inputs
 
-        # Handle 1D observations
         if observations.ndim == 1:
             n_samples = 1 if self.learner.input_dim > 1 else len(observations)
         else:
@@ -763,6 +768,10 @@ class CostActorCritic(ActorCritic):
         else:
             self.learner.save(save_path, custom_names=['policy', 'value', 'cost'])  # type: ignore
 
+    def get_grads(self):
+        self.grads = (self.policy_grads, self.value_grads, self.cost_grads)
+        return BaseGBT.get_grads(self)
+
     def copy(self) -> "CostActorCritic":
         """
         Copy class instance
@@ -772,21 +781,12 @@ class CostActorCritic(ActorCritic):
         """
         return self.__copy__()
 
-    def __copy__(self) -> "CostActorCritic":
-        assert self.learner is not None, "learner must be initialized first."
-        learner = self.learner.copy()
-        assert learner.optimizers is not None, "learner.optimizers must be initialized"
-        assert len(learner.optimizers) == 3, "learner.optimizers must be initialized"
-        copy_ = CostActorCritic(tree_struct=learner.tree_struct,
-                                input_dim=learner.input_dim,  # type: ignore
-                                output_dim=learner.output_dim,  # type: ignore
-                                policy_optimizer=learner.optimizers[0],
-                                value_optimizer=learner.optimizers[1],
-                                cost_optimizer=learner.optimizers[2],
-                                shared_tree_struct=self.shared_tree_struct,
-                                params=learner.params,
-                                bias=learner.get_bias(),  # type: ignore
-                                verbose=learner.verbose,
-                                device=learner.device)
-        copy_.learner = learner
-        return copy_
+    def __copy__(self):
+        result = type(self).__new__(type(self))
+        BaseGBT.__init__(result)
+        result.learner = self.learner.copy()
+        result.shared_tree_struct = self.shared_tree_struct
+        result.policy_grads = None
+        result.value_grads = None
+        result.cost_grads = None
+        return result

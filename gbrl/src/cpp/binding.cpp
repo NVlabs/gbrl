@@ -614,6 +614,11 @@ py::dict ensembleExportDataToDict(const exportData* data) {
         d["num_features"] = data->num_features;
         d["binary_features"] = data->binary_features;
 
+        auto depths_capsule = py::capsule(data->tree_depths, [](void* ptr) { delete[] reinterpret_cast<int*>(ptr); });
+        d["tree_depths"] = py::array_t<int>({data->n_trees}, data->tree_depths, depths_capsule);
+        auto counts_capsule = py::capsule(data->tree_leaf_counts, [](void* ptr) { delete[] reinterpret_cast<int*>(ptr); });
+        d["tree_leaf_counts"] = py::array_t<int>({data->n_trees}, data->tree_leaf_counts, counts_capsule);
+
         // Array data with ownership transfer via capsules
         auto bias_capsule = py::capsule(data->bias, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
         d["bias"] = py::array_t<float>({data->output_dim}, data->bias, bias_capsule);
@@ -1461,10 +1466,10 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         int start_tree_idx = start_tree_obj.is_none() ? 0 : start_tree_obj.cast<int>();
         int stop_tree_idx = stop_tree_obj.is_none() ? 0 : stop_tree_obj.cast<int>();
 
-        if (start_tree_idx < 0 || (start_tree_idx >= self.metadata->n_trees) && (self.metadata->n_trees > 0)) {
+        if (start_tree_idx < 0 || start_tree_idx > self.metadata->n_trees) {
             std::stringstream ss;
             ss << "start_tree_idx is out of bounds! Got " << start_tree_idx
-               << ", but valid range is [0, " << self.metadata->n_trees - 1 << "]";
+               << ", but valid range is [0, " << self.metadata->n_trees << "]";
             throw std::runtime_error(ss.str());
         }
         if (stop_tree_idx < 0 || stop_tree_idx > self.metadata->n_trees) {

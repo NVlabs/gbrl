@@ -31,7 +31,6 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import torch as th
 
-from gbrl import GBRL_CPP
 from gbrl.common.compression import (SharedActorCriticCompression,
                                      TreeCompression)
 from gbrl.common.utils import NumericalData, ensure_leaf_tensor_or_array
@@ -300,31 +299,8 @@ class SharedActorCriticLearner(GBTLearner):
         
         return final_loss
 
-    def __copy__(self) -> "SharedActorCriticLearner":
-        """
-        Creates a copy of the SharedActorCriticLearner instance.
-
-        Returns:
-            SharedActorCriticLearner: A copy of the current instance.
-        """
-        assert isinstance(self.input_dim, int), "input_dim should be an integer"
-        assert isinstance(self.output_dim, int), "output_dim should be an integer"
-        copy_ = SharedActorCriticLearner(input_dim=self.input_dim,
-                                         output_dim=self.output_dim,
-                                         tree_struct=self.tree_struct.copy(),
-                                         policy_optimizer=self.optimizers[0].copy(),
-                                         value_optimizer=self.optimizers[1].copy(),
-                                         params=self.params,
-                                         verbose=self.verbose,
-                                         device=self.device,
-                                         name=self.learner_name)
-        copy_.iteration = self.iteration
-        copy_.total_iterations = self.total_iterations
-        if self._cpp_model is not None:
-            copy_._cpp_model = GBRL_CPP(self._cpp_model)
-        if self.student_model is not None:
-            copy_.student_model = GBRL_CPP(self.student_model)
-        return copy_
+    def __copy__(self):
+        return GBTLearner.__copy__(self)
 
 
 class SeparateActorCriticLearner(MultiGBTLearner):
@@ -381,6 +357,7 @@ class SeparateActorCriticLearner(MultiGBTLearner):
                          policy_dim=[output_dim - 1, 0],
                          verbose=verbose, device=device,
                          names=[actor_name, critic_name])
+        self.n_objs_per_model = [self.n_objs, 1]
 
     def step_actor(self,
                    inputs: NumericalData,
@@ -464,39 +441,5 @@ class SeparateActorCriticLearner(MultiGBTLearner):
         """
         return super().predict(obs, requires_grad, start_idx, stop_idx, tensor, model_idx=1)  # type: ignore
 
-    def __copy__(self) -> "SeparateActorCriticLearner":
-        """
-        Creates a copy of the SeparateActorCriticLearner instance.
-
-        Returns:
-            SeparateActorCriticLearner: A new instance with the same parameters and structure.
-        """
-        opts = [opt.copy() if opt is not None else opt
-                for opt in self.optimizers
-                ]
-        assert isinstance(self.input_dim, int), "input_dim should be an integer"
-        assert isinstance(self.output_dim, int), "output_dim should be an integer"
-
-        copy_ = SeparateActorCriticLearner(input_dim=self.input_dim,
-                                           output_dim=self.output_dim,
-                                           tree_struct=self.tree_struct.copy(),
-                                           policy_optimizer=opts[0],
-                                           value_optimizer=opts[1],
-                                           params=self.params,
-                                           verbose=self.verbose,
-                                           device=self.device,
-                                           actor_name=self.learner_names[0],
-                                           critic_name=self.learner_names[1])
-        copy_.iteration = self.iteration
-        copy_.total_iterations = self.total_iterations
-
-        if self.student_models is not None:
-            copy_.student_models = [None] * self.n_learners
-        if self._cpp_models is not None:
-            copy_._cpp_models = [None] * self.n_learners
-        if self._cpp_models is not None:
-            for i in range(self.n_learners):
-                copy_._cpp_models[i] = GBRL_CPP(self._cpp_models[i])  # type: ignore
-                if self.student_models is not None:
-                    copy_.student_models[i] = GBRL_CPP(self.student_models[i])  # type: ignore
-        return copy_
+    def __copy__(self):
+        return MultiGBTLearner.__copy__(self)

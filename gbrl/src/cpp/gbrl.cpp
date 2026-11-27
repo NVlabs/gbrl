@@ -115,11 +115,20 @@ GBRL::GBRL(int input_dim, int output_dim, int policy_dim, int max_depth, int min
 }
 
 GBRL::GBRL(const std::string& filename){
-    this->learner_name = "GBRL";  // Will be overwritten when loaded
-    int status = this->loadFromFile(filename);
-    if (status != 0){
-        std::cerr << "Error loading . " <<  filename  << std::endl; 
-        throw std::runtime_error("File load error");
+    this->learner_name = "GBRL";
+    this->metadata = nullptr;
+    this->edata = nullptr;
+    this->device = cpu;
+    try {
+        if (this->loadFromFile(filename) != 0)
+            throw std::runtime_error("File load error");
+    } catch (...) {
+        for (auto *opt : this->opts)
+            delete opt;
+        if (this->edata != nullptr)
+            ensemble_data_dealloc(this->edata);
+        delete this->metadata;
+        throw;
     }
 }
 
@@ -545,6 +554,11 @@ float* GBRL::predict_densities(dataHolder<const float> *obs,
                                const int n_cat_features,
                                int start_tree_idx,
                                int stop_tree_idx){
+    if (start_tree_idx < 0 || stop_tree_idx < 0 ||
+        start_tree_idx > this->metadata->n_trees ||
+        stop_tree_idx > this->metadata->n_trees ||
+        (stop_tree_idx != 0 && stop_tree_idx < start_tree_idx))
+        throw std::runtime_error("Invalid density prediction tree range");
     if (this->metadata->iteration == 0){
         this->metadata->n_num_features = n_num_features;
         this->metadata->n_cat_features = n_cat_features;
@@ -885,7 +899,9 @@ void GBRL::_step_gpu(dataSet *dataset){
     if (gpu_obs != nullptr)
         transpose_matrix(gpu_obs, trans_obs, n_num_features, n_samples);
 
-    preprocess_matrices(gpu_build_grads, n_samples, output_dim, this->metadata->split_score_func);
+    for (int k = 0; k < this->metadata->n_objs; ++k)
+        preprocess_matrices(gpu_build_grads + static_cast<size_t>(k) * n_samples * output_dim,
+                            n_samples, output_dim, this->metadata->split_score_func);
 
     int n_candidates = process_candidates_cuda(gpu_obs, dataset->categorical_obs->data, candidate_indices, candidate_values, candidate_categories, candidate_numerical, n_samples, n_num_features, n_cat_features, n_bins, this->metadata->generator_type);
     
@@ -1446,8 +1462,8 @@ int GBRL::saveToFile(const std::string& filename){
         return -1;
     }
 
-    write_header(file, this->sheader);
-    file.write(reinterpret_cast<const char*>(this->metadata), sizeof(ensembleMetaData));
+    write_header(file, create_header());
+    write_ensemble_metadata(file, *this->metadata);
     char byte = static_cast<char>(this->parallel_predict);
     file.write(&byte, sizeof(byte));
     // properly save bool values
@@ -1496,8 +1512,7 @@ int GBRL::loadFromFile(const std::string& filename){
     this->sheader = read_header(file);
     std::cout << "Reading GBRL Library ";
     display_header(this->sheader);
-    this->metadata = new ensembleMetaData;
-    file.read(reinterpret_cast<char*>(this->metadata), sizeof(ensembleMetaData));
+    this->metadata = read_ensemble_metadata(file, this->sheader);
 
     char byte;
     file.read(&byte, sizeof(byte));
@@ -1505,11 +1520,19 @@ int GBRL::loadFromFile(const std::string& filename){
     file.read(&byte, sizeof(byte));
     this->metadata->use_cv = static_cast<bool>(byte);
 
-    // Read learner name length and name
-    size_t name_length;
-    file.read(reinterpret_cast<char*>(&name_length), sizeof(size_t));
-    this->learner_name.resize(name_length);
-    file.read(&this->learner_name[0], name_length);
+    if (this->sheader.minor_version != 1 || this->sheader.patch_version >= 6) {
+        size_t name_length = 0;
+        file.read(reinterpret_cast<char*>(&name_length), sizeof(name_length));
+        auto position = file.tellg();
+        file.seekg(0, std::ios::end);
+        auto remaining = file.tellg() - position;
+        file.seekg(position);
+        if (!file.good() || name_length > static_cast<uint64_t>(remaining))
+            throw std::runtime_error("Invalid checkpoint learner name length");
+        this->learner_name.resize(name_length);
+        if (name_length > 0)
+            file.read(&this->learner_name[0], name_length);
+    }
 
     if (!file.good()) {
         std::cerr << "Error occurred while reading the file." << std::endl;
@@ -1532,7 +1555,8 @@ int GBRL::loadFromFile(const std::string& filename){
         throw std::runtime_error("Serialized model has a negative monotonic constraint count");
     }
 
-    this->edata = load_ensemble_data(file, this->metadata);
+    this->edata = load_ensemble_data(file, this->metadata,
+        this->sheader.minor_version == 1 ? this->sheader.patch_version : -1);
     // load_ensemble_data allocates mono_constraints with n_constraints = 0 and
     // never restores it.  CUDA split scoring reads this field (not the metadata
     // copy), so without this a loaded constrained model scores as unconstrained.

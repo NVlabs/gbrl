@@ -308,8 +308,13 @@ float TreeNode::getSplitScoreMultiObj(
     const splitCandidate &split_candidate,
     const int min_data_in_leaf,
     const ensembleMetaData *metadata,
-    const ensembleData *edata
+    const ensembleData *edata,
+    const int global_feature_idx,
+    const monotonicConstraints *mono_constraints,
+    const int n_mono_constraints,
+    float *penalty_factor_out
 ) {
+    if (penalty_factor_out != nullptr) *penalty_factor_out = 1.0f;
     // Check for duplicate splits along the path
     bool is_numeric = split_candidate.categorical_value == nullptr;
     if (this->depth > 0) {
@@ -404,7 +409,27 @@ float TreeNode::getSplitScoreMultiObj(
 
     float total_gain = 0.0f;
 
+    const bool constrained = (mono_constraints != nullptr && n_mono_constraints > 0);
+
     if (split_score_func == L2) {
+        if (constrained) {
+            // Pool objective 0 (as split_score_l2_cuda does): convert to means,
+            // pool violating outputs, and convert back to sums.
+            float *l0 = new float[n_cols];
+            float *r0 = new float[n_cols];
+            for (int d = 0; d < n_cols; ++d) {
+                l0[d] = (left_count > 0) ? left_sum[d] / left_count_f : 0.0f;
+                r0[d] = (right_count > 0) ? right_sum[d] / right_count_f : 0.0f;
+            }
+            pool_constrained_means(l0, r0, n_cols, left_count_f, right_count_f,
+                                   global_feature_idx, mono_constraints, n_mono_constraints);
+            for (int d = 0; d < n_cols; ++d) {
+                left_sum[d] = l0[d] * left_count_f;
+                right_sum[d] = r0[d] * right_count_f;
+            }
+            delete[] l0;
+            delete[] r0;
+        }
         // L2 gain: Σ_k (||left_sum_k||^2/N_L + ||right_sum_k||^2/N_R) * density_k * λ_k
         for (int k = 0; k < n_objs; ++k) {
             float l_sq = 0.0f, r_sq = 0.0f;
@@ -427,6 +452,11 @@ float TreeNode::getSplitScoreMultiObj(
                 right_mean[k * n_cols + d] = (right_count > 0) ? right_sum[k * n_cols + d] / right_count_f : 0.0f;
             }
         }
+        // Pool objective 0 before the dot products so numerator and denominator
+        // describe the same child vectors (as splitScoreCosineWithConstraint).
+        if (constrained)
+            pool_constrained_means(left_mean, right_mean, n_cols, left_count_f, right_count_f,
+                                   global_feature_idx, mono_constraints, n_mono_constraints);
 
         // Compute dot(sample, mean) sums per objective
         float *l_dot_sum = new float[n_objs];
@@ -466,8 +496,6 @@ float TreeNode::getSplitScoreMultiObj(
             float denominator = left_count_f * l_mean_norm + right_count_f * r_mean_norm;
             float cosine = 0.0f;
             if (denominator > 0.0f) {
-                l_dot_sum[k] = (left_count > 0) ? l_dot_sum[k] / left_count_f : 0.0f;
-                r_dot_sum[k] = (right_count > 0) ? r_dot_sum[k] / right_count_f : 0.0f;
                 cosine = (l_dot_sum[k] + r_dot_sum[k]) / sqrtf(denominator);
             }
             total_gain += cosine * node_densities[k] * lambda_objs[k];
@@ -506,6 +534,7 @@ float TreeNode::getSplitScoreMultiObj(
         if (penalty > 1.0f) penalty = 1.0f;
 
         total_gain *= (1.0f - penalty);
+        if (penalty_factor_out != nullptr) *penalty_factor_out = 1.0f - penalty;
     }
 
     delete[] left_sum; delete[] right_sum;

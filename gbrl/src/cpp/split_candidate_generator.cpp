@@ -45,7 +45,6 @@
 
 SplitCandidateGenerator::SplitCandidateGenerator(const int n_samples, const int n_num_features, const int n_cat_features, const int n_bins, const int par_th, const generatorType &generator_type):
     n_samples(n_samples), n_num_features(n_num_features), n_cat_features(n_cat_features), n_bins(n_bins), par_th(par_th), generator_type(generator_type){
-    // printf("allocating enough for %d\n", n_bins*(n_num_features + n_cat_features));
     this->split_candidates = new splitCandidate[n_bins*(n_num_features + n_cat_features)];
     for (int i = 0; i < n_bins*(n_num_features + n_cat_features); ++i)
         this->split_candidates[i].categorical_value = nullptr;
@@ -130,33 +129,26 @@ void SplitCandidateGenerator::quantileSplitCandidates(const float *obs, int* con
 
 
 void SplitCandidateGenerator::processCategoricalCandidates(const char *categorical_obs) {
-    // 1. Count Frequencies using optimized Map
-    // Key: Pair(Feature Index, Category String) -> categoryInfo
     std::unordered_map<std::pair<int, std::string>, categoryInfo, PairHash> unique_cats;
 
     for (int feature_idx = 0; feature_idx < this->n_cat_features; ++feature_idx) {
         for (int sample_idx = 0; sample_idx < this->n_samples; ++sample_idx) {
             
-            // Efficiently grab the string
-
             const char* start_ptr = categorical_obs + (sample_idx * n_cat_features + feature_idx) * MAX_CHAR_SIZE;
             size_t safe_len = strnlen(start_ptr, MAX_CHAR_SIZE);
             std::pair<int, std::string> key = {feature_idx, std::string(start_ptr, safe_len)};
 
             categoryInfo& info = unique_cats[key];
             
-            // Initialize on first sight
             if (info.cat_count == 0) {
                 info.feature_idx = feature_idx;
                 info.feature_name = key.second; 
             }
             
-            // Increment Count (Frequency)
             info.cat_count++;
         }
     }
 
-    // 2. Flatten to Vector for Sorting
     std::vector<categoryInfo> cat_vec;
     cat_vec.reserve(unique_cats.size());
     
@@ -164,12 +156,10 @@ void SplitCandidateGenerator::processCategoricalCandidates(const char *categoric
         cat_vec.push_back(std::move(pair.second));
     }
     
-    // 3. Prune by Frequency
     int n_unique = static_cast<int>(cat_vec.size());
     int limit = this->n_cat_features * this->n_bins;
 
     if (n_unique > limit) {
-        // Sort DESCENDING by Frequency (cat_count)
         std::sort(cat_vec.begin(), cat_vec.end(), 
             [](const categoryInfo& a, const categoryInfo& b) {
                 return a.cat_count > b.cat_count; 
@@ -178,7 +168,6 @@ void SplitCandidateGenerator::processCategoricalCandidates(const char *categoric
         n_unique = limit;
     }
     
-    // 4. Generate Split Candidates
     int _n_candidates = this->n_candidates;
     
     for (int i = 0; i < n_unique; ++i) {
@@ -187,7 +176,6 @@ void SplitCandidateGenerator::processCategoricalCandidates(const char *categoric
         this->split_candidates[_n_candidates].feature_idx = cat_info.feature_idx;
         this->split_candidates[_n_candidates].feature_value = INFINITY;
         
-        // Allocate and Copy String safely
         this->split_candidates[_n_candidates].categorical_value = new char[MAX_CHAR_SIZE]; 
         memset(this->split_candidates[_n_candidates].categorical_value, 0, MAX_CHAR_SIZE);
         strncpy(this->split_candidates[_n_candidates].categorical_value, cat_info.feature_name.c_str(), MAX_CHAR_SIZE - 1);
@@ -201,7 +189,6 @@ void SplitCandidateGenerator::processCategoricalCandidates(const char *categoric
 
 int processCategoricalCandidates_func(
     const char *categorical_obs, 
-    // const float *grad_norms,   <-- REMOVED
     const int n_samples, 
     const int n_cat_features, 
     const int n_bins, 
@@ -210,22 +197,15 @@ int processCategoricalCandidates_func(
     char* category_values, 
     bool* numerics)
 {
-    // Map Key: Pair(Feature Index, Category String) -> Stats
-    // Using a pair key prevents us from allocating heap memory for "cat_name_idx" string concatenation
     std::unordered_map<std::pair<int, std::string>, CategoryStats, PairHash> unique_cats;
 
-    // 1. COUNT FREQUENCIES
-    // ---------------------
     for (int feature_idx = 0; feature_idx < n_cat_features; ++feature_idx) {
         for (int sample_idx = 0; sample_idx < n_samples; ++sample_idx) {
             
-            // Construct string from fixed-width char buffer
             const char* start_ptr = categorical_obs + (sample_idx * n_cat_features + feature_idx) * MAX_CHAR_SIZE;
             size_t safe_len = strnlen(start_ptr, MAX_CHAR_SIZE);
-            // Key construction
             std::pair<int, std::string> key = {feature_idx, std::string(start_ptr, safe_len)};
             
-            // Update Stats
             CategoryStats& stats = unique_cats[key];
             if (stats.count == 0) {
                 stats.feature_idx = feature_idx;
@@ -235,8 +215,6 @@ int processCategoricalCandidates_func(
         }
     }
 
-    // 2. FLATTEN TO VECTOR
-    // ---------------------
     std::vector<CategoryStats> cat_vec;
     cat_vec.reserve(unique_cats.size());
     
@@ -247,11 +225,7 @@ int processCategoricalCandidates_func(
     int n_unique = static_cast<int>(cat_vec.size());
     int limit = n_cat_features * n_bins;
 
-    // 3. PRUNE BY FREQUENCY (If needed)
-    // ---------------------
     if (n_unique > limit) {
-        // Sort DESCENDING by Count (Frequency)
-        // Keep the most frequent categories
         std::sort(cat_vec.begin(), cat_vec.end(), 
             [](const CategoryStats& a, const CategoryStats& b) {
                 return a.count > b.count; 
@@ -260,16 +234,12 @@ int processCategoricalCandidates_func(
         n_unique = limit;
     }
     
-    // 4. OUTPUT CANDIDATES
-    // ---------------------
     int n_candidates = 0;
     for (int i = 0; i < n_unique; ++i) {
         feature_inds[n_candidates] = cat_vec[i].feature_idx;
         feature_values[n_candidates] = INFINITY;
         numerics[n_candidates] = false;
         
-        // Safe Copy
-        // Ensure we don't overflow MAX_CHAR_SIZE
         memset(category_values + n_candidates * MAX_CHAR_SIZE, 0, MAX_CHAR_SIZE);
         strncpy(category_values + n_candidates * MAX_CHAR_SIZE, cat_vec[i].value.c_str(), MAX_CHAR_SIZE - 1);
         

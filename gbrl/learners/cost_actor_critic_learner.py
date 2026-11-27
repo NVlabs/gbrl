@@ -1,16 +1,28 @@
 ##############################################################################
-# Copyright (c) 2024, NVIDIA Corporation. All rights reserved.
+# Copyright (c) 2024-2026, NVIDIA Corporation. All rights reserved.
 #
-# This work is made available under the Nvidia Source Code License-NC.
-# To view a copy of this license, visit
-# https://nvlabs.github.io/gbrl/license.html
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the "Software"),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
 #
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
 ##############################################################################
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
-from gbrl import GBRL_CPP
 from gbrl.common.utils import NumericalData, ensure_leaf_tensor_or_array
 from gbrl.learners.gbt_learner import GBTLearner
 from gbrl.learners.actor_critic_learner import SharedActorCriticLearner, SeparateActorCriticLearner
@@ -90,9 +102,10 @@ class SharedCostActorCriticLearner(SharedActorCriticLearner):
             Tuple[float, Dict]: The final loss value and updated parameters
             for distillation
         """
+        # Scalar critics: accept (n,) or (n, 1) targets.
         targets = np.concatenate([policy_targets,
-                                  value_targets,
-                                  cost_targets[:, np.newaxis]], axis=1)
+                                  np.reshape(value_targets, (len(value_targets), -1)),
+                                  np.reshape(cost_targets, (len(cost_targets), -1))], axis=1)
         return GBTLearner.distil(self, obs, targets, params, verbose)
 
     def predict(self,  # type: ignore
@@ -190,31 +203,8 @@ class SharedCostActorCriticLearner(SharedActorCriticLearner):
                                         tensor)
         return pred_costs
 
-    def __copy__(self) -> "SharedCostActorCriticLearner":
-        """
-        Creates a copy of the SharedCostActorCriticLearner instance.
-
-        Returns:
-            SharedCostActorCriticLearner: A copy of the current instance.
-        """
-        assert isinstance(self.input_dim, int), "input_dim should be an integer"
-        assert isinstance(self.output_dim, int), "output_dim should be an integer"
-        copy_ = SharedCostActorCriticLearner(input_dim=self.input_dim,
-                                             output_dim=self.output_dim,
-                                             tree_struct=self.tree_struct.copy(),
-                                             policy_optimizer=self.optimizers[0].copy(),
-                                             value_optimizer=self.optimizers[1].copy(),
-                                             cost_optimizer=self.optimizers[2].copy(),
-                                             params=self.params,
-                                             verbose=self.verbose,
-                                             device=self.device)
-        copy_.iteration = self.iteration
-        copy_.total_iterations = self.total_iterations
-        if self._cpp_model is not None:
-            copy_._cpp_model = GBRL_CPP(self._cpp_model)
-        if self.student_model is not None:
-            copy_.student_model = GBRL_CPP(self.student_model)
-        return copy_
+    def __copy__(self):
+        return GBTLearner.__copy__(self)
 
 
 class SeparateCostActorCriticLearner(SeparateActorCriticLearner):
@@ -274,6 +264,7 @@ class SeparateCostActorCriticLearner(SeparateActorCriticLearner):
                                  n_learners=3,
                                  policy_dim=[output_dim - 2, 0, 0],
                                  verbose=verbose, device=device)
+        self.n_objs_per_model = [self.n_objs, 1, 1]
 
     def step_cost(self, inputs: NumericalData,
                   grads: NumericalData) -> None:
@@ -328,39 +319,5 @@ class SeparateCostActorCriticLearner(SeparateActorCriticLearner):
         """
         return super().predict(obs, requires_grad, start_idx, stop_idx, tensor, model_idx=2)  # type: ignore
 
-    def __copy__(self) -> "SeparateCostActorCriticLearner":
-        """
-        Creates a copy of the SeparateCostActorCriticLearner instance.
-
-        Returns:
-            SeparateCostActorCriticLearner: A new instance with the same parameters and structure.
-        """
-        opts = [opt.copy() if opt is not None else opt
-                for opt in self.optimizers
-                ]
-        assert isinstance(self.input_dim, int), "input_dim should be an integer"
-        # MultiGBTLearner stores [policy_dim, 1, 1]; the constructor takes the total.
-        output_dim = sum(self.output_dim)  # type: ignore
-
-        copy_ = SeparateCostActorCriticLearner(input_dim=self.input_dim,
-                                               output_dim=output_dim,
-                                               tree_struct=self.tree_struct.copy(),
-                                               policy_optimizer=opts[0],
-                                               value_optimizer=opts[1],
-                                               cost_optimizer=opts[2],
-                                               params=self.params,
-                                               verbose=self.verbose,
-                                               device=self.device)
-        copy_.iteration = self.iteration
-        copy_.total_iterations = self.total_iterations
-
-        if self.student_models is not None:
-            copy_.student_models = [None] * self.n_learners
-        if self._cpp_models is not None:
-            copy_._cpp_models = [None] * self.n_learners
-        if self._cpp_models is not None:
-            for i in range(self.n_learners):
-                copy_._cpp_models[i] = GBRL_CPP(self._cpp_models[i])  # type: ignore
-                if self.student_models is not None:
-                    copy_.student_models[i] = GBRL_CPP(self.student_models[i])  # type: ignore
-        return copy_
+    def __copy__(self):
+        return MultiGBTLearner.__copy__(self)

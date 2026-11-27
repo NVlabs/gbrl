@@ -63,6 +63,8 @@ struct exportData {
     int num_features;         /**< Number of numerical features */
     int binary_features;      /**< Total number of binary split nodes (sum of depths) */
 
+    int *tree_depths;
+    int *tree_leaf_counts;
     int *feature_indices;     /**< Split feature index per binary node [binary_features] */
     float *feature_values;    /**< Split threshold per binary node [binary_features] */
     float *leaf_values;       /**< Optimizer-scaled leaf predictions [n_leaves * output_dim] */
@@ -218,7 +220,11 @@ void save_ensemble_data(
  */
 ensembleData* load_ensemble_data(
     std::ifstream& file,
-    ensembleMetaData *metadata
+    ensembleMetaData *metadata,
+    int legacy_patch = -1
 );
+
+void write_ensemble_metadata(std::ofstream& file, const ensembleMetaData& metadata);
+ensembleMetaData* read_ensemble_metadata(std::ifstream& file, const serializationHeader& header);
 
 #endif // ENSEMBLE_IO_H

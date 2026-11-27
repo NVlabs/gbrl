@@ -55,7 +55,7 @@ void Predictor::momentum_over_leaves(const float *obs, const char *categorical_o
     while (leaf_idx < n_leaves && tree_idx < stop_tree_idx)
     {
         int depth = edata->ensemble_info->depths[leaf_idx];
-        passed = false;
+        passed = (depth == 0);
         int cond_idx = leaf_idx*max_depth;
         for (int depth_idx = depth - 1; depth_idx >= 0; --depth_idx){
             passed = (numerics[cond_idx + depth_idx]) ? (obs[obs_row + feature_indices[cond_idx + depth_idx]] >  feature_values[cond_idx + depth_idx]) == inequality_directions[cond_idx + depth_idx] : (strcmp(&categorical_obs[(categorical_obs_row + feature_indices[cond_idx + depth_idx]) * MAX_CHAR_SIZE],  categorical_values + (cond_idx + depth_idx)*MAX_CHAR_SIZE) == 0) ==  inequality_directions[cond_idx + depth_idx];
@@ -208,7 +208,7 @@ void Predictor::predict_over_leaves(const float *obs, const char *categorical_ob
     while (leaf_idx < n_leaves && tree_idx < stop_tree_idx)
     {
         int depth = edata->ensemble_info->depths[leaf_idx];
-        passed = false;
+        passed = (depth == 0);
         int cond_idx = leaf_idx*max_depth;
         for (int depth_idx = depth - 1; depth_idx >= 0; --depth_idx){
             passed = (numerics[cond_idx + depth_idx]) ? (obs[obs_row + feature_indices[cond_idx + depth_idx]] >  feature_values[cond_idx + depth_idx]) == inequality_directions[cond_idx + depth_idx] : (strcmp(&categorical_obs[(categorical_obs_row + feature_indices[cond_idx + depth_idx]) * MAX_CHAR_SIZE],  categorical_values + (cond_idx + depth_idx)*MAX_CHAR_SIZE) == 0) ==  inequality_directions[cond_idx + depth_idx];
@@ -289,7 +289,7 @@ void Predictor::predict_densities_over_leaves(const float *obs, const char *cate
     while (leaf_idx < n_leaves && tree_idx < stop_tree_idx)
     {
         int depth = edata->ensemble_info->depths[leaf_idx];
-        passed = false;
+        passed = (depth == 0);
         int cond_idx = leaf_idx*max_depth;
         for (int depth_idx = depth - 1; depth_idx >= 0; --depth_idx){
             passed = (numerics[cond_idx + depth_idx]) ? (obs[obs_row + feature_indices[cond_idx + depth_idx]] >  feature_values[cond_idx + depth_idx]) == inequality_directions[cond_idx + depth_idx] : (strcmp(&categorical_obs[(categorical_obs_row + feature_indices[cond_idx + depth_idx]) * MAX_CHAR_SIZE],  categorical_values + (cond_idx + depth_idx)*MAX_CHAR_SIZE) == 0) ==  inequality_directions[cond_idx + depth_idx];

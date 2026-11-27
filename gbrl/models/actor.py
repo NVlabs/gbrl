@@ -31,7 +31,7 @@ from typing import Dict, Optional, Tuple, Union
 import numpy as np
 import torch as th
 
-from gbrl.common.utils import (NumericalData, clip_grad_norm,
+from gbrl.common.utils import (normalize_objective_gradients, NumericalData, clip_grad_norm,
                                concatenate_arrays, constant_like,
                                ensure_leaf_tensor_or_array, numerical_dtype,
                                setup_optimizer, validate_array)
@@ -73,6 +73,8 @@ class ParametricActor(BaseGBT):
             policy_optimizer (Dict): Dictionary containing policy optimizer
             parameters.
             params (Dict, optional): Additional GBRL parameters.
+                Includes the Split-RL parameters n_objs, lambda_objs,
+                lambda_penalty and validate_obj_labels (see https://nvlabs.github.io/gbrl/split_rl.html).
             bias (np.ndarray, optional): Bias initialization, defaults to zero.
             verbose (int, optional): Verbosity level. Defaults to 0.
             device (str, optional): Compute device ('cpu' or 'cuda'). Defaults
@@ -131,10 +133,7 @@ class ParametricActor(BaseGBT):
             assert self.params.grad is not None, "params.grad must be set to compute gradients."
             policy_grads = self.params.grad.detach() * n_samples
 
-        if isinstance(policy_grads, tuple):
-            assert len(policy_grads) == self.learner.n_objs, \
-                "Length of policy_grads tuple must match number of objectives."
-            policy_grads = concatenate_arrays(tuple(g.unsqueeze(0) for g in policy_grads), axis=0)
+        policy_grads = normalize_objective_gradients(policy_grads, self.learner.n_objs, n_samples, self.learner.output_dim)
 
         policy_grads = clip_grad_norm(policy_grads, policy_grad_clip)
         validate_array(policy_grads)
@@ -242,6 +241,13 @@ class GaussianActor(BaseGBT):
             "Uniform".
             feature_weights - (list[float]): Per-feature multiplication
             weights used when choosing the best split. Weights should be >= 0
+            Split-RL (multi-objective) parameters, see https://nvlabs.github.io/gbrl/split_rl.html:
+            n_objs (int): number of objectives. Defaults to 1.
+            lambda_objs (list[float]): one weight per objective. Defaults to ones.
+            lambda_penalty (float): conflict/label-impurity split penalty.
+                Defaults to 1.0; 0.0 disables it.
+            validate_obj_labels (Optional[bool]): validate objective label
+                values (default: CPU yes, CUDA no).
         bias (np.ndarray, optional): manually set a bias. Defaults to None =
         np.zeros.
         verbose (int, optional): verbosity level. Defaults to 0.
@@ -270,7 +276,7 @@ class GaussianActor(BaseGBT):
         self.learner = GBTLearner(input_dim=input_dim,
                                   output_dim=output_dim,
                                   tree_struct=tree_struct,
-                                  optimizers=[mu_optimizer, std_optimizer],
+                                  optimizers=[mu_optimizer, std_optimizer] if std_optimizer is not None else [mu_optimizer],
                                   params=params,
                                   verbose=verbose,
                                   device=device)
@@ -317,12 +323,9 @@ class GaussianActor(BaseGBT):
             assert isinstance(self.params[0], th.Tensor), "params[0] must be a Tensor to compute gradients."
             assert self.params[0].grad is not None, "params[0].grad must be set to compute gradients."  # type: ignore
             mu_grads = self.params[0].grad.detach() * n_samples  # type: ignore
-        mu_grads = clip_grad_norm(mu_grads, mu_grad_clip)  # type: ignore
-
-        if isinstance(mu_grads, tuple):
-            assert len(mu_grads) == self.learner.n_objs, \
-                "Length of mu_grads tuple must match number of objectives."
-            mu_grads = concatenate_arrays(tuple(g.unsqueeze(0) for g in mu_grads), axis=0)
+        mu_dim = self.learner.output_dim if self.fixed_std else self.learner.output_dim // 2
+        mu_grads = normalize_objective_gradients(mu_grads, self.learner.n_objs, n_samples, mu_dim)
+        mu_grads = clip_grad_norm(mu_grads, mu_grad_clip)
 
         if not self.fixed_std:
             if log_std_grads is None:
@@ -332,12 +335,8 @@ class GaussianActor(BaseGBT):
                 assert self.params[1].grad is not None, \
                     "params[1].grad must be set to compute gradients."
                 log_std_grads = self.params[1].grad.detach() * n_samples  # type: ignore
-            log_std_grads = clip_grad_norm(log_std_grads, log_std_grad_clip)  # type: ignore
-
-            if isinstance(log_std_grads, tuple):
-                assert len(log_std_grads) == self.learner.n_objs, \
-                    "Length of log_std_grads tuple must match number of objectives."
-                log_std_grads = concatenate_arrays(tuple(g.unsqueeze(0) for g in log_std_grads), axis=0)
+            log_std_grads = normalize_objective_gradients(log_std_grads, self.learner.n_objs, n_samples, mu_dim)
+            log_std_grads = clip_grad_norm(log_std_grads, log_std_grad_clip)
 
             theta_grad = concatenate_arrays((mu_grads, log_std_grads))  # type: ignore
         else:

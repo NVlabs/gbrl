@@ -278,6 +278,12 @@ class TreeNode {
          * @param min_data_in_leaf Minimum samples required per leaf
          * @param metadata Ensemble metadata (for lambda_penalty, n_objs, etc.)
          * @param edata Ensemble data (for lambda_objs)
+         * @param global_feature_idx Global index of the split feature (for constraints)
+         * @param mono_constraints Monotonic constraints, applied to objective 0 only
+         *        (matches the CUDA kernels); nullptr disables them
+         * @param n_mono_constraints Number of monotonic constraints
+         * @param penalty_factor_out If non-null, receives the (1 - penalty)
+         *        factor applied to the returned gain (1 when no penalty applies)
          * @return Density-weighted split score with impurity penalty
          */
         float getSplitScoreMultiObj(
@@ -286,7 +292,11 @@ class TreeNode {
             const splitCandidate &split_candidate,
             const int min_data_in_leaf,
             const ensembleMetaData *metadata,
-            const ensembleData *edata
+            const ensembleData *edata,
+            const int global_feature_idx = -1,
+            const monotonicConstraints *mono_constraints = nullptr,
+            const int n_mono_constraints = 0,
+            float *penalty_factor_out = nullptr
         );
 
         // Node data members

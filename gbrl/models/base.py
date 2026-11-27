@@ -59,6 +59,7 @@ class BaseGBT(ABC):
         self.grads: Optional[Union[NumericalData, Tuple[Optional[NumericalData], ...]]] = None
         self.params: Optional[Union[NumericalData, Tuple[Optional[NumericalData], ...]]] = None
         self.input = None
+        self.inputs = None
 
     def set_bias(self, *args, **kwargs) -> None:
         """
@@ -294,8 +295,8 @@ class BaseGBT(ABC):
         but returned as a Python dictionary of NumPy arrays.
 
         .. note::
-            Only numerical features are supported. Models trained with
-            categorical features are not supported by this method.
+            Only numerical oblivious ensembles with SGD optimizers are supported.
+            Active splits are packed per tree; training padding is omitted.
 
         Returns:
             Union[dict, Tuple[dict, ...]]: Dictionary (or tuple of dicts for
@@ -308,6 +309,8 @@ class BaseGBT(ABC):
             - ``max_depth`` (int): Maximum tree depth.
             - ``num_features`` (int): Number of numerical features.
             - ``binary_features`` (int): Total binary split nodes.
+            - ``tree_depths`` (np.ndarray): Active depth per tree ``(n_trees,)``.
+            - ``tree_leaf_counts`` (np.ndarray): Leaf count per tree ``(n_trees,)``.
             - ``bias`` (np.ndarray): Model bias ``(output_dim,)``.
             - ``feature_indices`` (np.ndarray): Split feature per node ``(binary_features,)``.
             - ``feature_values`` (np.ndarray): Split threshold per node ``(binary_features,)``.
@@ -357,10 +360,14 @@ class BaseGBT(ABC):
 
         Raises:
             AssertionError: If learner is not initialized.
-            RuntimeError: If the tree data is incompatible.
+            RuntimeError: If the tree data is incompatible or contains invalid
+                depths, active feature indices, leaf counts, or densities.
 
         .. note::
-            Only CPU ensembles are currently supported for ``add_tree``.
+            Initialize the destination feature layout with a prediction on
+            representative inputs before inserting trees. Imported trees are
+            validated once before insertion on either backend. These checks
+            add no work to training steps or prediction.
         """
         assert self.learner is not None, "learner must be initialized first"
         self.learner.add_tree(tree_dict)
@@ -455,12 +462,7 @@ class BaseGBT(ABC):
     def extract_grads(self) -> Optional[Union[Optional[th.Tensor],
                                                 Tuple[Optional[th.Tensor], ...]]]:
         """
-        Return a copy of the gradients of the model's parameters from the last forward pass.
-
-        This method returns a cloned and detached copy of the gradients for each parameter tensor in
-        `self.params`. The returned gradients are not attached to the autograd graph, so further operations
-        on them will not affect the computation graph or optimizer steps. The original gradients remain
-        unchanged and tracked by autograd.
+        Return detached copies of parameter gradients from the last forward pass.
 
         Returns:
             Optional[Union[th.Tensor, Tuple[Optional[th.Tensor], ...]]]:

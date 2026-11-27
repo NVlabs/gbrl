@@ -28,6 +28,10 @@
 #include <string>
 #include <cstring>
 #include <iostream>
+#include <memory>
+#include <algorithm>
+#include <cmath>
+#include <limits>
 #include <fstream>
 
 #include "ensemble_io.h"
@@ -183,6 +187,37 @@ treeData* get_tree_data(int tree_idx, ensembleMetaData *metadata, ensembleData *
 // ============================================================================
 
 /**
+ * @brief Grow the ensemble so n_new_leaves leaves and one tree fit.
+ *
+ * allocate_ensemble_memory{,_cuda} only grow when the ensemble is already full
+ * (n_leaves >= max_leaves) and only by one batch, so looping on them never makes
+ * progress when a tree straddles the boundary or exceeds a batch.  Both copy
+ * existing data by n_leaves/n_trees (not by the old capacity), so we can mark
+ * the ensemble full and size the batch to the request.
+ */
+static void reserve_tree_capacity(ensembleMetaData *metadata, ensembleData *edata,
+                                  const int n_new_leaves, deviceType device)
+{
+    if (metadata->n_leaves + n_new_leaves <= metadata->max_leaves &&
+        metadata->n_trees + 1 <= metadata->max_trees)
+        return;
+    const int saved_leaves_batch = metadata->max_leaves_batch;
+    const int saved_trees_batch = metadata->max_trees_batch;
+    metadata->max_leaves_batch = std::max(saved_leaves_batch, n_new_leaves);
+    metadata->max_trees_batch = std::max(saved_trees_batch, 1);
+    metadata->max_leaves = metadata->n_leaves;  // force the grow branch
+#ifdef USE_CUDA
+    if (device == gpu)
+        allocate_ensemble_memory_cuda(metadata, edata);
+    else
+#endif
+        allocate_ensemble_memory(metadata, edata);
+    (void)device;
+    metadata->max_leaves_batch = saved_leaves_batch;
+    metadata->max_trees_batch = saved_trees_batch;
+}
+
+/**
  * @brief Helper: insert tree data into CPU ensemble arrays at the given offsets
  */
 static void add_tree_data_cpu(const treeData *tdata, ensembleMetaData *metadata,
@@ -195,10 +230,7 @@ static void add_tree_data_cpu(const treeData *tdata, ensembleMetaData *metadata,
     int n_objs = metadata->n_objs;
 
     // Ensure enough capacity
-    while (metadata->n_leaves + n_leaves_in_tree > metadata->max_leaves ||
-           metadata->n_trees + 1 > metadata->max_trees){
-        allocate_ensemble_memory(metadata, edata);
-    }
+    reserve_tree_capacity(metadata, edata, n_leaves_in_tree, cpu);
 
     int leaf_start = metadata->n_leaves;
     int tree_idx = metadata->n_trees;
@@ -248,6 +280,56 @@ static void add_tree_data_cpu(const treeData *tdata, ensembleMetaData *metadata,
     metadata->iteration += 1;
 }
 
+// Imported trees are checked once, before either backend changes the ensemble.
+// This path is not called by tree fitting or prediction.
+static void validate_imported_tree(const treeData *tree, const ensembleMetaData *metadata) {
+    if (tree->n_leaves <= 0 || tree->tree_depth < 0 || tree->tree_depth > tree->max_depth ||
+        tree->split_count != (tree->is_oblivious ? 1 : tree->n_leaves)) {
+        throw std::runtime_error("treeData has invalid tree dimensions");
+    }
+    if (tree->is_oblivious &&
+        (tree->tree_depth >= std::numeric_limits<int>::digits ||
+         tree->n_leaves != (1 << tree->tree_depth))) {
+        throw std::runtime_error("treeData oblivious leaf count must equal 2^tree_depth");
+    }
+    if (!tree->is_oblivious && tree->max_depth < std::numeric_limits<int>::digits &&
+        tree->n_leaves > (1 << tree->max_depth)) {
+        throw std::runtime_error("treeData greedy leaf count must not exceed 2^max_depth");
+    }
+    int actual_depth = 0;
+    for (int row = 0; row < tree->split_count; ++row) {
+        const int depth = tree->depths[row];
+        if (depth < 0 || depth > tree->max_depth) {
+            throw std::runtime_error("treeData depths must be within [0, max_depth]");
+        }
+        actual_depth = std::max(actual_depth, depth);
+        for (int d = 0; d < depth; ++d) {
+            const size_t idx = static_cast<size_t>(row) * tree->max_depth + d;
+            const int count = tree->is_numerics[idx] ? metadata->n_num_features : metadata->n_cat_features;
+            if (tree->feature_indices[idx] < 0 || tree->feature_indices[idx] >= count) {
+                throw std::runtime_error("treeData active feature index is out of range; initialize "
+                                         "the destination feature layout with predict() before add_tree()");
+            }
+        }
+    }
+    if (actual_depth != tree->tree_depth) {
+        throw std::runtime_error("treeData tree_depth does not match depths");
+    }
+    for (int leaf = 0; leaf < tree->n_leaves; ++leaf) {
+        double sum = 0.0;
+        for (int k = 0; k < tree->n_objs; ++k) {
+            const float density = tree->densities[static_cast<size_t>(leaf) * tree->n_objs + k];
+            if (!std::isfinite(density) || density < 0.0f || density > 1.0f) {
+                throw std::runtime_error("treeData densities must be finite and within [0, 1]");
+            }
+            sum += density;
+        }
+        if (std::abs(sum - 1.0) > 1e-5) {
+            throw std::runtime_error("treeData densities must sum to one per leaf");
+        }
+    }
+}
+
 void add_tree_data(const treeData *tdata, ensembleMetaData *metadata, ensembleData *edata, deviceType device){
     if (tdata == nullptr){
         throw std::runtime_error("treeData is nullptr");
@@ -268,6 +350,8 @@ void add_tree_data(const treeData *tdata, ensembleMetaData *metadata, ensembleDa
         throw std::runtime_error("treeData n_objs does not match ensemble n_objs");
     }
 
+    validate_imported_tree(tdata, metadata);
+
     if (device == cpu){
         add_tree_data_cpu(tdata, metadata, edata);
         return;
@@ -280,10 +364,7 @@ void add_tree_data(const treeData *tdata, ensembleMetaData *metadata, ensembleDa
     int output_dim = metadata->output_dim;
     int n_objs = metadata->n_objs;
 
-    while (metadata->n_leaves + n_leaves_in_tree > metadata->max_leaves ||
-           metadata->n_trees + 1 > metadata->max_trees){
-        allocate_ensemble_memory_cuda(metadata, edata);
-    }
+    reserve_tree_capacity(metadata, edata, n_leaves_in_tree, gpu);
 
     int leaf_start = metadata->n_leaves;
     int tree_idx = metadata->n_trees;
@@ -352,12 +433,16 @@ void add_tree_data(const treeData *tdata, ensembleMetaData *metadata, ensembleDa
  * Leaf values are negated and multiplied by each optimizer's per-tree
  * learning rate to produce final inference-ready predictions.
  */
+static void validate_export(const ensembleMetaData *metadata, const std::vector<Optimizer*>& opts) {
+    if (metadata->grow_policy != OBLIVIOUS || metadata->n_cat_features > 0)
+        throw std::runtime_error("Export requires oblivious trees with numerical features only");
+    for (auto *opt : opts)
+        if (opt->getAlgo() != SGD)
+            throw std::runtime_error("Export requires SGD optimizers");
+}
+
 exportData* get_export_data(ensembleMetaData *metadata, ensembleData *edata, deviceType device, std::vector<Optimizer*> opts){
-    // GREEDY stores depths and split conditions per leaf, but the export layout
-    // below reads them per tree.
-    if (metadata->grow_policy == GREEDY){
-        throw std::runtime_error("Export is only supported for oblivious trees");
-    }
+    validate_export(metadata, opts);
     exportData *exp_data = new exportData;
 
     ensembleData *edata_cpu = nullptr;
@@ -382,15 +467,24 @@ exportData* get_export_data(ensembleMetaData *metadata, ensembleData *edata, dev
     exp_data->num_features = metadata->n_num_features;
     exp_data->binary_features = binary_features;
 
+    exp_data->tree_depths = new int[metadata->n_trees];
+    exp_data->tree_leaf_counts = new int[metadata->n_trees];
     exp_data->feature_indices = new int[binary_features];
     exp_data->feature_values = new float[binary_features];
-    exp_data->leaf_values = new float[metadata->n_leaves * metadata->output_dim];
+    exp_data->leaf_values = new float[metadata->n_leaves * metadata->output_dim]();
     exp_data->bias = new float[metadata->output_dim];
     memcpy(exp_data->bias, edata_cpu->bias, metadata->output_dim * sizeof(float));
 
-    for (int i  = 0; i < binary_features; ++i){
-        exp_data->feature_indices[i] = edata_cpu->feature_data->feature_indices[i];
-        exp_data->feature_values[i] = edata_cpu->feature_data->feature_values[i];
+    int packed_idx = 0;
+    for (int t = 0; t < metadata->n_trees; ++t) {
+        exp_data->tree_depths[t] = edata_cpu->ensemble_info->depths[t];
+        const int leaf_stop = t + 1 < metadata->n_trees ? edata_cpu->ensemble_info->tree_indices[t + 1] : metadata->n_leaves;
+        exp_data->tree_leaf_counts[t] = leaf_stop - edata_cpu->ensemble_info->tree_indices[t];
+        for (int d = 0; d < edata_cpu->ensemble_info->depths[t]; ++d) {
+            int src = t * metadata->max_depth + d;
+            exp_data->feature_indices[packed_idx] = edata_cpu->feature_data->feature_indices[src];
+            exp_data->feature_values[packed_idx++] = edata_cpu->feature_data->feature_values[src];
+        }
     }
 
     int tree_idx = 0;
@@ -423,6 +517,19 @@ exportData* get_export_data(ensembleMetaData *metadata, ensembleData *edata, dev
 
 void export_ensemble_data(std::ofstream& header_file, const std::string& model_name, ensembleData *edata, ensembleMetaData *metadata, deviceType device, std::vector<Optimizer*> opts, exportFormat export_format, exportType export_type, const std::string &prefix)
 {
+    validate_export(metadata, opts);
+    std::unique_ptr<exportData> packed(get_export_data(metadata, edata, device, opts));
+    std::unique_ptr<int[]> packed_depths(packed->tree_depths);
+    std::unique_ptr<int[]> packed_counts(packed->tree_leaf_counts);
+    std::unique_ptr<int[]> packed_indices(packed->feature_indices);
+    std::unique_ptr<float[]> packed_values(packed->feature_values);
+    std::unique_ptr<float[]> packed_leaves(packed->leaf_values);
+    std::unique_ptr<float[]> packed_bias(packed->bias);
+    if (export_type == COMPACT)
+        for (int t = 0; t < metadata->n_trees; ++t)
+            if (packed->tree_depths[t] != metadata->max_depth)
+                throw std::runtime_error("Compact export requires every tree to reach max_depth; use full export");
+
     std::string type_name;
     switch (export_format){
        case EXP_FLOAT:
@@ -475,6 +582,10 @@ void export_ensemble_data(std::ofstream& header_file, const std::string& model_n
         }
     }
 
+    // Write floats (thresholds, leaf values, bias) with round-trip precision so
+    // the exported model routes samples exactly like the trained one.
+    const std::streamsize saved_precision =
+        header_file.precision(std::numeric_limits<float>::max_digits10);
     header_file << "#ifndef GBRL_MODEL_H\n";
     header_file << "#define GBRL_MODEL_H\n\n";
 
@@ -577,7 +688,7 @@ void export_ensemble_data(std::ofstream& header_file, const std::string& model_n
             if (i < metadata->output_dim - 1)
                 header_file << ", ";
         }
-
+        header_file << "}";
     } else {
         header_file << "\tconst " << type_name << " bias = ";
         switch (export_format){
@@ -597,7 +708,7 @@ void export_ensemble_data(std::ofstream& header_file, const std::string& model_n
     std::string max_size = (metadata->input_dim < 255) ? "uint8" : "uint16";
     header_file << "\tconst " << max_size <<  " feature_indices[" << prefix << "BINARY_FEATURES] = {";
     for (int i  = 0; i < binary_splits; ++i){
-        header_file << edata_cpu->feature_data->feature_indices[i];
+        header_file << packed->feature_indices[i];
         if (i < binary_splits - 1)
             header_file << ", ";
     }
@@ -607,13 +718,13 @@ void export_ensemble_data(std::ofstream& header_file, const std::string& model_n
     for (int i  = 0; i < binary_splits; ++i){
         switch (export_format){
             case EXP_FLOAT:
-                header_file << edata_cpu->feature_data->feature_values[i];
+                header_file << packed->feature_values[i];
                 break;
             case EXP_FXP8:
-                   header_file << float_to_int16(edata_cpu->feature_data->feature_values[i]);
+                   header_file << float_to_int16(packed->feature_values[i]);
                 break;
             case EXP_FXP16:
-                   header_file << float_to_int32(edata_cpu->feature_data->feature_values[i]);
+                   header_file << float_to_int32(packed->feature_values[i]);
                 break;
         }
         if (i < binary_splits - 1)
@@ -622,34 +733,22 @@ void export_ensemble_data(std::ofstream& header_file, const std::string& model_n
     header_file << "};\n";
 
     header_file << "\tconst " << type_name << " leaf_values[" << prefix << "N_LEAVES*" << prefix << "N_OUTPUTS]  = {";
-    int tree_idx = 0;
-    float value;
-    for (int i  = 0; i < metadata->n_leaves; ++i){
-        // Advance once leaf i reaches the start of the next tree.
-        while (tree_idx + 1 < metadata->n_trees && i >= edata_cpu->ensemble_info->tree_indices[tree_idx + 1])
-            tree_idx += 1;
-        int value_idx = i*metadata->output_dim;
-        for (size_t opt_idx = 0; opt_idx < opts.size(); ++opt_idx){
-            for (int j=opts[opt_idx]->start_idx; j < opts[opt_idx]->stop_idx; ++j){
-                value = -edata_cpu->leaf_data->values[value_idx + j] * opts[opt_idx]->scheduler->get_lr(tree_idx);
-                switch (export_format){
-                    case EXP_FLOAT:
-                        header_file << value;
-                        break;
-                    case EXP_FXP8:
-                        header_file << float_to_int16(value);
-                        break;
-                    case EXP_FXP16:
-                        header_file << float_to_int32(value);
-                        break;
-                }
-                if ((i < metadata->n_leaves - 1) || (j < metadata->output_dim - 1  && i == metadata->n_leaves - 1))
-                    header_file << ", ";
-            }
+    for (int i = 0; i < metadata->n_leaves * metadata->output_dim; ++i) {
+        float value = packed->leaf_values[i];
+        switch (export_format) {
+            case EXP_FLOAT: header_file << value; break;
+            case EXP_FXP8: header_file << float_to_int16(value); break;
+            case EXP_FXP16: header_file << float_to_int32(value); break;
         }
+        if (i + 1 < metadata->n_leaves * metadata->output_dim)
+            header_file << ", ";
     }
     header_file << "};\n";
 
+    if (metadata->output_dim > 1) {
+        header_file << "\tfor (j = 0; j < " << prefix << "N_OUTPUTS; ++j)\n";
+        header_file << "\t\tresults[j] = bias[j];\n";
+    }
     header_file << "\tleaf_ptr = 0;\n";
     header_file << "\tcond_ptr = 0;\n";
     header_file << "\tunsigned char pass;\n";
@@ -687,15 +786,13 @@ void export_ensemble_data(std::ofstream& header_file, const std::string& model_n
         header_file << "\t\tcond_ptr += current_depth;\n";
     }
     header_file << "\t}\n";
-    if (metadata->output_dim > 1){
-        header_file << "\tfor (j = 0 ; j < " << prefix << "N_OUTPUTS; j++)\n";
-        header_file << "\t\tresults[j] += bias[j];\n";
-    } else {
+    if (metadata->output_dim == 1){
         header_file << "\tresult += bias;\n";
         header_file << "\treturn result;\n";
     }
     header_file << "}\n";
     header_file << "#endif\n";
+    header_file.precision(saved_precision);
 
 #ifdef USE_CUDA
     if (device == gpu){
@@ -818,101 +915,207 @@ void save_ensemble_data(std::ofstream& file, ensembleData *edata, ensembleMetaDa
 #endif 
 }
 
-ensembleData* load_ensemble_data(std::ifstream& file, ensembleMetaData *metadata){
-    if (!file.is_open() || file.fail()) {
-        std::cerr << "Error file is not open for writing: " << std::endl;
-        throw std::runtime_error("Error opening file");
-    }
-    ensembleData *edata_cpu = ensemble_data_alloc(metadata);
-    NULL_CHECK check;
-    file.read(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
-    if (check == VALID) {
-        file.read(reinterpret_cast<char*>(edata_cpu->bias), metadata->output_dim * sizeof(float));
-    } 
-    file.read(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
-    if (check == VALID) {
-        file.read(reinterpret_cast<char*>(edata_cpu->feature_data->feature_weights), metadata->input_dim * sizeof(float));
-    } 
-#ifdef DEBUG
-    file.read(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
-    if (check == VALID) {
-        file.read(reinterpret_cast<char*>(edata_cpu->n_samples), metadata->n_leaves * sizeof(int));
-    } 
-#endif 
-    file.read(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
-    if (check == VALID) {
-        file.read(reinterpret_cast<char*>(edata_cpu->ensemble_info->tree_indices), metadata->n_trees * sizeof(int));
-    } 
-    size_t sizes = (metadata->grow_policy == OBLIVIOUS) ? metadata->n_trees: metadata->n_leaves;
-    file.read(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
-    if (check == VALID) {
-        file.read(reinterpret_cast<char*>(edata_cpu->ensemble_info->depths), sizes * sizeof(int));
-    } 
-    file.read(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
-    if (check == VALID) {
-        file.read(reinterpret_cast<char*>(edata_cpu->leaf_data->values), metadata->output_dim * metadata->n_leaves * sizeof(float));
-    } 
-    file.read(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
-    if (check == VALID) {
-        file.read(reinterpret_cast<char*>(edata_cpu->feature_data->feature_indices), metadata->max_depth * sizes * sizeof(int));
-    } 
-    file.read(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
-       if (check == VALID) {
-        file.read(reinterpret_cast<char*>(edata_cpu->feature_data->feature_values), metadata->max_depth * sizes * sizeof(float));
-    } 
-    file.read(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
-       if (check == VALID) {
-        file.read(reinterpret_cast<char*>(edata_cpu->leaf_data->edge_weights), metadata->max_depth * metadata->n_leaves * sizeof(float));
-    } 
-    file.read(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
-       if (check == VALID) {
-        file.read(reinterpret_cast<char*>(edata_cpu->multi_objective_data->densities), metadata->n_leaves * metadata->n_objs * sizeof(float));
-    }
-    // monotonic constraints
-    file.read(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
-       if (check == VALID) {
-        file.read(reinterpret_cast<char*>(edata_cpu->mono_constraints->feature_idx), metadata->n_mono_constraints * sizeof(int));
-    }
-    file.read(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
-       if (check == VALID) {
-        file.read(reinterpret_cast<char*>(edata_cpu->mono_constraints->output_idx), metadata->n_mono_constraints * sizeof(int));
-    }
-    file.read(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
-       if (check == VALID) {
-        file.read(reinterpret_cast<char*>(edata_cpu->mono_constraints->constraint), metadata->n_mono_constraints * sizeof(int));
-    }
+struct LegacyMetadata {
+    int n_leaves;
+    int n_trees;
+    int max_trees;
+    int max_leaves;
+    int max_trees_batch;
+    int max_leaves_batch;
+    int input_dim;
+    int output_dim;
+    int policy_dim;
+    int max_depth;
+    int min_data_in_leaf;
+    int n_bins;
+    int par_th;
+    float cv_beta;
+    int verbose;
+    int batch_size;
+    bool use_cv;
+    scoreFunc split_score_func;
+    generatorType generator_type;
+    growPolicy grow_policy;
+    int n_num_features;
+    int n_cat_features;
+    int iteration;
+};
 
-    file.read(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
-       if (check == VALID) {
-        file.read(reinterpret_cast<char*>(edata_cpu->feature_mappings->reverse_num_feature_mapping), metadata->input_dim * sizeof(int));
-    } 
-    file.read(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
-       if (check == VALID) {
-        file.read(reinterpret_cast<char*>(edata_cpu->feature_mappings->reverse_cat_feature_mapping), metadata->input_dim * sizeof(int));
-    } 
-    file.read(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
-       if (check == VALID) {
-        file.read(reinterpret_cast<char*>(edata_cpu->feature_mappings->feature_mapping), metadata->input_dim * sizeof(int));
-    } 
-    file.read(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
-       if (check == VALID) {
-        file.read(reinterpret_cast<char*>(edata_cpu->feature_mappings->mapping_numerics), metadata->input_dim * sizeof(bool));
-    } 
-    file.read(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
-    if (check == VALID) {
-        file.read(reinterpret_cast<char*>(edata_cpu->feature_data->is_numerics), metadata->max_depth * sizes * sizeof(bool));
-    } 
-    file.read(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
-    if (check == VALID) {
-        file.read(reinterpret_cast<char*>(edata_cpu->feature_data->inequality_directions), metadata->max_depth * metadata->n_leaves * sizeof(bool));
-    } 
-    file.read(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
-    if (check == VALID) {
-        file.read(reinterpret_cast<char*>(edata_cpu->feature_data->categorical_values), metadata->max_depth * sizes * sizeof(char) * MAX_CHAR_SIZE);
-    } 
-    file.read(reinterpret_cast<char*>(&check), sizeof(NULL_CHECK));
-    if (check == VALID) {
-        file.read(reinterpret_cast<char*>(edata_cpu->multi_objective_data->lambda_objs), metadata->n_objs * sizeof(float));
-    } 
-    return edata_cpu;
+template<typename T>
+static void read_scalar(std::ifstream& file, T& value) {
+    file.read(reinterpret_cast<char*>(&value), sizeof(value));
+    if (!file.good())
+        throw std::runtime_error("Truncated checkpoint data");
+}
+
+void write_ensemble_metadata(std::ofstream& file, const ensembleMetaData& m) {
+    file.write(reinterpret_cast<const char*>(&m.n_leaves), sizeof(m.n_leaves));
+    file.write(reinterpret_cast<const char*>(&m.n_trees), sizeof(m.n_trees));
+    file.write(reinterpret_cast<const char*>(&m.max_trees), sizeof(m.max_trees));
+    file.write(reinterpret_cast<const char*>(&m.max_leaves), sizeof(m.max_leaves));
+    file.write(reinterpret_cast<const char*>(&m.max_trees_batch), sizeof(m.max_trees_batch));
+    file.write(reinterpret_cast<const char*>(&m.max_leaves_batch), sizeof(m.max_leaves_batch));
+    file.write(reinterpret_cast<const char*>(&m.input_dim), sizeof(m.input_dim));
+    file.write(reinterpret_cast<const char*>(&m.output_dim), sizeof(m.output_dim));
+    file.write(reinterpret_cast<const char*>(&m.policy_dim), sizeof(m.policy_dim));
+    file.write(reinterpret_cast<const char*>(&m.max_depth), sizeof(m.max_depth));
+    file.write(reinterpret_cast<const char*>(&m.min_data_in_leaf), sizeof(m.min_data_in_leaf));
+    file.write(reinterpret_cast<const char*>(&m.n_bins), sizeof(m.n_bins));
+    file.write(reinterpret_cast<const char*>(&m.par_th), sizeof(m.par_th));
+    file.write(reinterpret_cast<const char*>(&m.n_objs), sizeof(m.n_objs));
+    file.write(reinterpret_cast<const char*>(&m.verbose), sizeof(m.verbose));
+    file.write(reinterpret_cast<const char*>(&m.batch_size), sizeof(m.batch_size));
+    file.write(reinterpret_cast<const char*>(&m.n_num_features), sizeof(m.n_num_features));
+    file.write(reinterpret_cast<const char*>(&m.n_cat_features), sizeof(m.n_cat_features));
+    file.write(reinterpret_cast<const char*>(&m.iteration), sizeof(m.iteration));
+    file.write(reinterpret_cast<const char*>(&m.cv_beta), sizeof(m.cv_beta));
+    file.write(reinterpret_cast<const char*>(&m.lambda_penalty), sizeof(m.lambda_penalty));
+    file.write(reinterpret_cast<const char*>(&m.use_cv), sizeof(m.use_cv));
+    file.write(reinterpret_cast<const char*>(&m.split_score_func), sizeof(m.split_score_func));
+    file.write(reinterpret_cast<const char*>(&m.generator_type), sizeof(m.generator_type));
+    file.write(reinterpret_cast<const char*>(&m.grow_policy), sizeof(m.grow_policy));
+    file.write(reinterpret_cast<const char*>(&m.n_mono_constraints), sizeof(m.n_mono_constraints));
+}
+
+ensembleMetaData* read_ensemble_metadata(std::ifstream& file, const serializationHeader& header) {
+    std::unique_ptr<ensembleMetaData> m(new ensembleMetaData{});
+    if (header.minor_version == 1) {
+        LegacyMetadata old{};
+        file.read(reinterpret_cast<char*>(&old), sizeof(old));
+        if (!file.good())
+            throw std::runtime_error("Truncated legacy metadata");
+        m->n_leaves = old.n_leaves;
+        m->n_trees = old.n_trees;
+        m->max_trees = old.max_trees;
+        m->max_leaves = old.max_leaves;
+        m->max_trees_batch = old.max_trees_batch;
+        m->max_leaves_batch = old.max_leaves_batch;
+        m->input_dim = old.input_dim;
+        m->output_dim = old.output_dim;
+        m->policy_dim = old.policy_dim;
+        m->max_depth = old.max_depth;
+        m->min_data_in_leaf = old.min_data_in_leaf;
+        m->n_bins = old.n_bins;
+        m->par_th = old.par_th;
+        m->cv_beta = old.cv_beta;
+        m->verbose = old.verbose;
+        m->batch_size = old.batch_size;
+        m->use_cv = old.use_cv;
+        m->split_score_func = old.split_score_func;
+        m->generator_type = old.generator_type;
+        m->grow_policy = old.grow_policy;
+        m->n_num_features = old.n_num_features;
+        m->n_cat_features = old.n_cat_features;
+        m->iteration = old.iteration;
+        if (header.patch_version >= 7)
+            read_scalar(file, m->n_mono_constraints);
+        m->n_objs = 1;
+        m->lambda_penalty = 0.0f;
+    } else {
+        read_scalar(file, m->n_leaves);
+        read_scalar(file, m->n_trees);
+        read_scalar(file, m->max_trees);
+        read_scalar(file, m->max_leaves);
+        read_scalar(file, m->max_trees_batch);
+        read_scalar(file, m->max_leaves_batch);
+        read_scalar(file, m->input_dim);
+        read_scalar(file, m->output_dim);
+        read_scalar(file, m->policy_dim);
+        read_scalar(file, m->max_depth);
+        read_scalar(file, m->min_data_in_leaf);
+        read_scalar(file, m->n_bins);
+        read_scalar(file, m->par_th);
+        read_scalar(file, m->n_objs);
+        read_scalar(file, m->verbose);
+        read_scalar(file, m->batch_size);
+        read_scalar(file, m->n_num_features);
+        read_scalar(file, m->n_cat_features);
+        read_scalar(file, m->iteration);
+        read_scalar(file, m->cv_beta);
+        read_scalar(file, m->lambda_penalty);
+        read_scalar(file, m->use_cv);
+        read_scalar(file, m->split_score_func);
+        read_scalar(file, m->generator_type);
+        read_scalar(file, m->grow_policy);
+        read_scalar(file, m->n_mono_constraints);
+    }
+    if (m->input_dim <= 0 || m->output_dim <= 0 || m->n_objs <= 0 ||
+        m->policy_dim < 0 || m->policy_dim > m->output_dim ||
+        m->max_depth < 0 || m->max_depth > 16 || m->n_trees < 0 ||
+        m->n_leaves < m->n_trees || m->n_mono_constraints < 0 ||
+        m->n_num_features < 0 || m->n_cat_features < 0 ||
+        m->n_num_features + static_cast<int64_t>(m->n_cat_features) > m->input_dim ||
+        m->n_bins <= 0 || m->iteration < 0 ||
+        m->grow_policy > OBLIVIOUS || m->split_score_func > Cosine || m->generator_type > Quantile)
+        throw std::runtime_error("Invalid checkpoint metadata");
+    auto position = file.tellg();
+    file.seekg(0, std::ios::end);
+    const auto remaining = file.tellg() - position;
+    file.seekg(position);
+    const uint64_t splits = m->grow_policy == OBLIVIOUS ? m->n_trees : m->n_leaves;
+    const long double required = 4.0L * m->output_dim + 17.0L * m->input_dim +
+        4.0L * m->n_trees + 4.0L * splits +
+        4.0L * m->n_leaves * m->output_dim +
+        (9.0L + MAX_CHAR_SIZE) * splits * m->max_depth +
+        5.0L * m->n_leaves * m->max_depth + 12.0L * m->n_mono_constraints +
+        (header.minor_version == 1 ? 0.0L : 4.0L * m->n_objs * (m->n_leaves + 1.0L));
+    if (required > static_cast<long double>(remaining))
+        throw std::runtime_error("Checkpoint counts exceed the available data");
+    return m.release();
+}
+
+ensembleData* load_ensemble_data(std::ifstream& file, ensembleMetaData *metadata, int legacy_patch){
+    if (!file.is_open() || file.fail())
+        throw std::runtime_error("Error opening checkpoint file");
+    std::unique_ptr<ensembleData, decltype(&ensemble_data_dealloc)> owner(
+        ensemble_data_alloc(metadata), ensemble_data_dealloc);
+    ensembleData *edata_cpu = owner.get();
+    auto read_array = [&file](auto *destination, size_t count) {
+        NULL_CHECK check;
+        read_scalar(file, check);
+        if (check != VALID && check != NULL_OPT)
+            throw std::runtime_error("Invalid checkpoint array marker");
+        if (check == VALID)
+            file.read(reinterpret_cast<char*>(destination), count * sizeof(*destination));
+        if (!file.good())
+            throw std::runtime_error("Truncated checkpoint ensemble data");
+    };
+    const size_t n_leaves = metadata->n_leaves;
+    const size_t n_trees = metadata->n_trees;
+    const size_t depth = metadata->max_depth;
+    const size_t splits = metadata->grow_policy == OBLIVIOUS ? n_trees : n_leaves;
+
+    read_array(edata_cpu->bias, metadata->output_dim);
+    read_array(edata_cpu->feature_data->feature_weights, metadata->input_dim);
+#ifdef DEBUG
+    read_array(edata_cpu->n_samples, n_leaves);
+#endif
+    read_array(edata_cpu->ensemble_info->tree_indices, n_trees);
+    read_array(edata_cpu->ensemble_info->depths, splits);
+    read_array(edata_cpu->leaf_data->values, n_leaves * metadata->output_dim);
+    read_array(edata_cpu->feature_data->feature_indices, depth * splits);
+    read_array(edata_cpu->feature_data->feature_values, depth * splits);
+    read_array(edata_cpu->leaf_data->edge_weights, depth * n_leaves);
+    if (legacy_patch < 0) {
+        read_array(edata_cpu->multi_objective_data->densities, n_leaves * metadata->n_objs);
+    } else {
+        std::fill(edata_cpu->multi_objective_data->densities,
+                  edata_cpu->multi_objective_data->densities + n_leaves, 1.0f);
+        edata_cpu->multi_objective_data->lambda_objs[0] = 1.0f;
+    }
+    if (legacy_patch < 0 || legacy_patch >= 7) {
+        read_array(edata_cpu->mono_constraints->feature_idx, metadata->n_mono_constraints);
+        read_array(edata_cpu->mono_constraints->output_idx, metadata->n_mono_constraints);
+        read_array(edata_cpu->mono_constraints->constraint, metadata->n_mono_constraints);
+    }
+    read_array(edata_cpu->feature_mappings->reverse_num_feature_mapping, metadata->input_dim);
+    read_array(edata_cpu->feature_mappings->reverse_cat_feature_mapping, metadata->input_dim);
+    read_array(edata_cpu->feature_mappings->feature_mapping, metadata->input_dim);
+    read_array(edata_cpu->feature_mappings->mapping_numerics, metadata->input_dim);
+    read_array(edata_cpu->feature_data->is_numerics, depth * splits);
+    read_array(edata_cpu->feature_data->inequality_directions, depth * n_leaves);
+    read_array(edata_cpu->feature_data->categorical_values, depth * splits * MAX_CHAR_SIZE);
+    if (legacy_patch < 0)
+        read_array(edata_cpu->multi_objective_data->lambda_objs, metadata->n_objs);
+    return owner.release();
 }

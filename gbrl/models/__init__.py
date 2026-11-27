@@ -29,7 +29,7 @@ in various applications including supervised learning and reinforcement learning
 from gbrl.models.gbt import GBTModel
 from gbrl.models.actor import ParametricActor, GaussianActor
 from gbrl.models.critic import ContinuousCritic, DiscreteCritic
-from gbrl.models.actor_critic import ActorCritic
+from gbrl.models.actor_critic import ActorCritic, CostActorCritic
 
 __all__ = [
     'GBTModel',
@@ -38,4 +38,5 @@ __all__ = [
     'ContinuousCritic',
     'DiscreteCritic',
     'ActorCritic',
+    'CostActorCritic',
 ]

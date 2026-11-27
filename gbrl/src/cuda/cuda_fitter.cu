@@ -99,11 +99,15 @@ void calc_oblivious_parallelism(
     }
 
     shared_mem = floats_per_thread * sizeof(float);
-    while (static_cast<size_t>(threads_per_block)*shared_mem*(1u << depth) > deviceProp.sharedMemPerBlock){
-        if (threads_per_block == 1){
-            std::cerr << "output_dim " << output_dim << "too large! cannot work with so many columns! use cpu version" << std::endl;
-        }
+    // Each node is scored by its own kernel launch, so only one block's layout
+    // has to fit; the depth does not multiply the requirement.
+    (void)depth;
+    while (threads_per_block > 1 &&
+           static_cast<size_t>(threads_per_block)*shared_mem > deviceProp.sharedMemPerBlock){
         threads_per_block >>= 1;
+    }
+    if (static_cast<size_t>(threads_per_block)*shared_mem > deviceProp.sharedMemPerBlock){
+        std::cerr << "output_dim " << output_dim << " too large! cannot work with so many columns! use cpu version" << std::endl;
     }
 }
 
@@ -177,6 +181,11 @@ __global__ void reduce_split_scores_kernel(
         for (int k = 0; k < n_objs; ++k) {
             
             // Jump to the K-th layer
+            // Objectives with no weight in this node do not contribute, so
+            // they must not be able to invalidate the split either.
+            const float weight = node->densities[k] * lambda_objs[k];
+            if (weight == 0.0f) continue;
+
             int offset = cand_idx + (k * n_candidates);
             float score = split_scores[offset];
 
@@ -189,7 +198,7 @@ __global__ void reduce_split_scores_kernel(
             }
 
             // 2. Weighted Accumulation
-            total_gain += score * node->densities[k] * lambda_objs[k];
+            total_gain += score * weight;
         }
 
         // 3. Write Back
@@ -327,8 +336,9 @@ void evaluate_greedy_splits(
     );
 
     if (dataset->obj_labels->data != nullptr){
-        int threads = metadata->output_dim;
-        // Need shared memory for 2 float arrays of size 'threads'
+        int threads = 1;
+        while (threads < metadata->output_dim && threads < THREADS_PER_BLOCK)
+            threads <<= 1;
         size_t smem = 2 * threads * sizeof(float);
 
         calc_node_conflict_kernel<<<1, threads, smem, stream>>>(
@@ -338,6 +348,13 @@ void evaluate_greedy_splits(
         );
 
         get_tpb_dimensions(candidata->n_candidates * parent_n_samples, candidata->n_candidates, tpb);
+        // 2 * n_objs floats per thread: at 1024 threads this exceeds the 48KB
+        // default once n_objs >= 7 and the launch fails, silently dropping the
+        // penalty. Halve tpb (kept a power of two for the tree reduction) to fit.
+        int max_smem_per_block = 0;
+        cudaDeviceGetAttribute(&max_smem_per_block, cudaDevAttrMaxSharedMemoryPerBlock, 0);
+        while (tpb > 1 && sizeof(float) * 2 * metadata->n_objs * tpb > static_cast<size_t>(max_smem_per_block))
+            tpb >>= 1;
         size_t shared_mem = sizeof(float) * 2 * metadata->n_objs * tpb;
         split_impurity_penalty_kernel<<<candidata->n_candidates, tpb, shared_mem, stream>>>(
             dataset->obj_labels->data,
@@ -400,9 +417,10 @@ void evaluate_oblivious_splits_cuda(
 
         cudaStream_t current_stream = streams[i % n_streams];
 
-        // A. Conflict Calculation (Async)
         if (dataset->obj_labels->data != nullptr) {
-            int threads_rho = metadata->output_dim;
+            int threads_rho = 1;
+            while (threads_rho < metadata->output_dim && threads_rho < THREADS_PER_BLOCK)
+                threads_rho <<= 1;
             size_t smem_rho = 2 * threads_rho * sizeof(float);
 
             calc_node_conflict_kernel<<<1, threads_rho, smem_rho, current_stream>>>(
@@ -579,7 +597,8 @@ __global__ void split_score_cosine_cuda(
         int lbl = obj_labels ? static_cast<int>(__ldg(&obj_labels[sample_idx])) : 0;
         if (passed){
             // Per-label count (Right)
-            s_labels[threadIdx.x*label_stride + n_objs + lbl] += 1.0f;
+            if (lbl >= 0 && lbl < n_objs)  // CUDA labels are unvalidated by default
+                s_labels[threadIdx.x*label_stride + n_objs + lbl] += 1.0f;
             for (int k = 0; k < n_objs; ++k){
                 size_t g_base = (size_t)k * global_n_samples * n_cols + (size_t)sample_idx * n_cols;
                 int s_base = threadIdx.x * vec_stride + k * n_cols;
@@ -593,7 +612,8 @@ __global__ void split_score_cosine_cuda(
         else {
 
             // Per-label count (Left)
-            s_labels[threadIdx.x*label_stride + lbl] += 1.0f;
+            if (lbl >= 0 && lbl < n_objs)
+                s_labels[threadIdx.x*label_stride + lbl] += 1.0f;
             for (int k = 0; k < n_objs; ++k){
                 size_t g_base = (size_t)k * global_n_samples * n_cols + (size_t)sample_idx * n_cols;
                 int s_base = threadIdx.x * vec_stride + k * n_cols;
@@ -690,6 +710,9 @@ __global__ void split_score_cosine_cuda(
             return;
         }
 
+        // Corrections to the objective-0 cosine numerator for pooled dimensions.
+        float l_dot_fix = 0.0f, r_dot_fix = 0.0f;
+
         // Check monotonic constraints and apply pooling if violated
         // Monotonic constraints apply to first objective (k=0) only
         for (int c = 0; c < n_mono_constraints; ++c) {
@@ -721,6 +744,12 @@ __global__ void split_score_cosine_cuda(
                     // Update sums to reflect pooled means
                     left_mean[out_idx] = pooled_mean * l_count[0];
                     right_mean[out_idx] = pooled_mean * r_count[0];
+                    // The dot sums were accumulated against the unpooled sums;
+                    // after the /count below dimension out_idx contributes
+                    // n * mu^2, but the CPU reference (cosine_score on pooled
+                    // means) uses sum_i g_i * pooled = n * mu * pooled.
+                    l_dot_fix += l_count[0] * l_val * (pooled_mean - l_val);
+                    r_dot_fix += r_count[0] * r_val * (pooled_mean - r_val);
                 }
             }
         }
@@ -738,6 +767,10 @@ __global__ void split_score_cosine_cuda(
             r_mean_norm = (r_count[k] > 0.0f) ? r_mean_norm / (r_count[k]*r_count[k]) : 0.0f;
             l_dot_sum[k] = (l_count[k] > 0.0f) ? l_dot_sum[k] / l_count[k] : 0.0f;
             r_dot_sum[k] = (r_count[k] > 0.0f) ? r_dot_sum[k] / r_count[k] : 0.0f;
+            if (k == 0) {
+                l_dot_sum[0] += l_dot_fix;
+                r_dot_sum[0] += r_dot_fix;
+            }
 
             float denominator = l_count[0]* l_mean_norm + r_count[0] * r_mean_norm;
             if (denominator > 0.0f) {
@@ -869,7 +902,8 @@ for (int k = 0; k < n_objs; ++k){
         if ((candidate_numeric[cand_idx] && __ldg(&obs[__ldg(&candidate_indices[cand_idx])*global_n_samples + sample_idx]) > __ldg(&candidate_values[cand_idx])) || (!candidate_numeric[cand_idx] && strcmpCuda(&categorical_obs[(sample_idx*node->n_cat_features + __ldg(&candidate_indices[cand_idx]))* MAX_CHAR_SIZE], candidate_categories + cand_idx * MAX_CHAR_SIZE) == 0)){
             
             // Per-label count (Right)
-            s_labels[threadIdx.x*label_stride + n_objs + lbl] += 1.0f;
+            if (lbl >= 0 && lbl < n_objs)  // CUDA labels are unvalidated by default
+                s_labels[threadIdx.x*label_stride + n_objs + lbl] += 1.0f;
 
             for (int k = 0; k < n_objs; ++k){
                 size_t g_base = (size_t)k * global_n_samples * n_cols + (size_t)sample_idx * n_cols;
@@ -882,7 +916,8 @@ for (int k = 0; k < n_objs; ++k){
             }
         } else {
             // Per-label count (Left)
-            s_labels[threadIdx.x*label_stride + lbl] += 1.0f;
+            if (lbl >= 0 && lbl < n_objs)
+                s_labels[threadIdx.x*label_stride + lbl] += 1.0f;
 
             for (int k = 0; k < n_objs; ++k){
                 size_t g_base = (size_t)k * global_n_samples * n_cols + (size_t)sample_idx * n_cols;
@@ -1021,7 +1056,7 @@ for (int k = 0; k < n_objs; ++k){
 }
 
 __global__ void split_impurity_penalty_kernel(
-    const float* __restrict__ obj_labels,        // Renamed from 'labels'
+    const float* __restrict__ obj_labels,
     const float* __restrict__ obs,
     const char* __restrict__ categorical_obs,
     const TreeNodeGPU* __restrict__ node,
@@ -1081,6 +1116,8 @@ __global__ void split_impurity_penalty_kernel(
              is_greater = (strcmpCuda(s_cat, c_cat) == 0);
         }
 
+        // CUDA labels are unvalidated by default; skip out-of-range ones as the CPU does.
+        if (lbl < 0 || lbl >= n_objs) continue;
         if (is_greater) {
             s_labels[(n_objs + lbl) * bdim + threadIdx.x] += 1.0f;
         } else {
@@ -1138,9 +1175,7 @@ __global__ void calc_node_conflict_kernel(
     const int n_objs,
     const int n_cols)
 {
-    // 1. One Block per Node (Launched with threads = n_cols)
     int d = threadIdx.x;
-    if (d >= n_cols) return;
     
     // Early exit if node has no samples (avoid NaN from mean_values)
     if (node->n_samples == 0) {
@@ -1153,24 +1188,25 @@ __global__ void calc_node_conflict_kernel(
     float* s_num = &sdata[0];
     float* s_den = &sdata[blockDim.x];
 
-    // 2. Per-Dimension Accumulation
-    // We iterate K (objectives) locally in registers.
-    float sum_of_components = 0.0f; // (\sum \mu)^2
-    float sum_of_squares = 0.0f;    // \sum (\mu^2)
+    float sum_of_components = 0.0f;
+    float sum_of_squares = 0.0f;
 
-    for (int k = 0; k < n_objs; ++k) {
-        float val = node->mean_values[k * n_cols + d];
-        sum_of_components += val;
-        sum_of_squares += val * val;
+    float numerator = 0.0f;
+    for (int col = d; col < n_cols; col += blockDim.x) {
+        sum_of_components = 0.0f;
+        for (int k = 0; k < n_objs; ++k) {
+            float val = node->mean_values[k * n_cols + col];
+            sum_of_components += val;
+            sum_of_squares += val * val;
+        }
+        numerator += sum_of_components * sum_of_components;
     }
 
-    // Store partial results for reduction
-    s_num[d] = sum_of_components * sum_of_components; // Contribution to ||Sum Mu||^2
-    s_den[d] = sum_of_squares;                        // Contribution to Sum ||Mu||^2
+    s_num[d] = numerator;
+    s_den[d] = sum_of_squares;
     
     __syncthreads();
 
-    // 3. Parallel Reduction (Summing across dimensions D)
     for (int offset = blockDim.x / 2; offset > 0; offset >>= 1) {
         if (d < offset) {
             s_num[d] += s_num[d + offset];
@@ -1179,7 +1215,6 @@ __global__ void calc_node_conflict_kernel(
         __syncthreads();
     }
 
-    // 4. Final Calculation (Thread 0)
     if (d == 0) {
         float numerator = s_num[0];   // || Sum \mu ||^2
         float denominator = s_den[0]; // Sum || \mu ||^2
@@ -1190,7 +1225,6 @@ __global__ void calc_node_conflict_kernel(
         if (denominator > 1e-12f) {
             float ratio = numerator / denominator;
             
-            // Numerical stability clamp (Ratio should be <= 1.0 mathematically)
             if (ratio > 1.0f) ratio = 1.0f; 
             
             rho = 1.0f - ratio;
@@ -1213,8 +1247,6 @@ __global__ void calc_node_conflict_kernel(
         printf("==============================\n\n");
 #endif
 
-        // Store result in the node struct
-        // Ensure you added 'float conflict_rho;' to TreeNodeGPU definition
         node->conflict_rho = rho;
     }
 }
@@ -1419,11 +1451,18 @@ __global__ void split_cosine_score_kernel(
 
         float denominator =  lvalue * l_mean_norm + rvalue * r_mean_norm;
         float numerator = ldot[cand_offset] + rdot[cand_offset];
+        float cos = 0.0f;
         if (denominator == 0.0f){
-            split_scores[cand_offset] = -CUDART_INF_F;
-            return;
+            // Multi-objective: an objective whose gradients are all zero in both
+            // children has zero gain, as on CPU (getSplitScoreMultiObj); it must
+            // not veto the split for the other objectives.
+            if (n_objs == 1){
+                split_scores[cand_offset] = -CUDART_INF_F;
+                return;
+            }
+        } else {
+            cos = numerator / sqrtf(denominator);
         }
-        float cos = numerator / sqrtf(denominator) - node->scores[obj_idx];
         int tmp_idx = __ldg(&candidate_indices[cand_idx]);
         int feat_idx = (candidate_numeric[cand_idx]) ? r_num_mapping[tmp_idx] : r_cat_mapping[tmp_idx];
         // Unused reverse-mapping slots hold -1 and a stale mapping can name a
@@ -1432,7 +1471,9 @@ __global__ void split_cosine_score_kernel(
             split_scores[cand_offset] = -CUDART_INF_F;
             return;
         }
-        split_scores[cand_offset] = cos * __ldg(feature_weights + feat_idx);
+        // Weight the gain, then subtract the parent score (matches CPU and master):
+        // a zero-weight feature must score -parent, not 0, so it cannot pass >= 0.
+        split_scores[cand_offset] = cos * __ldg(feature_weights + feat_idx) - node->scores[obj_idx];
     }
 }
 
@@ -1520,7 +1561,8 @@ __global__ void split_l2_score_kernel(
             split_scores[cand_offset] = -CUDART_INF_F;
             return;
         }
-        split_scores[cand_offset] = ((l_mean_norm + r_mean_norm) - node->scores[obj_idx]) * __ldg(feature_weights + feat_idx);
+        // Weight the gain, then subtract the parent score (matches CPU and master).
+        split_scores[cand_offset] = (l_mean_norm + r_mean_norm) * __ldg(feature_weights + feat_idx) - node->scores[obj_idx];
     }
 }
 
@@ -2075,31 +2117,29 @@ void add_leaf_node(
         cudaDeviceSynchronize();
     }
 
-    int threads_per_block = WARP_SIZE*((dataset->n_samples  + WARP_SIZE - 1 )/ WARP_SIZE);
-    if (threads_per_block > THREADS_PER_BLOCK) {
-        threads_per_block = THREADS_PER_BLOCK;
-    }
-    
-    // Validate kernel launch parameters
-    if (metadata->output_dim == 0 || threads_per_block == 0) {
-        std::cerr << "CUDA Error: Invalid kernel configuration - output_dim: " 
-                  << metadata->output_dim << ", threads_per_block: " << threads_per_block << std::endl;
-        return;
-    }
-    
-    // Calculate shared memory: (n_objs + 1) * threads_per_block floats
+    if (metadata->output_dim <= 0)
+        throw std::runtime_error("add_leaf_node: invalid output_dim");
+
+    // reduce_leaf_sum halves blockDim.x in its tree reduction, so the block size
+    // must be a power of two (WARP_SIZE * ceil(n/WARP_SIZE) is not, e.g. 96, and
+    // would drop partial sums).
+    int threads_per_block = WARP_SIZE;
+    while (threads_per_block < dataset->n_samples && threads_per_block < THREADS_PER_BLOCK)
+        threads_per_block <<= 1;
+
+    // Shared memory: (n_objs + 1) * threads_per_block floats
     // Layout: [n_objs * blockDim.x for sums] + [blockDim.x for count]
+    // Halve the block until it fits; fail (rather than publish a leaf with no
+    // value) only if even one thread cannot hold the objective buffers.
+    int max_smem_per_block = 0;
+    cudaDeviceGetAttribute(&max_smem_per_block, cudaDevAttrMaxSharedMemoryPerBlock, 0);
     size_t shared_mem = sizeof(float) * threads_per_block * (metadata->n_objs + 1);
-    
-    // Validate shared memory doesn't exceed device limits
-    cudaDeviceProp deviceProp;
-    cudaGetDeviceProperties(&deviceProp, 0);
-    if (shared_mem > deviceProp.sharedMemPerBlock) {
-        std::cerr << "CUDA Error: Shared memory requirement (" << shared_mem 
-                  << " bytes) exceeds device limit (" << deviceProp.sharedMemPerBlock 
-                  << " bytes)" << std::endl;
-        return;
+    while (threads_per_block > 1 && shared_mem > static_cast<size_t>(max_smem_per_block)){
+        threads_per_block >>= 1;
+        shared_mem = sizeof(float) * threads_per_block * (metadata->n_objs + 1);
     }
+    if (shared_mem > static_cast<size_t>(max_smem_per_block))
+        throw std::runtime_error("add_leaf_node: n_objs too large for GPU shared memory; use device='cpu'");
     
     reduce_leaf_sum<<<metadata->output_dim, threads_per_block, shared_mem>>>(dataset->obs->data, dataset->categorical_obs->data, dataset->grads->data, edata->leaf_data->values, edata->multi_objective_data->lambda_objs, node, dataset->n_samples, leaf_idx*metadata->output_dim, metadata->n_objs, metadata->policy_dim);
     cudaDeviceSynchronize();
@@ -2433,7 +2473,10 @@ void fit_tree_oblivious_cuda(
 
     while(depth < metadata->max_depth){
         cudaMemsetAsync(split_data->split_scores, 0, split_data->size, streams[0]);
-        
+        // The clear covers oblivious_split_scores, which per-node kernels on
+        // streams[1..] write; finish it before any of them can run.
+        cudaStreamSynchronize(streams[0]);
+
         evaluate_oblivious_splits_cuda(dataset, edata, tree_nodes, depth, candidata, metadata, split_data, streams);
         cudaMemcpyAsync(&host_status, split_data->best_idx, sizeof(int), cudaMemcpyDeviceToHost, streams[0]);
         cudaStreamSynchronize(streams[0]);
@@ -2459,7 +2502,18 @@ void fit_tree_oblivious_cuda(
     // and the projection below can throw.
     const int leaves_before_tree = metadata->n_leaves;
     for (int node_idx = 0; node_idx < (1 << depth); ++node_idx){
-        add_leaf_node(tree_nodes[node_idx], depth, metadata, edata, dataset);
+        try {
+            add_leaf_node(tree_nodes[node_idx], depth, metadata, edata, dataset);
+        } catch (...) {
+            // Un-publish this tree's leaves and release everything it owns.
+            metadata->n_leaves = leaves_before_tree;
+            for (int j = node_idx; j < (1 << depth); ++j)
+                free_tree_node(tree_nodes[j]);
+            free(tree_nodes);
+            free(child_tree_nodes);
+            for(int i=0; i<n_streams; ++i) cudaStreamDestroy(streams[i]);
+            throw;
+        }
         free_tree_node(tree_nodes[node_idx]);
     }
 
@@ -2473,6 +2527,7 @@ void fit_tree_oblivious_cuda(
             metadata->n_leaves = leaves_before_tree;
             free(tree_nodes);
             free(child_tree_nodes);
+            for(int i=0; i<n_streams; ++i) cudaStreamDestroy(streams[i]);
             throw;
         }
     }
@@ -2517,6 +2572,8 @@ void fit_tree_greedy_cuda(
 
     int threads_per_block;
     calc_parallelism(candidata->n_candidates, metadata->output_dim, threads_per_block, metadata->split_score_func);
+    // Snapshot for rollback if a leaf cannot be computed.
+    const int leaves_before_tree = metadata->n_leaves;
     
     while (crnt_node_ptr_idx > 0)  {
         crnt_node_ptr_idx--; 
@@ -2563,7 +2620,20 @@ void fit_tree_greedy_cuda(
             tree_nodes[crnt_node_ptr_idx] = left_child;
             crnt_node_ptr_idx++;
         } else {
-            add_leaf_node(crnt_node, host_node.depth, metadata, edata, dataset);
+            try {
+                add_leaf_node(crnt_node, host_node.depth, metadata, edata, dataset);
+            } catch (...) {
+                // Un-publish this tree's leaves and release everything it owns.
+                metadata->n_leaves = leaves_before_tree;
+                free_tree_node(crnt_node);
+                for (int j = 0; j < crnt_node_ptr_idx; ++j)
+                    free_tree_node(tree_nodes[j]);
+                free(tree_nodes);
+                cudaFreeHost(h_pinned_score);
+                cudaFreeHost(h_pinned_status);
+                cudaStreamDestroy(stream);
+                throw;
+            }
         }
         free_tree_node(crnt_node);
         crnt_node = nullptr;

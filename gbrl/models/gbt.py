@@ -94,6 +94,13 @@ class GBTModel(BaseGBT):
                 generator_type - (str): candidate generation method "Quantile" or "Uniform".
                 feature_weights - (list[float]): Per-feature multiplication
                 weights used when choosing the best split. Weights should be >= 0
+                Split-RL (multi-objective) parameters, see https://nvlabs.github.io/gbrl/split_rl.html:
+                n_objs (int): number of objectives. Defaults to 1.
+                lambda_objs (list[float]): one weight per objective. Defaults to ones.
+                lambda_penalty (float): conflict/label-impurity split penalty.
+                    Defaults to 1.0; 0.0 disables it.
+                validate_obj_labels (Optional[bool]): validate objective label
+                    values (default: CPU yes, CUDA no).
             verbose (int, optional): verbosity level. Defaults to 0.
             device (str, optional): GBRL device 'cpu' or 'cuda/gpu'. Defaults to 'cpu'.
         """

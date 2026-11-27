@@ -49,6 +49,8 @@ class CMakeBuild(build_ext):
             cmake_args.append('-DCOVERAGE=ON')
         if os.environ.get('ASAN', '0') == '1':
             cmake_args.append('-DASAN=ON')
+        if os.environ.get('USE_GRAPHVIZ', '0') == '1':
+            cmake_args.append('-DUSE_GRAPHVIZ=ON')
         if sysconfig.get_config_var('LIBRARY') is not None:
             cmake_args.append('-DPYTHON_LIBRARY=' + sysconfig.get_config_var(
                 'LIBRARY'))

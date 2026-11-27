@@ -21,7 +21,7 @@
 ##############################################################################
 cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 # Set project details
-project(gbrl LANGUAGES C CXX VERSION 1.1.10)
+project(gbrl LANGUAGES C CXX VERSION 1.2.0)
 # Set C++14
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -193,7 +193,10 @@ if(USE_GRAPHVIZ)
     if(GRAPHVIZ_INCLUDE_DIR AND GRAPHVIZ_GVC_LIBRARY AND GRAPHVIZ_CGRAPH_LIBRARY)
         set(GRAPHVIZ_FOUND TRUE)
     else()
-        set(GRAPHVIZ_FOUND FALSE)
+        message(FATAL_ERROR
+            "USE_GRAPHVIZ=ON but the Graphviz development files (graphviz/cgraph.h, "
+            "libgvc, libcgraph) were not found. Install them, point GRAPHVIZ_INCLUDE_DIR/"
+            "GRAPHVIZ_LIBRARY_DIR at them, or build with USE_GRAPHVIZ=OFF.")
     endif()
 else()
     set(GRAPHVIZ_FOUND FALSE)

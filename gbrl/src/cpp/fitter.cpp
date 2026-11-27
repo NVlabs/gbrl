@@ -178,17 +178,8 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
         generator.generateNumericalSplitCandidates(dataset->obs->data, indices);
     }
     float *full_preds = nullptr;
-    if (metadata->n_cat_features > 0){
-        full_preds = init_zero_mat(dataset->n_samples*metadata->output_dim);
-        // 0 = every tree currently in the model; `iterations` is a per-call count, not a tree index.
-        Predictor::predict_cpu(dataset, full_preds, edata, metadata, 0, 0, false, opts);
-        float *full_grads = init_zero_mat(dataset->n_samples*metadata->output_dim); 
-        batch_loss = MultiRMSE::get_loss_and_gradients(full_preds, targets, full_grads, dataset->n_samples, metadata->output_dim, par_th);
+    if (metadata->n_cat_features > 0)
         generator.processCategoricalCandidates(dataset->categorical_obs->data);
-        delete[] full_preds;
-        full_preds = nullptr;
-        delete[] full_grads;
-    }
     dataSet batch_dataset;
 
     dataHolder<const float> obs_holder{nullptr, cpu};
@@ -386,7 +377,20 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
                     continue;
                 }
             } else {
-                parent_score = 0.0f;  // Multi-obj: gains are density-weighted, no parent subtraction needed
+                // Multi-obj: parent score is sum_k density_k * lambda_k * score_k, each
+                // objective block scored like the single-objective parent. This
+                // matches the CUDA greedy path (node->scores[k] reduced with
+                // density * lambda) and reduces to the single-objective case at n_objs=1.
+                parent_score = 0.0f;
+                const float *lambda_objs = edata->multi_objective_data->lambda_objs;
+                const size_t block = (size_t)dataset->n_samples * metadata->output_dim;
+                for (int k = 0; k < n_objs; ++k) {
+                    const float *obj_grads = dataset->build_grads->data + (size_t)k * block;
+                    float score_k = (metadata->split_score_func == Cosine)
+                        ? scoreCosine(crnt_node->sample_indices, crnt_node->n_samples, obj_grads, metadata->output_dim)
+                        : scoreL2(crnt_node->sample_indices, crnt_node->n_samples, obj_grads, metadata->output_dim);
+                    parent_score += score_k * crnt_node->densities[k] * lambda_objs[k];
+                }
             }
 
             if (crnt_node->depth == 0)
@@ -405,8 +409,11 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
                 // Process the batch of candidates
                 for (int j = start_idx; j < end_idx; ++j) {
                     float score;
+                    float penalty_factor = 1.0f;
                     if (multi_obj) {
-                        score = crnt_node->getSplitScoreMultiObj(dataset, metadata->split_score_func, split_candidates[j], metadata->min_data_in_leaf, metadata, edata);
+                        score = crnt_node->getSplitScoreMultiObj(
+                            dataset, metadata->split_score_func, split_candidates[j], metadata->min_data_in_leaf,
+                            metadata, edata, -1, nullptr, 0, &penalty_factor);
                     } else {
                         score = crnt_node->getSplitScore(dataset, metadata->split_score_func, split_candidates[j], metadata->min_data_in_leaf);
                     }
@@ -419,7 +426,12 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
                     // Unused reverse slots hold -1; reject rather than read out of bounds.
                     if (global_feature_idx < 0 || global_feature_idx >= metadata->input_dim)
                         continue;
-                    score = score * edata->feature_data->feature_weights[global_feature_idx] - parent_score;
+                    // CUDA applies the conflict penalty after subtracting the parent:
+                    // (1 - pen) * (w * gain - parent). score already carries (1 - pen)
+                    // on the gain, so scale the parent the same way (factor is 1
+                    // for single-objective models).
+                    score = score * edata->feature_data->feature_weights[global_feature_idx]
+                            - penalty_factor * parent_score;
                     
 #ifdef DEBUG
                     if (metadata->verbose > 1)
@@ -548,7 +560,9 @@ int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMe
                 for (int node_idx = 0; node_idx < (1 << depth); ++node_idx){
                     TreeNode *crnt_node = tree_nodes[node_idx];
                     if (multi_obj) {
-                        score += crnt_node->getSplitScoreMultiObj(dataset, metadata->split_score_func, split_candidates[j], metadata->min_data_in_leaf, metadata, edata);
+                        score += crnt_node->getSplitScoreMultiObj(
+                            dataset, metadata->split_score_func, split_candidates[j], metadata->min_data_in_leaf,
+                            metadata, edata, global_feature_idx, edata->mono_constraints, metadata->n_mono_constraints);
                     } else if (metadata->n_mono_constraints > 0) {
                         score += crnt_node->getSplitScoreWithConstraints(
                             dataset, metadata->split_score_func, split_candidates[j], metadata->min_data_in_leaf,
@@ -727,7 +741,7 @@ void Fitter::calc_leaf_value(dataSet *dataset, ensembleData *edata, ensembleMeta
     for (int i = 0; i < n_samples; ++i){
         row_idx = i*metadata->n_num_features;
         cat_row_idx = i*metadata->n_cat_features;
-        passed = false;
+        passed = (depth == 0);
         for (int depth_idx = depth - 1; depth_idx >= 0; --depth_idx){
             passed = (edata->feature_data->is_numerics[cond_idx + depth_idx]) ? (obs[row_idx + edata->feature_data->feature_indices[cond_idx + depth_idx]] > edata->feature_data->feature_values[cond_idx + depth_idx]) == edata->feature_data->inequality_directions[ineq_cond + depth_idx] : (strcmp(&categorical_obs[(cat_row_idx + edata->feature_data->feature_indices[cond_idx + depth_idx]) * MAX_CHAR_SIZE], edata->feature_data->categorical_values + (cond_idx + depth_idx)*MAX_CHAR_SIZE) == 0) == edata->feature_data->inequality_directions[ineq_cond + depth_idx];
             if (!passed)

@@ -28,6 +28,7 @@ SHAP computation, and model serialization.
 """
 import os
 import warnings
+from copy import deepcopy
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
@@ -35,7 +36,7 @@ import torch as th
 
 from gbrl import GBRL_CPP
 from gbrl.common.compression import ParametricActorCompression, TreeCompression
-from gbrl.common.utils import (NumericalData, concatenate_arrays,
+from gbrl.common.utils import (prepare_objective_labels, NumericalData, concatenate_arrays,
                                ensure_leaf_tensor_or_array, get_poly_vectors,
                                is_valid_feature_mapping,
                                normalize_vector_input, numerical_dtype,
@@ -266,24 +267,10 @@ class GBTLearner(BaseLearner):
             self._ensure_feature_mapping(inputs)
             self._feature_mapping_installed = True
 
-        default_obj_idx = 0
-        if obj_labels is not None:
-            unique_lbls = th.unique(obj_labels) if isinstance(obj_labels, th.Tensor) else np.unique(obj_labels)
-            if len(unique_lbls) == 1:
-                default_obj_idx = int(unique_lbls[0])
-                obj_labels = None
-
-        if obj_labels is not None:
-            lbl_arr = obj_labels.detach().cpu().numpy() if isinstance(obj_labels, th.Tensor) else np.asarray(obj_labels)
-            max_lbl = int(lbl_arr.max())
-            min_lbl = int(lbl_arr.min())
-            assert min_lbl >= 0, (
-                f"obj_labels contains negative values (min={min_lbl}). "
-                f"Labels must be integers in [0, n_objs-1].")
-            assert max_lbl < self.n_objs, (
-                f"obj_labels contains label {max_lbl} but n_objs={self.n_objs}. "
-                f"Labels must be integers in [0, {self.n_objs - 1}]. "
-                f"Increase n_objs or fix the label assignment.")
+        n_samples = (1 if self.input_dim > 1 else len(inputs)) if inputs.ndim == 1 else len(inputs)
+        label_n_objs = self.n_objs
+        obj_labels, default_obj_idx = prepare_objective_labels(
+            obj_labels, n_samples, label_n_objs, getattr(self, 'validate_obj_labels', None))
 
         if isinstance(grads, tuple):
             grads = concatenate_arrays(grads, axis=-1)
@@ -400,11 +387,8 @@ class GBTLearner(BaseLearner):
                 "from the export.")
         if modelname is None:
             modelname = ""
-        try:
-            status = self._cpp_model.export(filename, modelname, export_format, export_type, prefix)
-            assert status == 0, "Failed to export model"
-        except RuntimeError as e:
-            print(f"Caught an exception in GBRL: {e}")
+        status = self._cpp_model.export(filename, modelname, export_format, export_type, prefix)
+        assert status == 0, "Failed to export model"
 
     @classmethod
     def load(cls, filename: str, device: str) -> "GBTLearner":
@@ -461,6 +445,7 @@ class GBTLearner(BaseLearner):
             instance.output_dim = metadata['output_dim']
             instance.input_dim = metadata['input_dim']
             instance.n_objs = metadata['n_objs']
+            instance.validate_obj_labels = None
             # load() bypasses __init__, so restore lambda_objs the way it does.
             # They are serialized, so prefer the saved values; a model written
             # before the getter existed falls back to the default.
@@ -637,8 +622,8 @@ class GBTLearner(BaseLearner):
         returned as a Python dictionary of NumPy arrays.
 
         .. note::
-            Only numerical features are supported. Models trained with
-            categorical features are not supported by this method.
+            Only numerical oblivious ensembles with SGD optimizers are supported.
+            Active splits are packed per tree; training padding is omitted.
 
         Returns:
             Dict[str, Any]: Dictionary with the following keys:
@@ -650,6 +635,8 @@ class GBTLearner(BaseLearner):
             - ``max_depth`` (int): Maximum depth of any tree.
             - ``num_features`` (int): Number of numerical features.
             - ``binary_features`` (int): Total binary split nodes (sum of tree depths).
+            - ``tree_depths`` (np.ndarray): Active depth per tree ``(n_trees,)``.
+            - ``tree_leaf_counts`` (np.ndarray): Leaf count per tree ``(n_trees,)``.
             - ``bias`` (np.ndarray): Model bias, shape ``(output_dim,)``.
             - ``feature_indices`` (np.ndarray): Split feature index per node,
               shape ``(binary_features,)``.
@@ -662,6 +649,11 @@ class GBTLearner(BaseLearner):
             AssertionError: If the C++ model is not initialized.
         """
         assert self._cpp_model is not None, "Model not initialized!"
+        if self.student_model is not None:
+            raise ValueError(
+                "get_export_data() is not supported when a student model is attached. "
+                "The student contributes to every prediction but would be omitted "
+                "from the export data.")
         return self._cpp_model.get_export_data()
 
     def get_tree(self, tree_idx: int) -> Dict[str, Any]:
@@ -729,7 +721,9 @@ class GBTLearner(BaseLearner):
             RuntimeError: If the tree data is incompatible with the ensemble.
 
         .. note::
-            Only CPU ensembles are currently supported for ``add_tree``.
+            Initialize the destination feature layout with ``predict`` on
+            representative inputs before inserting trees. Validation runs once
+            per insertion on either backend.
         """
         assert self._cpp_model is not None, "Model not initialized!"
         self._cpp_model.add_tree(tree_dict)
@@ -1002,8 +996,9 @@ class GBTLearner(BaseLearner):
 
         For each sample, the per-objective density vector of every leaf it lands
         in is accumulated and then divided by the number of traversed trees.
-        Since each leaf's density vector sums to 1, every output row sums to 1
+        For a nonempty tree range, every output row sums to 1
         and can be read as a distribution over objectives / label classes.
+        Empty ensembles and empty ranges return zeros.
 
         Unlike :meth:`predict`, no bias, learning rate, or optimizer is applied,
         and the student model is not included.
@@ -1015,11 +1010,17 @@ class GBTLearner(BaseLearner):
             tensor (bool, optional): Whether to return a tensor. Defaults to False.
 
         Returns:
-            NumericalData: Densities of shape (n_samples, n_objs); each row sums to 1.
+            NumericalData: Densities of shape (n_samples, n_objs).
         """
         assert self._cpp_model is not None, "No model loaded!"
-        if stop_idx is None:
-            stop_idx = 0
+        start_idx = 0 if start_idx is None else start_idx
+        stop_idx = 0 if stop_idx is None else stop_idx
+        n_trees = self._cpp_model.get_num_trees()
+        end_idx = n_trees if stop_idx == 0 else stop_idx
+        if (not isinstance(start_idx, (int, np.integer)) or
+                not isinstance(stop_idx, (int, np.integer)) or
+                not 0 <= start_idx <= end_idx <= n_trees):
+            raise ValueError("Invalid density prediction tree range")
 
         inputs = self._mapping_input(inputs)
         num_inputs, cat_inputs = preprocess_features(inputs)
@@ -1034,6 +1035,8 @@ class GBTLearner(BaseLearner):
 
         if not isinstance(densities, np.ndarray):
             densities = th.from_dlpack(densities)  # type: ignore
+        # The binding returns 1-D when n_objs == 1; keep (n_samples, n_objs).
+        densities = densities.reshape(-1, self.n_objs)
 
         return ensure_leaf_tensor_or_array(densities, tensor, False, self.device)
 
@@ -1314,31 +1317,11 @@ class GBTLearner(BaseLearner):
         self._cpp_model.print_ensemble_metadata()
 
     def __copy__(self):
-        """Creates a copy of the GBTLearner instance."""
-        opts = [opt.copy() if opt is not None else opt
-                for opt in self.optimizers
-                ]
-
-        copy_ = GBTLearner(input_dim=self.input_dim,  # type: ignore
-                           output_dim=self.output_dim,  # type: ignore
-                           tree_struct=self.tree_struct.copy(),
-                           optimizers=opts,
-                           params=self.params,
-                           policy_dim=self.policy_dim,  # type: ignore
-                           verbose=self.verbose,
-                           device=self.device,
-                           name=self.learner_name)
-        # params does not describe these, so a rebuild from it alone would drop
-        # them and copy_.reset() would produce an unconstrained model.
-        copy_.monotonic_constraints = (dict(self.monotonic_constraints)
-                                       if self.monotonic_constraints else None)
-        copy_.feature_weights = np.array(self.feature_weights, copy=True)
-        copy_.feature_mapping = self.feature_mapping
-        copy_._feature_mapping_installed = self._feature_mapping_installed
-        copy_.iteration = self.iteration
-        copy_.total_iterations = self.total_iterations
-        if self._cpp_model is not None:
-            copy_._cpp_model = GBRL_CPP(self._cpp_model)
-        if self.student_model is not None:
-            copy_.student_model = GBRL_CPP(self.student_model)
-        return copy_
+        """Copy Python state and native ensembles independently."""
+        result = type(self).__new__(type(self))
+        excluded = {'_cpp_model', 'student_model', '_memory'}
+        result.__dict__ = deepcopy({k: v for k, v in self.__dict__.items() if k not in excluded})
+        result._memory = []
+        result._cpp_model = GBRL_CPP(self._cpp_model) if self._cpp_model is not None else None
+        result.student_model = GBRL_CPP(self.student_model) if self.student_model is not None else None
+        return result

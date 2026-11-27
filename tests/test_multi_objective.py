@@ -1,10 +1,23 @@
 ##############################################################################
 # Copyright (c) 2024-2026, NVIDIA Corporation. All rights reserved.
 #
-# This work is made available under the Nvidia Source Code License-NC.
-# To view a copy of this license, visit
-# https://nvlabs.github.io/gbrl/license.html
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the "Software"),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
 #
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
 ##############################################################################
 """
 Tests for multi-objective / Split-RL functionality in GBRL.
@@ -19,8 +32,8 @@ Key formula:
 - rho = 0 when all objectives agree (parallel gradients)
 - rho = 1 when objectives perfectly conflict (opposite gradients)
 
-IMPORTANT: Split-RL penalty is ONLY implemented on GPU (CUDA).
-CPU tests will verify the data flow works but penalty has no effect.
+CPU and CUDA implement the conflict penalty. CUDA-specific cases require
+a usable GPU; numerical references and API regressions also run on CPU.
 """
 import unittest
 import numpy as np
@@ -98,7 +111,7 @@ class TestMultiObjectiveBasic(unittest.TestCase):
         self.assertGreater(num_trees, 0, "Should grow at least one tree")
 
 
-@unittest.skipIf(not cuda_available(), "CUDA not available - Split-RL only implemented on GPU")
+@unittest.skipIf(not cuda_available(), "CUDA not available")
 class TestMultiObjectiveSplitRL(unittest.TestCase):
     """GPU tests for multi-objective Split-RL functionality."""
 
@@ -125,7 +138,6 @@ class TestMultiObjectiveSplitRL(unittest.TestCase):
         grads[1, :, 0] = np.linspace(-3.0, -1.0, n)  # Objective 1: -3 to -1 (CONFLICT!)
         
         # Interleaved objective labels with some clustering
-        # Similar to test_splitrl.py pattern
         obj_labels = np.zeros(n, dtype=np.float32)
         obj_labels[2] = 1  # Some early samples for obj 1
         obj_labels[4:7] = 1  # Cluster of obj 1

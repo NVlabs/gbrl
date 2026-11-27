@@ -317,7 +317,10 @@ ensembleData* ensemble_data_alloc(ensembleMetaData *metadata){
 
     edata->multi_objective_data->lambda_objs = new float[metadata->n_objs];
     data_size += sizeof(float) * metadata->n_objs;
-    memset(edata->multi_objective_data->lambda_objs, 0, metadata->n_objs * sizeof(float));
+    // Default weight 1 so single-objective and freshly created models (e.g. a
+    // distillation student) score and update normally before set_lambda_objs.
+    for (int k = 0; k < metadata->n_objs; ++k)
+        edata->multi_objective_data->lambda_objs[k] = 1.0f;
 
     // Monotonic constraints
     edata->mono_constraints->feature_idx = new int[metadata->n_mono_constraints];
@@ -417,7 +420,10 @@ ensembleData* ensemble_copy_data_alloc(ensembleMetaData *metadata){
     memset(edata->multi_objective_data->densities, 0, metadata->n_leaves * metadata->n_objs * sizeof(float));
     edata->multi_objective_data->lambda_objs = new float[metadata->n_objs];
     data_size += sizeof(float) * metadata->n_objs;
-    memset(edata->multi_objective_data->lambda_objs, 0, metadata->n_objs * sizeof(float));
+    // Default weight 1 so single-objective and freshly created models (e.g. a
+    // distillation student) score and update normally before set_lambda_objs.
+    for (int k = 0; k < metadata->n_objs; ++k)
+        edata->multi_objective_data->lambda_objs[k] = 1.0f;
 
     // Monotonic constraints
     edata->mono_constraints->feature_idx = new int[metadata->n_mono_constraints];
