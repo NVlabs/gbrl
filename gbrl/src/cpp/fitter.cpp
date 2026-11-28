@@ -351,7 +351,6 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
     std::vector<float> best_scores(n_threads, -INFINITY);
     std::vector<int> best_indices(n_threads, -1);
     FloatVector scores(n_candidates);
-    int batch_size = n_candidates / n_threads;
 
     while (!tree_nodes.empty())  {
         TreeNode *crnt_node = tree_nodes.back(); 
@@ -395,8 +394,12 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
 
             if (crnt_node->depth == 0)
                 parent_score = 0.0f;
+            // Threads outside the granted team never write their slot, so clear
+            // stale results from the previous node.
+            std::fill(best_scores.begin(), best_scores.end(), -INFINITY);
+            std::fill(best_indices.begin(), best_indices.end(), -1);
 #ifndef DEBUG
-            #pragma omp parallel
+            #pragma omp parallel num_threads(n_threads)
             {
                 int thread_num = omp_get_thread_num();
 #else
@@ -404,8 +407,17 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
 #endif
                 float local_best_score = -INFINITY;
                 int local_chosen_idx = -1;
-                int start_idx = thread_num * batch_size;
-                int end_idx = (thread_num == n_threads - 1) ? n_candidates : start_idx + batch_size;
+                // Partition by the team actually granted, not omp_get_max_threads():
+                // OpenMP may run the region with fewer threads (e.g. thread limits on
+                // macOS/libomp), and a max-threads split would leave candidates unscored.
+#ifndef DEBUG
+                const int team_size = omp_get_num_threads();
+#else
+                const int team_size = 1;
+#endif
+                const int team_batch = n_candidates / team_size;
+                int start_idx = thread_num * team_batch;
+                int end_idx = (thread_num == team_size - 1) ? n_candidates : start_idx + team_batch;
                 // Process the batch of candidates
                 for (int j = start_idx; j < end_idx; ++j) {
                     float score;
@@ -529,12 +541,14 @@ int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMe
     std::vector<float> best_scores(n_threads, -INFINITY);
     std::vector<int> best_indices(n_threads, -1);
     FloatVector scores(n_candidates);
-    int batch_size = n_candidates / n_threads;
 
     while (depth < metadata->max_depth)  {
         best_score = -INFINITY;
+        // Threads outside the granted team never write their slot.
+        std::fill(best_scores.begin(), best_scores.end(), -INFINITY);
+        std::fill(best_indices.begin(), best_indices.end(), -1);
 #ifndef DEBUG
-        #pragma omp parallel
+        #pragma omp parallel num_threads(n_threads)
         {
             int thread_num = omp_get_thread_num();
 #else 
@@ -542,8 +556,17 @@ int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMe
 #endif
             float local_best_score = -INFINITY;
             int local_chosen_idx = -1;
-            int start_idx = thread_num * batch_size;
-            int end_idx = (thread_num == n_threads - 1) ? n_candidates : start_idx + batch_size;
+            // Partition by the team actually granted, not omp_get_max_threads():
+            // OpenMP may run the region with fewer threads (e.g. thread limits on
+            // macOS/libomp), and a max-threads split would leave candidates unscored.
+#ifndef DEBUG
+            const int team_size = omp_get_num_threads();
+#else
+            const int team_size = 1;
+#endif
+            const int team_batch = n_candidates / team_size;
+            int start_idx = thread_num * team_batch;
+            int end_idx = (thread_num == team_size - 1) ? n_candidates : start_idx + team_batch;
             // Process the batch of candidates
             for (int j = start_idx; j < end_idx; ++j) {
                 float score = 0.0f;
