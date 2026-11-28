@@ -326,13 +326,36 @@ class TestSplitRLContracts(unittest.TestCase):
             gain = np.sqrt((left.sum(axis=1)**2).sum(axis=1) / left.shape[1] +
                            (right.sum(axis=1)**2).sum(axis=1) / right.shape[1])
             scores.append(gain.mean())
+        def expected_leaves(grads, left_mask):
+            # Leaf value = -lr * sum_k density_k * lambda_k * mean_k (lr = lambda = 1).
+            out = np.zeros((len(left_mask), grads.shape[2]), np.float32)
+            for mask in (left_mask, ~left_mask):
+                labels = LABELS[mask].astype(int)
+                value = sum((labels == k).mean() * grads[k, mask].mean(axis=0) for k in range(2))
+                out[mask] = -value
+            return out
+
         for policy in ('greedy', 'oblivious'):
-            m = GBTModel(dict(TREE, max_depth=1, grow_policy=policy, n_bins=8),
-                         1, 3, dict(OPT, stop_idx=3),
-                         params=dict(n_objs=2, lambda_penalty=0, generator_type='Uniform'))
-            m.step(X, gradients, obj_labels=LABELS)
-            threshold = m.get_tree(0)['feature_values'][0, 0]
-            self.assertEqual(int(np.floor(threshold)), int(np.argmax(scores)))
+            with self.subTest(policy=policy):
+                m = GBTModel(dict(TREE, max_depth=1, grow_policy=policy, n_bins=8),
+                             1, 3, dict(OPT, stop_idx=3),
+                             params=dict(n_objs=2, lambda_penalty=0, generator_type='Uniform'))
+                m.step(X, gradients, obj_labels=LABELS)
+                threshold = m.get_tree(0)['feature_values'][0, 0]
+                chosen, expected = int(np.floor(threshold)), int(np.argmax(scores))
+                if chosen != expected:
+                    # Diagnostics for platform-specific failures: does the model's
+                    # leaf data match the true gradients or a reversed pairing?
+                    predictions = m(X, requires_grad=False, tensor=False)
+                    left = X[:, 0] <= threshold
+                    detail = (f"{policy}: threshold={threshold} (cut {chosen}, expected {expected}); "
+                              f"left samples={np.flatnonzero(left).tolist()}; "
+                              f"leaf values match true grads="
+                              f"{np.allclose(predictions, expected_leaves(gradients, left), atol=1e-4)}, "
+                              f"reversed grads="
+                              f"{np.allclose(predictions, expected_leaves(gradients[:, ::-1], left), atol=1e-4)}; "
+                              f"reference scores={np.round(scores, 4).tolist()}")
+                    self.fail(detail)
 
 
 class TestReleaseReviewFixes(unittest.TestCase):

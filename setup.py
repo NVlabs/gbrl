@@ -128,5 +128,5 @@ setup(
     cmdclass=dict(build_ext=CMakeBuild),
     packages=find_packages(include=["gbrl", "gbrl.*"],
                            exclude=["gbrl.src", "gbrl.src.*"]),
-    include_package_data=True,
+    include_package_data=False,
 )
