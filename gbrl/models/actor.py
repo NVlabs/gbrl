@@ -409,6 +409,7 @@ class GaussianActor(BaseGBT):
                               output_dim=learner.output_dim,  # type: ignore
                               mu_optimizer=learner.optimizers[0],  # type: ignore
                               std_optimizer=std_optimizer,
+                              log_std_init=self.log_std_init,
                               params=learner.params,
                               bias=learner.get_bias(),  # type: ignore
                               verbose=learner.verbose,

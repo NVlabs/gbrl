@@ -745,7 +745,14 @@ void allocate_ensemble_memory_cuda(ensembleMetaData *metadata, ensembleData *eda
         const int old_max_leaves = metadata->max_leaves, old_max_trees = metadata->max_trees;
         metadata->max_leaves = new_size_leaves;
         metadata->max_trees = new_tree_size;
-        ensembleData *new_data = ensemble_data_alloc_cuda(metadata);
+        ensembleData *new_data = nullptr;
+        try {
+            new_data = ensemble_data_alloc_cuda(metadata);  // host-side new may throw
+        } catch (...) {
+            metadata->max_leaves = old_max_leaves;
+            metadata->max_trees = old_max_trees;
+            throw;
+        }
         if (new_data == nullptr) {
             metadata->max_leaves = old_max_leaves;
             metadata->max_trees = old_max_trees;

@@ -80,14 +80,17 @@ GBRL::GBRL(int input_dim, int output_dim, int policy_dim, int max_depth, int min
            int n_objs, int verbose,  float lambda_penalty,
            deviceType _device, std::string _learner_name){
     this->learner_name = _learner_name;
-    this->metadata = ensemble_metadata_alloc(INITAL_MAX_TREES, INITAL_MAX_TREES * (1 << max_depth), TREES_BATCH, TREES_BATCH * (1 << max_depth), input_dim, output_dim, policy_dim, max_depth, min_data_in_leaf, n_bins, par_th, cv_beta, lambda_penalty, verbose, n_objs, batch_size, use_cv, split_score_func, generator_type, grow_policy, 0);
+    int init_trees, init_leaves, batch_trees, batch_leaves;
+    bounded_tree_capacity(INITAL_MAX_TREES, max_depth, init_trees, init_leaves);
+    bounded_tree_capacity(TREES_BATCH, max_depth, batch_trees, batch_leaves);
+    this->metadata = ensemble_metadata_alloc(init_trees, init_leaves, batch_trees, batch_leaves, input_dim, output_dim, policy_dim, max_depth, min_data_in_leaf, n_bins, par_th, cv_beta, lambda_penalty, verbose, n_objs, batch_size, use_cv, split_score_func, generator_type, grow_policy, 0);
     this->sheader = create_header();
 #ifdef USE_CUDA
     if (_device == gpu){
-        this->metadata->max_trees = INITAL_MAX_GPU_TREES;
-        this->metadata->max_leaves = INITAL_MAX_GPU_TREES * (1 << max_depth);
-        this->metadata->max_trees_batch = GPU_TREES_BATCH;
-        this->metadata->max_leaves_batch = GPU_TREES_BATCH * (1 << max_depth);
+        bounded_tree_capacity(INITAL_MAX_GPU_TREES, max_depth,
+                              this->metadata->max_trees, this->metadata->max_leaves);
+        bounded_tree_capacity(GPU_TREES_BATCH, max_depth,
+                              this->metadata->max_trees_batch, this->metadata->max_leaves_batch);
     }
 #endif
     this->to_device(_device);
@@ -99,14 +102,17 @@ GBRL::GBRL(int input_dim, int output_dim, int policy_dim, int max_depth, int min
            std::string grow_policy, int n_objs,
            int verbose, float lambda_penalty, std::string _device, std::string _learner_name, int n_mono_constraints){
     this->learner_name = _learner_name;
-    this->metadata = ensemble_metadata_alloc(INITAL_MAX_TREES, INITAL_MAX_TREES * (1 << max_depth), TREES_BATCH, TREES_BATCH * (1 << max_depth), input_dim, output_dim, policy_dim, max_depth, min_data_in_leaf, n_bins, par_th, cv_beta, lambda_penalty, verbose, n_objs, batch_size, use_cv, stringToScoreFunc(split_score_func), stringTogeneratorType(generator_type), stringTogrowPolicy(grow_policy), n_mono_constraints);
+    int init_trees, init_leaves, batch_trees, batch_leaves;
+    bounded_tree_capacity(INITAL_MAX_TREES, max_depth, init_trees, init_leaves);
+    bounded_tree_capacity(TREES_BATCH, max_depth, batch_trees, batch_leaves);
+    this->metadata = ensemble_metadata_alloc(init_trees, init_leaves, batch_trees, batch_leaves, input_dim, output_dim, policy_dim, max_depth, min_data_in_leaf, n_bins, par_th, cv_beta, lambda_penalty, verbose, n_objs, batch_size, use_cv, stringToScoreFunc(split_score_func), stringTogeneratorType(generator_type), stringTogrowPolicy(grow_policy), n_mono_constraints);
     this->sheader = create_header();
 #ifdef USE_CUDA
     if (stringTodeviceType(_device) == gpu){
-        this->metadata->max_trees = INITAL_MAX_GPU_TREES;
-        this->metadata->max_leaves = INITAL_MAX_GPU_TREES * (1 << max_depth);
-        this->metadata->max_trees_batch = GPU_TREES_BATCH;
-        this->metadata->max_leaves_batch = GPU_TREES_BATCH * (1 << max_depth);
+        bounded_tree_capacity(INITAL_MAX_GPU_TREES, max_depth,
+                              this->metadata->max_trees, this->metadata->max_leaves);
+        bounded_tree_capacity(GPU_TREES_BATCH, max_depth,
+                              this->metadata->max_trees_batch, this->metadata->max_leaves_batch);
     }
 #endif
     this->to_device(stringTodeviceType(_device));
@@ -215,8 +221,8 @@ void GBRL::to_device(deviceType _device){
         this->edata = edata_gpu;
         this->metadata->max_trees        = this->metadata->n_trees;
         this->metadata->max_leaves       = this->metadata->n_leaves;
-        this->metadata->max_trees_batch  = GPU_TREES_BATCH;
-        this->metadata->max_leaves_batch = GPU_TREES_BATCH * (1 << this->metadata->max_depth);
+        bounded_tree_capacity(GPU_TREES_BATCH, this->metadata->max_depth,
+                              this->metadata->max_trees_batch, this->metadata->max_leaves_batch);
         this->device = gpu;
     } else {
         // gpu -> cpu: same exact-fit principle; batch sizes revert to CPU constants.
@@ -225,8 +231,8 @@ void GBRL::to_device(deviceType _device){
         this->edata = edata_cpu;
         this->metadata->max_trees        = this->metadata->n_trees;
         this->metadata->max_leaves       = this->metadata->n_leaves;
-        this->metadata->max_trees_batch  = TREES_BATCH;
-        this->metadata->max_leaves_batch = TREES_BATCH * (1 << this->metadata->max_depth);
+        bounded_tree_capacity(TREES_BATCH, this->metadata->max_depth,
+                              this->metadata->max_trees_batch, this->metadata->max_leaves_batch);
         this->device = cpu;
     }
     if (this->device == gpu && this->metadata->use_cv){
@@ -1554,8 +1560,9 @@ int GBRL::loadFromFile(const std::string& filename){
     // overwrites them with the target-device batch sizes.
     this->metadata->max_trees        = this->metadata->n_trees;
     this->metadata->max_leaves       = this->metadata->n_leaves;
-    this->metadata->max_trees_batch  = TREES_BATCH;
-    this->metadata->max_leaves_batch = TREES_BATCH * (1 << this->metadata->max_depth);
+    // Rejects out-of-range depths; otherwise bounds the batch to fit in int.
+    bounded_tree_capacity(TREES_BATCH, this->metadata->max_depth,
+                          this->metadata->max_trees_batch, this->metadata->max_leaves_batch);
     // A negative count would size every constraint buffer from a huge size_t.
     if (this->metadata->n_mono_constraints < 0){
         throw std::runtime_error("Serialized model has a negative monotonic constraint count");

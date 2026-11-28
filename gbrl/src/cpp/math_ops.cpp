@@ -294,7 +294,7 @@ static void reduce_rows(int row_start, int row_end, int n_cols, float *acc,
     for (int i = 0; i < n_cols * REDUCE_LANES; ++i)
         lanes[i] = identity;
     int r = row_start;
-    for (; r + REDUCE_LANES <= row_end; r += REDUCE_LANES) {
+    for (; row_end - r >= REDUCE_LANES; r += REDUCE_LANES) {
         for (int d = 0; d < n_cols; ++d) {
             float *lane = lanes + d * REDUCE_LANES;
             #pragma omp simd
@@ -340,8 +340,10 @@ static void column_reduce(int n_samples, int n_cols, int par_th, float *out,
 }
 
 struct SumOp { float operator()(float a, float b) const { return a + b; } };
-struct MaxOp { float operator()(float a, float b) const { return a > b ? a : b; } };
-struct MinOp { float operator()(float a, float b) const { return a < b ? a : b; } };
+// NaN entries are ignored (the finite extremum is kept, independent of lane
+// order); a column that is all NaN stays at the identity (-/+inf).
+struct MaxOp { float operator()(float a, float b) const { return (b > a || std::isnan(a)) ? b : a; } };
+struct MinOp { float operator()(float a, float b) const { return (b < a || std::isnan(a)) ? b : a; } };
 
 
 float* calculate_mean(const float *mat, const int n_samples, const int n_cols, const int par_th){

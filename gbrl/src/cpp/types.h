@@ -38,6 +38,8 @@
 #include <string>
 #include <cstdint>
 #include <iostream>
+#include <climits>
+#include <stdexcept>
 
 /** @brief Macro for stringifying preprocessor arguments */
 #define STRINGIFY(x) #x
@@ -50,6 +52,28 @@
 
 /** @brief Number of trees to add in each batch expansion (25,000) */
 #define TREES_BATCH 25000
+
+/**
+ * @brief Tree/leaf capacity for a requested tree count, kept within int.
+ *
+ * Capacities are leaves = trees * 2^max_depth. They are only preallocation
+ * sizes (storage grows on demand), so when the product would overflow int the
+ * tree count is reduced until it fits; at least one full tree always fits.
+ * Throws if max_depth is outside [0, 30] (a single tree would not fit).
+ */
+inline void bounded_tree_capacity(int requested_trees, int max_depth, int &trees, int &leaves) {
+    if (max_depth < 0 || max_depth > 30)
+        throw std::runtime_error("max_depth must be within [0, 30]");
+    const long long leaves_per_tree = 1LL << max_depth;
+    long long n_trees = requested_trees;
+    const long long max_trees_that_fit = INT_MAX / leaves_per_tree;  // >= 1 for depth <= 30
+    if (n_trees > max_trees_that_fit)
+        n_trees = max_trees_that_fit;
+    if (n_trees < 1)
+        n_trees = 1;
+    trees = static_cast<int>(n_trees);
+    leaves = static_cast<int>(n_trees * leaves_per_tree);
+}
 
 /** @brief Maximum character size for categorical values */
 #define MAX_CHAR_SIZE 128

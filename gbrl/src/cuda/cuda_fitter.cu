@@ -1207,7 +1207,9 @@ __global__ void calc_node_conflict_kernel(
     float sum_of_squares = 0.0f;
 
     float numerator = 0.0f;
-    for (int col = d; col < policy_dim; col += blockDim.x) {
+    // Clamp as on CPU: out-of-range policy_dim means all columns.
+    const int conflict_cols = (policy_dim < 0 || policy_dim > n_cols) ? n_cols : policy_dim;
+    for (int col = d; col < conflict_cols; col += blockDim.x) {
         sum_of_components = 0.0f;
         for (int k = 0; k < n_objs; ++k) {
             float val = node->mean_values[k * n_cols + col];
@@ -2457,7 +2459,8 @@ void fit_tree_oblivious_cuda(
     // Reject configurations whose per-thread split buffers cannot fit even a
     // one-thread block, before any tree resources are allocated
     // (calc_oblivious_parallelism halves the block size down to 1 thread).
-    {
+    // Depth-0 trees evaluate no splits, so they skip this check.
+    if (metadata->max_depth > 0) {
         const size_t floats_per_thread = (metadata->split_score_func == Cosine)
             ? 2 * (size_t)metadata->n_objs * (metadata->output_dim + 3)
             : 2 * (size_t)metadata->n_objs * (metadata->output_dim + 2);

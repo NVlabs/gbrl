@@ -176,7 +176,12 @@ class GBTModel(BaseGBT):
             assert self.input is not None, ("Cannot update trees without input."
                                             "Make sure model is called with requires_grad=True")
             X = self.input
-        n_samples = len(X)
+        # Same rule as GBTLearner.step: a 1-D input is one sample unless the
+        # model has a single feature.
+        if X.ndim == 1:
+            n_samples = 1 if self.learner.input_dim > 1 else len(X)
+        else:
+            n_samples = len(X)
 
         if grads is None:
             assert self.params is not None, "params must be set to compute gradients."

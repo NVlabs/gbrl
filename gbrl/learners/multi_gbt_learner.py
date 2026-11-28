@@ -269,8 +269,8 @@ class MultiGBTLearner(BaseLearner):
     def step(self,
              inputs: NumericalData,
              grads: Union[Sequence[NumericalData], NumericalData],
-             obj_labels: Optional[NumericalData] = None,
              model_idx: Optional[int] = None,
+             obj_labels: Optional[NumericalData] = None,
              obj_idx: Optional[int] = None
              ) -> None:
         """
