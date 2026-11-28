@@ -30,8 +30,8 @@ from typing import Dict, List, Optional, Union
 import numpy as np
 import torch as th
 
-from gbrl.common.utils import (NumericalData, clip_grad_norm, setup_optimizer,
-                               validate_array)
+from gbrl.common.utils import (NumericalData, clip_grad_norm, normalize_objective_gradients,
+                               setup_optimizer, validate_array)
 from gbrl.learners.gbt_learner import GBTLearner
 from gbrl.models.base import BaseGBT
 
@@ -55,7 +55,7 @@ class GBTModel(BaseGBT):
         Args:
             tree_struct (Dict): Dictionary containing
             tree structure information:
-                max_depth (int): maximum tree depth.
+                max_depth (int): maximum tree depth, in [0, 30].
                 grow_policy (str): 'greedy' or 'oblivious'.
                 n_bins (int): number of bins per feature for candidate generation.
                 min_data_in_leaf (int): minimum number of samples in a leaf.
@@ -168,6 +168,7 @@ class GBTModel(BaseGBT):
             X (NumericalData): inputs
             max_grad_norm (float, optional): perform gradient clipping by norm. Defaults to None.
             grads (Optional[NumericalData], optional): manually calculated gradients. Defaults to None.
+                Required when n_objs > 1: shape (n_objs, n_samples, output_dim).
             obj_labels (Optional[NumericalData]): objective labels vector.
 
         """
@@ -183,6 +184,11 @@ class GBTModel(BaseGBT):
             assert self.params.grad is not None, "params.grad must be set to compute gradients."
             grads = self.params.grad.detach() * n_samples
 
+        if self.learner.n_objs > 1:
+            # Clip per (objective, sample) row, so bring gradients to
+            # (n_objs, n_samples, output_dim) first.
+            grads = normalize_objective_gradients(grads, self.learner.n_objs, n_samples,
+                                                  self.learner.output_dim)
         grads = clip_grad_norm(grads, max_grad_norm)
         validate_array(grads)
         self.learner.step(inputs=X,

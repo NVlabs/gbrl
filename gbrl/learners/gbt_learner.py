@@ -700,6 +700,7 @@ class GBTLearner(BaseLearner):
             RuntimeError: If ``tree_idx`` is out of range.
         """
         assert self._cpp_model is not None, "Model not initialized!"
+        self._reject_student_tree_access("get_tree()")
         return self._cpp_model.get_tree(tree_idx)
 
     def add_tree(self, tree_dict: Dict[str, Any]) -> None:
@@ -726,7 +727,11 @@ class GBTLearner(BaseLearner):
             per insertion on either backend.
         """
         assert self._cpp_model is not None, "Model not initialized!"
-        self._cpp_model.add_tree(tree_dict)
+        before = self._cpp_model.get_iteration()
+        self._cpp_model.add_tree(tree_dict)  # raises before modifying on rejection
+        self.iteration = self._cpp_model.get_iteration()
+        self.total_iterations += self.iteration - before
+
     def _reject_student_tree_access(self, what: str) -> None:
         """get_num_trees() counts main + student, but these only see the main model.
 

@@ -262,6 +262,7 @@ class ActorCritic(BaseGBT):
         Args:
             observations (Optional[NumericalData], optional):Input observations.
             policy_grads (Optional[NumericalData], optional):Manually computed gradients for the policy.
+                Required when n_objs > 1: one block per objective, shape (n_objs, n_samples, policy_dim).
             value_grads (Optional[NumericalData], optional): Manually computed gradients for the value function.
             policy_grad_clip (Optional[float], optional):Gradient clipping value for policy updates.
             value_grad_clip (Optional[float], optional): Gradient clipping value for value updates.
@@ -324,6 +325,7 @@ class ActorCritic(BaseGBT):
             observations (NumericalData):
             policy_grad_clip (float, optional): Defaults to None.
             policy_grads (Optional[NumericalData], optional): manually calculated gradients. Defaults to None.
+                Required when n_objs > 1: one block per objective, shape (n_objs, n_samples, policy_dim).
             obj_labels (Optional[NumericalData]): objective labels vector.
 
         Returns:
@@ -653,6 +655,7 @@ class CostActorCritic(ActorCritic):
         Args:
             observations (Optional[NumericalData], optional):Input observations.
             policy_grads (Optional[NumericalData], optional):Manually computed gradients for the policy.
+                Required when n_objs > 1: one block per objective, shape (n_objs, n_samples, policy_dim).
             value_grads (Optional[NumericalData], optional): Manually computed gradients for the value function.
             cost_grads (Optional[NumericalData], optional): Manually computed gradients for the cost function.
             policy_grad_clip (Optional[float], optional):Gradient clipping value for policy updates.

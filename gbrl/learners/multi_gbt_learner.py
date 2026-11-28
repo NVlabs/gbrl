@@ -48,6 +48,19 @@ from gbrl.common.utils import (prepare_objective_labels, NumericalData, ensure_l
 from gbrl.learners.base import BaseLearner
 
 
+
+def _check_tree_layout(cpp_model, tree_dict: Dict) -> None:
+    """Raise if a tree dict cannot be inserted into cpp_model (layout only)."""
+    metadata = cpp_model.get_metadata()
+    is_oblivious = str(metadata['grow_policy']).lower() == 'oblivious'
+    for key, expected in (('output_dim', metadata['output_dim']),
+                          ('max_depth', metadata['max_depth']),
+                          ('n_objs', metadata['n_objs']),
+                          ('is_oblivious', is_oblivious)):
+        if key in tree_dict and tree_dict[key] != expected:
+            raise RuntimeError(f"treeData {key} {tree_dict[key]!r} does not match "
+                               f"the ensemble ({expected!r})")
+
 class MultiGBTLearner(BaseLearner):
     """
     MultiGBTLearner is a gradient boosted tree learner that
@@ -311,8 +324,6 @@ class MultiGBTLearner(BaseLearner):
 
             assert isinstance(grads, (list, tuple)) and len(grads) == self.n_learners, \
                     "When model_idx is not specified, grads must be a list or tuple with length equal to n_learners"
-            assert obj_labels is None or (obj_idx is not None and obj_labels is not None), \
-                "When obj_labels is provided, obj_idx must also be provided"
             self._memory = []
             for i in range(self.n_learners):
                 model_n_objs = self.n_objs_per_model[i] if hasattr(self, 'n_objs_per_model') else self.n_objs
@@ -483,11 +494,9 @@ class MultiGBTLearner(BaseLearner):
             assert self._cpp_models[i] is not None, "Can't export non-existent model!"
             if modelname is None:
                 modelname = ""
-            try:
-                status = self._cpp_models[i].export(exportname, modelname, export_format, export_type, prefix)
-                assert status == 0, "Failed to export model"
-            except RuntimeError as e:
-                print(f"Caught an exception in GBRL: {e}")
+            # Native rejections (e.g. unsupported compact export) propagate.
+            status = self._cpp_models[i].export(exportname, modelname, export_format, export_type, prefix)
+            assert status == 0, "Failed to export model"
 
     @classmethod
     def load(cls, filename: str, device: str) -> "MultiGBTLearner":
@@ -851,6 +860,7 @@ class MultiGBTLearner(BaseLearner):
             RuntimeError: If ``tree_idx`` is out of range.
         """
         assert self._cpp_models is not None, "Model not initialized."
+        self._reject_student_tree_access("get_tree()")
         if model_idx is None:
             return tuple(cpp_model.get_tree(tree_idx) for cpp_model in self._cpp_models)  # type: ignore
         return self._cpp_models[model_idx].get_tree(tree_idx)  # type: ignore
@@ -884,10 +894,24 @@ class MultiGBTLearner(BaseLearner):
                 "tree_dict must be a tuple when model_idx is None"
             assert len(tree_dict) == len(self._cpp_models), \
                 "tree_dict tuple length must match number of sub-models"
+            # Check every tree's layout before inserting any, so a mismatch in a
+            # later sub-model cannot leave earlier ones with an extra tree.
             for cpp_model, td in zip(self._cpp_models, tree_dict):
-                cpp_model.add_tree(td)  # type: ignore
+                _check_tree_layout(cpp_model, td)
+            for i, (cpp_model, td) in enumerate(zip(self._cpp_models, tree_dict)):
+                self._add_tree_to(i, td)
         else:
-            self._cpp_models[model_idx].add_tree(tree_dict)  # type: ignore
+            self._add_tree_to(model_idx, tree_dict)
+
+    def _add_tree_to(self, model_idx: int, tree_dict: Dict) -> None:
+        """Insert one tree and keep iteration counters in sync with the native model."""
+        cpp_model = self._cpp_models[model_idx]
+        before = cpp_model.get_iteration()
+        cpp_model.add_tree(tree_dict)  # raises before modifying on rejection
+        self.iteration[model_idx] = cpp_model.get_iteration()
+        if model_idx == 0:
+            # total_iterations follows sub-model 0, as in fit().
+            self.total_iterations += self.iteration[0] - before
     def _reject_student_tree_access(self, what: str) -> None:
         """See GBTLearner: get_num_trees() counts main + student, but these only
         see the main ensembles, which distil() resets to zero trees."""

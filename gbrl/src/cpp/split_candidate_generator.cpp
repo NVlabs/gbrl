@@ -338,11 +338,13 @@ float scoreL2(const int *indices, const int n_samples, const float *grads, const
         mean[d] = 0.0f;
     }
 
-    #pragma omp simd
-    for (int i = 0; i < n_samples * n_cols; ++i){
-        int row = i / n_cols;
-        int col = i % n_cols;
-        mean[col] += grads[indices[row]*n_cols + col];
+    // Rows outer, columns inner: each inner iteration owns one column, so the
+    // simd loop has no cross-iteration dependency.
+    for (int row = 0; row < n_samples; ++row){
+        const float *grad_row = grads + indices[row] * n_cols;
+        #pragma omp simd
+        for (int col = 0; col < n_cols; ++col)
+            mean[col] += grad_row[col];
     }
     
 

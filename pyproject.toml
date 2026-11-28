@@ -1,6 +1,6 @@
 [build-system]
 requires = [
-    "setuptools>=42",
+    "setuptools>=61",
     "wheel",
     "cmake>=3.18",
     "pybind11[global]==2.13.1"
@@ -28,13 +28,15 @@ dependencies = [
     "shap>=0.40.0",
     "matplotlib>=3.5.0",
     "fonttools>=4.60.2",
-    "filelock>=3.20.1",
+    # filelock 3.20.1 (security fix) needs Python 3.10+; 3.19.1 is the last
+    # release for Python 3.9.
+    "filelock>=3.20.1; python_version >= '3.10'",
+    "filelock>=3.19.1; python_version < '3.10'",
 ]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
-    "License :: Other/Proprietary License",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -59,7 +61,7 @@ Repository = "https://github.com/NVlabs/gbrl"
 [tool.poetry]
 name = "gbrl"
 version = "1.2.0"
-description = "Gradient Boosted Trees for RL"
+description = "Gradient Boosting Trees for RL"
 authors = ["Benjamin Fuhrer <bfuhrer@nvidia.com>", "Chen Tessler <ctessler@nvidia.com>", "Gal Dalal <gdalal@nvidia.com>"]
 readme = "README.md"
 packages = [{include = "gbrl"}]
@@ -76,9 +78,9 @@ shap = ">=0.40.0"
 matplotlib = ">=3.5.0"
 jinja2 = ">=3.1.6"
 setuptools = ">=78.1.1"
-Pillow = ">=10.3.0, !=12.1.1"
+Pillow = ">=13.0.0"
 fonttools = ">=4.60.2"
-filelock = ">=3.20.1"
+filelock = ">=4.2.1"
 
 
 [tool.poetry.group.dev]

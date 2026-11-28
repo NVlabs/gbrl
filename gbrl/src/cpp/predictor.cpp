@@ -146,15 +146,18 @@ void Predictor::predict_cpu(dataSet *dataset, float *preds, const ensembleData *
     // parallellize over trees
     if (n_tree_threads > 1 && parallel_predict && n_tree_threads > n_sample_threads){
         std::vector<float *> preds_buffer(n_tree_threads);
-        int trees_per_thread = n_trees / n_tree_threads;
         for (int i = 0; i < n_tree_threads; ++i)
             preds_buffer[i] = init_zero_mat(n_samples*output_dim);
         omp_set_num_threads(n_tree_threads);
         #pragma omp parallel
         {
+            // Partition by the team actually granted, which may be smaller
+            // than requested; buffers are indexed by thread_id < team size.
             int thread_id = omp_get_thread_num();
-            int thread_start_tree_idx = thread_id * trees_per_thread + start_tree_idx;
-            int thread_stop_tree_idx = (thread_id == n_tree_threads - 1) ? stop_tree_idx : thread_start_tree_idx + trees_per_thread;
+            int team_size = omp_get_num_threads();
+            int team_trees = n_trees / team_size;
+            int thread_start_tree_idx = thread_id * team_trees + start_tree_idx;
+            int thread_stop_tree_idx = (thread_id == team_size - 1) ? stop_tree_idx : thread_start_tree_idx + team_trees;
             for (int sample_idx = 0; sample_idx < n_samples; ++sample_idx){
                 predictFunc(dataset->obs->data, dataset->categorical_obs->data, preds_buffer[thread_id], sample_idx, edata, metadata, thread_start_tree_idx, thread_stop_tree_idx, opts);
             }        
@@ -165,13 +168,15 @@ void Predictor::predict_cpu(dataSet *dataset, float *preds, const ensembleData *
         }
     // sample parallelization
     } else if (n_sample_threads > 1) {
-        int samples_per_thread = n_samples / n_sample_threads;
         omp_set_num_threads(n_sample_threads);
         #pragma omp parallel
         {
+            // Partition by the team actually granted (may be < requested).
             int thread_id = omp_get_thread_num();
-            int start_idx = thread_id * samples_per_thread;
-            int end_idx = (thread_id == n_sample_threads - 1) ? n_samples : start_idx + samples_per_thread;
+            int team_size = omp_get_num_threads();
+            int team_samples = n_samples / team_size;
+            int start_idx = thread_id * team_samples;
+            int end_idx = (thread_id == team_size - 1) ? n_samples : start_idx + team_samples;
             for (int sample_idx = start_idx; sample_idx < end_idx; ++sample_idx) {
                 predictFunc(dataset->obs->data, dataset->categorical_obs->data, preds, sample_idx, edata, metadata, start_tree_idx, stop_tree_idx, opts);
             }
@@ -372,13 +377,15 @@ void Predictor::predict_densities_cpu(dataSet *dataset, float *densities_out, co
     // Each sample writes only to its own row, so parallelizing over samples is race-free.
     int n_sample_threads = calculate_num_threads(n_samples, par_th);
     if (parallel_predict && n_sample_threads > 1){
-        int samples_per_thread = n_samples / n_sample_threads;
         omp_set_num_threads(n_sample_threads);
         #pragma omp parallel
         {
+            // Partition by the team actually granted (may be < requested).
             int thread_id = omp_get_thread_num();
-            int start_idx = thread_id * samples_per_thread;
-            int end_idx = (thread_id == n_sample_threads - 1) ? n_samples : start_idx + samples_per_thread;
+            int team_size = omp_get_num_threads();
+            int team_samples = n_samples / team_size;
+            int start_idx = thread_id * team_samples;
+            int end_idx = (thread_id == team_size - 1) ? n_samples : start_idx + team_samples;
             for (int sample_idx = start_idx; sample_idx < end_idx; ++sample_idx) {
                 densityFunc(dataset->obs->data, dataset->categorical_obs->data, densities_out, sample_idx, edata, metadata, start_tree_idx, stop_tree_idx);
             }

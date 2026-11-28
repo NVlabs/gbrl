@@ -458,33 +458,19 @@ float TreeNode::getSplitScoreMultiObj(
             pool_constrained_means(left_mean, right_mean, n_cols, left_count_f, right_count_f,
                                    global_feature_idx, mono_constraints, n_mono_constraints);
 
-        // Compute dot(sample, mean) sums per objective
+        // sum_i g_i . mean = (sum_i g_i) . mean, since the mean is the same for
+        // every sample in a child (also after constraint pooling: the sums are
+        // the raw ones). This replaces a second pass over the samples.
         float *l_dot_sum = new float[n_objs];
         float *r_dot_sum = new float[n_objs];
         for (int k = 0; k < n_objs; ++k) {
-            l_dot_sum[k] = 0.0f;
-            r_dot_sum[k] = 0.0f;
-        }
-
-        for (int n = 0; n < this->n_samples; ++n) {
-            int sample_idx = _sample_indices[n];
-            bool goes_right = false;
-            if (is_numeric) {
-                goes_right = obs[sample_idx * n_features + split_candidate.feature_idx] > split_candidate.feature_value;
-            } else {
-                goes_right = (strcmp(&cat_obs[(sample_idx * n_features + split_candidate.feature_idx) * MAX_CHAR_SIZE],
-                                    split_candidate.categorical_value) == 0);
+            float l_dot = 0.0f, r_dot = 0.0f;
+            for (int d = 0; d < n_cols; ++d) {
+                l_dot += left_sum[k * n_cols + d] * left_mean[k * n_cols + d];
+                r_dot += right_sum[k * n_cols + d] * right_mean[k * n_cols + d];
             }
-            for (int k = 0; k < n_objs; ++k) {
-                size_t g_base = (size_t)k * gs * n_cols + (size_t)sample_idx * n_cols;
-                if (goes_right) {
-                    for (int d = 0; d < n_cols; ++d)
-                        r_dot_sum[k] += grads[g_base + d] * right_mean[k * n_cols + d];
-                } else {
-                    for (int d = 0; d < n_cols; ++d)
-                        l_dot_sum[k] += grads[g_base + d] * left_mean[k * n_cols + d];
-                }
-            }
+            l_dot_sum[k] = l_dot;
+            r_dot_sum[k] = r_dot;
         }
 
         for (int k = 0; k < n_objs; ++k) {
@@ -533,8 +519,14 @@ float TreeNode::getSplitScoreMultiObj(
         float penalty = lambda_penalty * this->conflict_rho * H;
         if (penalty > 1.0f) penalty = 1.0f;
 
-        total_gain *= (1.0f - penalty);
-        if (penalty_factor_out != nullptr) *penalty_factor_out = 1.0f - penalty;
+        if (penalty_factor_out != nullptr) {
+            // Caller applies the factor to its net score (greedy subtracts the
+            // parent first, as the CUDA path does).
+            *penalty_factor_out = 1.0f - penalty;
+        } else if (total_gain > 0.0f) {
+            // Only shrink positive gains: a negative gain times 0 is -0.0.
+            total_gain *= (1.0f - penalty);
+        }
     }
 
     delete[] left_sum; delete[] right_sum;

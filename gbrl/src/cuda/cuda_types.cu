@@ -27,6 +27,7 @@
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 #include <cstring>
+#include <stdexcept>
 #include <iostream>
 #include <omp.h>
 
@@ -739,9 +740,17 @@ void allocate_ensemble_memory_cuda(ensembleMetaData *metadata, ensembleData *eda
     if  ((leaf_idx >= metadata->max_leaves) || (tree_idx >= metadata->max_trees)){
         int new_size_leaves = metadata->n_leaves + metadata->max_leaves_batch;
         int new_tree_size = metadata->n_trees + metadata->max_trees_batch;
+        // Publish the new capacities only for the allocation; on failure the
+        // live buffers keep their old sizes, so restore them.
+        const int old_max_leaves = metadata->max_leaves, old_max_trees = metadata->max_trees;
         metadata->max_leaves = new_size_leaves;
         metadata->max_trees = new_tree_size;
         ensembleData *new_data = ensemble_data_alloc_cuda(metadata);
+        if (new_data == nullptr) {
+            metadata->max_leaves = old_max_leaves;
+            metadata->max_trees = old_max_trees;
+            throw std::runtime_error("Failed to grow GPU ensemble storage");
+        }
         cudaMemcpy(new_data->bias, edata->bias, metadata->output_dim * sizeof(float), cudaMemcpyDeviceToDevice);
         cudaMemcpy(new_data->feature_mappings->feature_mapping, edata->feature_mappings->feature_mapping, metadata->input_dim * sizeof(int), cudaMemcpyDeviceToDevice);
         cudaMemcpy(new_data->feature_mappings->reverse_num_feature_mapping, edata->feature_mappings->reverse_num_feature_mapping, metadata->input_dim * sizeof(int), cudaMemcpyDeviceToDevice);

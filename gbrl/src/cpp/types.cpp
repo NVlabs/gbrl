@@ -731,9 +731,20 @@ void allocate_ensemble_memory(ensembleMetaData *metadata, ensembleData *edata){
     if ((leaf_idx >= metadata->max_leaves) || (tree_idx >= metadata->max_trees)){
         int new_size_leaves = metadata->n_leaves + metadata->max_leaves_batch;
         int new_tree_size = metadata->n_trees + metadata->max_trees_batch;
+        // ensemble_data_alloc sizes from metadata, so publish the new capacities
+        // for the allocation but restore them if it fails: the live buffers keep
+        // the old sizes.
+        const int old_max_leaves = metadata->max_leaves, old_max_trees = metadata->max_trees;
         metadata->max_leaves = new_size_leaves;
         metadata->max_trees = new_tree_size;
-        ensembleData *new_data = ensemble_data_alloc(metadata);
+        ensembleData *new_data = nullptr;
+        try {
+            new_data = ensemble_data_alloc(metadata);
+        } catch (...) {
+            metadata->max_leaves = old_max_leaves;
+            metadata->max_trees = old_max_trees;
+            throw;
+        }
         memcpy(new_data->bias, edata->bias, metadata->output_dim * sizeof(float));
         memcpy(new_data->feature_data->feature_weights, edata->feature_data->feature_weights, metadata->input_dim * sizeof(float));
 #ifdef DEBUG

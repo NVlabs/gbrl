@@ -131,6 +131,16 @@ struct candidatesData {
     const char *candidate_categories; /**< Categorical values */
 };
 
+// extern "C" functions are assumed nothrow by MSVC (/EHsc, C4297); mark the
+// ones that may throw so their unwind code is kept. Same macro as cuda_fitter.h.
+#ifndef GBRL_MAY_THROW
+#ifdef __cplusplus
+#define GBRL_MAY_THROW noexcept(false)
+#else
+#define GBRL_MAY_THROW
+#endif
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -254,7 +264,7 @@ ensembleData* ensemble_compressed_data_copy_gpu_gpu(ensembleMetaData *metadata, 
 void allocate_ensemble_memory_cuda(
     ensembleMetaData *metadata,
     ensembleData *edata
-);
+) GBRL_MAY_THROW;
 
 #ifdef __cplusplus
 }

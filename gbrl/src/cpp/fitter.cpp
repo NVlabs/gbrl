@@ -335,7 +335,7 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
         Fitter::init_node_multi_obj(rootNode,
             (dataset->obj_labels != nullptr) ? dataset->obj_labels->data : nullptr,
             dataset->build_grads->data, n_objs, n_samples, metadata->output_dim,
-            dataset->default_obj_idx);
+            dataset->default_obj_idx, metadata->policy_dim);
     }
     
     tree_nodes.push_back(rootNode);
@@ -438,12 +438,13 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
                     // Unused reverse slots hold -1; reject rather than read out of bounds.
                     if (global_feature_idx < 0 || global_feature_idx >= metadata->input_dim)
                         continue;
-                    // CUDA applies the conflict penalty after subtracting the parent:
-                    // (1 - pen) * (w * gain - parent). score already carries (1 - pen)
-                    // on the gain, so scale the parent the same way (factor is 1
-                    // for single-objective models).
+                    // As on CUDA: net = w * gain - parent, then the conflict penalty
+                    // scales a positive net only (a negative net times 0 would be
+                    // -0.0 and pass the >= 0 test). factor is 1 for single-objective.
                     score = score * edata->feature_data->feature_weights[global_feature_idx]
-                            - penalty_factor * parent_score;
+                            - parent_score;
+                    if (score > 0.0f)
+                        score *= penalty_factor;
                     
 #ifdef DEBUG
                     if (metadata->verbose > 1)
@@ -480,11 +481,11 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
                 Fitter::init_node_multi_obj(crnt_node->left_child,
                     (dataset->obj_labels != nullptr) ? dataset->obj_labels->data : nullptr,
                     dataset->build_grads->data, n_objs, n_samples, metadata->output_dim,
-            dataset->default_obj_idx);
+            dataset->default_obj_idx, metadata->policy_dim);
                 Fitter::init_node_multi_obj(crnt_node->right_child,
                     (dataset->obj_labels != nullptr) ? dataset->obj_labels->data : nullptr,
                     dataset->build_grads->data, n_objs, n_samples, metadata->output_dim,
-            dataset->default_obj_idx);
+            dataset->default_obj_idx, metadata->policy_dim);
             }
             // assign node values
             tree_nodes.push_back(crnt_node->right_child);
@@ -526,7 +527,7 @@ int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMe
         Fitter::init_node_multi_obj(rootNode,
             (dataset->obj_labels != nullptr) ? dataset->obj_labels->data : nullptr,
             dataset->build_grads->data, n_objs, n_samples, metadata->output_dim,
-            dataset->default_obj_idx);
+            dataset->default_obj_idx, metadata->policy_dim);
     }
     
     tree_nodes[0] = rootNode;
@@ -642,7 +643,7 @@ int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMe
                 Fitter::init_node_multi_obj(tree_nodes[node_idx],
                     (dataset->obj_labels != nullptr) ? dataset->obj_labels->data : nullptr,
                     dataset->build_grads->data, n_objs, n_samples, metadata->output_dim,
-            dataset->default_obj_idx);
+            dataset->default_obj_idx, metadata->policy_dim);
             }
         }
     }
@@ -842,7 +843,8 @@ void Fitter::init_node_multi_obj(
     int n_objs,
     int global_n_samples,
     int output_dim,
-    int default_obj_idx
+    int default_obj_idx,
+    int policy_dim
 ) {
     node->n_objs = n_objs;
     node->global_n_samples = global_n_samples;
@@ -877,7 +879,10 @@ void Fitter::init_node_multi_obj(
         float denominator = 0.0f; // Σ_k ||μ_k||²
         float n_inv = 1.0f / static_cast<float>(node->n_samples);
 
-        for (int d = 0; d < output_dim; ++d) {
+        // Only policy columns: critic outputs have a single objective (their
+        // other blocks are zero) and must not dilute the conflict measure.
+        const int conflict_dims = (policy_dim < 0 || policy_dim > output_dim) ? output_dim : policy_dim;
+        for (int d = 0; d < conflict_dims; ++d) {
             float sum_of_means = 0.0f;
             float sum_of_sq = 0.0f;
             for (int k = 0; k < n_objs; ++k) {

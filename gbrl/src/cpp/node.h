@@ -283,7 +283,9 @@ class TreeNode {
          *        (matches the CUDA kernels); nullptr disables them
          * @param n_mono_constraints Number of monotonic constraints
          * @param penalty_factor_out If non-null, receives the (1 - penalty)
-         *        factor applied to the returned gain (1 when no penalty applies)
+         *        factor (1 when no penalty applies) and the returned gain is
+         *        left unpenalized for the caller to scale; if null, the factor
+         *        is applied to a positive gain here
          * @return Density-weighted split score with impurity penalty
          */
         float getSplitScoreMultiObj(

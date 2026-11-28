@@ -117,8 +117,9 @@ if (USE_CUDA AND NOT APPLE)
         set(CMAKE_CUDA_ARCHITECTURES ${CUDA_ARCHS})
 
         # The Visual Studio generator always uses the C++ compiler VS provides and
-        # warns if a CUDA host compiler is requested, so only set one elsewhere.
-        if(NOT MSVC AND NOT DEFINED CMAKE_CUDA_HOST_COMPILER AND NOT DEFINED ENV{CUDAHOSTCXX})
+        # warns if a CUDA host compiler is requested, so only skip it there;
+        # other generators (e.g. Ninja with cl) use the selected C++ compiler.
+        if(NOT CMAKE_GENERATOR MATCHES "Visual Studio" AND NOT DEFINED CMAKE_CUDA_HOST_COMPILER AND NOT DEFINED ENV{CUDAHOSTCXX})
             set(CMAKE_CUDA_HOST_COMPILER ${CMAKE_CXX_COMPILER} CACHE FILEPATH
                 "The compiler executable to use when compiling host code for CUDA")
             mark_as_advanced(CMAKE_CUDA_HOST_COMPILER)

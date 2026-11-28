@@ -36,6 +36,11 @@ from gbrl.common.utils import (NumericalData, TensorInfo,
                                normalize_device)
 
 
+# Leaf counts are computed as 1 << depth in native int arithmetic; checkpoints
+# accept the same limit.
+MAX_DEPTH = 30
+
+
 class BaseLearner(ABC):
     """
     Abstract base class for gradient boosting tree learners.
@@ -85,6 +90,11 @@ class BaseLearner(ABC):
         # the C++ constructor calls to_device(), whose CPU fallback reallocates
         # the ensemble.
         device = normalize_device(device)
+        max_depth = tree_struct.get('max_depth')
+        if max_depth is not None and (isinstance(max_depth, bool) or
+                                      not isinstance(max_depth, (int, np.integer)) or
+                                      not 0 <= max_depth <= MAX_DEPTH):
+            raise ValueError(f"max_depth must be an integer in [0, {MAX_DEPTH}], got {max_depth!r}")
         self.tree_struct = tree_struct
         self.input_dim = input_dim
         self.output_dim = output_dim
@@ -439,7 +449,11 @@ class BaseLearner(ABC):
             data = data.to(self.device)
 
         if isinstance(data, th.Tensor):
-            tensor_data = get_tensor_info(data.float())
+            # .float()/.contiguous() may create a temporary; keep it alive in
+            # _memory, otherwise the native call reads a freed buffer.
+            data = data.float().contiguous()
+            self._memory.append(data)
+            tensor_data = get_tensor_info(data)
             self._memory.append(tensor_data)
             return tensor_data
 

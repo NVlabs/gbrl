@@ -203,15 +203,26 @@ static void reserve_tree_capacity(ensembleMetaData *metadata, ensembleData *edat
         return;
     const int saved_leaves_batch = metadata->max_leaves_batch;
     const int saved_trees_batch = metadata->max_trees_batch;
+    const int saved_max_leaves = metadata->max_leaves;
+    const int saved_max_trees = metadata->max_trees;
     metadata->max_leaves_batch = std::max(saved_leaves_batch, n_new_leaves);
     metadata->max_trees_batch = std::max(saved_trees_batch, 1);
     metadata->max_leaves = metadata->n_leaves;  // force the grow branch
+    try {
 #ifdef USE_CUDA
-    if (device == gpu)
-        allocate_ensemble_memory_cuda(metadata, edata);
-    else
+        if (device == gpu)
+            allocate_ensemble_memory_cuda(metadata, edata);
+        else
 #endif
-        allocate_ensemble_memory(metadata, edata);
+            allocate_ensemble_memory(metadata, edata);
+    } catch (...) {
+        // Storage was not replaced: keep the live capacities and batch sizes.
+        metadata->max_leaves = saved_max_leaves;
+        metadata->max_trees = saved_max_trees;
+        metadata->max_leaves_batch = saved_leaves_batch;
+        metadata->max_trees_batch = saved_trees_batch;
+        throw;
+    }
     (void)device;
     metadata->max_leaves_batch = saved_leaves_batch;
     metadata->max_trees_batch = saved_trees_batch;
@@ -369,47 +380,59 @@ void add_tree_data(const treeData *tdata, ensembleMetaData *metadata, ensembleDa
     int leaf_start = metadata->n_leaves;
     int tree_idx = metadata->n_trees;
 
+    // Every copy writes into the inactive slot past n_leaves/n_trees; publish
+    // the tree only if all of them succeed, so a retry rewrites the same slot.
+    cudaError_t copy_status = cudaSuccess;
+    auto copy = [&copy_status](void *dst, const void *src, size_t bytes, cudaMemcpyKind kind) {
+        if (copy_status != cudaSuccess) return;
+        copy_status = cudaMemcpy(dst, src, bytes, kind);
+    };
+
     // tree_indices: single int written from host
-    cudaMemcpy(&edata->ensemble_info->tree_indices[tree_idx], &leaf_start,
+    copy(&edata->ensemble_info->tree_indices[tree_idx], &leaf_start,
                sizeof(int), cudaMemcpyHostToDevice);
 
     // Depths
     if (is_oblivious){
-        cudaMemcpy(&edata->ensemble_info->depths[tree_idx], tdata->depths,
+        copy(&edata->ensemble_info->depths[tree_idx], tdata->depths,
                    sizeof(int), cudaMemcpyHostToDevice);
     } else {
-        cudaMemcpy(&edata->ensemble_info->depths[leaf_start], tdata->depths,
+        copy(&edata->ensemble_info->depths[leaf_start], tdata->depths,
                    n_leaves_in_tree * sizeof(int), cudaMemcpyHostToDevice);
     }
 
     // Leaf values
-    cudaMemcpy(&edata->leaf_data->values[leaf_start * output_dim], tdata->values,
+    copy(&edata->leaf_data->values[leaf_start * output_dim], tdata->values,
                n_leaves_in_tree * output_dim * sizeof(float), cudaMemcpyHostToDevice);
 
     // Edge weights
-    cudaMemcpy(&edata->leaf_data->edge_weights[leaf_start * max_depth], tdata->edge_weights,
+    copy(&edata->leaf_data->edge_weights[leaf_start * max_depth], tdata->edge_weights,
                n_leaves_in_tree * max_depth * sizeof(float), cudaMemcpyHostToDevice);
 
     // Inequality directions
-    cudaMemcpy(&edata->feature_data->inequality_directions[leaf_start * max_depth], tdata->inequality_directions,
+    copy(&edata->feature_data->inequality_directions[leaf_start * max_depth], tdata->inequality_directions,
                n_leaves_in_tree * max_depth * sizeof(bool), cudaMemcpyHostToDevice);
 
     // Split-indexed arrays
     int split_dst_start = is_oblivious ? tree_idx : leaf_start;
     int split_count = tdata->split_count;
 
-    cudaMemcpy(&edata->feature_data->feature_indices[split_dst_start * max_depth], tdata->feature_indices,
+    copy(&edata->feature_data->feature_indices[split_dst_start * max_depth], tdata->feature_indices,
                split_count * max_depth * sizeof(int), cudaMemcpyHostToDevice);
-    cudaMemcpy(&edata->feature_data->feature_values[split_dst_start * max_depth], tdata->feature_values,
+    copy(&edata->feature_data->feature_values[split_dst_start * max_depth], tdata->feature_values,
                split_count * max_depth * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(&edata->feature_data->is_numerics[split_dst_start * max_depth], tdata->is_numerics,
+    copy(&edata->feature_data->is_numerics[split_dst_start * max_depth], tdata->is_numerics,
                split_count * max_depth * sizeof(bool), cudaMemcpyHostToDevice);
-    cudaMemcpy(&edata->feature_data->categorical_values[split_dst_start * max_depth * MAX_CHAR_SIZE], tdata->categorical_values,
+    copy(&edata->feature_data->categorical_values[split_dst_start * max_depth * MAX_CHAR_SIZE], tdata->categorical_values,
                split_count * max_depth * MAX_CHAR_SIZE * sizeof(char), cudaMemcpyHostToDevice);
 
     // Multi-objective densities
-    cudaMemcpy(&edata->multi_objective_data->densities[leaf_start * n_objs], tdata->densities,
+    copy(&edata->multi_objective_data->densities[leaf_start * n_objs], tdata->densities,
                n_leaves_in_tree * n_objs * sizeof(float), cudaMemcpyHostToDevice);
+
+    if (copy_status != cudaSuccess)
+        throw std::runtime_error(std::string("add_tree: failed to copy tree to GPU: ") +
+                                 cudaGetErrorString(copy_status));
 
     // Update metadata
     metadata->n_leaves += n_leaves_in_tree;
@@ -518,6 +541,8 @@ exportData* get_export_data(ensembleMetaData *metadata, ensembleData *edata, dev
 void export_ensemble_data(std::ofstream& header_file, const std::string& model_name, ensembleData *edata, ensembleMetaData *metadata, deviceType device, std::vector<Optimizer*> opts, exportFormat export_format, exportType export_type, const std::string &prefix)
 {
     validate_export(metadata, opts);
+    if (export_type == exportType::COMPACT && metadata->max_depth > 6)
+        throw std::runtime_error("Compact export supports max_depth <= 6; use export_type='full'");
     std::unique_ptr<exportData> packed(get_export_data(metadata, edata, device, opts));
     std::unique_ptr<int[]> packed_depths(packed->tree_depths);
     std::unique_ptr<int[]> packed_counts(packed->tree_leaf_counts);
@@ -552,12 +577,6 @@ void export_ensemble_data(std::ofstream& header_file, const std::string& model_n
         header_file.close();
         throw std::runtime_error("Export is only supported for oblivious trees");
     }
-    if (export_type == exportType::COMPACT){
-        if (metadata->max_depth > 6 || metadata->grow_policy != growPolicy::OBLIVIOUS){
-            std::cerr << "Cannot only compact export with max depth <= 6 and oblivious trees" << std::endl;
-            return; // Exit the function if the format is invalid
-        }
-    }
     ensembleData *edata_cpu = nullptr;
 #ifdef USE_CUDA
     if (device == gpu){
@@ -586,8 +605,8 @@ void export_ensemble_data(std::ofstream& header_file, const std::string& model_n
     // the exported model routes samples exactly like the trained one.
     const std::streamsize saved_precision =
         header_file.precision(std::numeric_limits<float>::max_digits10);
-    header_file << "#ifndef GBRL_MODEL_H\n";
-    header_file << "#define GBRL_MODEL_H\n\n";
+    header_file << "#ifndef " << prefix << "GBRL_MODEL_H\n";
+    header_file << "#define " << prefix << "GBRL_MODEL_H\n\n";
 
     
     header_file << "/*\n";
@@ -633,13 +652,13 @@ void export_ensemble_data(std::ofstream& header_file, const std::string& model_n
     header_file << "#define " << prefix << "N_TREES " << metadata->n_trees << "\n";
     header_file << "#define " << prefix << "N_LEAVES " << metadata->n_leaves << "\n";
     header_file << "#define " << prefix << "BINARY_FEATURES " << binary_splits << "\n";
-    header_file << "#define N_INPUTS " << metadata->input_dim << "\n";
+    header_file << "#define " << prefix << "N_INPUTS " << metadata->input_dim << "\n";
     header_file << "#define " << prefix << "N_OUTPUTS " << metadata->output_dim << "\n";
     header_file << "#define " << prefix << "NUM_FEATURES " << metadata->n_num_features  << "\n\n";
     if (metadata->output_dim > 1){
-        header_file << "static inline void gbrl_predict(" << type_name << " *results, const " << type_name << " *features){\n\n";
+        header_file << "static inline void " << prefix << "gbrl_predict(" << type_name << " *results, const " << type_name << " *features){\n\n";
     } else {
-        header_file << "static inline " << type_name << " gbrl_predict(const " << type_name << " *features){\n\n";
+        header_file << "static inline " << type_name << " " << prefix << "gbrl_predict(const " << type_name << " *features){\n\n";
         header_file << "\t" << type_name << " result = ";
         switch (export_format){
             case EXP_FLOAT:
@@ -915,6 +934,10 @@ void save_ensemble_data(std::ofstream& file, ensembleData *edata, ensembleMetaDa
 #endif 
 }
 
+// Matches the Python-side limit (BaseLearner): leaf counts are computed as
+// 1 << depth in int arithmetic.
+static constexpr int MAX_SUPPORTED_DEPTH = 30;
+
 struct LegacyMetadata {
     int n_leaves;
     int n_trees;
@@ -1041,7 +1064,7 @@ ensembleMetaData* read_ensemble_metadata(std::ifstream& file, const serializatio
     }
     if (m->input_dim <= 0 || m->output_dim <= 0 || m->n_objs <= 0 ||
         m->policy_dim < 0 || m->policy_dim > m->output_dim ||
-        m->max_depth < 0 || m->max_depth > 16 || m->n_trees < 0 ||
+        m->max_depth < 0 || m->max_depth > MAX_SUPPORTED_DEPTH || m->n_trees < 0 ||
         m->n_leaves < m->n_trees || m->n_mono_constraints < 0 ||
         m->n_num_features < 0 || m->n_cat_features < 0 ||
         m->n_num_features + static_cast<int64_t>(m->n_cat_features) > m->input_dim ||

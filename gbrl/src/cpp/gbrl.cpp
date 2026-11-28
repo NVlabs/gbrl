@@ -591,6 +591,8 @@ float* GBRL::predict_densities(dataHolder<const float> *obs,
 #ifdef USE_CUDA
     if (this->device == gpu){
         predict_densities_cuda(&dataset, densities, this->metadata, this->edata, start_tree_idx, stop_tree_idx);
+        if (densities == nullptr)
+            throw std::runtime_error("predict_densities: GPU allocation failed");
     }
 #endif
     if (this->device == cpu){
@@ -978,6 +980,7 @@ float GBRL::_fit_gpu(dataHolder<float> *obs,
     size_t result_tmp_size = sizeof(float)*n_blocks;
 
     size_t alloc_size = grads_size*3 +
+                        bias_size +  // mean_bias
                         cand_indices_size +
                         cand_float_size +
                         cand_cat_size +
@@ -1101,6 +1104,9 @@ float GBRL::_fit_gpu(dataHolder<float> *obs,
     bool *candidate_numerical = (bool*)(device_memory_block + trace);
     trace += cand_numerical_size;
     char *candidate_categories = (char*)(device_memory_block + trace);
+    // Reserve the candidate categories before placing the categorical
+    // observations; without this the two regions overlapped.
+    trace += cand_cat_size;
 
     if (categorical_obs->data != nullptr){
         if (categorical_obs->device == cpu){

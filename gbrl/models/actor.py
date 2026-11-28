@@ -112,7 +112,7 @@ class ParametricActor(BaseGBT):
             observations (NumericalData):
             policy_grad_clip (float, optional): . Defaults to None.
             policy_grads (Optional[NumericalData], optional): manually
-                calculated gradients. Defaults to None.
+                calculated gradients. Defaults to None. Required when n_objs > 1: one block per objective, shape (n_objs, n_samples, policy_dim).
             obj_labels (Optional[NumericalData]): objective label vector.
 
         """
@@ -296,7 +296,8 @@ class GaussianActor(BaseGBT):
         Args:
             observations (NumericalData): Input observations.
             mu_grads (Optional[NumericalData], optional):
-                Manually computed mean gradients.
+                Manually computed mean gradients. Required when n_objs > 1
+                (likewise log_std_grads): shape (n_objs, n_samples, mu_dim).
             log_std_grads (Optional[NumericalData], optional):
                 Manually computed log standard deviation gradients.
             mu_grad_clip (Optional[float], optional): Gradient clipping for

@@ -26,7 +26,7 @@ This module provides the abstract base class for all GBRL models,
 defining the common interface for gradient boosting tree models.
 """
 from abc import ABC, abstractmethod
-from typing import Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 import numpy as np
 import torch as th
@@ -377,7 +377,7 @@ class BaseGBT(ABC):
                  method: str = 'first_k', dist_type: str = 'supervised_learning',
                  optimizer_kwargs: Optional[dict] = None,
                  least_squares_W: bool = True, temperature: float = 1.0,
-                 lambda_reg: float = 1.0, **kwargs) -> float:
+                 lambda_reg: float = 1.0, **kwargs) -> Union[float, List[float]]:
         """
         Compresses the tree ensemble by selecting and retraining a subset of trees.
 
@@ -399,7 +399,8 @@ class BaseGBT(ABC):
             **kwargs: Additional keyword arguments passed to the compressor.
 
         Returns:
-            float: Final loss value after compression.
+            Union[float, List[float]]: Final loss after compression; one loss
+                per sub-model for multi-learner models.
 
         Raises:
             AssertionError: If learner is not initialized.

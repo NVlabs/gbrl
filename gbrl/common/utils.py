@@ -969,7 +969,14 @@ def process_monotonic_constraints(
 
 
 def normalize_objective_gradients(grads, n_objs, n_samples, output_dim):
-    """Normalize objective arrays or tuples without changing their backend."""
+    """Normalize objective arrays or tuples without changing their backend.
+
+    With n_objs > 1, gradients must hold one block per objective: an array of
+    shape (n_objs, n_samples, output_dim) or a sequence of n_objs arrays of
+    shape (n_samples, output_dim). Gradients taken from a single forward pass
+    (params.grad) have only one block, so multi-objective models need explicit
+    per-objective gradients.
+    """
     if isinstance(grads, (tuple, list)):
         if len(grads) != n_objs:
             raise ValueError("Expected one gradient array per objective")
@@ -978,6 +985,13 @@ def normalize_objective_gradients(grads, n_objs, n_samples, output_dim):
         else:
             grads = np.stack([g.reshape(n_samples, output_dim) for g in grads])
     shape = (n_objs, n_samples, output_dim) if n_objs > 1 else (n_samples, output_dim)
+    size = grads.numel() if isinstance(grads, th.Tensor) else np.size(grads)
+    expected = n_objs * n_samples * output_dim
+    if size != expected:
+        raise ValueError(
+            f"Expected gradients of shape {shape} ({expected} values), got "
+            f"{tuple(grads.shape)}. Multi-objective models need one gradient "
+            f"block per objective; pass them explicitly.")
     return grads.reshape(shape)
 
 

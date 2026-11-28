@@ -251,7 +251,10 @@ class Fitter {
          * @param grads Build gradients (stacked: [n_objs, n_samples, output_dim])
          * @param n_objs Number of objectives
          * @param global_n_samples Global sample count for stacked grad stride
-         * @param output_dim Output dimensionality
+         * @param output_dim Output dimensionality (gradient row stride)
+         * @param default_obj_idx Objective used when labels are absent
+         * @param policy_dim Columns entering conflict_rho (policy outputs only;
+         *        critic columns have no objectives). -1 means all columns.
          */
         static void init_node_multi_obj(
             TreeNode *node,
@@ -260,7 +263,8 @@ class Fitter {
             int n_objs,
             int global_n_samples,
             int output_dim,
-            int default_obj_idx = 0
+            int default_obj_idx = 0,
+            int policy_dim = -1
         );
 };
 

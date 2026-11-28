@@ -142,6 +142,8 @@ class TestTreeExtraction(unittest.TestCase):
         
         # Compare tree structures - both should have same number of trees
         n_trees = self.n_epochs
+        self.assertEqual(model1.get_num_trees(), n_trees, f"model1 tree count on {device}")
+        self.assertEqual(model2.get_num_trees(), n_trees, f"model2 tree count on {device}")
         for i in range(n_trees):
             tree1 = model1.get_tree(i)
             tree2 = model2.get_tree(i)

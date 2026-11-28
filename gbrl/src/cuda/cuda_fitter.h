@@ -41,10 +41,12 @@
  * their unwind code, which would turn a throw into a terminate. Declaring the
  * exception specification explicitly restores correct unwinding.
  */
+#ifndef GBRL_MAY_THROW
 #ifdef __cplusplus
 #define GBRL_MAY_THROW noexcept(false)
 #else
 #define GBRL_MAY_THROW
+#endif
 #endif
 
 #ifdef __cplusplus
@@ -221,7 +223,7 @@ void fit_tree_greedy_cuda(
     ensembleMetaData *metadata,
     candidatesData *candidata,
     splitDataGPU *split_data
-);
+) GBRL_MAY_THROW;
 
 /**
  * @brief Add leaf node to ensemble
@@ -238,7 +240,7 @@ void add_leaf_node(
     ensembleMetaData *metadata,
     ensembleData *edata,
     dataSet *dataset
-);
+) GBRL_MAY_THROW;
 
 /**
  * @brief Apply monotonic constraints to leaf values by isotonic projection
@@ -516,15 +518,19 @@ __global__ void lexicographic_guidance_impurity(
     const float guidance_weight);
 
 /**
- * @brief CUDA kernel to compute guidance percentage for a node
- * 
- * Calculates the percentage of samples in a node that require guidance
- * based on guidance labels from the parent node.
- * 
- * @param node Child node to update (guidance_percent written here)
- * @param parent_node Parent node containing sample indices
- * @param obj_labels Guidance label bitmask array for all samples
- * @param n_objs Number of objectives (used for popcount weighting)
+ * @brief CUDA kernel to compute a node's objective densities
+ *
+ * Writes node->densities[k] = fraction of the node's samples whose label is
+ * objective k, so the densities sum to 1.
+ *
+ * @param node Node to update (densities written here)
+ * @param parent_node Parent node; an empty node inherits its densities
+ *        (nullptr for the root)
+ * @param obj_labels Zero-based objective ids in [0, n_objs), one per sample;
+ *        nullptr when the batch is uniform
+ * @param n_objs Number of objectives
+ * @param default_obj_idx Objective used when labels are absent and no parent
+ *        densities are available
  */
 __global__ void calc_node_densities_kernel(
     TreeNodeGPU* __restrict__ node,
@@ -865,9 +871,15 @@ __global__ void split_l2_score_kernel(
     const int n_num_features
 );
 
+/**
+ * @brief Combine per-objective split scores into one score per candidate.
+ *
+ * Reads node->densities (one weight per objective) and lambda_objs; writes the
+ * density- and lambda-weighted sum into the objective-0 slot.
+ */
 __global__ void reduce_split_scores_kernel(
     float* __restrict__ split_scores,      // In/Out: [Obj0][Obj1]... -> [Total][Garbage]...
-    const float* __restrict__ densities,   // Size: n_objs
+    const TreeNodeGPU* __restrict__ node,  // reads node->densities (size n_objs)
     const float* __restrict__ lambda_objs,
     const int n_candidates,
     const int n_objs
@@ -876,11 +888,12 @@ __global__ void reduce_split_scores_kernel(
 __global__ void calc_node_conflict_kernel(
     TreeNodeGPU* __restrict__ node,       // Output: node->conflict_rho
     const int n_objs,
-    const int n_cols
+    const int n_cols,                     // row stride of node->mean_values (output_dim)
+    const int policy_dim                  // conflict uses policy columns only
 );
 
 __global__ void split_impurity_penalty_kernel(
-    const float* __restrict__ obj_labels,        // Renamed from 'labels'
+    const float* __restrict__ obj_labels,
     const float* __restrict__ obs,
     const char* __restrict__ categorical_obs,
     const TreeNodeGPU* __restrict__ node,
