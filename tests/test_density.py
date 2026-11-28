@@ -110,7 +110,7 @@ def _assert_valid_distributions(test, densities, msg):
 class TestDensityRowSumInvariant(unittest.TestCase):
     """
     Core invariant: every leaf density vector sums to 1 across all
-    device × grow_policy combinations.
+    device x grow_policy combinations.
     """
 
     def _check(self, device, grow_policy, max_depth=4):
@@ -135,7 +135,7 @@ class TestDensityRowSumInvariant(unittest.TestCase):
 
     @unittest.skipIf(not cuda_available(), "CUDA not available")
     def test_cuda_oblivious_deep(self):
-        """Deeper trees have more empty leaves — the original bug scaled with depth."""
+        """Deeper trees have more empty leaves - the original bug scaled with depth."""
         for depth in [4, 6, 8]:
             with self.subTest(depth=depth):
                 self._check('cuda', 'oblivious', max_depth=depth)
@@ -150,21 +150,21 @@ class TestDefaultObjIdx(unittest.TestCase):
 
     @unittest.skipIf(not cuda_available(), "CUDA not available")
     def test_all_reward_labels_cuda_oblivious(self):
-        """All label-0 minibatch → density should be [1, 0], not [1, 1]."""
+        """All label-0 minibatch -> density should be [1, 0], not [1, 1]."""
         model = _make_model('cuda', 'oblivious')
         _train(model, label_fn=lambda n: np.zeros(n, dtype=np.float32))
         _assert_valid_distributions(self, _leaf_densities(model), "All-reward labels")
 
     @unittest.skipIf(not cuda_available(), "CUDA not available")
     def test_all_safety_labels_cuda_oblivious(self):
-        """All label-1 minibatch → density should be [0, 1], not [1, 1]."""
+        """All label-1 minibatch -> density should be [0, 1], not [1, 1]."""
         model = _make_model('cuda', 'oblivious')
         _train(model, label_fn=lambda n: np.ones(n, dtype=np.float32))
         _assert_valid_distributions(self, _leaf_densities(model), "All-safety labels")
 
     @unittest.skipIf(not cuda_available(), "CUDA not available")
     def test_default_obj_idx_value_all_reward(self):
-        """All label-0 → each leaf's density[0] should be 1.0, density[1] = 0.0."""
+        """All label-0 -> each leaf's density[0] should be 1.0, density[1] = 0.0."""
         model = _make_model('cuda', 'oblivious')
         _train(model, n_steps=1, label_fn=lambda n: np.zeros(n, dtype=np.float32))
         # Every leaf, empty or not, must be exactly [1, 0]; a swapped index gives [0, 1].
@@ -175,7 +175,7 @@ class TestDefaultObjIdx(unittest.TestCase):
 
     @unittest.skipIf(not cuda_available(), "CUDA not available")
     def test_default_obj_idx_value_all_safety(self):
-        """All label-1 → density[1] should be 1.0 for leaves where default applies."""
+        """All label-1 -> density[1] should be 1.0 for leaves where default applies."""
         model = _make_model('cuda', 'oblivious')
         _train(model, n_steps=1, label_fn=lambda n: np.ones(n, dtype=np.float32))
         # Every leaf, empty or not, must be exactly [0, 1]; a swapped index gives [1, 0].
@@ -250,18 +250,18 @@ class TestDefaultObjIdxGradientRouting(unittest.TestCase):
     Semantic test: when all labels are the same, only that objective's gradients
     should shape the leaf value.
 
-    leaf_value = Σ_k density_k * lambda_k * mean_grad_k
+    leaf_value = sum_k density_k * lambda_k * mean_grad_k
     lambda_objs defaults to [1, 1].  GBT steps in the negative gradient direction, so:
-      default_obj_idx=0  →  density=[1,0]  →  pred ≈ -mean(grads[0]) = -G
-      default_obj_idx=1  →  density=[0,1]  →  pred ≈ -mean(grads[1]) = +G
+      default_obj_idx=0  ->  density=[1,0]  ->  pred ~ -mean(grads[0]) = -G
+      default_obj_idx=1  ->  density=[0,1]  ->  pred ~ -mean(grads[1]) = +G
 
     We fix grads[0]=+G and grads[1]=-G and verify:
       - Opposite-sign predictions depending on which label was used.
       - Each prediction matches -mean(grads[its_label]) within tolerance.
-    Changing the label index changes the result — that is the guarantee.
+    Changing the label index changes the result - that is the guarantee.
     """
 
-    GRAD_VAL = 2.0   # grads[0] = +G  →  pred ≈ -G;  grads[1] = -G  →  pred ≈ +G
+    GRAD_VAL = 2.0   # grads[0] = +G  ->  pred ~ -G;  grads[1] = -G  ->  pred ~ +G
     LR = 1.0
     N = 64
     ATol = 0.3
@@ -301,13 +301,13 @@ class TestDefaultObjIdxGradientRouting(unittest.TestCase):
         pred_obj1, _ = self._run(device, uniform_label=1)
 
         # GBT steps in the negative gradient direction
-        expected_obj0 = -self.GRAD_VAL * self.LR   # grads[0]=+G  →  pred ≈ -G
-        expected_obj1 = +self.GRAD_VAL * self.LR   # grads[1]=-G  →  pred ≈ +G
+        expected_obj0 = -self.GRAD_VAL * self.LR   # grads[0]=+G  ->  pred ~ -G
+        expected_obj1 = +self.GRAD_VAL * self.LR   # grads[1]=-G  ->  pred ~ +G
 
-        print(f"\n[{device}] all-label-0 pred: {pred_obj0:.4f}  (expected ≈ {expected_obj0:.1f})")
-        print(f"[{device}] all-label-1 pred: {pred_obj1:.4f}  (expected ≈ {expected_obj1:.1f})")
+        print(f"\n[{device}] all-label-0 pred: {pred_obj0:.4f}  (expected ~ {expected_obj0:.1f})")
+        print(f"[{device}] all-label-1 pred: {pred_obj1:.4f}  (expected ~ {expected_obj1:.1f})")
 
-        # Predictions must have opposite signs — changing the index changes the result
+        # Predictions must have opposite signs - changing the index changes the result
         self.assertLess(pred_obj0, 0,
             f"[{device}] all-label-0: expected negative pred (from grads[0]=+{self.GRAD_VAL}), got {pred_obj0:.4f}")
         self.assertGreater(pred_obj1, 0,

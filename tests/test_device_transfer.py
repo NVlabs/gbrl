@@ -23,7 +23,7 @@
 Tests for cross-device save/load and device-transfer correctness.
 
 Scenarios covered:
-  1. GPU-trained model loaded onto CPU — must not OOM/crash.
+  1. GPU-trained model loaded onto CPU - must not OOM/crash.
   2. GPU-trained model loaded onto CPU then continues training on CPU.
   3. CPU-trained model loaded onto GPU then continues training on GPU.
   4. Model loaded onto CPU, moved to GPU via set_device, continues training.
@@ -126,7 +126,7 @@ class TestDeviceTransfer(unittest.TestCase):
         )
 
     # ------------------------------------------------------------------
-    # 1. GPU-trained model loaded onto CPU — must not OOM/crash
+    # 1. GPU-trained model loaded onto CPU - must not OOM/crash
     # ------------------------------------------------------------------
     @unittest.skipIf(not cuda_available(), "cuda not available")
     def test_gpu_save_cpu_load_no_crash(self):
@@ -145,7 +145,7 @@ class TestDeviceTransfer(unittest.TestCase):
         self.assertLess(loss, 100.0, f"Unexpected loss after cross-device load: {loss}")
 
     # ------------------------------------------------------------------
-    # 2. GPU-trained → load on CPU → capacity invariant
+    # 2. GPU-trained -> load on CPU -> capacity invariant
     # ------------------------------------------------------------------
     @unittest.skipIf(not cuda_available(), "cuda not available")
     def test_gpu_save_cpu_load_capacity_invariant(self):
@@ -159,10 +159,10 @@ class TestDeviceTransfer(unittest.TestCase):
         model.save_learner(path)
 
         loaded = GBTModel.load_learner(path, device='cpu')
-        self._assert_exact_capacity(loaded, "GPU→CPU load")
+        self._assert_exact_capacity(loaded, "GPU->CPU load")
 
     # ------------------------------------------------------------------
-    # 3. GPU-trained → load on CPU → continue training on CPU
+    # 3. GPU-trained -> load on CPU -> continue training on CPU
     # ------------------------------------------------------------------
     @unittest.skipIf(not cuda_available(), "cuda not available")
     def test_gpu_save_cpu_load_continue_training(self):
@@ -181,7 +181,7 @@ class TestDeviceTransfer(unittest.TestCase):
                         f"Loss after cross-device load + CPU training: {loss}")
 
     # ------------------------------------------------------------------
-    # 4. CPU-trained → load on GPU → capacity invariant
+    # 4. CPU-trained -> load on GPU -> capacity invariant
     # ------------------------------------------------------------------
     @unittest.skipIf(not cuda_available(), "cuda not available")
     def test_cpu_save_gpu_load_capacity_invariant(self):
@@ -195,10 +195,10 @@ class TestDeviceTransfer(unittest.TestCase):
         model.save_learner(path)
 
         loaded = GBTModel.load_learner(path, device='cuda')
-        self._assert_exact_capacity(loaded, "CPU→GPU load")
+        self._assert_exact_capacity(loaded, "CPU->GPU load")
 
     # ------------------------------------------------------------------
-    # 5. CPU-trained → load on GPU → continue training on GPU
+    # 5. CPU-trained -> load on GPU -> continue training on GPU
     # ------------------------------------------------------------------
     @unittest.skipIf(not cuda_available(), "cuda not available")
     def test_cpu_save_gpu_load_continue_training(self):
@@ -214,10 +214,10 @@ class TestDeviceTransfer(unittest.TestCase):
         loaded = GBTModel.load_learner(path, device='cuda')
         loss = _train_steps(loaded, self.X, self.y, 30, device='cuda')
         self.assertLess(loss, 20.0,
-                        f"Loss after CPU load → GPU training: {loss}")
+                        f"Loss after CPU load -> GPU training: {loss}")
 
     # ------------------------------------------------------------------
-    # 6. GPU-trained → load on CPU → set_device GPU → continue training
+    # 6. GPU-trained -> load on CPU -> set_device GPU -> continue training
     # ------------------------------------------------------------------
     @unittest.skipIf(not cuda_available(), "cuda not available")
     def test_gpu_save_cpu_load_move_to_gpu_continue(self):
@@ -235,11 +235,11 @@ class TestDeviceTransfer(unittest.TestCase):
         loaded.set_device('cuda')
 
         # Capacity must still be exact after to_device
-        self._assert_exact_capacity(loaded, "GPU→CPU load→to_device(GPU)")
+        self._assert_exact_capacity(loaded, "GPU->CPU load->to_device(GPU)")
 
         loss = _train_steps(loaded, self.X, self.y, 30, device='cuda')
         self.assertLess(loss, 20.0,
-                        f"Loss after load→CPU→GPU→train: {loss}")
+                        f"Loss after load->CPU->GPU->train: {loss}")
 
     # ------------------------------------------------------------------
     # 7. Capacity expands on first new tree, not to default constants
@@ -267,7 +267,7 @@ class TestDeviceTransfer(unittest.TestCase):
         self.assertGreater(md_after['max_trees'], n_trees_before,
                            "max_trees should have grown after the first new tree")
         # max_trees must NOT have jumped to INITIAL_MAX_TREES if n_trees was
-        # already above it — it must be n_trees_before + batch_size.
+        # already above it - it must be n_trees_before + batch_size.
         expected_max = n_trees_before + md_before['max_trees_batch']
         self.assertEqual(md_after['max_trees'], expected_max,
                          f"Expected max_trees={expected_max}, got {md_after['max_trees']}")

@@ -198,7 +198,7 @@ class TestTreeExtraction(unittest.TestCase):
         
         # Compare models
         self._compare_models(model1, model2, self.X, device='cpu')
-        print("✓ CPU: Models produce identical predictions and have identical tree structures")
+        print("OK CPU: Models produce identical predictions and have identical tree structures")
 
     @unittest.skipIf(not cuda_available(), "CUDA not available")
     def test_tree_extraction_insertion_gpu(self):
@@ -215,12 +215,12 @@ class TestTreeExtraction(unittest.TestCase):
         
         # Compare models
         self._compare_models(model1, model2, self.X, device='cuda')
-        print("✓ GPU: Models produce identical predictions and have identical tree structures")
+        print("OK GPU: Models produce identical predictions and have identical tree structures")
 
     @unittest.skipIf(not cuda_available(), "CUDA not available")
     def test_tree_extraction_cpu_to_gpu(self):
         """Test extracting trees from CPU model and adding to GPU model"""
-        print("\n=== Testing tree extraction CPU→GPU ===")
+        print("\n=== Testing tree extraction CPU->GPU ===")
         
         # Train on CPU
         model_cpu, trees = self._train_and_extract_trees(device='cpu')
@@ -237,9 +237,9 @@ class TestTreeExtraction(unittest.TestCase):
         
         np.testing.assert_allclose(
             pred_cpu, pred_gpu, rtol=1e-5, atol=1e-6,
-            err_msg="CPU→GPU predictions differ"
+            err_msg="CPU->GPU predictions differ"
         )
-        print("✓ CPU→GPU: Models produce identical predictions")
+        print("OK CPU->GPU: Models produce identical predictions")
 
     def test_incremental_tree_addition_cpu(self):
         """Test adding trees incrementally on CPU (simulating distributed training)"""
@@ -290,7 +290,7 @@ class TestTreeExtraction(unittest.TestCase):
                 err_msg=f"Predictions differ after adding tree {epoch}"
             )
         
-        print(f"✓ CPU: Incremental addition of {self.n_epochs} trees successful")
+        print(f"OK CPU: Incremental addition of {self.n_epochs} trees successful")
 
     @unittest.skipIf(not cuda_available(), "CUDA not available")
     def test_incremental_tree_addition_gpu(self):
@@ -342,7 +342,7 @@ class TestTreeExtraction(unittest.TestCase):
                 err_msg=f"Predictions differ after adding tree {epoch} on GPU"
             )
         
-        print(f"✓ GPU: Incremental addition of {self.n_epochs} trees successful")
+        print(f"OK GPU: Incremental addition of {self.n_epochs} trees successful")
 
     def test_same_bias_initialization(self):
         """Test that models with same bias produce same results when trees are transferred"""
@@ -378,7 +378,7 @@ class TestTreeExtraction(unittest.TestCase):
             pred1 = model1(X).numpy()
             pred2 = model2(X).numpy()
         np.testing.assert_allclose(pred1, pred2, rtol=1e-7, atol=1e-8)
-        print(f"✓ Initial predictions identical (bias={bias_value})")
+        print(f"OK Initial predictions identical (bias={bias_value})")
         
         # Train model1
         for epoch in range(self.n_epochs):
@@ -401,7 +401,7 @@ class TestTreeExtraction(unittest.TestCase):
             pred1_final, pred2_final, rtol=1e-5, atol=1e-6,
             err_msg="Final predictions differ despite same bias and transferred trees"
         )
-        print(f"✓ Final predictions identical after transferring {self.n_epochs} trees")
+        print(f"OK Final predictions identical after transferring {self.n_epochs} trees")
 
 
 if __name__ == '__main__':
