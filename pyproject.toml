@@ -78,9 +78,18 @@ shap = ">=0.40.0"
 matplotlib = ">=3.5.0"
 jinja2 = ">=3.1.6"
 setuptools = ">=78.1.1"
-Pillow = ">=13.0.0"
+# Newest releases per Python version (13.0.0 / 4.2.1 need Python 3.11+).
+Pillow = [
+    {version = ">=13.0.0", python = ">=3.11"},
+    {version = ">=12.3.0", python = ">=3.10,<3.11"},
+    {version = ">=11.3.0", python = "<3.10"},
+]
 fonttools = ">=4.60.2"
-filelock = ">=4.2.1"
+filelock = [
+    {version = ">=4.2.1", python = ">=3.11"},
+    {version = ">=3.20.1", python = ">=3.10,<3.11"},
+    {version = ">=3.19.1", python = "<3.10"},
+]
 
 
 [tool.poetry.group.dev]
