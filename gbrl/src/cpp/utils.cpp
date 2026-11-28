@@ -77,7 +77,12 @@ void write_header(std::ofstream& file, const serializationHeader& header) {
 }
 
 serializationHeader create_header() {
-    serializationHeader header;
+    serializationHeader header{};
+    header.reserved1 = 0x31464c524247ULL;
+    header.reserved2 = 1;
+#ifdef DEBUG
+    header.reserved2 |= 0x100;
+#endif
     header.major_version = MAJOR_VERSION;
     header.minor_version = MINOR_VERSION;
     header.patch_version = PATCH_VERSION;
@@ -85,11 +90,36 @@ serializationHeader create_header() {
 }
 
 serializationHeader read_header(std::ifstream& file) {
-    serializationHeader header;
+    serializationHeader header{};
     file.read(reinterpret_cast<char*>(&header), sizeof(header));
-    if (!file.good()) {
-        throw std::runtime_error("Failed to read header from file");
+    if (!file.good())
+        throw std::runtime_error("Failed to read checkpoint header");
+    if (header.reserved1 != 0x31464c524247ULL) {
+        uint16_t version[3];
+        memcpy(version, &header, sizeof(version));
+        if (version[0] == 1 && version[1] == 1) {
+            header = serializationHeader{};
+            header.major_version = version[0];
+            header.minor_version = version[1];
+            header.patch_version = version[2];
+        } else if (header.reserved1 != 0 || header.reserved2 != 0) {
+            throw std::runtime_error("Unknown checkpoint format");
+        }
+    } else {
+        if ((header.reserved2 & 0xff) != 1)
+            throw std::runtime_error("Unsupported checkpoint format version");
+#ifdef DEBUG
+        const bool debug_build = true;
+#else
+        const bool debug_build = false;
+#endif
+        if (bool(header.reserved2 & 0x100) != debug_build)
+            throw std::runtime_error("Checkpoint debug/release layout differs from this build");
     }
+    if (header.major_version != 1 ||
+        !((header.minor_version == 1 && header.patch_version >= 2 && header.patch_version <= 9) ||
+          (header.minor_version == 2 && header.patch_version == 0)))
+        throw std::runtime_error("Unsupported checkpoint version; supported: 1.1.2-1.1.9 and 1.2.0");
     return header;
 }
 

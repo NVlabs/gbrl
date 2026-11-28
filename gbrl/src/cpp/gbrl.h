@@ -41,6 +41,7 @@
 #include "loss.h"
 #include "split_candidate_generator.h"
 #include "types.h"
+#include "ensemble_io.h"
 
 #ifdef USE_CUDA
 #include "cuda_types.h"
@@ -85,7 +86,9 @@ class GBRL {
             bool use_control_variates,
             int batch_size,
             growPolicy grow_policy,
+            int n_objs,
             int verbose,
+            float lambda_penalty,
             deviceType _device,
             std::string _learner_name = "GBRL"
         );
@@ -98,6 +101,7 @@ class GBRL {
          * @param policy_dim Dimensionality of policy (for RL applications)
          * @param max_depth Maximum depth of individual trees
          * @param min_data_in_leaf Minimum samples required in each leaf
+         * @param n_objs Number of objectives for multi-objective tasks
          * @param n_bins Number of candidate bins for splits
          * @param par_th Parallelization threshold
          * @param cv_beta Control variates beta parameter
@@ -120,7 +124,9 @@ class GBRL {
             bool use_control_variates,
             int batch_size,
             std::string grow_policy,
+            int n_objs,
             int verbose,
+            float lambda_penalty,
             std::string _device,
             std::string _learner_name = "GBRL",
             int n_mono_constraints = 0
@@ -288,9 +294,11 @@ class GBRL {
             dataHolder<const float> *obs,
             dataHolder<const char> *categorical_obs,
             dataHolder<float> *grads,
+            dataHolder<const float> *obj_labels,
             const int n_samples,
             const int n_num_features,
-            const int n_cat_features
+            const int n_cat_features,
+            const int default_obj_idx = 0
         );
 
         /**
@@ -306,6 +314,35 @@ class GBRL {
          * @return Pointer to predictions (n_samples x output_dim), caller must free
          */
         float* predict(
+            dataHolder<const float> *obs,
+            dataHolder<const char> *categorical_obs,
+            const int n_samples,
+            const int n_num_features,
+            const int n_cat_features,
+            int start_tree_idx,
+            int stop_tree_idx
+        );
+
+        /**
+         * @brief Average per-objective leaf densities across the ensemble
+         *
+         * For each sample, accumulates the per-objective density vector of every
+         * leaf it lands in and divides by the number of traversed trees. Because
+         * each leaf's density vector sums to 1, every output row sums to 1 and can
+         * be read as a distribution over objectives/label classes.
+         *
+         * Unlike predict(), no bias, learning rate, or optimizer is applied.
+         *
+         * @param obs Numerical observations
+         * @param categorical_obs Categorical observations
+         * @param n_samples Number of samples
+         * @param n_num_features Number of numerical features
+         * @param n_cat_features Number of categorical features
+         * @param start_tree_idx Starting tree index (inclusive)
+         * @param stop_tree_idx Stopping tree index (exclusive, 0 means all trees)
+         * @return Pointer to densities (n_samples x n_objs), caller must free
+         */
+        float* predict_densities(
             dataHolder<const float> *obs,
             dataHolder<const char> *categorical_obs,
             const int n_samples,
@@ -388,6 +425,19 @@ class GBRL {
         void set_bias(dataHolder<const float> *bias, const int output_dim);
         
         /**
+         * @brief Set global bias term
+         * 
+         * Sets the global bias/intercept term for the ensemble output. Supports both CPU
+         * and GPU data through the dataHolder interface, with automatic device-to-device
+         * transfers.
+         * 
+         * @param lambdas lambda objective values wrapped in dataHolder with device info
+         * @param n_objs Number of objects (must match metadata->n_objs)
+         * @throws std::runtime_error if n_objs doesn't match metadata->n_objs
+         */
+        void set_lambda_objs(dataHolder<const float> *lambdas, const int n_objs);
+        
+        /**
          * @brief Set per-feature importance weights
          * 
          * Sets the importance weight for each input feature. These weights are used during
@@ -446,6 +496,15 @@ class GBRL {
          * @return Pointer to feature weights array
          */
         float* get_feature_weights();
+
+        /**
+         * @brief Get the per-objective lambda weights
+         *
+         * Returns a newly allocated copy of length n_objs; the caller owns it.
+         *
+         * @return Pointer to lambda weights array, or nullptr if unset
+         */
+        float* get_lambda_objs();
         
         /**
          * @brief Get feature mapping arrays
@@ -567,6 +626,31 @@ class GBRL {
          * @param W Correction matrix to apply before compression (n_leaves+1 x output_dim)
          */
         void compress_ensemble(const int n_compressed_leaves, const int n_compressed_trees, const int *leaf_indices, const int *tree_indices, const int *new_tree_indices, const float *W);
+
+        exportData* get_ensemble_export_data();
+
+        /**
+         * @brief Extract a single tree from the ensemble
+         * 
+         * Returns a treeData struct containing copies of all arrays
+         * for the specified tree. Caller owns all memory.
+         * 
+         * @param tree_idx 0-based index of the tree to extract
+         * @return Pointer to treeData struct
+         */
+        treeData* get_tree(int tree_idx);
+
+        /**
+         * @brief Add a tree to the ensemble
+         * 
+         * Appends tree data to the end of the ensemble. This is the
+         * counterpart to get_tree() for distributed ensemble synchronization.
+         * Updates n_trees, n_leaves, and iteration.
+         * 
+         * @param tdata Tree data to append (arrays are copied, caller retains ownership)
+         */
+        void add_tree(const treeData *tdata);
+
 
         ensembleData *edata;                /**< Ensemble parameter data */
         ensembleMetaData *metadata;         /**< Ensemble metadata */

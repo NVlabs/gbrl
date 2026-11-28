@@ -34,6 +34,21 @@
 #include "cuda_types.h"
 #include "node.h"
 
+/**
+ * @brief Marks an extern "C" entry point that may propagate a C++ exception.
+ *
+ * MSVC assumes extern "C" functions are nothrow under /EHsc (C4297) and skips
+ * their unwind code, which would turn a throw into a terminate. Declaring the
+ * exception specification explicitly restores correct unwinding.
+ */
+#ifndef GBRL_MAY_THROW
+#ifdef __cplusplus
+#define GBRL_MAY_THROW noexcept(false)
+#else
+#define GBRL_MAY_THROW
+#endif
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -47,7 +62,8 @@ extern "C" {
  */
 TreeNodeGPU* allocate_root_tree_node(
     dataSet *dataset,
-    ensembleMetaData *metadata
+    ensembleMetaData *metadata,
+    cudaStream_t stream
 );
 
 /**
@@ -58,7 +74,10 @@ TreeNodeGPU* allocate_root_tree_node(
  */
 void allocate_child_tree_node(
     TreeNodeGPU* host_parent,
-    TreeNodeGPU** device_child
+    TreeNodeGPU** device_child,
+    const int n_objs,
+    cudaStream_t stream,
+    const int default_obj_idx
 );
 
 /**
@@ -81,7 +100,8 @@ void allocate_child_tree_nodes(
     TreeNodeGPU** right_child,
     candidatesData *candidata,
     splitDataGPU *split_data,
-    ensembleMetaData *metadata
+    ensembleMetaData *metadata,
+    cudaStream_t stream
 );
 
 /**
@@ -106,12 +126,13 @@ void free_tree_node(TreeNodeGPU* node);
 void evaluate_greedy_splits(
     dataSet *dataset,
     ensembleData *edata,
-    const TreeNodeGPU *node,
+    TreeNodeGPU *node,
     candidatesData *candidata,
     ensembleMetaData *metadata,
     splitDataGPU* split_data,
     const int threads_per_block,
-    const int parent_n_samples
+    const int parent_n_samples,
+    cudaStream_t stream = 0
 );
 
 /**
@@ -132,7 +153,8 @@ void evaluate_oblivious_splits_cuda(
     const int depth,
     candidatesData *candidata,
     ensembleMetaData *metadata,
-    splitDataGPU *split_data
+    splitDataGPU *split_data,
+    const std::vector<cudaStream_t>& streams
 );
 
 /**
@@ -164,7 +186,9 @@ void calc_oblivious_parallelism(
     const int output_dim,
     int &threads_per_block,
     const scoreFunc split_score_func,
-    const int depth
+    size_t &shared_mem,
+    const int depth,
+    const int n_objs
 );
 
 /**
@@ -182,7 +206,7 @@ void fit_tree_oblivious_cuda(
     ensembleMetaData *metadata,
     candidatesData *candidata,
     splitDataGPU *split_data
-);
+) GBRL_MAY_THROW;
 
 /**
  * @brief Fit greedy tree on GPU
@@ -199,7 +223,7 @@ void fit_tree_greedy_cuda(
     ensembleMetaData *metadata,
     candidatesData *candidata,
     splitDataGPU *split_data
-);
+) GBRL_MAY_THROW;
 
 /**
  * @brief Add leaf node to ensemble
@@ -216,7 +240,7 @@ void add_leaf_node(
     ensembleMetaData *metadata,
     ensembleData *edata,
     dataSet *dataset
-);
+) GBRL_MAY_THROW;
 
 /**
  * @brief Apply monotonic constraints to leaf values by isotonic projection
@@ -245,7 +269,7 @@ void apply_monotonic_constraints_cuda(
     int tree_idx,
     int tree_depth,
     int start_leaf_idx
-);
+) GBRL_MAY_THROW;
 
 #ifdef __CUDACC__
 
@@ -282,6 +306,8 @@ __global__ void split_score_cosine_cuda(
     const char* __restrict__ categorical_obs,
     const float* __restrict__ grads,
     const float* __restrict__ feature_weights,
+    const float* __restrict__ obj_labels,
+    const float* __restrict__ lambda_objs,
     const TreeNodeGPU* __restrict__ node,
     const int* __restrict__ candidate_indices,
     const float* __restrict__ candidate_values,
@@ -293,6 +319,8 @@ __global__ void split_score_cosine_cuda(
     float* __restrict__ split_scores,
     const int global_n_samples,
     const int n_num_features,
+    const int n_objs,
+    const float lambda_penalty,
     const int* __restrict__ mono_feature_idx,
     const int* __restrict__ mono_output_idx,
     const int* __restrict__ mono_constraint,
@@ -332,6 +360,8 @@ __global__ void split_score_l2_cuda(
     const char* __restrict__ categorical_obs,
     const float* __restrict__ grads,
     const float* __restrict__ feature_weights,
+    const float* __restrict__ obj_labels,
+    const float* __restrict__ lambda_objs,
     const TreeNodeGPU* __restrict__ node,
     const int* __restrict__ candidate_indices,
     const float* __restrict__ candidate_values,
@@ -343,6 +373,8 @@ __global__ void split_score_l2_cuda(
     float* __restrict__ split_scores,
     const int global_n_samples,
     const int n_num_features,
+    const int n_objs,
+    const float lambda_penalty,
     const int* __restrict__ mono_feature_idx,
     const int* __restrict__ mono_output_idx,
     const int* __restrict__ mono_constraint,
@@ -356,14 +388,20 @@ __global__ void split_score_l2_cuda(
  * @param n_candidates Number of candidates
  * @param best_idx Output best candidate index
  * @param best_score Output best score
- * @param node Current tree node
  */
 __global__ void update_best_candidate_cuda(
     float* __restrict__ split_scores,
     int n_candidates,
     int* __restrict__ best_idx,
-    float* __restrict__ best_score,
-    const TreeNodeGPU* __restrict__ node
+    float* __restrict__ best_score
+);
+
+__global__ void enforce_oblivious_pava_kernel(
+    float* __restrict__ values,
+    const int* __restrict__ tree_constraints,
+    const int leaf_start_idx,
+    const int output_dim,
+    const int depth
 );
 
 __global__ void enforce_oblivious_pava_kernel(
@@ -389,12 +427,14 @@ __global__ void enforce_oblivious_pava_kernel(
 __global__ void reduce_leaf_sum(
     const float* __restrict__ obs,
     const char* __restrict__ categorical_obs,
-    const float* __restrict__ grads,
+    const float* __restrict__ grads,       // Stacked: [Obj0][Obj1]...
     float* __restrict__ values,
+    const float* __restrict__ lambda_objs,
     const TreeNodeGPU* __restrict__ node,
-    const int n_samples,
-    const int global_idx,
-    const int policy_dim
+    const int n_samples,                   // Global sample count (loop limit)
+    const int global_idx,                  // Offset into 'values' array
+    const int n_objs,
+    const int policy_dim                   // Dims < policy_dim get weighted mixture; dims >= policy_dim use plain mean from obj 0
 );
 
 /**
@@ -431,25 +471,90 @@ __global__ void partition_samples_kernel(
 /**
  * @brief CUDA kernel to compute L2 node score
  * 
- * @param node Tree node
- * @param mean Node mean values
+ * Computes L2-based split score for a tree node using the mean squared norm
+ * of gradients weighted by the number of samples.
+ * 
+ * @param node Tree node to score (score written to node->score)
+ * @param mean Node mean gradient values
  */
 __global__ void node_l2_kernel(
     TreeNodeGPU* __restrict__ node,
-    const float* __restrict__ mean
+    const int n_objs
 );
 
 /**
- * @brief CUDA kernel to compute cosine node score
+ * @brief CUDA kernel for lexicographic guidance-based split impurity
  * 
- * @param node Tree node
- * @param grads Gradient values
- * @param mean Output mean values
+ * Scores splits using a lexicographic ordering that prioritizes separating
+ * samples by guidance compliance, then by gradient variance within non-compliant samples.
+ * 
+ * @param obs Numerical observations
+ * @param categorical_obs Categorical observations
+ * @param guidance_labels Guidance label values (>0 = requires guidance)
+ * @param node Current tree node
+ * @param candidate_indices Candidate feature indices
+ * @param candidate_values Candidate threshold values
+ * @param candidate_categories Candidate categorical values
+ * @param candidate_numeric Feature type flags (true = numerical)
+ * @param min_data_in_leaf Minimum samples per leaf constraint
+ * @param split_scores Output split impurity reduction scores
+ * @param global_n_samples Total dataset sample count
+ * @param n_num_features Number of numerical features
+ * @param guidance_weight Weight for guidance penalty
+ */
+__global__ void lexicographic_guidance_impurity(
+    const float* __restrict__ obs,
+    const char* __restrict__ categorical_obs,
+    const float* __restrict__ guidance_labels,
+    const TreeNodeGPU* __restrict__ node,
+    const int* __restrict__ candidate_indices,
+    const float* __restrict__ candidate_values,
+    const char* __restrict__ candidate_categories,
+    const bool* __restrict__ candidate_numeric,
+    const int min_data_in_leaf,
+    float* __restrict__ split_scores,
+    const int global_n_samples,
+    const int n_num_features,
+    const float guidance_weight);
+
+/**
+ * @brief CUDA kernel to compute a node's objective densities
+ *
+ * Writes node->densities[k] = fraction of the node's samples whose label is
+ * objective k, so the densities sum to 1.
+ *
+ * @param node Node to update (densities written here)
+ * @param parent_node Parent node; an empty node inherits its densities
+ *        (nullptr for the root)
+ * @param obj_labels Zero-based objective ids in [0, n_objs), one per sample;
+ *        nullptr when the batch is uniform
+ * @param n_objs Number of objectives
+ * @param default_obj_idx Objective used when labels are absent and no parent
+ *        densities are available
+ */
+__global__ void calc_node_densities_kernel(
+    TreeNodeGPU* __restrict__ node,
+    const TreeNodeGPU* __restrict__ parent_node,
+    const float* __restrict__ obj_labels,
+    const int n_objs,
+    const int default_obj_idx);
+/**
+ * @brief CUDA kernel to compute cosine-based node score
+ * 
+ * Computes cosine similarity-based split score using the dot product
+ * of gradients with the node mean, optionally incorporating guidance gradients.
+ * 
+ * @param node Tree node to score (score written to node->score)
+ * @param grads Primary gradient values
+ * @param guidance_grads Guidance gradient values (can be nullptr)
+ * @param mean Node mean gradient values
+ * @param guidance_scale Scaling factor for guidance gradients
  */
 __global__ void node_cosine_kernel(
     TreeNodeGPU* __restrict__ node,
     const float* __restrict__ grads,
-    float* __restrict__ mean
+    const int n_objs,
+    const int global_n_samples
 );
 
 /**
@@ -498,15 +603,15 @@ __global__ void column_sums_reduce(
  * @brief CUDA kernel for node-specific column mean reduction
  * 
  * @param in Input matrix
- * @param out Output column means
  * @param n_cols Number of columns
  * @param node Tree node defining sample subset
  */
 __global__ void node_column_mean_reduce(
     const float * __restrict__ in,
-    float * __restrict__ out,
     size_t n_cols,
-    const TreeNodeGPU* __restrict__ node
+    size_t global_n_rows,
+    const TreeNodeGPU* __restrict__ node,
+    const int n_objs
 );
 
 /**
@@ -520,6 +625,7 @@ __global__ void node_column_mean_reduce(
  * @param inequality_directions Output direction array
  * @param is_numerics Output feature type array
  * @param categorical_values Output categorical value array
+ * @param guidance_percent Output guidance percentage array
  * @param global_idx Global tree index
  * @param leaf_idx Leaf index
  * @param max_depth Maximum tree depth
@@ -533,9 +639,14 @@ __global__ void copy_node_to_data(
     bool* __restrict__ inequality_directions,
     bool* __restrict__ is_numerics,
     char * __restrict__  categorical_values,
+    float * __restrict__  densities,
+#ifdef DEBUG
+    int* __restrict__ n_samples,
+#endif
     const int global_idx,
     const int leaf_idx,
-    const int max_depth
+    const int max_depth,
+    const int n_objs
 );
 
 /**
@@ -631,6 +742,7 @@ __global__ void split_conditional_sum_kernel(
     const bool* __restrict__ candidate_numeric,
     const int n_candidates,
     const int global_n_samples,
+    const int n_objs,
     float* __restrict__ left_sum,
     float* __restrict__ right_sum,
     float* __restrict__ left_count,
@@ -665,15 +777,16 @@ __global__ void split_conditional_dot_kernel(
     const float* __restrict__ grads,
     const TreeNodeGPU* __restrict__ node,
     const int* __restrict__ candidate_indices,
-    const float* __restrict__ candidate_values, 
+    const float* __restrict__ candidate_values,
     const char* __restrict__ candidate_categories,
     const bool* __restrict__ candidate_numeric,
     const int n_candidates,
     const int global_n_samples,
-    float* __restrict__ left_sum,
-    float* __restrict__ right_sum,
-    float* __restrict__ left_count,
-    float* __restrict__ right_count,
+    const int n_objs,
+    const float* __restrict__ left_sum,
+    const float* __restrict__ right_sum,
+    const float* __restrict__ left_count,
+    const float* __restrict__ right_count,
     float* __restrict__ ldot,
     float* __restrict__ rdot
 );
@@ -709,13 +822,14 @@ __global__ void split_cosine_score_kernel(
     const int* __restrict__ r_num_mapping,
     const int* __restrict__ r_cat_mapping,
     const int n_candidates,
-    float* __restrict__ lsum,
-    float* __restrict__ rsum,
-    float* __restrict__ lcount,
-    float* __restrict__ rcount,
-    float* __restrict__ ldot,
-    float* __restrict__ rdot,
-    const int min_data_in_leaf,
+    const int n_objs,
+    const float* __restrict__ lsum,
+    const float* __restrict__ rsum,
+    const float* __restrict__ lcount,
+    const float* __restrict__ rcount,
+    const float* __restrict__ ldot,
+    const float* __restrict__ rdot,
+    const int min_data_in_leaf, 
     const int n_num_features
 );
 
@@ -748,12 +862,50 @@ __global__ void split_l2_score_kernel(
     const int* __restrict__ r_num_mapping,
     const int* __restrict__ r_cat_mapping,
     const int n_candidates,
-    float* __restrict__ lsum,
-    float* __restrict__ rsum,
-    float* __restrict__ lcount,
-    float* __restrict__ rcount,
+    const int n_objs,
+    const float* __restrict__ lsum,
+    const float* __restrict__ rsum,
+    const float* __restrict__ lcount,
+    const float* __restrict__ rcount,
     const int min_data_in_leaf,
     const int n_num_features
+);
+
+/**
+ * @brief Combine per-objective split scores into one score per candidate.
+ *
+ * Reads node->densities (one weight per objective) and lambda_objs; writes the
+ * density- and lambda-weighted sum into the objective-0 slot.
+ */
+__global__ void reduce_split_scores_kernel(
+    float* __restrict__ split_scores,      // In/Out: [Obj0][Obj1]... -> [Total][Garbage]...
+    const TreeNodeGPU* __restrict__ node,  // reads node->densities (size n_objs)
+    const float* __restrict__ lambda_objs,
+    const int n_candidates,
+    const int n_objs
+);
+
+__global__ void calc_node_conflict_kernel(
+    TreeNodeGPU* __restrict__ node,       // Output: node->conflict_rho
+    const int n_objs,
+    const int n_cols,                     // row stride of node->mean_values (output_dim)
+    const int policy_dim                  // conflict uses policy columns only
+);
+
+__global__ void split_impurity_penalty_kernel(
+    const float* __restrict__ obj_labels,
+    const float* __restrict__ obs,
+    const char* __restrict__ categorical_obs,
+    const TreeNodeGPU* __restrict__ node,
+    float* __restrict__ split_scores,            // In/Out: Gain -> Penalized Gain
+    const int* __restrict__ candidate_indices,
+    const float* __restrict__ candidate_values,
+    const char* __restrict__ candidate_categories,
+    const bool* __restrict__ candidate_numeric,
+    const int n_candidates,
+    const int global_n_samples,
+    const float lambda_penalty,
+    const int n_objs
 );
 
 #endif

@@ -49,6 +49,8 @@ class CMakeBuild(build_ext):
             cmake_args.append('-DCOVERAGE=ON')
         if os.environ.get('ASAN', '0') == '1':
             cmake_args.append('-DASAN=ON')
+        if os.environ.get('USE_GRAPHVIZ', '0') == '1':
+            cmake_args.append('-DUSE_GRAPHVIZ=ON')
         if sysconfig.get_config_var('LIBRARY') is not None:
             cmake_args.append('-DPYTHON_LIBRARY=' + sysconfig.get_config_var(
                 'LIBRARY'))
@@ -116,14 +118,15 @@ class CMakeBuild(build_ext):
 
 setup(
     name="gbrl",
-    version="1.1.9",
+    version="1.2.0",
     description="Gradient Boosted Trees for RL",
     author="Benjamin Fuhrer, Chen Tessler, Gal Dalal",
     author_email="bfuhrer@nvidia.com, ctessler@nvidia.com, gdalal@nvidia.com",
+    url="https://github.com/NVlabs/gbrl",
     license="MIT",
     ext_modules=[CMakeExtension('gbrl/gbrl_cpp', sourcedir='.')],
     cmdclass=dict(build_ext=CMakeBuild),
     packages=find_packages(include=["gbrl", "gbrl.*"],
                            exclude=["gbrl.src", "gbrl.src.*"]),
-    include_package_data=True,
+    include_package_data=False,
 )

@@ -164,7 +164,7 @@ def get_index_mapping(arr: NumericalData) -> Tuple[np.ndarray, np.ndarray]:
         return np.arange(arr.shape[-1]), np.ones(arr.shape[-1], dtype=bool)
 
 
-def to_numpy(arr: Union[np.ndarray, th.Tensor]) -> np.ndarray:
+def to_numpy(arr: NumericalData) -> np.ndarray:
     if isinstance(arr, th.Tensor):
         arr = arr.detach().cpu().numpy()
     return np.ascontiguousarray(arr, dtype=numerical_dtype)
@@ -528,10 +528,12 @@ def clip_grad_norm(grads: NumericalData, grad_clip: Optional[float]) ->\
             grads = np.clip(grads, a_min=-grad_clip, a_max=grad_clip)
         return grads
     if isinstance(grads, th.Tensor):
-        grad_norms = th.norm(grads, p=2, dim=1, keepdim=True)
+        grad_norms = th.norm(grads, p=2, dim=-1, keepdim=True)
     else:
-        grad_norms = np.linalg.norm(grads, axis=1, ord=2, keepdims=True)
-    mask = (grad_norms > grad_clip).squeeze()
+        grad_norms = np.linalg.norm(grads, axis=-1, ord=2, keepdims=True)
+    # Drop only the trailing norm axis; squeeze() would also collapse a
+    # single sample or objective axis and break the indexing below.
+    mask = (grad_norms > grad_clip)[..., 0]
     grads[mask] = grad_clip * grads[mask] / grad_norms[mask]
     return grads
 
@@ -636,16 +638,16 @@ def ensure_same_type(arr_a: NumericalData,
 
 
 def concatenate_arrays(arrays: Sequence[NumericalData],
-                       axis: int = 1) -> \
+                       axis: int = -1) -> \
                         NumericalData:
     """
     Concatenates multiple arrays along a specified axis. All arrays must be of the same type
     (either all NumPy arrays or all PyTorch tensors). If an array has fewer dimensions than
-    required for concatenation, an axis is added to match the dimensionality.
+    required for concatenation, a singleton dimension is added at the concatenation axis.
 
     Args:
         arrays (Sequence[NumericalData]): Sequence of arrays (NumPy or PyTorch) to concatenate.
-        axis (int, optional): Axis along which to concatenate. Defaults to 1.
+        axis (int, optional): Axis along which to concatenate. Defaults to -1.
 
     Returns:
         NumericalData: Concatenated array with the type and device of the first array.
@@ -658,23 +660,28 @@ def concatenate_arrays(arrays: Sequence[NumericalData],
     for arr in arrays[1:]:
         assert isinstance(arr, sequence_type), "All arrays must be of the same type"
 
-    # Check if we need to add an axis to match dimensionality
-    def add_axis_if_needed(array, target_ndim, axis):
-        if array.ndim < target_ndim or array.ndim == 1:
-            if isinstance(array, th.Tensor):
-                array = array.unsqueeze(axis)
-            else:  # For NumPy array
-                array = np.expand_dims(array, axis=axis)
-        return array
+    # Determine the target number of dimensions. 1-D inputs are per-sample
+    # scalars and become columns (two (N,) arrays -> (N, 2)), as in GBRL <= 1.1.9;
+    # concatenating them end to end would give (2N,) and be silently mis-shaped.
+    target_ndim = max(max([arr.ndim for arr in arrays]), 2)
 
-    # Ensure all arrays have at least the right number of dimensions for
-    # concatenation
-    max_ndim = max([arr.ndim for arr in arrays])
-    arrays = [add_axis_if_needed(arr, max_ndim, axis) for arr in arrays]
+    # Normalize axis to positive index
+    normalized_axis = axis if axis >= 0 else target_ndim + axis
 
-    if isinstance(arrays[0], th.Tensor):
-        return th.cat(arrays, dim=axis)  # type: ignore
-    return np.concatenate(arrays, axis=axis)
+    # Expand dimensions for arrays with fewer dimensions
+    expanded_arrays = []
+    for arr in arrays:
+        if arr.ndim < target_ndim:
+            # Add singleton dimension at the concatenation axis
+            if isinstance(arr, th.Tensor):
+                arr = arr.unsqueeze(normalized_axis)
+            else:  # NumPy array
+                arr = np.expand_dims(arr, axis=normalized_axis)
+        expanded_arrays.append(arr)
+
+    if isinstance(expanded_arrays[0], th.Tensor):
+        return th.cat(expanded_arrays, dim=normalized_axis)  # type: ignore
+    return np.concatenate(expanded_arrays, axis=normalized_axis)
 
 
 def pad_array(array: NumericalData, n_dims: int, pad_value: float = 0.0, axis: int = -1) -> NumericalData:
@@ -691,10 +698,19 @@ def pad_array(array: NumericalData, n_dims: int, pad_value: float = 0.0, axis: i
     Returns:
         NumericalData: Padded array with the same type as the input.
     """
+    # concatenate_arrays needs at least two arrays.
+    if n_dims <= 0:
+        return array
+    # Append exactly n_dims entries along `axis`; 1-D input is treated as a column.
+    if array.ndim == 1:
+        array = array[:, None]
+    pad_axis = axis if axis >= 0 else array.ndim + axis
+    pad_shape = tuple(n_dims if i == pad_axis else s for i, s in enumerate(array.shape))
     if isinstance(array, th.Tensor):
-        return concatenate_arrays([array, pad_value*th.ones((len(array), n_dims), dtype=array.dtype, device=array.device)],
-                                  axis=axis)
-    return concatenate_arrays([array, pad_value*np.ones((len(array), n_dims), dtype=array.dtype)], axis=axis)
+        padding = th.full(pad_shape, pad_value, dtype=array.dtype, device=array.device)
+        return th.cat([array, padding], dim=pad_axis)
+    padding = np.full(pad_shape, pad_value, dtype=array.dtype)
+    return np.concatenate([array, padding], axis=pad_axis)
 
 
 def validate_array(arr: NumericalData) -> None:
@@ -950,3 +966,74 @@ def process_monotonic_constraints(
         np.ascontiguousarray(output_indices, dtype=np.int32),
         np.ascontiguousarray(constraint_dirs, dtype=np.int32)
     )
+
+
+def normalize_objective_gradients(grads, n_objs, n_samples, output_dim):
+    """Normalize objective arrays or tuples without changing their backend.
+
+    With n_objs > 1, gradients must hold one block per objective: an array of
+    shape (n_objs, n_samples, output_dim) or a sequence of n_objs arrays of
+    shape (n_samples, output_dim). Gradients taken from a single forward pass
+    (params.grad) have only one block, so multi-objective models need explicit
+    per-objective gradients.
+    """
+    if isinstance(grads, (tuple, list)):
+        if len(grads) != n_objs:
+            raise ValueError("Expected one gradient array per objective")
+        if isinstance(grads[0], th.Tensor):
+            grads = th.stack([g.reshape(n_samples, output_dim) for g in grads])
+        else:
+            grads = np.stack([g.reshape(n_samples, output_dim) for g in grads])
+    shape = (n_objs, n_samples, output_dim) if n_objs > 1 else (n_samples, output_dim)
+    size = grads.numel() if isinstance(grads, th.Tensor) else np.size(grads)
+    expected = n_objs * n_samples * output_dim
+    if size != expected:
+        raise ValueError(
+            f"Expected gradients of shape {shape} ({expected} values), got "
+            f"{tuple(grads.shape)}. Multi-objective models need one gradient "
+            f"block per objective; pass them explicitly.")
+    return grads.reshape(shape)
+
+
+def expand_critic_gradients(grads, n_objs, n_samples):
+    """Place scalar critic gradients in objective block zero."""
+    if n_objs == 1:
+        return grads.reshape(n_samples, 1)
+    if grads.ndim == 3:
+        return grads.reshape(n_objs, n_samples, 1)
+    if isinstance(grads, th.Tensor):
+        result = grads.new_zeros((n_objs, n_samples, 1))
+    else:
+        result = np.zeros((n_objs, n_samples, 1), dtype=grads.dtype)
+    result[0] = grads.reshape(n_samples, 1)
+    return result
+
+
+def prepare_objective_labels(labels, n_samples, n_objs, validate=None):
+    """Check labels before optimizing uniform CPU batches; keep CUDA data on device."""
+    if labels is None:
+        return None, 0
+    if labels.ndim not in (1, 2) or (labels.ndim == 2 and 1 not in labels.shape):
+        raise ValueError("obj_labels must be a vector")
+    size = labels.numel() if isinstance(labels, th.Tensor) else labels.size
+    if size != n_samples:
+        raise ValueError("obj_labels length must match the number of observations")
+    labels = labels.reshape(-1)
+    if n_samples == 0:
+        raise ValueError("Cannot train with an empty batch")
+    is_cuda = isinstance(labels, th.Tensor) and labels.is_cuda
+    validate = not is_cuda if validate is None else validate
+    if is_cuda:
+        if validate:
+            valid = th.isfinite(labels) & (labels == labels.trunc()) & (labels >= 0) & (labels < n_objs)
+            if not bool(valid.all()):
+                raise ValueError("obj_labels must contain finite integers in [0, n_objs)")
+        return labels.contiguous(), 0
+    array = labels.detach().numpy() if isinstance(labels, th.Tensor) else np.asarray(labels)
+    lo, hi = array.min(), array.max()
+    if validate and (not np.isfinite(array).all() or lo < 0 or hi >= n_objs or
+                     not np.equal(array, np.trunc(array)).all()):
+        raise ValueError("obj_labels must contain finite integers in [0, n_objs)")
+    if lo == hi:
+        return None, int(lo)
+    return labels, 0

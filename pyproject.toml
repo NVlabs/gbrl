@@ -1,6 +1,6 @@
 [build-system]
 requires = [
-    "setuptools>=42",
+    "setuptools>=61",
     "wheel",
     "cmake>=3.18",
     "pybind11[global]==2.13.1"
@@ -10,16 +10,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gbrl"
-version = "1.1.9"
+version = "1.2.0"
 description = "Gradient Boosted Trees for RL"
 readme = { file = "README.md", content-type = "text/markdown" }
 authors = [
     {name = "Benjamin Fuhrer", email = "bfuhrer@nvidia.com"},
     {name = "Chen Tessler", email = "ctessler@nvidia.com"},
-    {name = "Gal Dalal", email = "galal@nvidia.com"}
+    {name = "Gal Dalal", email = "gdalal@nvidia.com"}
 ]
-# Note: pybind11 appears in both build-system.requires (for C++ extension compilation)
-# and dependencies (for runtime headers). This is intentional.
 dependencies = [
     "pybind11[global]==2.13.1",
     "numpy>=1.21.0",
@@ -30,40 +28,46 @@ dependencies = [
     "shap>=0.40.0",
     "matplotlib>=3.5.0",
     "fonttools>=4.60.2",
-    "filelock>=3.20.1",
+    # filelock 3.20.1 (security fix) needs Python 3.10+; 3.19.1 is the last
+    # release for Python 3.9.
+    "filelock>=3.20.1; python_version >= '3.10'",
+    "filelock>=3.19.1; python_version < '3.10'",
 ]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
-    "License :: Other/Proprietary License",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: Scientific/Engineering :: Artificial Intelligence"
 ]
 
 dynamic = ["license"]
 
-requires-python = ">=3.9"
+requires-python = ">=3.9,<3.14"
 
 [project.urls]
 Homepage = "https://github.com/NVlabs/gbrl"
 Documentation = "https://nvlabs.github.io/gbrl/"
 Repository = "https://github.com/NVlabs/gbrl"
+"GBRL Paper" = "https://arxiv.org/abs/2407.08250"
+"Split-RL Paper" = "https://arxiv.org/abs/2611.34799"
+"Split-RL Code" = "https://github.com/NVlabs/split_rl"
 
 [tool.poetry]
 name = "gbrl"
-version = "1.1.9"
-description = "Gradient Boosted Trees for RL"
-authors = ["Benjamin Fuhrer <bfuhrer@nvidia.com>", "Chen Tessler <ctessler@nvidia.com>", "Gal Dalal <galal@nvidia.com>"]
+version = "1.2.0"
+description = "Gradient Boosting Trees for RL"
+authors = ["Benjamin Fuhrer <bfuhrer@nvidia.com>", "Chen Tessler <ctessler@nvidia.com>", "Gal Dalal <gdalal@nvidia.com>"]
 readme = "README.md"
 packages = [{include = "gbrl"}]
 
 [tool.poetry.dependencies]
-python = ">=3.10,<3.13"
+python = ">=3.9,<3.14"
 pybind11 = {version = "2.13.1", extras = ["global"]}
 numpy = ">=1.21.0"
 cmake = ">=3.18"
@@ -74,12 +78,20 @@ shap = ">=0.40.0"
 matplotlib = ">=3.5.0"
 jinja2 = ">=3.1.6"
 setuptools = ">=78.1.1"
-Pillow = ">=10.3.0, !=12.1.1"
+# Newest releases per Python version (13.0.0 / 4.2.1 need Python 3.11+).
+Pillow = [
+    {version = ">=13.0.0", python = ">=3.11"},
+    {version = ">=12.3.0", python = ">=3.10,<3.11"},
+    {version = ">=11.3.0", python = "<3.10"},
+]
 fonttools = ">=4.60.2"
-filelock = ">=3.20.1"
+filelock = [
+    {version = ">=4.2.1", python = ">=3.11"},
+    {version = ">=3.20.1", python = ">=3.10,<3.11"},
+    {version = ">=3.19.1", python = "<3.10"},
+]
 
 
 [tool.poetry.group.dev]
 [tool.poetry.group.dev.dependencies]
 pytest = "*"
-

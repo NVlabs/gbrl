@@ -29,6 +29,7 @@ architectures with separate models.
 import json
 import os
 import warnings
+from copy import deepcopy
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
@@ -36,7 +37,7 @@ import torch as th
 
 from gbrl import GBRL_CPP
 from gbrl.common.compression import ParametricActorCompression, TreeCompression
-from gbrl.common.utils import (NumericalData, ensure_leaf_tensor_or_array,
+from gbrl.common.utils import (prepare_objective_labels, NumericalData, ensure_leaf_tensor_or_array,
                                get_index_mapping, get_poly_vectors, get_tensor_info,
                                is_valid_feature_mapping,
                                normalize_vector_input, numerical_dtype,
@@ -46,6 +47,19 @@ from gbrl.common.utils import (NumericalData, ensure_leaf_tensor_or_array,
                                validate_optimizer_ranges)
 from gbrl.learners.base import BaseLearner
 
+
+
+def _check_tree_layout(cpp_model, tree_dict: Dict) -> None:
+    """Raise if a tree dict cannot be inserted into cpp_model (layout only)."""
+    metadata = cpp_model.get_metadata()
+    is_oblivious = str(metadata['grow_policy']).lower() == 'oblivious'
+    for key, expected in (('output_dim', metadata['output_dim']),
+                          ('max_depth', metadata['max_depth']),
+                          ('n_objs', metadata['n_objs']),
+                          ('is_oblivious', is_oblivious)):
+        if key in tree_dict and tree_dict[key] != expected:
+            raise RuntimeError(f"treeData {key} {tree_dict[key]!r} does not match "
+                               f"the ensemble ({expected!r})")
 
 class MultiGBTLearner(BaseLearner):
     """
@@ -126,6 +140,7 @@ class MultiGBTLearner(BaseLearner):
         # so their local iteration counts cannot carry history across resets.
         self._consumed_steps = [0] * n_learners
         self.n_learners = n_learners
+        self.n_objs_per_model = [self.n_objs] * n_learners
 
         # Handle learner names
         if names is None:
@@ -168,8 +183,12 @@ class MultiGBTLearner(BaseLearner):
             if isinstance(self.output_dim, list):
                 params['output_dim'] = self.output_dim[i]   # type: ignore
                 params['policy_dim'] = self.policy_dim[i]   # type: ignore
+            params['n_objs'] = self.n_objs_per_model[i]
             cpp_model = GBRL_CPP(**params, learner_name=self.learner_names[i])
             cpp_model.set_feature_weights(self.feature_weights)
+            model_lambda = (self.lambda_objs[:params['n_objs']] if params['policy_dim'] > 0
+                            else np.ones(params['n_objs'], dtype=numerical_dtype))
+            cpp_model.set_lambda_objs(model_lambda)
             # Copy: writing the reduced horizon back would subtract
             # total_iterations again on every subsequent reset().
             cfg = next_optimizers[i].copy()
@@ -250,14 +269,19 @@ class MultiGBTLearner(BaseLearner):
     def step(self,
              inputs: NumericalData,
              grads: Union[Sequence[NumericalData], NumericalData],
-             model_idx: Optional[int] = None) -> None:
+             model_idx: Optional[int] = None,
+             obj_labels: Optional[NumericalData] = None,
+             obj_idx: Optional[int] = None
+             ) -> None:
         """
         Performs a single gradient update step (e.g, adding a single decision tree).
 
         Args:
             inputs (Union[np.ndarray, th.Tensor, Tuple]): Input features.
             grads (Union[Sequence[NumericalData], NumericalData]): Gradients.
+            obj_labels (Optional[NumericalData]): objective label vector.
             model_idx (int, optional): The index of the model.
+            obj_idx (int, optional): The index of the objective label.
         """
         assert model_idx is not None or ((isinstance(grads, list) or isinstance(grads, tuple)) and
                                          len(grads) == self.n_learners), "Invalid model index or gradients"
@@ -268,26 +292,53 @@ class MultiGBTLearner(BaseLearner):
             self._ensure_feature_mapping(inputs)
             self._feature_mapping_installed = True
 
+        n_samples = (1 if self.input_dim > 1 else len(inputs)) if inputs.ndim == 1 else len(inputs)
+        label_n_objs = self.n_objs
+        if model_idx is not None:
+            label_n_objs = self.n_objs_per_model[model_idx]
+        elif obj_idx is not None:
+            label_n_objs = self.n_objs_per_model[obj_idx]
+        obj_labels, default_obj_idx = prepare_objective_labels(
+            obj_labels, n_samples, label_n_objs, getattr(self, 'validate_obj_labels', None))
+
+        if inputs.ndim == 1:
+            inputs = inputs.reshape(n_samples, self.input_dim)
         inputs = self._mapping_input(inputs)
         num_inputs, cat_inputs = preprocess_features(inputs)
 
         if model_idx is not None:
             assert not isinstance(grads, list), "When model_idx is specified, grads should not be a list"
+            model_n_objs = self.n_objs_per_model[model_idx] if hasattr(self, 'n_objs_per_model') else self.n_objs
+            grads = grads.reshape((model_n_objs, n_samples, self.output_dim[model_idx]))  # type: ignore
+
             self._memory = []
             self._cpp_models[model_idx].step(obs=self.transform_data(num_inputs),
                                              categorical_obs=cat_inputs,
                                              grads=self.transform_data(grads),  # type: ignore
-                                             )
+                                             obj_labels=self.transform_data(obj_labels),
+                                             default_obj_idx=default_obj_idx)
 
             self._memory = []
             self.iteration[model_idx] = self._cpp_models[model_idx].get_iteration()
         else:
+
+            assert isinstance(grads, (list, tuple)) and len(grads) == self.n_learners, \
+                    "When model_idx is not specified, grads must be a list or tuple with length equal to n_learners"
             self._memory = []
             for i in range(self.n_learners):
+                model_n_objs = self.n_objs_per_model[i] if hasattr(self, 'n_objs_per_model') else self.n_objs
+                if i == obj_idx or (obj_idx is None and i == 0):
+                    model_labels = obj_labels
+                    model_grads = grads[i].reshape((model_n_objs, n_samples, self.output_dim[i]))  # type: ignore
+                else:
+                    model_labels = None
+                    model_grads = grads[i].reshape((model_n_objs, n_samples, self.output_dim[i]))
+
                 self._cpp_models[i].step(obs=self.transform_data(num_inputs),
                                          categorical_obs=cat_inputs,
-                                         grads=self.transform_data(grads[i]),  # type: ignore
-                                         )
+                                         grads=self.transform_data(model_grads),  # type: ignore
+                                         obj_labels=self.transform_data(model_labels),
+                                         default_obj_idx=default_obj_idx if i == obj_idx or (obj_idx is None and i == 0) else 0)
 
                 self._memory = []
 
@@ -314,7 +365,7 @@ class MultiGBTLearner(BaseLearner):
             Union[float, List[float]]: The final loss value.
         """
 
-        assert model_idx is not None or (isinstance(targets, list) and
+        assert model_idx is not None or (isinstance(targets, (list, tuple)) and
                                          len(targets) == self.n_learners)
         assert self._cpp_models is not None, "Model not initialized."
         if isinstance(inputs, th.Tensor):
@@ -331,10 +382,10 @@ class MultiGBTLearner(BaseLearner):
         # call can throw after adding some of the requested trees (a rejected
         # monotonic projection, for instance).
         if model_idx is not None:
-            assert not isinstance(targets, list), \
-                "when model_idx is specified, targets should not be a list"
+            assert not isinstance(targets, (list, tuple)), \
+                "when model_idx is specified, targets should not be a list or tuple"
             targets = to_numpy(targets)
-            if isinstance(self.output_dim, list):
+            if isinstance(self.output_dim, (list, tuple)):
                 output_dim_idx = self.output_dim[model_idx]
             else:
                 output_dim_idx = self.output_dim
@@ -351,7 +402,7 @@ class MultiGBTLearner(BaseLearner):
                 self.total_iterations += self.iteration[model_idx] - iters_before
             return loss
 
-        assert isinstance(targets, list) and len(targets) == self.n_learners, \
+        assert isinstance(targets, (list, tuple)) and len(targets) == self.n_learners, \
             "when model_idx is not specified, targets should be a list with length equal to n_learners"
         losses = []
         # One shared count for all sub-models, which train the same number of
@@ -359,14 +410,16 @@ class MultiGBTLearner(BaseLearner):
         iters_before = self._cpp_models[0].get_iteration()
         try:
             for i in range(self.n_learners):
-                targets[i] = to_numpy(targets[i])
-                if isinstance(self.output_dim, list):
+                # Local copy: targets may be a tuple, and the caller's list must
+                # not be modified.
+                target_i = to_numpy(targets[i])
+                if isinstance(self.output_dim, (list, tuple)):
                     output_dim_i = self.output_dim[i]
                 else:
                     output_dim_i = self.output_dim
-                targets[i] = targets[i].reshape((len(targets[i]), output_dim_i))
+                target_i = target_i.reshape((len(target_i), output_dim_i))
                 loss = self._cpp_models[i].fit(num_inputs, cat_inputs,
-                                               targets[i],
+                                               target_i,
                                                iterations, shuffle, loss_type)
                 self.iteration[i] = self._cpp_models[i].get_iteration()
                 losses.append(loss)
@@ -414,7 +467,9 @@ class MultiGBTLearner(BaseLearner):
 
         print(f"Saved {self.n_learners} models with metadata to {meta_filename}")
 
-    def export(self, filename: str, modelname: Optional[str] = None) -> None:
+    def export(self, filename: str, modelname: Optional[str] = None,
+                export_format: str = 'float', export_type: str = 'full',
+                prefix: str = '') -> None:
         """
         Exports the model to a C header file.
 
@@ -422,6 +477,9 @@ class MultiGBTLearner(BaseLearner):
             filename (str): The filename to export the model to.
             modelname (str, optional): The name of the model in the C code.
             Defaults to None.
+            export_format (str, optional): Format for exported values ('float', 'fxp8', etc.). Defaults to 'float'.
+            export_type (str, optional): Export type ('full', 'compact'). Defaults to 'full'.
+            prefix (str, optional): Prefix for exported symbols. Defaults to ''.
         """
         assert self._cpp_models is not None, "Model not initialized."
         if self.student_models is not None:
@@ -436,11 +494,9 @@ class MultiGBTLearner(BaseLearner):
             assert self._cpp_models[i] is not None, "Can't export non-existent model!"
             if modelname is None:
                 modelname = ""
-            try:
-                status = self._cpp_models[i].export(exportname, modelname)
-                assert status == 0, "Failed to export model"
-            except RuntimeError as e:
-                print(f"Caught an exception in GBRL: {e}")
+            # Native rejections (e.g. unsupported compact export) propagate.
+            status = self._cpp_models[i].export(exportname, modelname, export_format, export_type, prefix)
+            assert status == 0, "Failed to export model"
 
     @classmethod
     def load(cls, filename: str, device: str) -> "MultiGBTLearner":
@@ -516,6 +572,8 @@ class MultiGBTLearner(BaseLearner):
             instance.params = {'input_dim': metadata['input_dim'],
                                'output_dim': instance.output_dim,
                                'policy_dim': instance.policy_dim,
+                               'lambda_penalty': metadata['lambda_penalty'],
+                               'n_objs': metadata['n_objs'],
                                'split_score_func':
                                metadata['split_score_func'],
                                'generator_type': metadata['generator_type'],
@@ -529,6 +587,17 @@ class MultiGBTLearner(BaseLearner):
                                }
             # Keep the lists from the loop above, don't overwrite with single values
             instance.input_dim = metadata['input_dim']
+            instance.n_objs = metadata['n_objs']
+            instance.validate_obj_labels = None
+            # load() bypasses __init__, so restore lambda_objs the way it does.
+            # They are serialized, so prefer the saved values; a model written
+            # before the getter existed falls back to the default.
+            saved_lambdas = instance._cpp_models[0].get_lambda_objs()
+            if saved_lambdas is None:
+                instance.lambda_objs = np.ones(instance.n_objs, dtype=numerical_dtype)
+            else:
+                instance.lambda_objs = np.ascontiguousarray(
+                    saved_lambdas, dtype=numerical_dtype)
             instance.verbose = metadata['verbose']
             # params keeps max_depth / n_bins / batch_size / grow_policy /
             # device: reset() rebuilds every C++ model from it.
@@ -539,6 +608,7 @@ class MultiGBTLearner(BaseLearner):
             # for checkpoints written before it was serialized.
             instance.total_iterations = int(
                 file_metadata.get('total_iterations', metadata['iteration']))
+            instance.n_objs_per_model = [m.get_metadata()['n_objs'] for m in instance._cpp_models]
             instance.student_models = None
             instance.feature_weights = instance._cpp_models[0].get_feature_weights()
             instance.feature_mapping = instance._cpp_models[0].get_feature_mapping()
@@ -575,7 +645,7 @@ class MultiGBTLearner(BaseLearner):
         Returns:
             Union[np.ndarray, Tuple[np.ndarray, ...]]: The learning rates.
         """
-        assert self._cpp_models is not None and isinstance(self._cpp_models, list), \
+        assert self._cpp_models is not None and isinstance(self._cpp_models, (list, tuple)), \
             "Model not initialized."
 
         if model_idx is not None:
@@ -592,7 +662,7 @@ class MultiGBTLearner(BaseLearner):
         Returns:
             Union[int, Tuple[int, int]]: The current iteration number.
         """
-        assert self._cpp_models is not None and isinstance(self._cpp_models, list), \
+        assert self._cpp_models is not None and isinstance(self._cpp_models, (list, tuple)), \
             "Model not initialized."
         if model_idx is not None:
             return self._cpp_models[model_idx].get_iteration()
@@ -608,7 +678,7 @@ class MultiGBTLearner(BaseLearner):
         Returns:
             Union[int, Tuple[int, int]]: The total number of trees.
         """
-        assert self._cpp_models is not None and isinstance(self._cpp_models, list), \
+        assert self._cpp_models is not None and isinstance(self._cpp_models, (list, tuple)), \
             "Model not initialized."
 
         if model_idx is not None:
@@ -638,13 +708,13 @@ class MultiGBTLearner(BaseLearner):
         assert self._cpp_models is not None, "Model not initialized."
         try:
             if model_idx is None:
-                assert isinstance(bias, list) and len(bias) == self.n_learners, \
+                assert isinstance(bias, (list, tuple)) and len(bias) == self.n_learners, \
                     "When model_idx is None, bias must be a list with length equal to n_learners"
                 for i in range(self.n_learners):
                     self._cpp_models[i].set_bias(normalize_vector_input(bias[i]))
             else:
-                assert not isinstance(bias, list), \
-                    "When model_idx is specified, bias should not be a list"
+                assert not isinstance(bias, (list, tuple)), \
+                    "When model_idx is specified, bias should not be a list or tuple"
                 self._cpp_models[model_idx].set_bias(normalize_vector_input(bias))
         except RuntimeError as e:
             print(f"Caught an exception in GBRL: {e}")
@@ -729,6 +799,119 @@ class MultiGBTLearner(BaseLearner):
             return tuple(cpp_model.get_device() for cpp_model in self._cpp_models)
         return self._cpp_models[model_idx].get_device()  # type: ignore
 
+    def get_export_data(self, model_idx: Optional[int] = None) -> Union[Dict, Tuple[Dict, ...]]:
+        """Returns the export data for the ensemble(s), suitable for inference.
+
+        Extracts a simplified representation of the trained ensemble that
+        contains only the data needed for inference: split feature indices,
+        split thresholds, optimizer-scaled leaf values, and bias. This is
+        the same data that :meth:`export` writes to a C header file, but
+        returned as a Python dictionary of NumPy arrays.
+
+        .. note::
+            Only numerical features are supported. Models trained with
+            categorical features are not supported by this method.
+
+        Args:
+            model_idx (int, optional): Index of a specific sub-model to
+                query. If ``None``, returns data for all sub-models.
+
+        Returns:
+            Union[Dict, Tuple[Dict, ...]]: Export data dictionary (or tuple
+            of dictionaries when ``model_idx`` is ``None``). See
+            :meth:`~gbrl.learners.gbt_learner.GBTLearner.get_export_data`
+            for the dictionary schema.
+
+        Raises:
+            AssertionError: If the C++ models are not initialized.
+        """
+        assert self._cpp_models is not None, "Model not initialized."
+        if self.student_models is not None:
+            raise ValueError(
+                "get_export_data() is not supported when student models are attached. "
+                "The student models contribute to every prediction but would be "
+                "omitted from the export data.")
+        if model_idx is None:
+            return tuple(cpp_model.get_export_data() for cpp_model in self._cpp_models)  # type: ignore
+        return self._cpp_models[model_idx].get_export_data()  # type: ignore
+
+    def get_tree(self, tree_idx: int,
+                 model_idx: Optional[int] = None) -> Union[Dict, Tuple[Dict, ...]]:
+        """Extract a single tree from the ensemble(s).
+
+        Returns a dictionary (or tuple of dictionaries) containing all arrays
+        that define the structure and predictions of one tree. The dict is
+        suitable for serialization (e.g. via MPI) and can be inserted into
+        another ensemble using :meth:`add_tree`.
+
+        Parameters:
+            tree_idx (int): 0-based index of the tree to extract.
+            model_idx (int, optional): Index of a specific sub-model.
+                If ``None``, extracts the tree from all sub-models.
+
+        Returns:
+            Union[Dict, Tuple[Dict, ...]]: Tree data dictionary (or tuple
+            of dictionaries when ``model_idx`` is ``None``). See
+            :meth:`~gbrl.learners.gbt_learner.GBTLearner.get_tree`
+            for the dictionary schema.
+
+        Raises:
+            AssertionError: If the C++ models are not initialized.
+            RuntimeError: If ``tree_idx`` is out of range.
+        """
+        assert self._cpp_models is not None, "Model not initialized."
+        self._reject_student_tree_access("get_tree()")
+        if model_idx is None:
+            return tuple(cpp_model.get_tree(tree_idx) for cpp_model in self._cpp_models)  # type: ignore
+        return self._cpp_models[model_idx].get_tree(tree_idx)  # type: ignore
+
+    def add_tree(self, tree_dict: Union[Dict, Tuple[Dict, ...]],
+                 model_idx: Optional[int] = None) -> None:
+        """Add a tree to the ensemble(s) from a dictionary.
+
+        Appends the tree described by ``tree_dict`` to the end of the
+        ensemble. This is the counterpart to :meth:`get_tree` for
+        distributed ensemble synchronization (e.g. MPI broadcast).
+
+        Parameters:
+            tree_dict (Union[Dict, Tuple[Dict, ...]]): Tree data dictionary
+                as returned by :meth:`get_tree`. When ``model_idx`` is ``None``,
+                must be a tuple with one dict per sub-model.
+            model_idx (int, optional): Index of a specific sub-model.
+                If ``None``, adds the tree to all sub-models (``tree_dict``
+                must be a tuple).
+
+        Raises:
+            AssertionError: If the C++ models are not initialized.
+            RuntimeError: If the tree data is incompatible.
+
+        .. note::
+            Only CPU ensembles are currently supported for ``add_tree``.
+        """
+        assert self._cpp_models is not None, "Model not initialized."
+        if model_idx is None:
+            assert isinstance(tree_dict, tuple), \
+                "tree_dict must be a tuple when model_idx is None"
+            assert len(tree_dict) == len(self._cpp_models), \
+                "tree_dict tuple length must match number of sub-models"
+            # Check every tree's layout before inserting any, so a mismatch in a
+            # later sub-model cannot leave earlier ones with an extra tree.
+            for cpp_model, td in zip(self._cpp_models, tree_dict):
+                _check_tree_layout(cpp_model, td)
+            for i, (cpp_model, td) in enumerate(zip(self._cpp_models, tree_dict)):
+                self._add_tree_to(i, td)
+        else:
+            self._add_tree_to(model_idx, tree_dict)
+
+    def _add_tree_to(self, model_idx: int, tree_dict: Dict) -> None:
+        """Insert one tree and keep iteration counters in sync with the native model."""
+        cpp_model = self._cpp_models[model_idx]
+        before = cpp_model.get_iteration()
+        cpp_model.add_tree(tree_dict)  # raises before modifying on rejection
+        self.iteration[model_idx] = cpp_model.get_iteration()
+        if model_idx == 0:
+            # total_iterations follows sub-model 0, as in fit().
+            self.total_iterations += self.iteration[0] - before
     def _reject_student_tree_access(self, what: str) -> None:
         """See GBTLearner: get_num_trees() counts main + student, but these only
         see the main ensembles, which distil() resets to zero trees."""
@@ -747,7 +930,7 @@ class MultiGBTLearner(BaseLearner):
             tree_idx (int): The index of the tree to print.
             model_idx (int, optional): The index of the model to print.
         """
-        assert self._cpp_models is not None and isinstance(self._cpp_models, list), \
+        assert self._cpp_models is not None and isinstance(self._cpp_models, (list, tuple)), \
             "Model not initialized."
         self._reject_student_tree_access("print_tree()")
         if model_idx is None:
@@ -765,7 +948,7 @@ class MultiGBTLearner(BaseLearner):
             filename (str): The filename to save the plot to.
             model_idx (int, optional): The index of the model to print.
         """
-        assert self._cpp_models is not None and isinstance(self._cpp_models, list), \
+        assert self._cpp_models is not None and isinstance(self._cpp_models, (list, tuple)), \
             "Model not initialized."
         self._reject_student_tree_access("plot_tree()")
 
@@ -801,7 +984,7 @@ class MultiGBTLearner(BaseLearner):
             If return_base=True, returns (phi, base) where base is (n_samples, output_dim).
             If model_idx is None, returns a list with one entry per sub-model.
         """
-        assert self._cpp_models is not None and isinstance(self._cpp_models, list), \
+        assert self._cpp_models is not None and isinstance(self._cpp_models, (list, tuple)), \
             "Model not initialized."
 
         if self.student_models is not None:
@@ -858,7 +1041,7 @@ class MultiGBTLearner(BaseLearner):
             If return_base=True, returns (phi, base) where base is (n_samples, output_dim).
             If model_idx is None, returns a list with one entry per sub-model.
         """
-        assert self._cpp_models is not None and isinstance(self._cpp_models, list), \
+        assert self._cpp_models is not None and isinstance(self._cpp_models, (list, tuple)), \
             "Model not initialized."
 
         if self.student_models is not None:
@@ -906,7 +1089,7 @@ class MultiGBTLearner(BaseLearner):
             ValueError: If model_idx is given, or if the models end up on
                 different devices.
         """
-        assert self._cpp_models is not None and isinstance(self._cpp_models, list), \
+        assert self._cpp_models is not None and isinstance(self._cpp_models, (list, tuple)), \
             "Model not initialized."
 
         # One shared self.device drives transform_data() for every sub-model and
@@ -994,7 +1177,7 @@ class MultiGBTLearner(BaseLearner):
         Returns:
             Union[NumericalData, List[NumericalData]]: The predicted output.
         """
-        assert self._cpp_models is not None and isinstance(self._cpp_models, list), \
+        assert self._cpp_models is not None and isinstance(self._cpp_models, (list, tuple)), \
             "Model not initialized."
         assert self.n_learners > 0, "No learners in the model."
 
@@ -1109,7 +1292,8 @@ class MultiGBTLearner(BaseLearner):
             student_mapping, student_mask = get_index_mapping(obs)
             student_model.set_feature_mapping(np.ascontiguousarray(student_mapping),
                                               np.ascontiguousarray(student_mask))
-            targets[i] = np.ascontiguousarray(targets[i], dtype=numerical_dtype)
+            # Local copy: targets may be a tuple and belongs to the caller.
+            target_i = np.ascontiguousarray(targets[i], dtype=numerical_dtype)
             # start_idx/stop_idx are required: stop_idx defaults to 0 in the binding
             # and C++ rejects stop_idx <= 0, which would leave the student with no
             # optimizer and make it predict only its bias.
@@ -1122,18 +1306,18 @@ class MultiGBTLearner(BaseLearner):
                     f"Invalid GBRL distillation optimizer configuration "
                     f"for learner {i}: {exc}") from exc
 
-            bias = np.mean(targets[i], axis=0)
+            bias = np.mean(target_i, axis=0)
             # np.mean returns a NumPy scalar (e.g. np.float32) for 1-D targets,
             # not a Python float.
             bias = np.atleast_1d(bias).astype(numerical_dtype, copy=False)
 
             student_model.set_bias(bias.astype(numerical_dtype))
-            tr_loss = student_model.fit(num_obs, cat_obs, targets[i], learner_params['min_steps'])
+            tr_loss = student_model.fit(num_obs, cat_obs, target_i, learner_params['min_steps'])
             while tr_loss > learner_params.get('min_distillation_loss', 0.1):
                 if learner_params['min_steps'] < learner_params['limit_steps']:
                     steps_to_add = min(500, learner_params['limit_steps'] - learner_params['min_steps'])
                     tr_loss = student_model.fit(num_obs, cat_obs,
-                                                targets[i], steps_to_add,
+                                                target_i, steps_to_add,
                                                 shuffle=False)
                     learner_params['min_steps'] += steps_to_add
                 else:
@@ -1354,41 +1538,11 @@ class MultiGBTLearner(BaseLearner):
                 self._cpp_models[i].print_ensemble_metadata()
 
     def __copy__(self):
-        """Creates a copy of the MultiGBTLearner instance."""
-        assert self._cpp_models is not None and isinstance(self._cpp_models, list), \
-            "Model not initialized."
-
-        opts = [opt.copy() if opt is not None else opt
-                for opt in self.optimizers
-                ]
-        copy_ = MultiGBTLearner(input_dim=self.input_dim,
-                                output_dim=self.output_dim,
-                                tree_struct=self.tree_struct.copy(),
-                                optimizers=opts,
-                                params=self.params,
-                                n_learners=self.n_learners,
-                                policy_dim=self.policy_dim,
-                                verbose=self.verbose,
-                                device=self.device)
-        # params does not describe these, so copy_.reset() would otherwise
-        # restore default feature weights.
-        copy_.feature_weights = np.array(self.feature_weights, copy=True)
-        copy_.feature_mapping = self.feature_mapping
-        copy_._feature_mapping_installed = self._feature_mapping_installed
-        # Copy: sharing the list would let training the copy advance the
-        # original's per-learner counters.
-        copy_.iteration = list(self.iteration)
-        copy_.total_iterations = self.total_iterations
-        copy_._consumed_steps = list(self._consumed_steps)
-        if self.student_models is not None:
-            copy_.student_models = [None] * self.n_learners
-
-        if self._cpp_models is not None:
-            copy_._cpp_models = [None] * self.n_learners
-            for i in range(self.n_learners):
-                copy_._cpp_models[i] = GBRL_CPP(self._cpp_models[i])
-                # Guarded separately: the enclosing check is on _cpp_models, and
-                # student_models is None until a distillation has been run.
-                if self.student_models is not None and self.student_models[i] is not None:
-                    copy_.student_models[i] = GBRL_CPP(self.student_models[i])  # type: ignore
-        return copy_
+        """Copy Python state and native ensembles independently."""
+        result = type(self).__new__(type(self))
+        excluded = {'_cpp_models', 'student_models', '_memory'}
+        result.__dict__ = deepcopy({k: v for k, v in self.__dict__.items() if k not in excluded})
+        result._memory = []
+        result._cpp_models = [GBRL_CPP(m) for m in self._cpp_models] if self._cpp_models is not None else None
+        result.student_models = [GBRL_CPP(m) if m is not None else None for m in self.student_models] if self.student_models is not None else None
+        return result

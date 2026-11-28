@@ -21,7 +21,7 @@
 ##############################################################################
 cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 # Set project details
-project(gbrl LANGUAGES C CXX VERSION 1.1.9)
+project(gbrl LANGUAGES C CXX VERSION 1.2.0)
 # Set C++14
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -66,6 +66,7 @@ find_package(Python3 COMPONENTS Interpreter Development.Module REQUIRED)
 #-- Options
 include(CMakeDependentOption)
 option(USE_CUDA  "Build with GPU acceleration" OFF)
+option(USE_GRAPHVIZ  "Build with Graphviz tree-plotting support (adds a runtime dependency on libgvc/libcgraph)" OFF)
 option(COVERAGE  "Run coverage report" OFF)
 option(ASAN  "Use address-santizier" OFF)
 
@@ -87,8 +88,13 @@ if (USE_CUDA AND NOT APPLE)
     if (CUDAToolkit_FOUND)
         set(CUDA_VERSION "${CUDAToolkit_VERSION_MAJOR}${CUDAToolkit_VERSION_MINOR}")
         # Ensure CUDA architectures are set before enabling CUDA language
-        set(CUDA_ARCHS "60" "61" "62" "70" "75")
-        
+        # CUDA 13 dropped support for Maxwell/Pascal/Volta (compute capability < 7.5)
+        if(${CUDA_VERSION} VERSION_GREATER_EQUAL "130")
+            set(CUDA_ARCHS "75")
+        else()
+            set(CUDA_ARCHS "60" "61" "62" "70" "75")
+        endif()
+
         if(${CUDA_VERSION} VERSION_GREATER_EQUAL "110")
             list(APPEND CUDA_ARCHS "80")
         endif()
@@ -102,11 +108,18 @@ if (USE_CUDA AND NOT APPLE)
             list(APPEND CUDA_ARCHS "89")
             list(APPEND CUDA_ARCHS "90")
         endif()
+        if(${CUDA_VERSION} VERSION_GREATER_EQUAL "128")
+            list(APPEND CUDA_ARCHS "100")
+            list(APPEND CUDA_ARCHS "120")
+        endif()
         list(POP_BACK CUDA_ARCHS CUDA_LAST_SUPPORTED_ARCH)
         list(APPEND CUDA_ARCHS "${CUDA_LAST_SUPPORTED_ARCH}-virtual")
         set(CMAKE_CUDA_ARCHITECTURES ${CUDA_ARCHS})
 
-        if(NOT DEFINED CMAKE_CUDA_HOST_COMPILER AND NOT DEFINED ENV{CUDAHOSTCXX})
+        # The Visual Studio generator always uses the C++ compiler VS provides and
+        # warns if a CUDA host compiler is requested, so only skip it there;
+        # other generators (e.g. Ninja with cl) use the selected C++ compiler.
+        if(NOT CMAKE_GENERATOR MATCHES "Visual Studio" AND NOT DEFINED CMAKE_CUDA_HOST_COMPILER AND NOT DEFINED ENV{CUDAHOSTCXX})
             set(CMAKE_CUDA_HOST_COMPILER ${CMAKE_CXX_COMPILER} CACHE FILEPATH
                 "The compiler executable to use when compiling host code for CUDA")
             mark_as_advanced(CMAKE_CUDA_HOST_COMPILER)
@@ -170,15 +183,22 @@ if(NOT pybind11_FOUND)
     find_package(pybind11 CONFIG REQUIRED)
 endif()
 
-find_path(GRAPHVIZ_INCLUDE_DIR         NAMES graphviz/cgraph.h
-          HINTS ${GRAPHVIZ_INCLUDE_DIR})
-find_library(GRAPHVIZ_GVC_LIBRARY      NAMES gvc 
-             HINTS ${GRAPHVIZ_LIBRARY_DIR})
-find_library(GRAPHVIZ_CGRAPH_LIBRARY   NAMES cgraph
-             HINTS ${GRAPHVIZ_LIBRARY_DIR})
-            
-if(GRAPHVIZ_INCLUDE_DIR AND GRAPHVIZ_GVC_LIBRARY AND GRAPHVIZ_CGRAPH_LIBRARY)
-    set(GRAPHVIZ_FOUND TRUE)
+if(USE_GRAPHVIZ)
+    find_path(GRAPHVIZ_INCLUDE_DIR         NAMES graphviz/cgraph.h
+              HINTS ${GRAPHVIZ_INCLUDE_DIR})
+    find_library(GRAPHVIZ_GVC_LIBRARY      NAMES gvc
+                 HINTS ${GRAPHVIZ_LIBRARY_DIR})
+    find_library(GRAPHVIZ_CGRAPH_LIBRARY   NAMES cgraph
+                 HINTS ${GRAPHVIZ_LIBRARY_DIR})
+
+    if(GRAPHVIZ_INCLUDE_DIR AND GRAPHVIZ_GVC_LIBRARY AND GRAPHVIZ_CGRAPH_LIBRARY)
+        set(GRAPHVIZ_FOUND TRUE)
+    else()
+        message(FATAL_ERROR
+            "USE_GRAPHVIZ=ON but the Graphviz development files (graphviz/cgraph.h, "
+            "libgvc, libcgraph) were not found. Install them, point GRAPHVIZ_INCLUDE_DIR/"
+            "GRAPHVIZ_LIBRARY_DIR at them, or build with USE_GRAPHVIZ=OFF.")
+    endif()
 else()
     set(GRAPHVIZ_FOUND FALSE)
 endif()
@@ -258,7 +278,7 @@ endif()
 if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_libraries(gbrl_cpp PRIVATE OpenMP::OpenMP_CXX)
     if (USE_CUDA)
-        target_link_libraries(gbrl_cpp PRIVATE CUDA::cudart)
+        target_link_libraries(gbrl_cpp PRIVATE CUDA::cudart_static)
     endif()
 elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
     find_package(LLVM REQUIRED)
@@ -266,11 +286,23 @@ elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
     link_directories(${LLVM_LIBRARY_DIRS})
     target_link_libraries(gbrl_cpp PRIVATE ${LLVM_LIBRARIES} OpenMP::OpenMP_CXX)
 elseif (WIN32)
-    target_link_libraries(gbrl_cpp PRIVATE OpenMP::OpenMP_CXX)
+    if (MSVC)
+        # Deliberately not linking OpenMP::OpenMP_CXX here: its interface adds
+        # plain /openmp, which conflicts with the /openmp:experimental in
+        # CMAKE_CXX_FLAGS (warning D9025). MSVC auto-links vcomp from the
+        # compile flag, so the runtime is still pulled in.
+    else()
+        target_link_libraries(gbrl_cpp PRIVATE OpenMP::OpenMP_CXX)
+    endif()
     if (USE_CUDA)
         set(cuda_lib_path "${CUDAToolkit_ROOT_DIR}/lib/x64")
         message(STATUS "cuda_lib_path: ${cuda_lib_path}")
-        target_link_libraries(gbrl_cpp PRIVATE CUDA::cudart)
+        target_link_libraries(gbrl_cpp PRIVATE CUDA::cudart_static)
+        if (MSVC)
+            # cudart_static is built against the static CRT; everything else
+            # here uses /MD, so drop its LIBCMT default-lib request (LNK4098).
+            target_link_options(gbrl_cpp PRIVATE /NODEFAULTLIB:LIBCMT)
+        endif()
     endif()
 endif()
 

@@ -38,6 +38,8 @@
 #include <string>
 #include <cstdint>
 #include <iostream>
+#include <climits>
+#include <stdexcept>
 
 /** @brief Macro for stringifying preprocessor arguments */
 #define STRINGIFY(x) #x
@@ -50,6 +52,28 @@
 
 /** @brief Number of trees to add in each batch expansion (25,000) */
 #define TREES_BATCH 25000
+
+/**
+ * @brief Tree/leaf capacity for a requested tree count, kept within int.
+ *
+ * Capacities are leaves = trees * 2^max_depth. They are only preallocation
+ * sizes (storage grows on demand), so when the product would overflow int the
+ * tree count is reduced until it fits; at least one full tree always fits.
+ * Throws if max_depth is outside [0, 30] (a single tree would not fit).
+ */
+inline void bounded_tree_capacity(int requested_trees, int max_depth, int &trees, int &leaves) {
+    if (max_depth < 0 || max_depth > 30)
+        throw std::runtime_error("max_depth must be within [0, 30]");
+    const long long leaves_per_tree = 1LL << max_depth;
+    long long n_trees = requested_trees;
+    const long long max_trees_that_fit = INT_MAX / leaves_per_tree;  // >= 1 for depth <= 30
+    if (n_trees > max_trees_that_fit)
+        n_trees = max_trees_that_fit;
+    if (n_trees < 1)
+        n_trees = 1;
+    trees = static_cast<int>(n_trees);
+    leaves = static_cast<int>(n_trees * leaves_per_tree);
+}
 
 /** @brief Maximum character size for categorical values */
 #define MAX_CHAR_SIZE 128
@@ -89,10 +113,12 @@ class Optimizer;
  * go to the left or right child of a tree node.
  */
 struct splitCondition {
+    // Scalar types first (optimal memory alignment)
     int feature_idx;                /**< Index of the feature used for splitting */
     float feature_value;            /**< Threshold value for numerical features */
-    bool inequality_direction;      /**< Direction of inequality (< or >=) */
     float edge_weight;              /**< Weight associated with this split edge */
+    bool inequality_direction;      /**< Direction of inequality (< or >=) */
+    // Pointer last
     char *categorical_value;        /**< Value for categorical feature comparison */
 };
 /**
@@ -114,9 +140,11 @@ struct splitCandidate {
  * determine promising split candidates.
  */
 struct categoryInfo {
+    // Scalar types first (optimal memory alignment)
     float total_grad_norm;          /**< Sum of gradient norms for this category */
     int cat_count;                  /**< Number of samples in this category */
     int feature_idx;                /**< Index of the categorical feature */
+    // Complex types last
     std::string feature_name;       /**< Name/value of the category */
 };
 
@@ -207,18 +235,22 @@ enum growPolicy : uint8_t {
  * @brief Configuration parameters for an optimizer
  * 
  * Contains all settings needed to configure and restore an optimizer's state.
+ * Members ordered for optimal memory alignment: ints/floats first, then complex types.
  */
 struct optimizerConfig {
-    std::string algo;               /**< Algorithm name (SGD, Adam, etc.) */
-    std::string scheduler_func;     /**< Learning rate scheduler type */
-    float init_lr;                  /**< Initial learning rate */
-    float stop_lr;                  /**< Final learning rate (for decay) */
+    // Integer types first
     int start_idx;                  /**< Starting tree index for optimization */
     int stop_idx;                   /**< Stopping tree index for optimization */
     int T;                          /**< Total number of optimization steps */
+    // Float types
+    float init_lr;                  /**< Initial learning rate */
+    float stop_lr;                  /**< Final learning rate (for decay) */
     float beta_1;                   /**< First moment decay rate (Adam) */
     float beta_2;                   /**< Second moment decay rate (Adam) */
     float eps;                      /**< Numerical stability epsilon (Adam) */
+    // Complex types last
+    std::string algo;               /**< Algorithm name (SGD, Adam, etc.) */
+    std::string scheduler_func;     /**< Learning rate scheduler type */
 };
 
 /** @brief Alias for vector of floats */
@@ -235,31 +267,37 @@ using BoolVector = std::vector<bool>;
  * 
  * Contains all structural and hyperparameter information about the
  * gradient boosted tree ensemble.
+ * Members ordered for optimal memory alignment: ints/floats first, then bools/enums.
  */
 struct ensembleMetaData {
-    int n_leaves;                   /**< Current number of leaves in ensemble */
-    int n_trees;                    /**< Current number of trees in ensemble */
-    int max_trees;                  /**< Maximum capacity for trees */
-    int max_leaves;                 /**< Maximum capacity for leaves */
-    int max_trees_batch;            /**< Max trees to add in one batch */
-    int max_leaves_batch;           /**< Max leaves to add in one batch */
-    int input_dim;                  /**< Number of input features (numerical) */
-    int output_dim;                 /**< Dimension of output/target space */
-    int policy_dim;                 /**< Dimension of policy output (for RL) */
-    int max_depth;                  /**< Maximum depth of individual trees */
-    int min_data_in_leaf;           /**< Minimum samples required per leaf */
-    int n_bins;                     /**< Number of bins for split candidates */
-    int par_th;                     /**< Parallelization threshold */
-    float cv_beta;                  /**< Control variates beta parameter */
-    int verbose;                    /**< Verbosity level for logging */
-    int batch_size;                 /**< Training batch size */
-    bool use_cv;                    /**< Whether to use control variates */
-    scoreFunc split_score_func;     /**< Function for scoring splits */
-    generatorType generator_type;   /**< Method for generating candidates */
-    growPolicy grow_policy;         /**< Tree growing strategy */
-    int n_num_features;             /**< Number of numerical features */
-    int n_cat_features;             /**< Number of categorical features */
-    int iteration;                  /**< Current training iteration */
+    // Integer types first
+    int n_leaves;
+    int n_trees;
+    int max_trees;
+    int max_leaves;
+    int max_trees_batch;
+    int max_leaves_batch;
+    int input_dim;
+    int output_dim;
+    int policy_dim;
+    int max_depth;
+    int min_data_in_leaf;
+    int n_bins;
+    int par_th;
+    int n_objs;
+    int verbose;
+    int batch_size;
+    int n_num_features;
+    int n_cat_features;
+    int iteration;
+    // Float types
+    float cv_beta;
+    float lambda_penalty;
+    // Smaller types last (bool, enums)
+    bool use_cv;
+    scoreFunc split_score_func;
+    generatorType generator_type;
+    growPolicy grow_policy;
     int n_mono_constraints;        /**< Number of monotonic constraints */
 };
 
@@ -284,11 +322,13 @@ struct dataHolder {
  * categorical features, and gradients.
  */
 struct dataSet {
-    dataHolder<const float> *obs;           /**< Numerical observations */
-    dataHolder<const char> *categorical_obs; /**< Categorical observations */
-    dataHolder<float> *grads;               /**< Gradient values */
-    dataHolder<float> *build_grads;         /**< Gradients for tree building */
-    int n_samples;                          /**< Number of data samples */
+    dataHolder<const float> *obs;
+    dataHolder<const char> *categorical_obs;
+    dataHolder<float> *grads;
+    dataHolder<float> *build_grads;
+    dataHolder<const float> *obj_labels;
+    int n_samples;
+    int default_obj_idx = 0;  // Default objective index when obj_labels is nullptr; 0 = reward signal.
 };
 
 struct monotonicConstraints {
@@ -324,14 +364,21 @@ struct featureData {
     char* categorical_values;       /**< Values for categorical splits */
 };
 
+struct multiObjectiveData {
+    float* densities;               /**< Densities per leaf for multi-objective optimization */
+    float* lambda_objs;             /**< Lambda values for multi-objective optimization */
+};
+
 /**
- * @brief Data storage for the entire ensemble of trees
+ * @brief Ensemble tree and leaf data arrays
  * 
- * Contains all parameter arrays and tree structure information for
- * the gradient boosted ensemble. Memory layout optimized for both
- * CPU and GPU access patterns.
+ * Contains all arrays for storing tree structure and predictions.
+ * Members ordered for optimal GPU memory alignment: size_t first, then all pointers.
  */
 struct ensembleData {
+    // Scalar types first
+    size_t alloc_data_size;         /**< Total allocated memory size */
+    // Pointers last
     float *bias;                    /**< Global bias terms for each output */
 #ifdef DEBUG
     int *n_samples;                 /**< Sample counts per leaf (debug only) */
@@ -342,8 +389,8 @@ struct ensembleData {
     // Monotonic Constraints
     struct monotonicConstraints *mono_constraints;  /**< Monotonic constraints information */
     struct featureMapping *feature_mappings;       /**< Feature mapping information */
-
-    size_t alloc_data_size;                         /**< Total allocated memory size */
+    // Multi-objective optimization data
+    struct multiObjectiveData *multi_objective_data; /**< Multi-objective optimization data */
 };
 
 /**
@@ -351,13 +398,14 @@ struct ensembleData {
  * 
  * Ensures compatibility when loading saved models by storing
  * version information.
+ * Members ordered for optimal memory alignment: largest types first.
  */
 struct serializationHeader {
+    uint64_t reserved1 = 0;         /**< Reserved for future use */
+    uint32_t reserved2 = 0;         /**< Reserved for future use */
     uint16_t major_version;         /**< Major version number */
     uint16_t minor_version;         /**< Minor version number */
     uint16_t patch_version;         /**< Patch version number */
-    uint64_t reserved1 = 0;         /**< Reserved for future use */
-    uint32_t reserved2 = 0;         /**< Reserved for future use */
 };
 
 /**
@@ -365,21 +413,31 @@ struct serializationHeader {
  * 
  * Tracks relationships between parent and child nodes during
  * tree traversal and construction.
+ * Members ordered for optimal memory alignment: ints first, then bools.
  */
 struct nodeInfo {
+    // Integer types first
     int idx;                        /**< Relative index within current tree */
     int parent_idx;                 /**< Relative index of parent node */
     int depth;                      /**< Depth level in tree (root = 0) */
+    // Smaller types last
     bool is_left;                   /**< True if this is a left child */
     bool is_right;                  /**< True if this is a right child */
 };
 
+/**
+ * @brief Matrix representation of the ensemble for a given input
+ * 
+ * Encodes the ensemble as a linear system A * V where A is a binary
+ * activation matrix indicating which leaves are active per sample,
+ * and V contains the corresponding leaf values.
+ */
 struct matrixRepresentation {
-    bool *A;
-    float *V;
-    int n_leaves;
-    int n_trees;
-    int *n_leaves_per_tree;
+    bool *A;                  /**< Binary activation matrix [n_samples x (n_leaves + 1)] */
+    float *V;                 /**< Leaf value matrix [(n_leaves + 1) x output_dim] */
+    int n_leaves;             /**< Total number of leaves */
+    int n_trees;              /**< Total number of trees */
+    int *n_leaves_per_tree;   /**< Number of leaves in each tree [n_trees] */
 };
 
 // ============================================================================
@@ -471,8 +529,8 @@ std::string schedulerTypeToString(schedulerFunc func);
 ensembleMetaData* ensemble_metadata_alloc(
     int max_trees, int max_leaves, int max_trees_batch, int max_leaves_batch,
     int input_dim, int output_dim, int policy_dim, int max_depth,
-    int min_data_in_leaf, int n_bins, int par_th, float cv_beta,
-    int verbose, int batch_size, bool use_cv, scoreFunc split_score_func,
+    int min_data_in_leaf, int n_bins, int par_th, float cv_beta, float lambda_penalty,
+    int verbose, int n_objs, int batch_size, bool use_cv, scoreFunc split_score_func,
     generatorType generator_type, growPolicy grow_policy, int n_mono_constraints
 );
 
@@ -521,6 +579,16 @@ ensembleData* copy_ensemble_data(ensembleData *other_edata, ensembleMetaData *me
  * @return Pointer to newly allocated compressed ensemble data
  */
 ensembleData* copy_compressed_ensemble_data(ensembleData *other_edata, ensembleMetaData *metadata, const int *leaf_indices, const int *tree_indices, const int n_compressed_leaves, const int n_compressed_trees, const int *new_tree_indices);
+
+/**
+ * @brief Deallocate all memory associated with ensemble data
+ * 
+ * Frees all sub-structures (ensemble_info, leaf_data, feature_data,
+ * feature_mappings, mono_constraints, multi_objective_data) and their
+ * internal arrays, then frees the ensembleData struct itself.
+ * 
+ * @param edata Ensemble data to deallocate (must not be nullptr)
+ */
 void ensemble_data_dealloc(ensembleData *edata);
 
 /**

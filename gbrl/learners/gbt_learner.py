@@ -28,6 +28,7 @@ SHAP computation, and model serialization.
 """
 import os
 import warnings
+from copy import deepcopy
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
@@ -35,7 +36,7 @@ import torch as th
 
 from gbrl import GBRL_CPP
 from gbrl.common.compression import ParametricActorCompression, TreeCompression
-from gbrl.common.utils import (NumericalData, concatenate_arrays,
+from gbrl.common.utils import (prepare_objective_labels, NumericalData, concatenate_arrays,
                                ensure_leaf_tensor_or_array, get_poly_vectors,
                                is_valid_feature_mapping,
                                normalize_vector_input, numerical_dtype,
@@ -109,6 +110,21 @@ class GBTLearner(BaseLearner):
         self._feature_mapping_installed = False
         self.learner_name = name
 
+        # Validate: Linear LR scheduler is not supported with greedy trees on GPU
+        grow_policy = tree_struct.get('grow_policy', 'greedy').lower()
+        # self.device is normalized by BaseLearner, so the 'gpu' alias is caught too.
+        if self.device == 'cuda' and grow_policy != 'oblivious':
+            for opt in self.optimizers:
+                sched = opt.get('scheduler', 'Const')
+                init_lr = opt.get('init_lr', opt.get('lr', 1.0))
+                is_linear = (isinstance(sched, str) and sched.lower() == 'linear') or \
+                            (isinstance(init_lr, str) and 'lin_' in init_lr)
+                if is_linear:
+                    raise ValueError(
+                        f"Linear LR scheduler is not supported with grow_policy='{grow_policy}' on GPU. "
+                        "Use scheduler='Const' or switch to grow_policy='oblivious'."
+                    )
+
     def reset(self) -> None:
         """
         Resets the learner to its initial state,
@@ -146,6 +162,7 @@ class GBTLearner(BaseLearner):
         # Publish only after every optimizer is set, so a failure keeps the old model.
         cpp_model = GBRL_CPP(**self.params, learner_name=self.learner_name, n_mono_constraints=n_mono_constraints)
         cpp_model.set_feature_weights(self.feature_weights)
+        cpp_model.set_lambda_objs(self.lambda_objs)
 
         # Set monotonic constraint data if provided
         if mono_data is not None:
@@ -229,6 +246,7 @@ class GBTLearner(BaseLearner):
     def step(self,
              inputs: NumericalData,
              grads: Union[NumericalData, Tuple[NumericalData, ...]],
+             obj_labels: Optional[NumericalData] = None,
              ) -> None:
         """
         Performs a single gradient update step by adding a decision tree to the ensemble.
@@ -236,6 +254,7 @@ class GBTLearner(BaseLearner):
         Args:
             inputs (NumericalData): Input features (NumPy array or PyTorch tensor).
             grads (NumericalData or Tuple[NumericalData, ...]): Gradients for the update step.
+            obj_labels (Optional[NumericalData]): Optional objective label vector.
 
         Returns:
             None
@@ -243,19 +262,23 @@ class GBTLearner(BaseLearner):
         assert self._cpp_model is not None, "Model not initialized!"
         assert isinstance(grads, (list, tuple, np.ndarray, th.Tensor)), \
             "Invalid gradients type"
-
         super().step(inputs)
         if not self._feature_mapping_installed:
             self._ensure_feature_mapping(inputs)
             self._feature_mapping_installed = True
 
+        n_samples = (1 if self.input_dim > 1 else len(inputs)) if inputs.ndim == 1 else len(inputs)
+        label_n_objs = self.n_objs
+        obj_labels, default_obj_idx = prepare_objective_labels(
+            obj_labels, n_samples, label_n_objs, getattr(self, 'validate_obj_labels', None))
+
         if isinstance(grads, tuple):
-            grads = concatenate_arrays(grads)
+            grads = concatenate_arrays(grads, axis=-1)
 
         if inputs.ndim == 1:
             inputs = inputs.reshape((1, self.input_dim)) if self.input_dim > 1 else inputs.reshape((len(inputs), 1))   # type: ignore
 
-        grads = grads.reshape((len(inputs), self.output_dim))  # type: ignore
+        grads = grads.reshape((self.n_objs, len(inputs), self.output_dim))  # type: ignore
         inputs = self._mapping_input(inputs)
         num_inputs, cat_inputs = preprocess_features(inputs)
 
@@ -263,7 +286,8 @@ class GBTLearner(BaseLearner):
         self._cpp_model.step(obs=self.transform_data(num_inputs),
                              categorical_obs=cat_inputs,
                              grads=self.transform_data(grads),  # type: ignore
-                             )
+                             obj_labels=self.transform_data(obj_labels),
+                             default_obj_idx=default_obj_idx)
 
         self._memory = []
 
@@ -340,13 +364,18 @@ class GBTLearner(BaseLearner):
         status = self._cpp_model.save(filename)
         assert status == 0, "Failed to save model"
 
-    def export(self, filename: str, modelname: Optional[str] = None) -> None:
+    def export(self, filename: str, modelname: Optional[str] = None,
+                export_format: str = 'float', export_type: str = 'full',
+                prefix: str = '') -> None:
         """
         Exports the model to a C header file.
 
         Args:
             filename (str): The filename to export the model to.
             modelname (str, optional): The name of the model in the C code. Defaults to None.
+            export_format (str, optional): Format for exported values ('float', 'fxp8', etc.). Defaults to 'float'.
+            export_type (str, optional): Export type ('full', 'compact'). Defaults to 'full'.
+            prefix (str, optional): Prefix for exported symbols. Defaults to ''.
         """
         filename = filename.rstrip('.')
         filename += '.h'
@@ -358,11 +387,8 @@ class GBTLearner(BaseLearner):
                 "from the export.")
         if modelname is None:
             modelname = ""
-        try:
-            status = self._cpp_model.export(filename, modelname)
-            assert status == 0, "Failed to export model"
-        except RuntimeError as e:
-            print(f"Caught an exception in GBRL: {e}")
+        status = self._cpp_model.export(filename, modelname, export_format, export_type, prefix)
+        assert status == 0, "Failed to export model"
 
     @classmethod
     def load(cls, filename: str, device: str) -> "GBTLearner":
@@ -411,11 +437,24 @@ class GBTLearner(BaseLearner):
                                'use_control_variates':
                                metadata['use_control_variates'],
                                'verbose': metadata['verbose'],
+                               'lambda_penalty': metadata['lambda_penalty'],
+                               'n_objs': metadata['n_objs'],
                                'device': instance._cpp_model.get_device(),
                                **instance.tree_struct
                                }
             instance.output_dim = metadata['output_dim']
             instance.input_dim = metadata['input_dim']
+            instance.n_objs = metadata['n_objs']
+            instance.validate_obj_labels = None
+            # load() bypasses __init__, so restore lambda_objs the way it does.
+            # They are serialized, so prefer the saved values; a model written
+            # before the getter existed falls back to the default.
+            saved_lambdas = instance._cpp_model.get_lambda_objs()
+            if saved_lambdas is None:
+                instance.lambda_objs = np.ones(instance.n_objs, dtype=numerical_dtype)
+            else:
+                instance.lambda_objs = np.ascontiguousarray(
+                    saved_lambdas, dtype=numerical_dtype)
             instance.policy_dim = metadata['policy_dim']
             instance.verbose = metadata['verbose']
             instance.optimizers = instance._cpp_model.get_optimizers()
@@ -572,6 +611,126 @@ class GBTLearner(BaseLearner):
             str: The device.
         """
         return self._cpp_model.get_device()
+
+    def get_export_data(self) -> Dict[str, Any]:
+        """Returns the export data for the ensemble, suitable for inference.
+
+        Extracts a simplified representation of the trained ensemble that
+        contains only the data needed for inference: split feature indices,
+        split thresholds, optimizer-scaled leaf values, and bias. This is
+        the same data that :meth:`export` writes to a C header file, but
+        returned as a Python dictionary of NumPy arrays.
+
+        .. note::
+            Only numerical oblivious ensembles with SGD optimizers are supported.
+            Active splits are packed per tree; training padding is omitted.
+
+        Returns:
+            Dict[str, Any]: Dictionary with the following keys:
+
+            - ``n_trees`` (int): Number of trees in the ensemble.
+            - ``n_leaves`` (int): Total number of leaves across all trees.
+            - ``input_dim`` (int): Number of input features.
+            - ``output_dim`` (int): Dimensionality of output predictions.
+            - ``max_depth`` (int): Maximum depth of any tree.
+            - ``num_features`` (int): Number of numerical features.
+            - ``binary_features`` (int): Total binary split nodes (sum of tree depths).
+            - ``tree_depths`` (np.ndarray): Active depth per tree ``(n_trees,)``.
+            - ``tree_leaf_counts`` (np.ndarray): Leaf count per tree ``(n_trees,)``.
+            - ``bias`` (np.ndarray): Model bias, shape ``(output_dim,)``.
+            - ``feature_indices`` (np.ndarray): Split feature index per node,
+              shape ``(binary_features,)``.
+            - ``feature_values`` (np.ndarray): Split threshold per node,
+              shape ``(binary_features,)``.
+            - ``leaf_values`` (np.ndarray): Optimizer-scaled leaf predictions,
+              shape ``(n_leaves, output_dim)``.
+
+        Raises:
+            AssertionError: If the C++ model is not initialized.
+        """
+        assert self._cpp_model is not None, "Model not initialized!"
+        if self.student_model is not None:
+            raise ValueError(
+                "get_export_data() is not supported when a student model is attached. "
+                "The student contributes to every prediction but would be omitted "
+                "from the export data.")
+        return self._cpp_model.get_export_data()
+
+    def get_tree(self, tree_idx: int) -> Dict[str, Any]:
+        """Extract a single tree from the ensemble.
+
+        Returns a dictionary containing all arrays that define the structure
+        and predictions of one tree. The dict is suitable for serialization
+        (e.g. via MPI, pickle, or JSON) and can be inserted into another
+        ensemble using :meth:`add_tree`.
+
+        For **OBLIVIOUS** trees ``split_count=1`` (one shared set of splits).
+        For **GREEDY** trees ``split_count=n_leaves`` (per-leaf split paths).
+
+        Parameters:
+            tree_idx (int): 0-based index of the tree to extract.
+
+        Returns:
+            Dict[str, Any]: Dictionary with scalar metadata and NumPy arrays:
+
+            - ``n_leaves`` (int): Number of leaves in the tree.
+            - ``tree_depth`` (int): Depth of the tree.
+            - ``output_dim`` (int): Dimensionality of leaf values.
+            - ``max_depth`` (int): Ensemble max depth parameter.
+            - ``n_objs`` (int): Number of multi-objective objectives.
+            - ``split_count`` (int): Number of split-indexed entries.
+            - ``is_oblivious`` (bool): Whether the tree uses oblivious grow policy.
+            - ``depths`` (np.ndarray): Depth(s), shape ``(1,)`` or ``(n_leaves,)``.
+            - ``values`` (np.ndarray): Leaf predictions, shape ``(n_leaves, output_dim)``.
+            - ``edge_weights`` (np.ndarray): Edge weights, shape ``(n_leaves, max_depth)``.
+            - ``feature_indices`` (np.ndarray): Split feature indices,
+              shape ``(split_count, max_depth)``.
+            - ``feature_values`` (np.ndarray): Split thresholds,
+              shape ``(split_count, max_depth)``.
+            - ``is_numerics`` (np.ndarray): Numeric flags,
+              shape ``(split_count, max_depth)``.
+            - ``inequality_directions`` (np.ndarray): Inequality directions,
+              shape ``(n_leaves, max_depth)``.
+            - ``categorical_values`` (np.ndarray): Categorical split values (flat char array).
+            - ``densities`` (np.ndarray): Multi-objective densities,
+              shape ``(n_leaves, n_objs)``.
+
+        Raises:
+            AssertionError: If the C++ model is not initialized.
+            RuntimeError: If ``tree_idx`` is out of range.
+        """
+        assert self._cpp_model is not None, "Model not initialized!"
+        self._reject_student_tree_access("get_tree()")
+        return self._cpp_model.get_tree(tree_idx)
+
+    def add_tree(self, tree_dict: Dict[str, Any]) -> None:
+        """Add a tree to the ensemble from a dictionary.
+
+        Appends the tree described by ``tree_dict`` to the end of the
+        ensemble. This is the counterpart to :meth:`get_tree` for
+        distributed ensemble synchronization (e.g. MPI broadcast).
+
+        The tree dict must have the same ``output_dim``, ``max_depth``,
+        and ``is_oblivious`` as the target ensemble.
+
+        Parameters:
+            tree_dict (Dict[str, Any]): Dictionary as returned by
+                :meth:`get_tree`.
+
+        Raises:
+            AssertionError: If the C++ model is not initialized.
+            RuntimeError: If the tree data is incompatible with the ensemble.
+
+        .. note::
+            Initialize the destination feature layout with ``predict`` on
+            representative inputs before inserting trees. Validation runs once
+            per insertion on either backend.
+        """
+        assert self._cpp_model is not None, "Model not initialized!"
+        before = self._cpp_model.get_iteration()
+        self._cpp_model.add_tree(tree_dict)  # raises before modifying on rejection
+        self.iteration = self._cpp_model.get_iteration()
+        self.total_iterations += self.iteration - before
 
     def _reject_student_tree_access(self, what: str) -> None:
         """get_num_trees() counts main + student, but these only see the main model.
@@ -831,6 +990,60 @@ class GBTLearner(BaseLearner):
 
         preds = ensure_leaf_tensor_or_array(preds, tensor, requires_grad, self.device)
         return preds
+
+    def predict_densities(self,
+                          inputs: NumericalData,
+                          start_idx: Optional[int] = None,
+                          stop_idx: Optional[int] = None,
+                          tensor: bool = False) -> NumericalData:
+        """
+        Predicts the per-objective density distribution for the given features.
+
+        For each sample, the per-objective density vector of every leaf it lands
+        in is accumulated and then divided by the number of traversed trees.
+        For a nonempty tree range, every output row sums to 1
+        and can be read as a distribution over objectives / label classes.
+        Empty ensembles and empty ranges return zeros.
+
+        Unlike :meth:`predict`, no bias, learning rate, or optimizer is applied,
+        and the student model is not included.
+
+        Args:
+            inputs (NumericalData): Input features.
+            start_idx (int, optional): Start tree index. Defaults to 0.
+            stop_idx (int, optional): Stop tree index. Defaults to None (all trees).
+            tensor (bool, optional): Whether to return a tensor. Defaults to False.
+
+        Returns:
+            NumericalData: Densities of shape (n_samples, n_objs).
+        """
+        assert self._cpp_model is not None, "No model loaded!"
+        start_idx = 0 if start_idx is None else start_idx
+        stop_idx = 0 if stop_idx is None else stop_idx
+        n_trees = self._cpp_model.get_num_trees()
+        end_idx = n_trees if stop_idx == 0 else stop_idx
+        if (not isinstance(start_idx, (int, np.integer)) or
+                not isinstance(stop_idx, (int, np.integer)) or
+                not 0 <= start_idx <= end_idx <= n_trees):
+            raise ValueError("Invalid density prediction tree range")
+
+        inputs = self._mapping_input(inputs)
+        num_inputs, cat_inputs = preprocess_features(inputs)
+
+        self._memory = []
+        densities = self._cpp_model.predict_densities(
+            obs=self.transform_data(num_inputs),
+            categorical_obs=cat_inputs,
+            start_tree_idx=start_idx,
+            stop_tree_idx=stop_idx)
+        self._memory = []
+
+        if not isinstance(densities, np.ndarray):
+            densities = th.from_dlpack(densities)  # type: ignore
+        # The binding returns 1-D when n_objs == 1; keep (n_samples, n_objs).
+        densities = densities.reshape(-1, self.n_objs)
+
+        return ensure_leaf_tensor_or_array(densities, tensor, False, self.device)
 
     def distil(self,
                obs: np.ndarray,
@@ -1109,31 +1322,11 @@ class GBTLearner(BaseLearner):
         self._cpp_model.print_ensemble_metadata()
 
     def __copy__(self):
-        """Creates a copy of the GBTLearner instance."""
-        opts = [opt.copy() if opt is not None else opt
-                for opt in self.optimizers
-                ]
-
-        copy_ = GBTLearner(input_dim=self.input_dim,  # type: ignore
-                           output_dim=self.output_dim,  # type: ignore
-                           tree_struct=self.tree_struct.copy(),
-                           optimizers=opts,
-                           params=self.params,
-                           policy_dim=self.policy_dim,  # type: ignore
-                           verbose=self.verbose,
-                           device=self.device,
-                           name=self.learner_name)
-        # params does not describe these, so a rebuild from it alone would drop
-        # them and copy_.reset() would produce an unconstrained model.
-        copy_.monotonic_constraints = (dict(self.monotonic_constraints)
-                                       if self.monotonic_constraints else None)
-        copy_.feature_weights = np.array(self.feature_weights, copy=True)
-        copy_.feature_mapping = self.feature_mapping
-        copy_._feature_mapping_installed = self._feature_mapping_installed
-        copy_.iteration = self.iteration
-        copy_.total_iterations = self.total_iterations
-        if self._cpp_model is not None:
-            copy_._cpp_model = GBRL_CPP(self._cpp_model)
-        if self.student_model is not None:
-            copy_.student_model = GBRL_CPP(self.student_model)
-        return copy_
+        """Copy Python state and native ensembles independently."""
+        result = type(self).__new__(type(self))
+        excluded = {'_cpp_model', 'student_model', '_memory'}
+        result.__dict__ = deepcopy({k: v for k, v in self.__dict__.items() if k not in excluded})
+        result._memory = []
+        result._cpp_model = GBRL_CPP(self._cpp_model) if self._cpp_model is not None else None
+        result.student_model = GBRL_CPP(self.student_model) if self.student_model is not None else None
+        return result

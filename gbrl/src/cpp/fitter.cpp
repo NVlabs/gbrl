@@ -51,24 +51,24 @@
 void Fitter::step_cpu(dataSet *dataset, ensembleData *edata, ensembleMetaData *metadata){
     const int output_dim = metadata->output_dim, par_th = metadata->par_th;
     const int n_trees = metadata->n_trees;
+    const int n_objs = metadata->n_objs;
     if (metadata->use_cv && n_trees > 0){
         Fitter::control_variates(dataset, edata, metadata);
     }
 
-    float *build_grads = copy_mat(dataset->grads->data, dataset->n_samples*output_dim, par_th);
+    // Copy all objectives' worth of gradients
+    float *build_grads = copy_mat(dataset->grads->data, dataset->n_samples*output_dim*n_objs, par_th);
     if (metadata->split_score_func == L2){
-        float *mean_grads = calculate_mean(build_grads, dataset->n_samples, output_dim, par_th);
-        float *std = calculate_std_and_center(build_grads, mean_grads, dataset->n_samples, output_dim, par_th);
-        divide_mat_by_vec_inplace(build_grads, std, dataset->n_samples, output_dim, par_th);
-        delete[] mean_grads;
-        delete[] std;
+        // Normalize each objective's gradient block independently
+        for (int k = 0; k < n_objs; ++k) {
+            float *obj_block = build_grads + (size_t)k * dataset->n_samples * output_dim;
+            float *mean_grads = calculate_mean(obj_block, dataset->n_samples, output_dim, par_th);
+            float *std = calculate_std_and_center(obj_block, mean_grads, dataset->n_samples, output_dim, par_th);
+            divide_mat_by_vec_inplace(obj_block, std, dataset->n_samples, output_dim, par_th);
+            delete[] mean_grads;
+            delete[] std;
+        }
     } 
-
-    float *norm_grads = nullptr;
-    if (metadata->n_cat_features > 0){
-        norm_grads = init_zero_mat(dataset->n_samples*metadata->output_dim);
-        calculate_squared_norm(norm_grads, dataset->grads->data, dataset->n_samples, metadata->output_dim, par_th);
-    }
 
     SplitCandidateGenerator generator = SplitCandidateGenerator(dataset->n_samples, metadata->n_num_features, metadata->n_cat_features, metadata->n_bins, metadata->par_th, metadata->generator_type);
     int **indices = nullptr;
@@ -90,7 +90,7 @@ void Fitter::step_cpu(dataSet *dataset, ensembleData *edata, ensembleMetaData *m
         generator.generateNumericalSplitCandidates(dataset->obs->data, indices);
     }
     if (metadata->n_cat_features > 0)
-        generator.processCategoricalCandidates(dataset->categorical_obs->data, norm_grads);
+        generator.processCategoricalCandidates(dataset->categorical_obs->data);
 
     dataHolder<float> build_grads_holder{build_grads, cpu};
     dataset->build_grads = &build_grads_holder; 
@@ -126,8 +126,6 @@ void Fitter::step_cpu(dataSet *dataset, ensembleData *edata, ensembleMetaData *m
                     delete[] indices;
                 }
                 delete[] build_grads;
-                if (norm_grads != nullptr)
-                    delete[] norm_grads;
                 throw;
             }
         }
@@ -140,9 +138,6 @@ void Fitter::step_cpu(dataSet *dataset, ensembleData *edata, ensembleMetaData *m
     }
     
     delete[] build_grads;
-    if (norm_grads != nullptr)
-        delete[] norm_grads;
-
     metadata->iteration++;
 }
 
@@ -156,15 +151,13 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
     bool is_last_batch;
     int batch_preds_size = metadata->batch_size*metadata->output_dim, last_batch_preds_size = (dataset->n_samples % metadata->batch_size)*metadata->output_dim;
     float batch_loss = INFINITY; 
-    float *build_grads, *preds, *grads, *norm_grads;
+    float *build_grads, *preds, *grads;
     float *batch_preds = init_zero_mat(batch_preds_size); // Assuming batch_size is the max batch size
     float *batch_build_grads = init_zero_mat(batch_preds_size); // Assuming batch_size is the max batch size
     float *last_batch_preds = init_zero_mat(last_batch_preds_size); // Assuming batch_size is the max batch size
     float *batch_grads = init_zero_mat(batch_preds_size); // Assuming batch_size is the max batch size
     float *last_batch_grads = init_zero_mat(last_batch_preds_size); // Assuming batch_size is the max batch size
     float *last_batch_build_grads = init_zero_mat(last_batch_preds_size); // Assuming batch_size is the max batch size
-    float *batch_grad_norms = init_zero_mat(metadata->batch_size); // Assuming batch_size is the max batch size
-    float *last_batch_grad_norms = init_zero_mat(dataset->n_samples % metadata->batch_size); // Assuming batch_size is the max batch size
 
     SplitCandidateGenerator generator = SplitCandidateGenerator(dataset->n_samples, metadata->n_num_features, metadata->n_cat_features, metadata->n_bins, metadata->par_th, metadata->generator_type);
     int **indices = nullptr;
@@ -185,20 +178,8 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
         generator.generateNumericalSplitCandidates(dataset->obs->data, indices);
     }
     float *full_preds = nullptr;
-    if (metadata->n_cat_features > 0){
-        full_preds = init_zero_mat(dataset->n_samples*metadata->output_dim);
-        // 0 = every tree currently in the model; `iterations` is a per-call count, not a tree index.
-        Predictor::predict_cpu(dataset, full_preds, edata, metadata, 0, 0, false, opts);
-        float *full_grads = init_zero_mat(dataset->n_samples*metadata->output_dim); 
-        float *full_grad_norms = init_zero_mat(dataset->n_samples); 
-        batch_loss = MultiRMSE::get_loss_and_gradients(full_preds, targets, full_grads, dataset->n_samples, metadata->output_dim, par_th);
-        calculate_squared_norm(full_grad_norms, full_grads, dataset->n_samples, metadata->output_dim, metadata->par_th);
-        generator.processCategoricalCandidates(dataset->categorical_obs->data, full_grad_norms);
-        delete[] full_preds;
-        full_preds = nullptr;
-        delete[] full_grads;
-        delete[] full_grad_norms;
-    }
+    if (metadata->n_cat_features > 0)
+        generator.processCategoricalCandidates(dataset->categorical_obs->data);
     dataSet batch_dataset;
 
     dataHolder<const float> obs_holder{nullptr, cpu};
@@ -209,6 +190,9 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
     batch_dataset.build_grads = &build_grads_holder;
     dataHolder<const char> categorical_obs_holder{nullptr, cpu};
     batch_dataset.categorical_obs = &categorical_obs_holder;
+
+    dataHolder<const float> obj_label_holder{nullptr, cpu};
+    batch_dataset.obj_labels = &obj_label_holder;
 
     for (int i = 0; i < iterations; ++i){
         batch_dataset.obs->data = dataset->obs->data + batch_start_idx*metadata->n_num_features; 
@@ -238,7 +222,6 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
             Fitter::control_variates(&batch_dataset, edata, metadata);
         }
 
-        norm_grads = is_last_batch ? last_batch_grad_norms : batch_grad_norms;
         int size_preds = is_last_batch ? last_batch_preds_size : batch_preds_size;
         build_grads =  is_last_batch ? last_batch_build_grads : batch_build_grads;
         memcpy(build_grads, grads, sizeof(float) * size_preds);
@@ -252,9 +235,7 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
             divide_mat_by_vec_inplace(build_grads, std, batch_dataset.n_samples, metadata->output_dim, metadata->par_th);
             delete[] mean_grads;
             delete[] std;
-        } else {
-            calculate_squared_norm(norm_grads, grads, batch_dataset.n_samples, metadata->output_dim, metadata->par_th);
-        }
+        } 
         batch_dataset.build_grads->data = build_grads;
 
         int added_leaves = 0;
@@ -291,8 +272,6 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
                     delete[] batch_build_grads;
                     delete[] last_batch_grads;
                     delete[] last_batch_build_grads;
-                    delete[] batch_grad_norms;
-                    delete[] last_batch_grad_norms;
                     throw;
                 }
             }
@@ -331,8 +310,6 @@ float Fitter::fit_cpu(dataSet *dataset, const float* targets, ensembleData *edat
     delete[] batch_build_grads;
     delete[] last_batch_grads;
     delete[] last_batch_build_grads;
-    delete[] batch_grad_norms;
-    delete[] last_batch_grad_norms;
     return full_loss;
 }
 
@@ -342,6 +319,8 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
     int depth = 0, node_idx_cntr = 0, chosen_idx = 0;
     float best_score, parent_score = -INFINITY;
     int n_samples = dataset->n_samples;
+    const int n_objs = metadata->n_objs;
+    const bool multi_obj = (n_objs > 1);
 
     int added_leaves = 0;
 
@@ -350,6 +329,15 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
 
     std::vector<TreeNode*> tree_nodes; 
     TreeNode *rootNode = new TreeNode(root_sample_indices, n_samples, metadata->n_num_features, metadata->n_cat_features, metadata->output_dim, depth, 0);
+    
+    // Initialize multi-objective fields on root
+    if (multi_obj) {
+        Fitter::init_node_multi_obj(rootNode,
+            (dataset->obj_labels != nullptr) ? dataset->obj_labels->data : nullptr,
+            dataset->build_grads->data, n_objs, n_samples, metadata->output_dim,
+            dataset->default_obj_idx, metadata->policy_dim);
+    }
+    
     tree_nodes.push_back(rootNode);
 
     int n_candidates = generator.n_candidates;
@@ -363,7 +351,6 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
     std::vector<float> best_scores(n_threads, -INFINITY);
     std::vector<int> best_indices(n_threads, -1);
     FloatVector scores(n_candidates);
-    int batch_size = n_candidates / n_threads;
 
     while (!tree_nodes.empty())  {
         TreeNode *crnt_node = tree_nodes.back(); 
@@ -379,19 +366,40 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
 
         best_score = -INFINITY;
         if (to_split){
-            if (metadata->split_score_func == Cosine){
-                parent_score = scoreCosine(crnt_node->sample_indices, crnt_node->n_samples, dataset->build_grads->data, metadata->output_dim);
-            } else if (metadata->split_score_func == L2){
-                parent_score = scoreL2(crnt_node->sample_indices, crnt_node->n_samples, dataset->build_grads->data, metadata->output_dim);
-            } else{
-                std::cerr << "error invalid split score func!" << std::endl;
-                continue;
+            if (!multi_obj) {
+                if (metadata->split_score_func == Cosine){
+                    parent_score = scoreCosine(crnt_node->sample_indices, crnt_node->n_samples, dataset->build_grads->data, metadata->output_dim);
+                } else if (metadata->split_score_func == L2){
+                    parent_score = scoreL2(crnt_node->sample_indices, crnt_node->n_samples, dataset->build_grads->data, metadata->output_dim);
+                } else{
+                    std::cerr << "error invalid split score func!" << std::endl;
+                    continue;
+                }
+            } else {
+                // Multi-obj: parent score is sum_k density_k * lambda_k * score_k, each
+                // objective block scored like the single-objective parent. This
+                // matches the CUDA greedy path (node->scores[k] reduced with
+                // density * lambda) and reduces to the single-objective case at n_objs=1.
+                parent_score = 0.0f;
+                const float *lambda_objs = edata->multi_objective_data->lambda_objs;
+                const size_t block = (size_t)dataset->n_samples * metadata->output_dim;
+                for (int k = 0; k < n_objs; ++k) {
+                    const float *obj_grads = dataset->build_grads->data + (size_t)k * block;
+                    float score_k = (metadata->split_score_func == Cosine)
+                        ? scoreCosine(crnt_node->sample_indices, crnt_node->n_samples, obj_grads, metadata->output_dim)
+                        : scoreL2(crnt_node->sample_indices, crnt_node->n_samples, obj_grads, metadata->output_dim);
+                    parent_score += score_k * crnt_node->densities[k] * lambda_objs[k];
+                }
             }
 
             if (crnt_node->depth == 0)
                 parent_score = 0.0f;
+            // Threads outside the granted team never write their slot, so clear
+            // stale results from the previous node.
+            std::fill(best_scores.begin(), best_scores.end(), -INFINITY);
+            std::fill(best_indices.begin(), best_indices.end(), -1);
 #ifndef DEBUG
-            #pragma omp parallel
+            #pragma omp parallel num_threads(n_threads)
             {
                 int thread_num = omp_get_thread_num();
 #else
@@ -399,11 +407,28 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
 #endif
                 float local_best_score = -INFINITY;
                 int local_chosen_idx = -1;
-                int start_idx = thread_num * batch_size;
-                int end_idx = (thread_num == n_threads - 1) ? n_candidates : start_idx + batch_size;
+                // Partition by the team actually granted, not omp_get_max_threads():
+                // OpenMP may run the region with fewer threads (e.g. thread limits on
+                // macOS/libomp), and a max-threads split would leave candidates unscored.
+#ifndef DEBUG
+                const int team_size = omp_get_num_threads();
+#else
+                const int team_size = 1;
+#endif
+                const int team_batch = n_candidates / team_size;
+                int start_idx = thread_num * team_batch;
+                int end_idx = (thread_num == team_size - 1) ? n_candidates : start_idx + team_batch;
                 // Process the batch of candidates
                 for (int j = start_idx; j < end_idx; ++j) {
-                    float score = crnt_node->getSplitScore(dataset, metadata->split_score_func, split_candidates[j], metadata->min_data_in_leaf);
+                    float score;
+                    float penalty_factor = 1.0f;
+                    if (multi_obj) {
+                        score = crnt_node->getSplitScoreMultiObj(
+                            dataset, metadata->split_score_func, split_candidates[j], metadata->min_data_in_leaf,
+                            metadata, edata, -1, nullptr, 0, &penalty_factor);
+                    } else {
+                        score = crnt_node->getSplitScore(dataset, metadata->split_score_func, split_candidates[j], metadata->min_data_in_leaf);
+                    }
                     // feature_weights is indexed by ORIGINAL input column, so the
                     // split's type-local index has to go through the reverse
                     // mapping, as the oblivious path does.
@@ -413,10 +438,17 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
                     // Unused reverse slots hold -1; reject rather than read out of bounds.
                     if (global_feature_idx < 0 || global_feature_idx >= metadata->input_dim)
                         continue;
-                    score = score * edata->feature_data->feature_weights[global_feature_idx] - parent_score;
+                    // As on CUDA: net = w * gain - parent, then the conflict penalty
+                    // scales a positive net only (a negative net times 0 would be
+                    // -0.0 and pass the >= 0 test). factor is 1 for single-objective.
+                    score = score * edata->feature_data->feature_weights[global_feature_idx]
+                            - parent_score;
+                    if (score > 0.0f)
+                        score *= penalty_factor;
                     
 #ifdef DEBUG
-                    std::cout << " cand: " <<  j << " score: " <<  score << " parent score: " <<  parent_score << " info: " << split_candidates[j] << std::endl;
+                    if (metadata->verbose > 1)
+                        std::cout << " cand: " <<  j << " score: " <<  score << " parent score: " <<  parent_score << " info: " << split_candidates[j] << std::endl;
 #endif
 
                     if (score > local_best_score) {
@@ -444,6 +476,17 @@ int Fitter::fit_greedy_tree(dataSet *dataset, ensembleData *edata, ensembleMetaD
                 std::cerr << "ERROR couldn't split best score" << std::endl;
                 break;
             }
+            // Initialize multi-obj fields on children
+            if (multi_obj) {
+                Fitter::init_node_multi_obj(crnt_node->left_child,
+                    (dataset->obj_labels != nullptr) ? dataset->obj_labels->data : nullptr,
+                    dataset->build_grads->data, n_objs, n_samples, metadata->output_dim,
+            dataset->default_obj_idx, metadata->policy_dim);
+                Fitter::init_node_multi_obj(crnt_node->right_child,
+                    (dataset->obj_labels != nullptr) ? dataset->obj_labels->data : nullptr,
+                    dataset->build_grads->data, n_objs, n_samples, metadata->output_dim,
+            dataset->default_obj_idx, metadata->policy_dim);
+            }
             // assign node values
             tree_nodes.push_back(crnt_node->right_child);
             tree_nodes.push_back(crnt_node->left_child);
@@ -465,6 +508,8 @@ int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMe
     int depth = 0, node_idx_cntr = 0, chosen_idx = 0;
     float best_score;
     int n_samples = dataset->n_samples;
+    const int n_objs = metadata->n_objs;
+    const bool multi_obj = (n_objs > 1);
 
     int added_leaves = 0;
 
@@ -476,6 +521,15 @@ int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMe
     std::vector<TreeNode*> tree_nodes(max_n_leaves); 
     std::vector<TreeNode*> child_tree_nodes(max_n_leaves); 
     TreeNode *rootNode = new TreeNode(root_sample_indices, n_samples, metadata->n_num_features, metadata->n_cat_features, metadata->output_dim, depth, 0);
+    
+    // Initialize multi-objective fields on root
+    if (multi_obj) {
+        Fitter::init_node_multi_obj(rootNode,
+            (dataset->obj_labels != nullptr) ? dataset->obj_labels->data : nullptr,
+            dataset->build_grads->data, n_objs, n_samples, metadata->output_dim,
+            dataset->default_obj_idx, metadata->policy_dim);
+    }
+    
     tree_nodes[0] = rootNode;
 
     int n_candidates = generator.n_candidates;
@@ -488,14 +542,14 @@ int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMe
     std::vector<float> best_scores(n_threads, -INFINITY);
     std::vector<int> best_indices(n_threads, -1);
     FloatVector scores(n_candidates);
-    int batch_size = n_candidates / n_threads;
 
-
-    
     while (depth < metadata->max_depth)  {
         best_score = -INFINITY;
+        // Threads outside the granted team never write their slot.
+        std::fill(best_scores.begin(), best_scores.end(), -INFINITY);
+        std::fill(best_indices.begin(), best_indices.end(), -1);
 #ifndef DEBUG
-        #pragma omp parallel
+        #pragma omp parallel num_threads(n_threads)
         {
             int thread_num = omp_get_thread_num();
 #else 
@@ -503,8 +557,17 @@ int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMe
 #endif
             float local_best_score = -INFINITY;
             int local_chosen_idx = -1;
-            int start_idx = thread_num * batch_size;
-            int end_idx = (thread_num == n_threads - 1) ? n_candidates : start_idx + batch_size;
+            // Partition by the team actually granted, not omp_get_max_threads():
+            // OpenMP may run the region with fewer threads (e.g. thread limits on
+            // macOS/libomp), and a max-threads split would leave candidates unscored.
+#ifndef DEBUG
+            const int team_size = omp_get_num_threads();
+#else
+            const int team_size = 1;
+#endif
+            const int team_batch = n_candidates / team_size;
+            int start_idx = thread_num * team_batch;
+            int end_idx = (thread_num == team_size - 1) ? n_candidates : start_idx + team_batch;
             // Process the batch of candidates
             for (int j = start_idx; j < end_idx; ++j) {
                 float score = 0.0f;
@@ -520,8 +583,11 @@ int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMe
 
                 for (int node_idx = 0; node_idx < (1 << depth); ++node_idx){
                     TreeNode *crnt_node = tree_nodes[node_idx];
-                    // Use constraint-aware scoring if constraints exist
-                    if (metadata->n_mono_constraints > 0) {
+                    if (multi_obj) {
+                        score += crnt_node->getSplitScoreMultiObj(
+                            dataset, metadata->split_score_func, split_candidates[j], metadata->min_data_in_leaf,
+                            metadata, edata, global_feature_idx, edata->mono_constraints, metadata->n_mono_constraints);
+                    } else if (metadata->n_mono_constraints > 0) {
                         score += crnt_node->getSplitScoreWithConstraints(
                             dataset, metadata->split_score_func, split_candidates[j], metadata->min_data_in_leaf,
                             global_feature_idx, edata->mono_constraints, metadata->n_mono_constraints
@@ -532,8 +598,9 @@ int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMe
                 }
                 score = score * edata->feature_data->feature_weights[global_feature_idx];
                 
-#ifdef DEBUG
-                std::cout << " cand: " <<  j << " score: " <<  score << " info: " << split_candidates[j] << std::endl;
+#ifdef DEBUG    
+                if (metadata->verbose > 1)
+                    std::cout << " cand: " <<  j << " score: " <<  score << " info: " << split_candidates[j] << std::endl;
 #endif
 
                 if (score > local_best_score) {
@@ -571,6 +638,13 @@ int Fitter::fit_oblivious_tree(dataSet *dataset, ensembleData *edata, ensembleMe
         for (int node_idx = 0; node_idx < (1 << depth); ++node_idx){
             tree_nodes[node_idx] = child_tree_nodes[node_idx];
             child_tree_nodes[node_idx] = nullptr;
+            // Initialize multi-obj fields on new level nodes
+            if (multi_obj && tree_nodes[node_idx] != nullptr) {
+                Fitter::init_node_multi_obj(tree_nodes[node_idx],
+                    (dataset->obj_labels != nullptr) ? dataset->obj_labels->data : nullptr,
+                    dataset->build_grads->data, n_objs, n_samples, metadata->output_dim,
+            dataset->default_obj_idx, metadata->policy_dim);
+            }
         }
     }
 
@@ -610,6 +684,10 @@ void Fitter::update_ensemble_per_leaf(ensembleData *edata, ensembleMetaData *met
             edata->leaf_data->edge_weights[row_idx + i] = node->split_conditions[i].edge_weight;
         }
     }
+    // Store per-leaf densities (computed during calc_leaf_value for multi-obj)
+    // Initialize to uniform for now; actual densities set in calc_leaf_value
+    for (int k = 0; k < metadata->n_objs; ++k)
+        edata->multi_objective_data->densities[idx * metadata->n_objs + k] = (k == 0) ? 1.0f : 0.0f;
     metadata->n_leaves += 1;
 }
 
@@ -636,6 +714,9 @@ void Fitter::update_ensemble_per_tree(ensembleData *edata, ensembleMetaData *met
                 edata->leaf_data->edge_weights[metadata->n_leaves*metadata->max_depth + i] = node->split_conditions[i].edge_weight;
             }
         }
+        // Initialize densities (actual values set in calc_leaf_value for multi-obj)
+        for (int k = 0; k < metadata->n_objs; ++k)
+            edata->multi_objective_data->densities[metadata->n_leaves * metadata->n_objs + k] = (k == 0) ? 1.0f : 0.0f;
         metadata->n_leaves += 1;
     }
 }
@@ -643,14 +724,37 @@ void Fitter::update_ensemble_per_tree(ensembleData *edata, ensembleMetaData *met
 
 void Fitter::calc_leaf_value(dataSet *dataset, ensembleData *edata, ensembleMetaData *metadata, const int leaf_idx, const int tree_idx){
     int output_dim = metadata->output_dim;
+    int policy_dim = metadata->policy_dim;
+    int n_objs = metadata->n_objs;
+    int n_samples = dataset->n_samples;
     const float *obs = dataset->obs->data, *grads = dataset->grads->data;
     const char *categorical_obs = dataset->categorical_obs->data;
+    const float *obj_labels = (dataset->obj_labels != nullptr) ? dataset->obj_labels->data : nullptr;
+    const float *lambda_objs = edata->multi_objective_data->lambda_objs;
     int depth = (metadata->grow_policy == OBLIVIOUS) ? edata->ensemble_info->depths[tree_idx] : edata->ensemble_info->depths[leaf_idx];
     int cond_idx = (metadata->grow_policy == OBLIVIOUS) ? tree_idx*metadata->max_depth : leaf_idx*metadata->max_depth;
     int ineq_cond = leaf_idx*metadata->max_depth;
     float count = 0;
     bool passed;
-    int idx, row_idx, cat_row_idx;
+    int row_idx, cat_row_idx;
+
+    bool multi_obj = (n_objs > 1);
+
+    // Per-objective gradient sums for density-weighted leaf values
+    float *obj_sums = nullptr;
+    float *leaf_densities = nullptr;
+    float *label_counts = nullptr;
+    if (multi_obj) {
+        obj_sums = new float[n_objs * output_dim];
+        leaf_densities = new float[n_objs];
+        label_counts = new float[n_objs];
+        for (int k = 0; k < n_objs; ++k) {
+            label_counts[k] = 0.0f;
+            leaf_densities[k] = 0.0f;
+            for (int d = 0; d < output_dim; ++d)
+                obj_sums[k * output_dim + d] = 0.0f;
+        }
+    }
 
     // Start from zero: this slot may still hold values from a tree that was
     // rolled back after a failed monotonic projection, and the loop below
@@ -658,32 +762,151 @@ void Fitter::calc_leaf_value(dataSet *dataset, ensembleData *edata, ensembleMeta
     float *leaf_values = edata->leaf_data->values + leaf_idx * output_dim;
     std::fill(leaf_values, leaf_values + output_dim, 0.0f);
 
-    for (int i = 0; i < dataset->n_samples; ++i){
+    for (int i = 0; i < n_samples; ++i){
         row_idx = i*metadata->n_num_features;
         cat_row_idx = i*metadata->n_cat_features;
-        passed = false;
+        passed = (depth == 0);
         for (int depth_idx = depth - 1; depth_idx >= 0; --depth_idx){
             passed = (edata->feature_data->is_numerics[cond_idx + depth_idx]) ? (obs[row_idx + edata->feature_data->feature_indices[cond_idx + depth_idx]] > edata->feature_data->feature_values[cond_idx + depth_idx]) == edata->feature_data->inequality_directions[ineq_cond + depth_idx] : (strcmp(&categorical_obs[(cat_row_idx + edata->feature_data->feature_indices[cond_idx + depth_idx]) * MAX_CHAR_SIZE], edata->feature_data->categorical_values + (cond_idx + depth_idx)*MAX_CHAR_SIZE) == 0) == edata->feature_data->inequality_directions[ineq_cond + depth_idx];
             if (!passed)
                 break;
         }
         if (passed){
-            idx = i*output_dim;
-
-            #pragma omp simd
-            for (int d = 0; d < output_dim; ++d)
-                edata->leaf_data->values[leaf_idx*output_dim + d] += grads[idx + d];
             count += 1;
+            if (multi_obj) {
+                // Count labels for density computation
+                int lbl = (obj_labels != nullptr) ? static_cast<int>(obj_labels[i]) : dataset->default_obj_idx;
+                if (lbl >= 0 && lbl < n_objs) label_counts[lbl] += 1.0f;
+                // Accumulate per-objective gradient sums
+                for (int k = 0; k < n_objs; ++k) {
+                    size_t g_base = (size_t)k * n_samples * output_dim + (size_t)i * output_dim;
+                    for (int d = 0; d < output_dim; ++d)
+                        obj_sums[k * output_dim + d] += grads[g_base + d];
+                }
+            } else {
+                int idx = i*output_dim;
+                #pragma omp simd
+                for (int d = 0; d < output_dim; ++d)
+                    edata->leaf_data->values[leaf_idx*output_dim + d] += grads[idx + d];
+            }
         }
     }
+
     if (count > 0){
-        for (int d = 0; d < output_dim; ++d){
-            edata->leaf_data->values[leaf_idx*output_dim + d] /= count;
+        if (multi_obj) {
+            // Compute leaf densities from label counts
+            for (int k = 0; k < n_objs; ++k)
+                leaf_densities[k] = label_counts[k] / count;
+
+            // Store densities in ensemble data
+            for (int k = 0; k < n_objs; ++k)
+                edata->multi_objective_data->densities[leaf_idx * n_objs + k] = leaf_densities[k];
+
+            // Compute density-weighted leaf values
+            for (int d = 0; d < output_dim; ++d) {
+                if (d < policy_dim) {
+                    // Policy dimensions: weighted mixture across objectives
+                    // V = Σ(density_k × λ_k × mean_grad_k)
+                    float leaf_value = 0.0f;
+                    for (int k = 0; k < n_objs; ++k) {
+                        float mean_k = obj_sums[k * output_dim + d] / count;
+                        leaf_value += mean_k * leaf_densities[k] * lambda_objs[k];
+                    }
+                    edata->leaf_data->values[leaf_idx * output_dim + d] = leaf_value;
+                } else {
+                    // Critic dimensions (d >= policy_dim): plain mean from objective 0 only
+                    edata->leaf_data->values[leaf_idx * output_dim + d] = obj_sums[0 * output_dim + d] / count;
+                }
+            }
+        } else {
+            for (int d = 0; d < output_dim; ++d){
+                edata->leaf_data->values[leaf_idx*output_dim + d] /= count;
+            }
         }
+    }
+
+    if (multi_obj) {
+        delete[] obj_sums;
+        delete[] leaf_densities;
+        delete[] label_counts;
     }
 #ifdef DEBUG
     edata->n_samples[leaf_idx] = static_cast<int>(count);
 #endif
+}
+
+
+void Fitter::init_node_multi_obj(
+    TreeNode *node,
+    const float *obj_labels,
+    const float *grads,
+    int n_objs,
+    int global_n_samples,
+    int output_dim,
+    int default_obj_idx,
+    int policy_dim
+) {
+    node->n_objs = n_objs;
+    node->global_n_samples = global_n_samples;
+
+    // Allocate and compute densities from labels
+    node->densities = new float[n_objs];
+    if (obj_labels == nullptr || n_objs <= 1) {
+        // No labels: all density on the default objective (caller-supplied label index).
+        for (int k = 0; k < n_objs; ++k)
+            node->densities[k] = (k == default_obj_idx) ? 1.0f : 0.0f;
+    } else {
+        for (int k = 0; k < n_objs; ++k)
+            node->densities[k] = 0.0f;
+        for (int i = 0; i < node->n_samples; ++i) {
+            int sample_idx = node->sample_indices[i];
+            int lbl = static_cast<int>(obj_labels[sample_idx]);
+            if (lbl >= 0 && lbl < n_objs)
+                node->densities[lbl] += 1.0f;
+        }
+        if (node->n_samples > 0) {
+            float n_inv = 1.0f / static_cast<float>(node->n_samples);
+            for (int k = 0; k < n_objs; ++k)
+                node->densities[k] *= n_inv;
+        }
+    }
+
+    // Compute conflict rho from per-objective mean gradients
+    node->conflict_rho = 0.0f;
+    if (n_objs > 1 && node->n_samples > 0) {
+        // Compute per-obj mean gradients, then ρ = 1 - ||Σ_k μ_k||² / Σ_k ||μ_k||²
+        float numerator = 0.0f;   // ||Σ_k μ_k||²
+        float denominator = 0.0f; // Σ_k ||μ_k||²
+        float n_inv = 1.0f / static_cast<float>(node->n_samples);
+
+        // Only policy columns: critic outputs have a single objective (their
+        // other blocks are zero) and must not dilute the conflict measure.
+        const int conflict_dims = (policy_dim < 0 || policy_dim > output_dim) ? output_dim : policy_dim;
+        for (int d = 0; d < conflict_dims; ++d) {
+            float sum_of_means = 0.0f;
+            float sum_of_sq = 0.0f;
+            for (int k = 0; k < n_objs; ++k) {
+                // Compute mean of obj k, dim d over samples in this node
+                float mean_kd = 0.0f;
+                for (int i = 0; i < node->n_samples; ++i) {
+                    int sample_idx = node->sample_indices[i];
+                    size_t g_idx = (size_t)k * global_n_samples * output_dim + (size_t)sample_idx * output_dim + d;
+                    mean_kd += grads[g_idx];
+                }
+                mean_kd *= n_inv;
+                sum_of_means += mean_kd;
+                sum_of_sq += mean_kd * mean_kd;
+            }
+            numerator += sum_of_means * sum_of_means;
+            denominator += sum_of_sq;
+        }
+
+        if (denominator > 1e-12f) {
+            float ratio = numerator / denominator;
+            if (ratio > 1.0f) ratio = 1.0f;
+            node->conflict_rho = 1.0f - ratio;
+        }
+    }
 }
 
 

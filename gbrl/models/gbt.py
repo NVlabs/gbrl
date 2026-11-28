@@ -30,8 +30,8 @@ from typing import Dict, List, Optional, Union
 import numpy as np
 import torch as th
 
-from gbrl.common.utils import (NumericalData, clip_grad_norm, setup_optimizer,
-                               validate_array)
+from gbrl.common.utils import (NumericalData, clip_grad_norm, normalize_objective_gradients,
+                               setup_optimizer, validate_array)
 from gbrl.learners.gbt_learner import GBTLearner
 from gbrl.models.base import BaseGBT
 
@@ -55,7 +55,7 @@ class GBTModel(BaseGBT):
         Args:
             tree_struct (Dict): Dictionary containing
             tree structure information:
-                max_depth (int): maximum tree depth.
+                max_depth (int): maximum tree depth, in [0, 30].
                 grow_policy (str): 'greedy' or 'oblivious'.
                 n_bins (int): number of bins per feature for candidate generation.
                 min_data_in_leaf (int): minimum number of samples in a leaf.
@@ -94,6 +94,13 @@ class GBTModel(BaseGBT):
                 generator_type - (str): candidate generation method "Quantile" or "Uniform".
                 feature_weights - (list[float]): Per-feature multiplication
                 weights used when choosing the best split. Weights should be >= 0
+                Split-RL (multi-objective) parameters, see https://nvlabs.github.io/gbrl/split_rl.html:
+                n_objs (int): number of objectives. Defaults to 1.
+                lambda_objs (list[float]): one weight per objective. Defaults to ones.
+                lambda_penalty (float): conflict/label-impurity split penalty.
+                    Defaults to 1.0; 0.0 disables it.
+                validate_obj_labels (Optional[bool]): validate objective label
+                    values (default: CPU yes, CUDA no).
             verbose (int, optional): verbosity level. Defaults to 0.
             device (str, optional): GBRL device 'cpu' or 'cuda/gpu'. Defaults to 'cpu'.
         """
@@ -152,6 +159,7 @@ class GBTModel(BaseGBT):
              X: Optional[NumericalData] = None,
              grads: Optional[NumericalData] = None,
              max_grad_norm: Optional[float] = None,
+             obj_labels: Optional[NumericalData] = None,
              ) -> None:
         """
         Perform a boosting step (fits a single tree on the gradients)
@@ -160,13 +168,20 @@ class GBTModel(BaseGBT):
             X (NumericalData): inputs
             max_grad_norm (float, optional): perform gradient clipping by norm. Defaults to None.
             grads (Optional[NumericalData], optional): manually calculated gradients. Defaults to None.
+                Required when n_objs > 1: shape (n_objs, n_samples, output_dim).
+            obj_labels (Optional[NumericalData]): objective labels vector.
 
         """
         if X is None:
             assert self.input is not None, ("Cannot update trees without input."
                                             "Make sure model is called with requires_grad=True")
             X = self.input
-        n_samples = len(X)
+        # Same rule as GBTLearner.step: a 1-D input is one sample unless the
+        # model has a single feature.
+        if X.ndim == 1:
+            n_samples = 1 if self.learner.input_dim > 1 else len(X)
+        else:
+            n_samples = len(X)
 
         if grads is None:
             assert self.params is not None, "params must be set to compute gradients."
@@ -174,9 +189,17 @@ class GBTModel(BaseGBT):
             assert self.params.grad is not None, "params.grad must be set to compute gradients."
             grads = self.params.grad.detach() * n_samples
 
+        if self.learner.n_objs > 1:
+            # Clip per (objective, sample) row, so bring gradients to
+            # (n_objs, n_samples, output_dim) first.
+            grads = normalize_objective_gradients(grads, self.learner.n_objs, n_samples,
+                                                  self.learner.output_dim)
         grads = clip_grad_norm(grads, max_grad_norm)
         validate_array(grads)
-        self.learner.step(inputs=X, grads=grads)
+        self.learner.step(inputs=X,
+                          grads=grads,
+                          obj_labels=obj_labels
+                          )
 
         self.grads = grads
         self.input = None

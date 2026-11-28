@@ -182,7 +182,7 @@ class TreeNode {
             const splitCandidate &split_candidate,
             const int min_data_in_leaf
         );
-        
+
         /**
          * @brief Score numerical split using L2 norm with monotonic constraint pooling
          * 
@@ -266,6 +266,41 @@ class TreeNode {
          */
         friend std::ostream& operator<<(std::ostream& os, const TreeNode& obj);
 
+        /**
+         * @brief Compute split score with multi-objective density weighting
+         * 
+         * Handles stacked gradients [n_objs, n_samples, output_dim] with
+         * density-weighted gains and label-impurity penalty.
+         * 
+         * @param dataset Training dataset (contains stacked grads and obj_labels)
+         * @param split_score_func Scoring function to use (L2 or Cosine)
+         * @param split_candidate Candidate split to evaluate
+         * @param min_data_in_leaf Minimum samples required per leaf
+         * @param metadata Ensemble metadata (for lambda_penalty, n_objs, etc.)
+         * @param edata Ensemble data (for lambda_objs)
+         * @param global_feature_idx Global index of the split feature (for constraints)
+         * @param mono_constraints Monotonic constraints, applied to objective 0 only
+         *        (matches the CUDA kernels); nullptr disables them
+         * @param n_mono_constraints Number of monotonic constraints
+         * @param penalty_factor_out If non-null, receives the (1 - penalty)
+         *        factor (1 when no penalty applies) and the returned gain is
+         *        left unpenalized for the caller to scale; if null, the factor
+         *        is applied to a positive gain here
+         * @return Density-weighted split score with impurity penalty
+         */
+        float getSplitScoreMultiObj(
+            dataSet *dataset,
+            scoreFunc split_score_func,
+            const splitCandidate &split_candidate,
+            const int min_data_in_leaf,
+            const ensembleMetaData *metadata,
+            const ensembleData *edata,
+            const int global_feature_idx = -1,
+            const monotonicConstraints *mono_constraints = nullptr,
+            const int n_mono_constraints = 0,
+            float *penalty_factor_out = nullptr
+        );
+
         // Node data members
         int *sample_indices = nullptr;      /**< Indices of samples at this node */
         int n_samples;                      /**< Number of samples at this node */
@@ -274,9 +309,13 @@ class TreeNode {
         int output_dim;                     /**< Output dimensionality */
         int depth;                          /**< Depth in tree (root = 0) */
         int node_idx;                       /**< Node index in traversal order */
+        int n_objs = 1;                     /**< Number of objectives */
+        int global_n_samples = 0;           /**< Global sample count for stacked grad indexing */
 
         float feature_value;                /**< Split threshold value */
         int feature_idx;                    /**< Index of split feature */
+        float conflict_rho = 0.0f;          /**< Gradient disagreement metric */
+        float *densities = nullptr;         /**< Per-objective densities [n_objs] */
 
         splitCondition *split_conditions = nullptr;  /**< Split condition data */
         

@@ -36,9 +36,7 @@
 
 /** @brief Major version number - incremented for incompatible API changes */
 #define MAJOR_VERSION 1
-
-/** @brief Minor version number - incremented for backward compatible new features */
-#define MINOR_VERSION 1
-#define PATCH_VERSION 9
+#define MINOR_VERSION 2
+#define PATCH_VERSION 0
 
 #endif // VERSION_CONFIG_H

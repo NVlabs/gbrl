@@ -44,6 +44,7 @@
 #define FULL_MASK 0xffffffff          /**< Full warp mask for warp operations */
 #define MAX_BLOCKS_PER_GRID 65535     /**< CUDA maximum blocks per grid */
 #define MAX_THREADS_PER_BLOCK 1024    /**< CUDA maximum threads per block */
+#define DEFAULT_N_STREAMS 8           /**< Default number of CUDA streams */
 
 // Matrix operation tile sizes
 #define BLOCK_COLS 32                 /**< Block column size for matrix ops */
@@ -92,22 +93,29 @@ struct splitDataGPU {
  * @brief GPU tree node representation
  * 
  * Stores node data on GPU for parallel tree operations.
+ * Members ordered for optimal GPU memory alignment: floats/ints first, then pointers.
  */
 struct TreeNodeGPU {
-    int n_samples;                /**< Number of samples in node */
-    int depth;                    /**< Node depth in tree */
-    int n_num_features;           /**< Number of numerical features */
-    int n_cat_features;           /**< Number of categorical features */
-    int output_dim;               /**< Output dimensionality */
-    int node_idx;                 /**< Node index in tree */
-    float score;                  /**< Node split score */
-    int *sample_indices;          /**< Indices of samples in node */
-    int *feature_indices;         /**< Feature indices along path */
-    float *feature_values;        /**< Feature threshold values along path */
-    float *edge_weights;          /**< Edge weights along path */
-    bool *inequality_directions;  /**< Split directions along path */
-    bool *is_numerics;            /**< Feature type flags along path */
-    char *categorical_values;     /**< Categorical split values along path */
+    // Scalar types first (optimal alignment)
+    int n_samples;
+    int depth;
+    int n_num_features;
+    int n_cat_features;
+    int output_dim;
+    int node_idx;
+    int n_objs;
+    float conflict_rho;
+    // Pointers last (proper GPU memory alignment)
+    int *sample_indices;
+    int* feature_indices;
+    float* feature_values;
+    float* edge_weights;
+    float* scores;
+    float *densities;
+    float *mean_values;
+    bool* inequality_directions;
+    bool* is_numerics;
+    char* categorical_values;
 };
 
 /**
@@ -122,6 +130,16 @@ struct candidatesData {
     const bool *candidate_numeric;   /**< Numerical feature flags */
     const char *candidate_categories; /**< Categorical values */
 };
+
+// extern "C" functions are assumed nothrow by MSVC (/EHsc, C4297); mark the
+// ones that may throw so their unwind code is kept. Same macro as cuda_fitter.h.
+#ifndef GBRL_MAY_THROW
+#ifdef __cplusplus
+#define GBRL_MAY_THROW noexcept(false)
+#else
+#define GBRL_MAY_THROW
+#endif
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -246,7 +264,7 @@ ensembleData* ensemble_compressed_data_copy_gpu_gpu(ensembleMetaData *metadata, 
 void allocate_ensemble_memory_cuda(
     ensembleMetaData *metadata,
     ensembleData *edata
-);
+) GBRL_MAY_THROW;
 
 #ifdef __cplusplus
 }

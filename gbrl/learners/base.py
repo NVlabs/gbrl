@@ -36,6 +36,11 @@ from gbrl.common.utils import (NumericalData, TensorInfo,
                                normalize_device)
 
 
+# Leaf counts are computed as 1 << depth in native int arithmetic; checkpoints
+# accept the same limit.
+MAX_DEPTH = 30
+
+
 class BaseLearner(ABC):
     """
     Abstract base class for gradient boosting tree learners.
@@ -54,7 +59,8 @@ class BaseLearner(ABC):
         total_iterations (int): Total number of training iterations.
         feature_weights (Union[float, NumericalData]): Feature importance weights.
     """
-    def __init__(self, input_dim: int,
+    def __init__(self,
+                 input_dim: int,
                  output_dim: Union[int, List[int]],
                  tree_struct: Dict,
                  params: Dict,
@@ -84,10 +90,16 @@ class BaseLearner(ABC):
         # the C++ constructor calls to_device(), whose CPU fallback reallocates
         # the ensemble.
         device = normalize_device(device)
+        max_depth = tree_struct.get('max_depth')
+        if max_depth is not None and (isinstance(max_depth, bool) or
+                                      not isinstance(max_depth, (int, np.integer)) or
+                                      not 0 <= max_depth <= MAX_DEPTH):
+            raise ValueError(f"max_depth must be an integer in [0, {MAX_DEPTH}], got {max_depth!r}")
         self.tree_struct = tree_struct
         self.input_dim = input_dim
         self.output_dim = output_dim
         self.policy_dim = policy_dim if policy_dim is not None else output_dim
+
         self.device = device
         self.params = {'input_dim': input_dim,
                        'output_dim': output_dim,
@@ -98,7 +110,27 @@ class BaseLearner(ABC):
                                                     'Quantile'),
                        'use_control_variates': params.get('control_variates',
                                                           False),
+                       'lambda_penalty': params.get('lambda_penalty',
+                                                    1.0),
+                       'n_objs': params.get('n_objs', 1),
                        'verbose': verbose, 'device': device, **tree_struct}
+
+        self.n_objs = self.params['n_objs']
+        self.validate_obj_labels = params.get('validate_obj_labels')
+        if not isinstance(self.n_objs, int) or self.n_objs < 1:
+            raise ValueError("n_objs must be a positive integer")
+        if self.params['use_control_variates'] and self.n_objs > 1:
+            # Fitter::control_variates only corrects objective block 0.
+            raise ValueError("control_variates is not supported with n_objs > 1")
+
+        if 'lambda_objs' in params:
+            lambda_objs = params['lambda_objs']
+            assert len(lambda_objs) == self.n_objs, \
+                "Length of lambda_objs must match number of objectives"
+            self.lambda_objs = np.ascontiguousarray(np.array(lambda_objs,
+                                                             dtype=numerical_dtype))
+        else:
+            self.lambda_objs = np.ones(self.n_objs, dtype=numerical_dtype)
 
         self.iteration = 0
         self.total_iterations = 0
@@ -179,7 +211,9 @@ class BaseLearner(ABC):
         """
         pass
 
-    def export(self, filename: str, modelname: Optional[str] = None) -> None:
+    def export(self, filename: str, modelname: Optional[str] = None,
+                export_format: str = 'float', export_type: str = 'full',
+                prefix: str = '') -> None:
         # exports model to C
         filename = filename.rstrip('.')
         filename += '.h'
@@ -187,7 +221,7 @@ class BaseLearner(ABC):
         if modelname is None:
             modelname = ""
         try:
-            status = self._cpp_model.export(filename, modelname)
+            status = self._cpp_model.export(filename, modelname, export_format, export_type, prefix)
             assert status == 0, "Failed to export model"
         except RuntimeError as e:
             print(f"Caught an exception in GBRL: {e}")
@@ -415,7 +449,11 @@ class BaseLearner(ABC):
             data = data.to(self.device)
 
         if isinstance(data, th.Tensor):
-            tensor_data = get_tensor_info(data.float())
+            # .float()/.contiguous() may create a temporary; keep it alive in
+            # _memory, otherwise the native call reads a freed buffer.
+            data = data.float().contiguous()
+            self._memory.append(data)
+            tensor_data = get_tensor_info(data)
             self._memory.append(tensor_data)
             return tensor_data
 

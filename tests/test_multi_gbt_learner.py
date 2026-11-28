@@ -55,13 +55,13 @@ class TestMultiGBTLearner(unittest.TestCase):
                                           scaled=False)
         except TypeError:
             X, y = datasets.load_diabetes(return_X_y=True, as_frame=False)
-        
+
         cls.X = X
         cls.y = y[:, np.newaxis] if len(y.shape) == 1 else y
         cls.input_dim = X.shape[1]
         cls.n_samples = len(X)
         cls.test_dir = tempfile.mkdtemp()
-        
+
         cls.tree_struct = {
             'max_depth': 4,
             'n_bins': 256,

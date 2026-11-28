@@ -3,9 +3,9 @@ Quickstart
 
 Prerequisites
 -------------
-Python 3.9 or higher
+Python 3.9 - 3.13
 
-CUDA 12 runtime libraries (for GPU-enabled installation)
+CUDA 11 - 13 (for GPU-enabled installation)
 
 Installation
 ------------
@@ -17,7 +17,7 @@ GBRL provides pre-compiled binaries for easy installation. Choose **one** of the
 
    pip install gbrl
 
-**GPU-enabled installation** (requires CUDA 12 runtime libraries):
+**GPU-enabled installation** (supports CUDA 11 - 13):
 
 .. code-block:: console
 
@@ -36,10 +36,10 @@ Source Compilation
 Prerequisites
 -------------
 
-- Python 3.9 or higher
+- Python 3.9 - 3.13
 - LLVM/OpenMP (macOS)
-- CUDA Toolkit 11 or 12 (optional, for GPU acceleration; requires NVCC)
-- Graphviz (Optional)
+- CUDA Toolkit 11 - 13 (optional, for GPU acceleration; requires NVCC)
+- Graphviz (Optional; enables tree plotting. See *Optional: tree plotting with Graphviz* below)
 
 Platform-specific Dependencies
 ------------------------------
@@ -101,9 +101,25 @@ Clone the GBRL repository and install:
 
 .. code-block:: console
 
-   git clone <gbrl-repo-url>
+   git clone https://github.com/NVlabs/gbrl.git
    cd gbrl
    pip install .
+
+Optional: tree plotting with Graphviz
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Tree plotting (``plot_tree``) requires the Graphviz development files and is
+disabled by default. To enable it, set ``USE_GRAPHVIZ=1`` when installing from
+source:
+
+.. code-block:: console
+
+   USE_GRAPHVIZ=1 pip install .
+
+The build stops with an error if Graphviz is requested but not found. If
+Graphviz is installed in a non-standard location, add its install prefix to the
+``CMAKE_PREFIX_PATH`` environment variable, e.g.
+``CMAKE_PREFIX_PATH=/opt/graphviz USE_GRAPHVIZ=1 pip install .``.
 
 Environment Variables
 ~~~~~~~~~~~~~~~~~~~~~

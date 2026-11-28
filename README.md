@@ -17,6 +17,28 @@ GBRL features a shared tree-based structure for policy and value functions, sign
 - Optimized Actor-Critic Architecture: GBRL features a shared tree-based structure for policy and value functions. This significantly reduces memory and computational overhead, enabling it to tackle complex, high-dimensional RL problems.
 - Hardware Acceleration: GBRL leverages CUDA for hardware-accelerated computation, ensuring efficiency and speed.
 - Seamless Integration: GBRL is designed for easy integration with popular RL libraries. We implemented GBT-based actor-critic algorithm implementations (A2C, PPO, and AWR) in stable_baselines3 [GBRL_SB3](https://github.com/NVlabs/gbrl_sb3). 
+- Split-RL: Multi-objective gradients, conflict-aware tree splitting, and reward/cost critics for RL with competing objectives.
+
+## Split-RL
+
+GBRL contains the core tree-learning implementation used in
+[**Split-RL: Local Conflict Resolution in Reinforcement Learning**](https://arxiv.org/abs/2611.34799),
+by Benjamin Fuhrer, Chen Tessler, and Gal Dalal, NeurIPS 2026.
+
+Split-RL uses objective-specific policy gradients and sample labels to guide
+tree construction. When objective gradients conflict, its split penalty favors
+splits that separate the objectives. Leaf updates combine gradients using the
+local objective proportions and configurable objective weights. This supports
+experiments with competing reward signals or reward and cost objectives;
+`CostActorCritic` provides policy, reward-value, and cost-value outputs.
+
+Configure `n_objs`, `lambda_objs`, and `lambda_penalty`, and pass objective labels
+to `step`. The implementation includes CPU and CUDA paths for greedy and
+oblivious trees. See the [Split-RL guide](https://github.com/NVlabs/gbrl/blob/master/docs/split_rl.rst)
+for data shapes, examples, and current limitations.
+
+The Split-RL algorithm and experiment code is available at
+[NVlabs/split_rl](https://github.com/NVlabs/split_rl).
 
 ## Performance
 
@@ -26,7 +48,7 @@ The following results, obtained using the `GBRL_SB3` repository, demonstrate the
 
 ## Getting started
 ### Dependencies
-- Python 3.9 or higher
+- Python 3.9 - 3.13
 
 ### Installation
 GBRL provides pre-compiled binaries for easy installation. Choose **one** of the following options:
@@ -34,7 +56,7 @@ GBRL provides pre-compiled binaries for easy installation. Choose **one** of the
 **CPU-only installation** (default):  
 ```pip install gbrl```
 
-**GPU-enabled installation** (requires CUDA 12 runtime libraries):  
+**GPU-enabled installation** (supports CUDA 11 - 13):  
 ```pip install gbrl-gpu```
 
 For further installation details and dependencies see the documentation. 
@@ -52,9 +74,11 @@ For a detailed usage example, see `tutorial.ipynb`
 - Quantile based candidate generation - (CPU/GPU)
 - Supervised learning fitting / Multi-iteration fitting - (CPU/GPU)
     - MultiRMSE loss (only)
+    - All registered optimizers must use SGD (Adam is not supported, on CPU or GPU)
 - Categorical inputs
 - Input feature weights - (CPU/GPU)
 - Monotonic constraints - (CPU/GPU, oblivious trees; the whole model must use SGD, Adam is not allowed on any output)
+- Split-RL multi-objective training - (CPU/GPU, greedy and oblivious trees; trained with `step`, not `fit`; no control variates)
 
 ### GBT Inference
 
@@ -73,6 +97,8 @@ For comprehensive documentation, visit the [GBRL documentation](https://nvlabs.g
 To contribute to GBRL, please review and sign the Contributor License Agreement (CLA) available at: [https://github.com/NVlabs/gbrl/blob/master/CLA.md](https://github.com/NVlabs/gbrl/blob/master/CLA.md)
 
 # Citation
+For the original GBRL paper:
+
 ``` 
 @inproceedings{
 fuhrer2025gradient,
@@ -83,8 +109,21 @@ year={2025},
 url={https://arxiv.org/abs/2407.08250}
 }
 ```
+
+For work using the Split-RL extensions, please also cite:
+
+```
+@inproceedings{
+fuhrer2026splitrl,
+title={Split-{RL}: Local Conflict Resolution in Reinforcement Learning},
+author={Benjamin Fuhrer and Chen Tessler and Gal Dalal},
+booktitle={The Fortieth Annual Conference on Neural Information Processing Systems},
+year={2026},
+url={https://arxiv.org/abs/2611.34799}
+}
+```
+
 # Licenses
 Copyright © 2024-2026, NVIDIA Corporation. All rights reserved.
 
 This work is made available under the NVIDIA MIT License. Click [here](https://github.com/NVlabs/gbrl/blob/master/LICENSE) to view a copy of this license.
-

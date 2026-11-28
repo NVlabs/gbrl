@@ -101,8 +101,31 @@ void predict_cuda_no_host(
 );
 
 /**
+ * @brief Average per-objective leaf densities on GPU
+ *
+ * For every sample, traverses the ensemble and accumulates the per-objective
+ * density vector of each leaf it lands in, then divides by the number of
+ * traversed trees. Result is left in GPU memory.
+ *
+ * @param dataset Input dataset (obs may live on host or device)
+ * @param densities_out Output densities on GPU (n_samples x n_objs), assigned by this call
+ * @param metadata Ensemble configuration
+ * @param edata Ensemble parameters on GPU
+ * @param start_tree_idx Starting tree index
+ * @param stop_tree_idx Stopping tree index (0 means all trees)
+ */
+void predict_densities_cuda(
+    dataSet *dataset,
+    float *&densities_out,
+    ensembleMetaData *metadata,
+    ensembleData *edata,
+    int start_tree_idx,
+    int stop_tree_idx
+);
+
+/**
  * @brief Free GPU optimizer array
- * 
+ *
  * @param device_ops GPU optimizer array
  * @param n_opts Number of optimizers
  */
@@ -334,6 +357,105 @@ __global__ void predict_oblivious_kernel_tree_wise(
     const int output_dim,
     const int max_depth,
     const int tree_offset
+);
+
+/**
+ * @brief CUDA kernel accumulating leaf densities for greedy trees
+ *
+ * One block per leaf; each thread strides over samples. Threads atomically add
+ * the leaf's density vector into the row of every sample that reaches it.
+ * Categorical arrays are only dereferenced when is_numerics is false, so they
+ * may be null when the model has no categorical features.
+ *
+ * @param obs Numerical observations
+ * @param categorical_obs Categorical observations (may be null if n_cat_features == 0)
+ * @param densities_out Output densities (n_samples x n_objs), accumulated in place
+ * @param n_samples Number of samples
+ * @param n_num_features Number of numerical features
+ * @param n_cat_features Number of categorical features
+ * @param feature_indices Feature indices for all splits
+ * @param depths Node depths
+ * @param feature_values Split thresholds
+ * @param inequality_directions Split directions
+ * @param densities Per-leaf density vectors (n_leaves x n_objs)
+ * @param categorical_values Categorical split values (may be null if n_cat_features == 0)
+ * @param is_numerics Feature type indicators
+ * @param n_objs Number of objectives
+ * @param max_depth Maximum tree depth
+ * @param leaf_offset Leaf index offset
+ */
+__global__ void predict_densities_kernel_greedy(
+    const float* __restrict__ obs,
+    const char* __restrict__ categorical_obs,
+    float* __restrict__ densities_out,
+    const int n_samples,
+    const int n_num_features,
+    const int n_cat_features,
+    const int* __restrict__ feature_indices,
+    const int* __restrict__ depths,
+    const float* __restrict__ feature_values,
+    const bool* __restrict__ inequality_directions,
+    const float* __restrict__ densities,
+    const char* __restrict__ categorical_values,
+    const bool* __restrict__ is_numerics,
+    const int n_objs,
+    const int max_depth,
+    const int leaf_offset
+);
+
+/**
+ * @brief CUDA kernel accumulating leaf densities for oblivious trees
+ *
+ * One block per tree; each thread strides over samples, computing the leaf
+ * index bitwise and adding that leaf's density vector to the sample's row.
+ *
+ * @param obs Numerical observations
+ * @param categorical_obs Categorical observations (may be null if n_cat_features == 0)
+ * @param densities_out Output densities (n_samples x n_objs), accumulated in place
+ * @param n_samples Number of samples
+ * @param n_num_features Number of numerical features
+ * @param n_cat_features Number of categorical features
+ * @param feature_indices Feature indices for all splits
+ * @param depths Tree depths
+ * @param feature_values Split thresholds
+ * @param densities Per-leaf density vectors (n_leaves x n_objs)
+ * @param tree_indices Starting leaf index of each tree
+ * @param categorical_values Categorical split values (may be null if n_cat_features == 0)
+ * @param is_numerics Feature type indicators
+ * @param n_objs Number of objectives
+ * @param max_depth Maximum tree depth
+ * @param tree_offset Tree index offset
+ */
+__global__ void predict_densities_oblivious_kernel(
+    const float* __restrict__ obs,
+    const char* __restrict__ categorical_obs,
+    float* __restrict__ densities_out,
+    const int n_samples,
+    const int n_num_features,
+    const int n_cat_features,
+    const int* __restrict__ feature_indices,
+    const int* __restrict__ depths,
+    const float* __restrict__ feature_values,
+    const float* __restrict__ densities,
+    const int* __restrict__ tree_indices,
+    const char* __restrict__ categorical_values,
+    const bool* __restrict__ is_numerics,
+    const int n_objs,
+    const int max_depth,
+    const int tree_offset
+);
+
+/**
+ * @brief CUDA kernel scaling every element of a matrix by a scalar
+ *
+ * @param mat Matrix modified in place
+ * @param scale Multiplier
+ * @param size Number of elements
+ */
+__global__ void scale_mat_kernel(
+    float* __restrict__ mat,
+    const float scale,
+    const int size
 );
 #endif
 

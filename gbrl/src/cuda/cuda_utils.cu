@@ -68,6 +68,22 @@ void get_tpb_dimensions(int n_elements, int blocks, int& threads_per_block) {
     cudaDeviceProp deviceProp;
     cudaGetDeviceProperties(&deviceProp, 0);
 
-    threads_per_block = 1 << static_cast<int>(ceilf(log2f(static_cast<float>(n_elements) / blocks)));
-    threads_per_block = (threads_per_block > deviceProp.maxThreadsPerBlock) ? deviceProp.maxThreadsPerBlock : threads_per_block;
+    // Handle edge cases: ensure valid inputs
+    if (n_elements <= 0 || blocks <= 0) {
+        threads_per_block = 1;
+        return;
+    }
+    
+    float ratio = static_cast<float>(n_elements) / static_cast<float>(blocks);
+    if (ratio < 1.0f) {
+        threads_per_block = 1;
+    } else {
+        threads_per_block = 1 << static_cast<int>(ceilf(log2f(ratio)));
+        threads_per_block = (threads_per_block > deviceProp.maxThreadsPerBlock) ? deviceProp.maxThreadsPerBlock : threads_per_block;
+    }
+    
+    // Ensure at least 1 thread
+    if (threads_per_block < 1) {
+        threads_per_block = 1;
+    }
 }

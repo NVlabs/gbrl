@@ -27,6 +27,7 @@
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 #include <cstring>
+#include <stdexcept>
 #include <iostream>
 #include <omp.h>
 
@@ -124,6 +125,17 @@ __global__ void selective_copyc(const int n_elements, const int* __restrict__ in
 // - reverse_num_feature_mapping: Internal numerical to original mapping (used in computation)
 // - reverse_cat_feature_mapping: Internal categorical to original mapping (used in computation)
 // Only reverse mappings are actively used; forward mappings maintained for serialization.
+// Default objective weights to 1 (allocations are zero-filled). A weight of 0
+// would zero every split score and policy leaf until set_lambda_objs runs, which
+// never happens for internally created models such as a distillation student.
+static void init_lambda_objs_cuda(float *lambda_objs, const int n_objs){
+    if (lambda_objs == nullptr || n_objs <= 0) return;
+    float *ones = new float[n_objs];
+    for (int k = 0; k < n_objs; ++k) ones[k] = 1.0f;
+    cudaMemcpy(lambda_objs, ones, sizeof(float) * n_objs, cudaMemcpyHostToDevice);
+    delete[] ones;
+}
+
 ensembleData* ensemble_data_alloc_cuda(ensembleMetaData *metadata){
     ensembleData *edata = new ensembleData;
     if (metadata == nullptr){
@@ -138,6 +150,7 @@ ensembleData* ensemble_data_alloc_cuda(ensembleMetaData *metadata){
     edata->mono_constraints = new monotonicConstraints;
     edata->mono_constraints->n_constraints = 0;  // Initialize to 0
     edata->feature_mappings = new featureMapping;
+    edata->multi_objective_data = new multiObjectiveData;
 
     char *data;
     size_t bias_size = metadata->output_dim * sizeof(float);
@@ -151,6 +164,8 @@ ensembleData* ensemble_data_alloc_cuda(ensembleMetaData *metadata){
     size_t value_sizes = metadata->output_dim * metadata->max_leaves * sizeof(float);
     size_t cond_sizes = split_sizes*metadata->max_depth;
     size_t edge_size = metadata->max_depth * metadata->max_leaves;
+    size_t lambda_objs_size = metadata->n_objs * sizeof(float);
+    size_t densities_size = metadata->max_leaves * metadata->n_objs * sizeof(float);
     size_t mono_size = metadata->n_mono_constraints * sizeof(int);
     size_t data_size = bias_size 
                      + feature_mapping_size * 3  // 3 int arrays: feature_mapping, reverse_num_feature_mapping, reverse_cat_feature_mapping
@@ -158,10 +173,12 @@ ensembleData* ensemble_data_alloc_cuda(ensembleMetaData *metadata){
                      + tree_size
                      + split_sizes * sizeof(int) // depths
                      + value_sizes 
+                     + lambda_objs_size
                      + mono_size * 3 // monotonic constraints: feature_idx, output_idx, constraint
                      + edge_size * (sizeof(bool) + sizeof(float)) // inequality directions + edge weights
                      + cond_sizes * (sizeof(int) + sizeof(float) + sizeof(bool) + sizeof(char)*MAX_CHAR_SIZE)
-                     + feature_numerics_size;  // 1 bool array: mapping_numerics
+                     + feature_numerics_size  // 1 bool array: mapping_numerics
+                     + densities_size; // densities per leaf
 #ifdef DEBUG 
     size_t sample_size = metadata->max_leaves * sizeof(int);
     data_size += sample_size;
@@ -195,6 +212,9 @@ ensembleData* ensemble_data_alloc_cuda(ensembleMetaData *metadata){
     trace += split_sizes * sizeof(int);
     edata->leaf_data->values = (float *)(data + trace);
     trace += value_sizes;
+    edata->multi_objective_data->lambda_objs = (float *)(data + trace);
+    trace += lambda_objs_size;
+    init_lambda_objs_cuda(edata->multi_objective_data->lambda_objs, metadata->n_objs);
     edata->feature_data->feature_indices = (int *)(data + trace);
     trace += cond_sizes * sizeof(int);
     edata->mono_constraints->feature_idx = (int *)(data + trace);
@@ -207,6 +227,8 @@ ensembleData* ensemble_data_alloc_cuda(ensembleMetaData *metadata){
     trace += cond_sizes * sizeof(float);
     edata->leaf_data->edge_weights = (float *)(data + trace);
     trace += edge_size * sizeof(float);
+    edata->multi_objective_data->densities = (float *)(data + trace);
+    trace += densities_size;
     edata->feature_data->is_numerics = (bool *)(data + trace);
     trace += cond_sizes * sizeof(bool);
     edata->feature_data->inequality_directions = (bool *)(data + trace);
@@ -236,6 +258,7 @@ ensembleData* ensemble_copy_data_alloc_cuda(ensembleMetaData *metadata){
     edata->mono_constraints = new monotonicConstraints;
     edata->mono_constraints->n_constraints = 0;  // Initialize to 0
     edata->feature_mappings = new featureMapping;
+    edata->multi_objective_data = new multiObjectiveData;
 
     char *data;
     size_t bias_size = metadata->output_dim * sizeof(float);
@@ -246,6 +269,8 @@ ensembleData* ensemble_copy_data_alloc_cuda(ensembleMetaData *metadata){
     size_t value_sizes = metadata->output_dim * metadata->n_leaves * sizeof(float);
     size_t cond_sizes = split_sizes*metadata->max_depth;
     size_t edge_size = metadata->n_leaves*metadata->max_depth;
+    size_t lambda_objs_size = metadata->n_objs * sizeof(float);
+    size_t densities_size = metadata->n_leaves * metadata->n_objs * sizeof(float);
     size_t mono_size = metadata->n_mono_constraints * sizeof(int);
 
     size_t data_size = bias_size
@@ -254,10 +279,12 @@ ensembleData* ensemble_copy_data_alloc_cuda(ensembleMetaData *metadata){
                      + tree_size
                      + split_sizes * sizeof(int) // depths
                      + value_sizes 
+                     + lambda_objs_size
                      + mono_size * 3 // monotonic constraints: feature_idx, output_idx, constraint
                      + edge_size * (sizeof(bool) + sizeof(float)) // inequality directions + edge_weights
                      + sizeof(bool) * metadata->input_dim  // 1 bool array: mapping_numerics
-                     + cond_sizes * (sizeof(int) + sizeof(float) + sizeof(bool) + sizeof(char)*MAX_CHAR_SIZE); 
+                     + cond_sizes * (sizeof(int) + sizeof(float) + sizeof(bool) + sizeof(char)*MAX_CHAR_SIZE)
+                     + densities_size; // densities per leaf
 #ifdef DEBUG 
     size_t sample_size = metadata->max_leaves * sizeof(int);
     data_size += sample_size;
@@ -291,6 +318,9 @@ ensembleData* ensemble_copy_data_alloc_cuda(ensembleMetaData *metadata){
     trace += split_sizes * sizeof(int);
     edata->leaf_data->values = (float *)(data + trace);
     trace += value_sizes;
+    edata->multi_objective_data->lambda_objs = (float *)(data + trace);
+    trace += lambda_objs_size;
+    init_lambda_objs_cuda(edata->multi_objective_data->lambda_objs, metadata->n_objs);
     edata->feature_data->feature_indices = (int *)(data + trace);
     trace += cond_sizes * sizeof(int);
     edata->mono_constraints->feature_idx = (int *)(data + trace);
@@ -303,6 +333,8 @@ ensembleData* ensemble_copy_data_alloc_cuda(ensembleMetaData *metadata){
     trace += cond_sizes * sizeof(float);
     edata->leaf_data->edge_weights = (float *)(data + trace);
     trace += edge_size * sizeof(float);
+    edata->multi_objective_data->densities = (float *)(data + trace);
+    trace += densities_size;
     edata->feature_data->is_numerics = (bool *)(data + trace);
     trace += cond_sizes * sizeof(bool);
     edata->feature_data->inequality_directions = (bool *)(data + trace);
@@ -332,6 +364,7 @@ ensembleData* ensemble_compressed_data_alloc_cuda(ensembleMetaData *metadata, co
     edata->mono_constraints = new monotonicConstraints;
     edata->mono_constraints->n_constraints = 0;  // Initialize to 0
     edata->feature_mappings = new featureMapping;
+    edata->multi_objective_data = new multiObjectiveData;
 
     char *data;
     size_t bias_size = metadata->output_dim * sizeof(float);
@@ -343,6 +376,8 @@ ensembleData* ensemble_compressed_data_alloc_cuda(ensembleMetaData *metadata, co
     size_t cond_sizes = split_sizes*metadata->max_depth;
     size_t edge_size = n_compressed_leaves*metadata->max_depth;
     size_t mono_size = metadata->n_mono_constraints * sizeof(int);
+    size_t lambda_objs_size = metadata->n_objs * sizeof(float);
+    size_t densities_size = n_compressed_leaves * metadata->n_objs * sizeof(float);
 
     size_t data_size = bias_size
                      + feature_mapping_size * 3  // 3 int arrays: feature_mapping, reverse_num_feature_mapping, reverse_cat_feature_mapping
@@ -353,6 +388,7 @@ ensembleData* ensemble_compressed_data_alloc_cuda(ensembleMetaData *metadata, co
                      + mono_size * 3 // monotonic constraints: feature_idx, output_idx, constraint
                      + edge_size * (sizeof(bool) + sizeof(float)) // inequality directions + edge_weights
                      + sizeof(bool) * metadata->input_dim  // 1 bool array: mapping_numerics
+                     + lambda_objs_size + densities_size  // multi_objective_data arrays
                      + cond_sizes * (sizeof(int) + sizeof(float) + sizeof(bool) + sizeof(char)*MAX_CHAR_SIZE); 
 #ifdef DEBUG 
     size_t sample_size = n_compressed_leaves * sizeof(int);
@@ -399,6 +435,11 @@ ensembleData* ensemble_compressed_data_alloc_cuda(ensembleMetaData *metadata, co
     trace += cond_sizes * sizeof(float);
     edata->leaf_data->edge_weights = (float *)(data + trace);
     trace += edge_size * sizeof(float);
+    edata->multi_objective_data->densities = (float *)(data + trace);
+    trace += densities_size;
+    edata->multi_objective_data->lambda_objs = (float *)(data + trace);
+    trace += lambda_objs_size;
+    init_lambda_objs_cuda(edata->multi_objective_data->lambda_objs, metadata->n_objs);
     edata->feature_data->is_numerics = (bool *)(data + trace);
     trace += cond_sizes * sizeof(bool);
     edata->feature_data->inequality_directions = (bool *)(data + trace);
@@ -424,6 +465,8 @@ ensembleData* ensemble_data_copy_gpu_gpu(ensembleMetaData *metadata, ensembleDat
     size_t value_sizes = metadata->output_dim * metadata->n_leaves * sizeof(float);
     size_t cond_sizes = split_sizes*metadata->max_depth;
     size_t edge_size = metadata->n_leaves*metadata->max_depth;
+    size_t lambda_objs_size = metadata->n_objs * sizeof(float);
+    size_t densities_size = metadata->n_leaves * metadata->n_objs * sizeof(float);
     size_t mono_size = metadata->n_mono_constraints * sizeof(int);
 
     cudaMemcpy(edata->bias, other_edata->bias, bias_size, cudaMemcpyDeviceToDevice);
@@ -438,6 +481,7 @@ ensembleData* ensemble_data_copy_gpu_gpu(ensembleMetaData *metadata, ensembleDat
     cudaMemcpy(edata->ensemble_info->tree_indices, other_edata->ensemble_info->tree_indices, tree_size, cudaMemcpyDeviceToDevice);
     cudaMemcpy(edata->ensemble_info->depths, other_edata->ensemble_info->depths, split_sizes * sizeof(int), cudaMemcpyDeviceToDevice);
     cudaMemcpy(edata->leaf_data->values, other_edata->leaf_data->values, value_sizes, cudaMemcpyDeviceToDevice);
+    cudaMemcpy(edata->multi_objective_data->lambda_objs, other_edata->multi_objective_data->lambda_objs, lambda_objs_size, cudaMemcpyDeviceToDevice);
     cudaMemcpy(edata->mono_constraints->feature_idx, other_edata->mono_constraints->feature_idx, mono_size, cudaMemcpyDeviceToDevice);
     cudaMemcpy(edata->mono_constraints->output_idx, other_edata->mono_constraints->output_idx, mono_size, cudaMemcpyDeviceToDevice);
     cudaMemcpy(edata->mono_constraints->constraint, other_edata->mono_constraints->constraint, mono_size, cudaMemcpyDeviceToDevice);
@@ -447,6 +491,7 @@ ensembleData* ensemble_data_copy_gpu_gpu(ensembleMetaData *metadata, ensembleDat
     cudaMemcpy(edata->feature_data->feature_indices, other_edata->feature_data->feature_indices, cond_sizes * sizeof(int), cudaMemcpyDeviceToDevice);
     cudaMemcpy(edata->feature_data->feature_values, other_edata->feature_data->feature_values, cond_sizes * sizeof(float), cudaMemcpyDeviceToDevice);
     cudaMemcpy(edata->leaf_data->edge_weights, other_edata->leaf_data->edge_weights, edge_size * sizeof(float), cudaMemcpyDeviceToDevice);
+    cudaMemcpy(edata->multi_objective_data->densities, other_edata->multi_objective_data->densities, densities_size, cudaMemcpyDeviceToDevice);
     cudaMemcpy(edata->feature_data->is_numerics, other_edata->feature_data->is_numerics, cond_sizes * sizeof(bool), cudaMemcpyDeviceToDevice);
     cudaMemcpy(edata->feature_data->inequality_directions, other_edata->feature_data->inequality_directions, edge_size * sizeof(bool), cudaMemcpyDeviceToDevice);
     cudaMemcpy(edata->feature_mappings->mapping_numerics, other_edata->feature_mappings->mapping_numerics, metadata->input_dim * sizeof(bool), cudaMemcpyDeviceToDevice);
@@ -465,6 +510,8 @@ ensembleData* ensemble_data_copy_gpu_cpu(ensembleMetaData *metadata, ensembleDat
     size_t value_sizes = metadata->output_dim * metadata->n_leaves * sizeof(float);
     size_t cond_sizes = split_sizes*metadata->max_depth;
     size_t edge_size = metadata->n_leaves*metadata->max_depth;
+    size_t densities_size = metadata->n_leaves * metadata->n_objs * sizeof(float);
+    size_t lambda_objs_size = metadata->n_objs * sizeof(float);
     size_t mono_size = metadata->n_mono_constraints * sizeof(int);
     
     cudaMemcpy(edata->bias, other_edata->bias, bias_size, cudaMemcpyDeviceToHost);
@@ -480,6 +527,7 @@ ensembleData* ensemble_data_copy_gpu_cpu(ensembleMetaData *metadata, ensembleDat
     cudaMemcpy(edata->ensemble_info->tree_indices, other_edata->ensemble_info->tree_indices, tree_size, cudaMemcpyDeviceToHost);
     cudaMemcpy(edata->ensemble_info->depths, other_edata->ensemble_info->depths, split_sizes * sizeof(int), cudaMemcpyDeviceToHost);
     cudaMemcpy(edata->leaf_data->values, other_edata->leaf_data->values, value_sizes, cudaMemcpyDeviceToHost);
+    cudaMemcpy(edata->multi_objective_data->lambda_objs, other_edata->multi_objective_data->lambda_objs, lambda_objs_size, cudaMemcpyDeviceToHost);
     cudaMemcpy(edata->mono_constraints->feature_idx, other_edata->mono_constraints->feature_idx, mono_size, cudaMemcpyDeviceToHost);
     cudaMemcpy(edata->mono_constraints->output_idx, other_edata->mono_constraints->output_idx, mono_size, cudaMemcpyDeviceToHost);
     cudaMemcpy(edata->mono_constraints->constraint, other_edata->mono_constraints->constraint, mono_size, cudaMemcpyDeviceToHost);
@@ -489,6 +537,7 @@ ensembleData* ensemble_data_copy_gpu_cpu(ensembleMetaData *metadata, ensembleDat
     cudaMemcpy(edata->feature_data->feature_indices, other_edata->feature_data->feature_indices, cond_sizes * sizeof(int), cudaMemcpyDeviceToHost);
     cudaMemcpy(edata->feature_data->feature_values, other_edata->feature_data->feature_values, cond_sizes * sizeof(float), cudaMemcpyDeviceToHost);
     cudaMemcpy(edata->leaf_data->edge_weights, other_edata->leaf_data->edge_weights, edge_size * sizeof(float), cudaMemcpyDeviceToHost);
+    cudaMemcpy(edata->multi_objective_data->densities, other_edata->multi_objective_data->densities, densities_size, cudaMemcpyDeviceToHost);
     cudaMemcpy(edata->feature_data->is_numerics, other_edata->feature_data->is_numerics, cond_sizes * sizeof(bool), cudaMemcpyDeviceToHost);
     cudaMemcpy(edata->feature_data->inequality_directions, other_edata->feature_data->inequality_directions, edge_size * sizeof(bool), cudaMemcpyDeviceToHost);
     cudaMemcpy(edata->feature_data->categorical_values, other_edata->feature_data->categorical_values, cond_sizes * sizeof(char) * MAX_CHAR_SIZE, cudaMemcpyDeviceToHost); 
@@ -507,6 +556,9 @@ ensembleData* ensemble_data_copy_cpu_gpu(ensembleMetaData *metadata, ensembleDat
     size_t cond_sizes = split_sizes*metadata->max_depth;
     size_t mono_size = metadata->n_mono_constraints * sizeof(int);
     size_t edge_size = metadata->n_leaves*metadata->max_depth;
+    size_t densities_size = metadata->n_leaves * metadata->n_objs * sizeof(float);
+    size_t lambda_objs_size = metadata->n_objs * sizeof(float);
+
     cudaMemcpy(edata->bias, other_edata->bias, bias_size, cudaMemcpyHostToDevice);
     cudaMemcpy(edata->feature_mappings->feature_mapping, other_edata->feature_mappings->feature_mapping, feature_mapping_size, cudaMemcpyHostToDevice);
     cudaMemcpy(edata->feature_mappings->reverse_num_feature_mapping, other_edata->feature_mappings->reverse_num_feature_mapping, feature_mapping_size, cudaMemcpyHostToDevice);
@@ -526,9 +578,11 @@ ensembleData* ensemble_data_copy_cpu_gpu(ensembleMetaData *metadata, ensembleDat
     cudaMemcpy(edata->ensemble_info->tree_indices, other_edata->ensemble_info->tree_indices, tree_size, cudaMemcpyHostToDevice);
     cudaMemcpy(edata->ensemble_info->depths, other_edata->ensemble_info->depths, split_sizes * sizeof(int), cudaMemcpyHostToDevice);
     cudaMemcpy(edata->leaf_data->values, other_edata->leaf_data->values, value_sizes, cudaMemcpyHostToDevice);
+    cudaMemcpy(edata->multi_objective_data->lambda_objs, other_edata->multi_objective_data->lambda_objs, lambda_objs_size, cudaMemcpyHostToDevice);
     cudaMemcpy(edata->feature_data->feature_indices, other_edata->feature_data->feature_indices, cond_sizes * sizeof(int), cudaMemcpyHostToDevice);
     cudaMemcpy(edata->feature_data->feature_values, other_edata->feature_data->feature_values, cond_sizes * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(edata->leaf_data->edge_weights, other_edata->leaf_data->edge_weights, edge_size * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(edata->multi_objective_data->densities, other_edata->multi_objective_data->densities, densities_size, cudaMemcpyHostToDevice);
     cudaMemcpy(edata->feature_data->is_numerics, other_edata->feature_data->is_numerics, cond_sizes * sizeof(bool), cudaMemcpyHostToDevice);
     cudaMemcpy(edata->feature_data->inequality_directions, other_edata->feature_data->inequality_directions, edge_size * sizeof(bool), cudaMemcpyHostToDevice);
     cudaMemcpy(edata->feature_data->categorical_values, other_edata->feature_data->categorical_values, cond_sizes * sizeof(char) * MAX_CHAR_SIZE, cudaMemcpyHostToDevice); 
@@ -582,6 +636,18 @@ ensembleData* ensemble_compressed_data_copy_gpu_gpu(ensembleMetaData *metadata, 
     selective_copyf<<<n_blocks, THREADS_PER_BLOCK>>>(n_compressed_leaves, leaf_indices_gpu, edata->leaf_data->values, other_edata->leaf_data->values, metadata->output_dim);
     selective_copyf<<<n_blocks, THREADS_PER_BLOCK>>>(n_compressed_leaves, leaf_indices_gpu, edata->leaf_data->edge_weights, other_edata->leaf_data->edge_weights, metadata->max_depth);
     selective_copyb<<<n_blocks, THREADS_PER_BLOCK>>>(n_compressed_leaves, leaf_indices_gpu, edata->feature_data->inequality_directions, other_edata->feature_data->inequality_directions, metadata->max_depth);
+    // Multi-objective data and monotonic constraints, matching the CPU
+    // copy_compressed_ensemble_data. Without these, later trees train with
+    // zero objective weights (zero policy leaves) and no constraints.
+    selective_copyf<<<n_blocks, THREADS_PER_BLOCK>>>(n_compressed_leaves, leaf_indices_gpu, edata->multi_objective_data->densities, other_edata->multi_objective_data->densities, metadata->n_objs);
+    cudaMemcpy(edata->multi_objective_data->lambda_objs, other_edata->multi_objective_data->lambda_objs, metadata->n_objs * sizeof(float), cudaMemcpyDeviceToDevice);
+    size_t mono_size = metadata->n_mono_constraints * sizeof(int);
+    if (mono_size > 0){
+        cudaMemcpy(edata->mono_constraints->feature_idx, other_edata->mono_constraints->feature_idx, mono_size, cudaMemcpyDeviceToDevice);
+        cudaMemcpy(edata->mono_constraints->output_idx, other_edata->mono_constraints->output_idx, mono_size, cudaMemcpyDeviceToDevice);
+        cudaMemcpy(edata->mono_constraints->constraint, other_edata->mono_constraints->constraint, mono_size, cudaMemcpyDeviceToDevice);
+    }
+    edata->mono_constraints->n_constraints = metadata->n_mono_constraints;
     cudaDeviceSynchronize();
     cudaFree(data);
     return edata;
@@ -595,21 +661,36 @@ void ensemble_data_dealloc_cuda(ensembleData *edata){
     delete edata->feature_data;
     delete edata->mono_constraints;
     delete edata->feature_mappings;
+    delete edata->multi_objective_data;
     delete edata; 
 }
+
 
 splitDataGPU* allocate_split_data(ensembleMetaData *metadata, const int n_candidates){
     splitDataGPU *split_data = new splitDataGPU;
     int nodes_per_evaluation = (metadata->grow_policy == GREEDY) ? 1 : (1 << metadata->max_depth);
-    size_t data_alloc_size = sizeof(float) * n_candidates + 
-                    sizeof(float) * metadata->output_dim  +
-                    sizeof(float) * n_candidates * metadata->output_dim * 2 + 
-                    sizeof(float) * n_candidates * 2 + 
+
+    size_t split_score_allocation = sizeof(float) * n_candidates;
+    size_t sum_allocation = sizeof(float) * n_candidates * metadata->output_dim;
+    size_t count_allocation = sizeof(float) * n_candidates;
+    size_t dot_allocation = sizeof(float) * n_candidates;
+
+    if (metadata->grow_policy == GREEDY){
+        split_score_allocation *= metadata->n_objs;
+        sum_allocation *= metadata->n_objs;
+        count_allocation *= metadata->n_objs;
+        dot_allocation *= metadata->n_objs;
+    }
+    
+    size_t data_alloc_size = split_score_allocation + // split_scores
+                    sum_allocation * 2 + // left_sum + right_sum 
+                    count_allocation * 2 + // left_count + right_count
                     sizeof(int)*3 + sizeof(int) + sizeof(float);
+
     if (metadata->split_score_func == Cosine)
-        data_alloc_size += sizeof(float) * n_candidates * 2;
+        data_alloc_size +=  dot_allocation * 2; // cosine dot products
     if (metadata->grow_policy == OBLIVIOUS)
-        data_alloc_size += sizeof(float) * n_candidates * nodes_per_evaluation;
+        data_alloc_size += sizeof(float) * n_candidates * nodes_per_evaluation; // oblivious split scores
 
     char *data_alloc;
     cudaError_t err = allocateCudaMemory((void**)&data_alloc, data_alloc_size, "when trying to allocate memory for allocate_split_data");
@@ -620,17 +701,15 @@ splitDataGPU* allocate_split_data(ensembleMetaData *metadata, const int n_candid
     cudaMemset(data_alloc, 0, data_alloc_size);
     size_t trace = 0;
     split_data->split_scores = (float *)(data_alloc + trace);
-    trace += sizeof(float)*n_candidates;
-    split_data->node_mean = (float *)(data_alloc + trace);
-    trace += sizeof(float)*metadata->output_dim;
+    trace += split_score_allocation;
     split_data->left_sum = (float *)(data_alloc + trace);
-    trace += sizeof(float)*n_candidates*metadata->output_dim;
+    trace += sum_allocation;
     split_data->right_sum  = (float *)(data_alloc + trace);
-    trace += sizeof(float)*n_candidates*metadata->output_dim;
+    trace += sum_allocation;
     split_data->left_count = (float *)(data_alloc + trace);
-    trace += sizeof(float)*n_candidates;
+    trace += count_allocation;
     split_data->right_count  = (float *)(data_alloc + trace);
-    trace += sizeof(float)*n_candidates;
+    trace += count_allocation;
     split_data->tree_counters = (int *)(data_alloc + trace);
     trace += sizeof(int) * 3;
     split_data->best_score = (float *)(data_alloc + trace);
@@ -643,9 +722,9 @@ splitDataGPU* allocate_split_data(ensembleMetaData *metadata, const int n_candid
 
     if (metadata->split_score_func == Cosine){
         split_data->left_dot = (float *)(data_alloc + trace);
-        trace += sizeof(float)*n_candidates;
+        trace += dot_allocation;
         split_data->right_dot = (float *)(data_alloc + trace);
-        trace += sizeof(float)*n_candidates;
+        trace += dot_allocation;
     }
     split_data->oblivious_split_scores = nullptr;
     if (metadata->grow_policy == OBLIVIOUS){
@@ -655,14 +734,30 @@ splitDataGPU* allocate_split_data(ensembleMetaData *metadata, const int n_candid
     return split_data;
 }
 
+
 void allocate_ensemble_memory_cuda(ensembleMetaData *metadata, ensembleData *edata){
     int leaf_idx = metadata->n_leaves, tree_idx = metadata->n_trees; 
     if  ((leaf_idx >= metadata->max_leaves) || (tree_idx >= metadata->max_trees)){
         int new_size_leaves = metadata->n_leaves + metadata->max_leaves_batch;
         int new_tree_size = metadata->n_trees + metadata->max_trees_batch;
+        // Publish the new capacities only for the allocation; on failure the
+        // live buffers keep their old sizes, so restore them.
+        const int old_max_leaves = metadata->max_leaves, old_max_trees = metadata->max_trees;
         metadata->max_leaves = new_size_leaves;
         metadata->max_trees = new_tree_size;
-        ensembleData *new_data = ensemble_data_alloc_cuda(metadata);
+        ensembleData *new_data = nullptr;
+        try {
+            new_data = ensemble_data_alloc_cuda(metadata);  // host-side new may throw
+        } catch (...) {
+            metadata->max_leaves = old_max_leaves;
+            metadata->max_trees = old_max_trees;
+            throw;
+        }
+        if (new_data == nullptr) {
+            metadata->max_leaves = old_max_leaves;
+            metadata->max_trees = old_max_trees;
+            throw std::runtime_error("Failed to grow GPU ensemble storage");
+        }
         cudaMemcpy(new_data->bias, edata->bias, metadata->output_dim * sizeof(float), cudaMemcpyDeviceToDevice);
         cudaMemcpy(new_data->feature_mappings->feature_mapping, edata->feature_mappings->feature_mapping, metadata->input_dim * sizeof(int), cudaMemcpyDeviceToDevice);
         cudaMemcpy(new_data->feature_mappings->reverse_num_feature_mapping, edata->feature_mappings->reverse_num_feature_mapping, metadata->input_dim * sizeof(int), cudaMemcpyDeviceToDevice);
@@ -676,6 +771,8 @@ void allocate_ensemble_memory_cuda(ensembleMetaData *metadata, ensembleData *eda
         cudaMemcpy(new_data->ensemble_info->tree_indices, edata->ensemble_info->tree_indices, tree_idx * sizeof(int), cudaMemcpyDeviceToDevice);
         cudaMemcpy(new_data->feature_data->inequality_directions, edata->feature_data->inequality_directions, leaf_idx * metadata->max_depth * sizeof(bool), cudaMemcpyDeviceToDevice);
         cudaMemcpy(new_data->leaf_data->edge_weights, edata->leaf_data->edge_weights, leaf_idx * metadata->max_depth * sizeof(float), cudaMemcpyDeviceToDevice);
+        cudaMemcpy(new_data->multi_objective_data->densities, edata->multi_objective_data->densities, leaf_idx * metadata->n_objs * sizeof(float), cudaMemcpyDeviceToDevice);
+        cudaMemcpy(new_data->multi_objective_data->lambda_objs, edata->multi_objective_data->lambda_objs, metadata->n_objs * sizeof(float), cudaMemcpyDeviceToDevice);
         cudaMemcpy(new_data->mono_constraints->feature_idx, edata->mono_constraints->feature_idx, metadata->n_mono_constraints * sizeof(int), cudaMemcpyDeviceToDevice);
         cudaMemcpy(new_data->mono_constraints->output_idx, edata->mono_constraints->output_idx, metadata->n_mono_constraints * sizeof(int), cudaMemcpyDeviceToDevice);
         cudaMemcpy(new_data->mono_constraints->constraint, edata->mono_constraints->constraint, metadata->n_mono_constraints * sizeof(int), cudaMemcpyDeviceToDevice);
@@ -717,6 +814,8 @@ void allocate_ensemble_memory_cuda(ensembleMetaData *metadata, ensembleData *eda
         edata->mono_constraints->output_idx = new_data->mono_constraints->output_idx;
         edata->mono_constraints->constraint = new_data->mono_constraints->constraint;
         edata->leaf_data->edge_weights = new_data->leaf_data->edge_weights;
+        edata->multi_objective_data->densities = new_data->multi_objective_data->densities;
+        edata->multi_objective_data->lambda_objs = new_data->multi_objective_data->lambda_objs;
         edata->feature_data->is_numerics = new_data->feature_data->is_numerics;
         edata->feature_data->categorical_values = new_data->feature_data->categorical_values;
         
@@ -726,6 +825,7 @@ void allocate_ensemble_memory_cuda(ensembleMetaData *metadata, ensembleData *eda
         delete new_data->feature_data;
         delete new_data->mono_constraints;
         delete new_data->feature_mappings;
+        delete new_data->multi_objective_data;
         delete new_data;
     }
 }

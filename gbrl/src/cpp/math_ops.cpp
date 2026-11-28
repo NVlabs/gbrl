@@ -265,263 +265,149 @@ void _broadcast_mat_elementwise_div_by_vec(float *mat, const float *vec, const f
 
 
 
-float* calculate_mean(const float *mat, const int n_samples, const int n_cols, const int par_th){
-    int n_elements = n_samples * n_cols;
-    float *mean = new float[n_cols];
-    float n_samples_recip = 1.0f / static_cast<float>(n_samples);
-#pragma omp simd
-    for (int d = 0; d < n_cols; ++d) 
-        mean[d] = 0.0f;
-    int n_threads = calculate_num_threads(n_elements, par_th);
-    if (n_threads > 1){
-        omp_set_num_threads(n_threads);
-        int elements_per_thread = (n_elements) / n_threads;
-        float *thread_mean = new float[n_threads*n_cols];
-#pragma omp simd
-        for (int d = 0; d < n_threads*n_cols; ++d) 
-            thread_mean[d] = 0.0f;
-        #pragma omp parallel
-        {
-            int thread_id = omp_get_thread_num();
-            int start_idx = thread_id * elements_per_thread;
-            int end_idx = (thread_id == n_threads - 1) ? n_elements : start_idx + elements_per_thread;
-#pragma omp simd
-            for (int i = start_idx; i < end_idx; ++i) {
-                int col = i % n_cols;
-                thread_mean[thread_id * n_cols + col] += mat[i];
-            }
+// ---------------------------------------------------------------------------
+// Per-column reductions over a row-major (n_samples x n_cols) matrix.
+//
+// `omp simd` is only used on loops whose iterations are independent:
+//  - n_cols >= COL_SIMD_MIN: rows outer, columns inner (each lane owns a column);
+//  - narrower matrices: REDUCE_LANES independent partial results per column,
+//    vectorized across the lanes and combined at the end.
+// No `simd reduction` clause is used (MSVC's experimental OpenMP ignores it).
+// Threads split the rows using the team actually granted by OpenMP.
+// ---------------------------------------------------------------------------
+static constexpr int REDUCE_LANES = 8;
+static constexpr int COL_SIMD_MIN = 8;
+
+// acc[d] = op(acc[d], term(r, d)) over rows [row_start, row_end).
+template <typename Term, typename Op>
+static void reduce_rows(int row_start, int row_end, int n_cols, float *acc,
+                        float identity, Term term, Op op) {
+    if (n_cols >= COL_SIMD_MIN) {
+        for (int r = row_start; r < row_end; ++r) {
+            #pragma omp simd
+            for (int d = 0; d < n_cols; ++d)
+                acc[d] = op(acc[d], term(r, d));
         }
-#pragma omp simd
-        for (int d = 0; d < n_threads*n_cols; ++d) {
-            int col = d % n_cols;
-            mean[col] += thread_mean[d];
-        }
-        delete[] thread_mean;
-    } else {
-#pragma omp simd
-        for (int i = 0; i < n_elements; ++i) {
-            int col = i % n_cols;
-            mean[col] += mat[i]; 
+        return;
+    }
+    float lanes[COL_SIMD_MIN * REDUCE_LANES];
+    for (int i = 0; i < n_cols * REDUCE_LANES; ++i)
+        lanes[i] = identity;
+    int r = row_start;
+    for (; row_end - r >= REDUCE_LANES; r += REDUCE_LANES) {
+        for (int d = 0; d < n_cols; ++d) {
+            float *lane = lanes + d * REDUCE_LANES;
+            #pragma omp simd
+            for (int l = 0; l < REDUCE_LANES; ++l)
+                lane[l] = op(lane[l], term(r + l, d));
         }
     }
+    for (; r < row_end; ++r)
+        for (int d = 0; d < n_cols; ++d)
+            lanes[d * REDUCE_LANES] = op(lanes[d * REDUCE_LANES], term(r, d));
+    for (int d = 0; d < n_cols; ++d)
+        for (int l = 0; l < REDUCE_LANES; ++l)
+            acc[d] = op(acc[d], lanes[d * REDUCE_LANES + l]);
+}
 
+// out[d] = op over all rows of term(r, d), starting from identity.
+template <typename Term, typename Op>
+static void column_reduce(int n_samples, int n_cols, int par_th, float *out,
+                          float identity, Term term, Op op) {
+    for (int d = 0; d < n_cols; ++d)
+        out[d] = identity;
+    const int n_threads = calculate_num_threads(n_samples * n_cols, par_th);
+    if (n_threads <= 1) {
+        reduce_rows(0, n_samples, n_cols, out, identity, term, op);
+        return;
+    }
+    float *partial = new float[n_threads * n_cols];
+    for (int i = 0; i < n_threads * n_cols; ++i)
+        partial[i] = identity;
+    #pragma omp parallel num_threads(n_threads)
+    {
+        const int thread_id = omp_get_thread_num();
+        const int team_size = omp_get_num_threads();
+        const int rows_per_thread = n_samples / team_size;
+        const int start = thread_id * rows_per_thread;
+        const int end = (thread_id == team_size - 1) ? n_samples : start + rows_per_thread;
+        reduce_rows(start, end, n_cols, partial + thread_id * n_cols, identity, term, op);
+    }
+    for (int t = 0; t < n_threads; ++t)
+        for (int d = 0; d < n_cols; ++d)
+            out[d] = op(out[d], partial[t * n_cols + d]);
+    delete[] partial;
+}
+
+struct SumOp { float operator()(float a, float b) const { return a + b; } };
+// NaN entries are ignored (the finite extremum is kept, independent of lane
+// order); a column that is all NaN stays at the identity (-/+inf).
+struct MaxOp { float operator()(float a, float b) const { return (b > a || std::isnan(a)) ? b : a; } };
+struct MinOp { float operator()(float a, float b) const { return (b < a || std::isnan(a)) ? b : a; } };
+
+
+float* calculate_mean(const float *mat, const int n_samples, const int n_cols, const int par_th){
+    float *mean = new float[n_cols];
+    column_reduce(n_samples, n_cols, par_th, mean, 0.0f,
+                  [mat, n_cols](int r, int d) { return mat[r * n_cols + d]; }, SumOp());
+    const float n_samples_recip = 1.0f / static_cast<float>(n_samples);
 #pragma omp simd
-    for (int d = 0; d < n_cols; ++d) 
+    for (int d = 0; d < n_cols; ++d)
         mean[d] *= n_samples_recip;
-
     return mean;
 }
 
 float* calculate_var(const float *mat, const float *mean, const int n_samples, const int n_cols, const int par_th){
-    int n_elements = n_samples * n_cols;
-    float n_samples_recip = 1.0f / (static_cast<float>(n_samples) - 1.0f);
-    float value;
-
     float *var = new float[n_cols];
+    column_reduce(n_samples, n_cols, par_th, var, 0.0f,
+                  [mat, mean, n_cols](int r, int d) {
+                      const float value = mat[r * n_cols + d] - mean[d];
+                      return value * value;
+                  }, SumOp());
+    const float n_samples_recip = 1.0f / (static_cast<float>(n_samples) - 1.0f);
 #pragma omp simd
-    for (int d = 0; d < n_cols; ++d) {
-        var[d] = 0;
-    }
-
-    int n_threads = calculate_num_threads(n_elements, par_th);
-    if (n_threads > 1){
-        int elements_per_thread = n_elements / n_threads;
-        omp_set_num_threads(n_threads);
-        float *thread_var = new float[n_threads*n_cols];
-#pragma omp simd
-        for (int d = 0; d < n_threads*n_cols; ++d){
-            thread_var[d] = 0;
-        }
-        #pragma omp parallel
-        {
-            int thread_id = omp_get_thread_num();
-            int start_idx = thread_id * elements_per_thread;
-            int end_idx = (thread_id == n_threads - 1) ? n_elements : start_idx + elements_per_thread;
-#pragma omp simd
-            for (int i = start_idx; i < end_idx; ++i) {
-                int col = i % n_cols;
-                value = mat[i] - mean[col];
-                thread_var[thread_id * n_cols + col] += (value * value);
-            }
-        }
-#pragma omp simd
-        for (int d = 0; d < n_threads*n_cols; ++d) {
-            int col = d % n_cols;
-            var[col] += thread_var[d];
-        }
-        delete[] thread_var;
-    } else {
-#pragma omp simd
-        for (int i = 0; i < n_elements; ++i) {
-            int col = i % n_cols;
-            value = mat[i] - mean[col];
-            var[col] += (value * value);  
-        }
-    }
-
-#pragma omp simd
-    for (int d = 0; d < n_cols; ++d) {
+    for (int d = 0; d < n_cols; ++d)
         var[d] *= n_samples_recip;
-    }
     return var;
 }
 
 
 float* calculate_row_covariance(const float *mat_l, const float *mat_r, const int n_samples, const int n_cols, const int par_th){
-    int n_elements = n_samples * n_cols;
     // assumes both matrices are centered
     float *cov = new float[n_cols];
+    column_reduce(n_samples, n_cols, par_th, cov, 0.0f,
+                  [mat_l, mat_r, n_cols](int r, int d) {
+                      return mat_l[r * n_cols + d] * mat_r[r * n_cols + d];
+                  }, SumOp());
+    const float n_samples_recip = 1.0f / (static_cast<float>(n_samples) - 1.0f);
 #pragma omp simd
-    for (int d = 0; d < n_cols; ++d) 
-        cov[d] = 0.0f;
-
-    float n_samples_recip = 1.0f / (static_cast<float>(n_samples) - 1.0f);
-
-    int n_threads = calculate_num_threads(n_elements, par_th);
-    if (n_threads > 1){
-        int elements_per_thread = n_elements / n_threads;
-        omp_set_num_threads(n_threads);
-        float *thread_cov = new float[n_threads*n_cols];
-#pragma omp simd
-        for (int d = 0; d < n_threads*n_cols; ++d) 
-            thread_cov[d] = 0.0f;
-        #pragma omp parallel
-        {
-            int thread_id = omp_get_thread_num();
-            int start_idx = thread_id * elements_per_thread;
-            int end_idx = (thread_id == n_threads - 1) ? n_elements : start_idx + elements_per_thread;
-#pragma omp simd
-            for (int i = start_idx; i < end_idx; ++i) {
-                int col = i % n_cols;
-                thread_cov[thread_id * n_cols + col] += (mat_l[i] * mat_r[i]);
-            }
-        }
-#pragma omp simd
-        for (int d = 0; d < n_threads*n_cols; ++d) {
-            int col = d % n_cols;
-            cov[col] += thread_cov[d];
-        }
-        delete[] thread_cov;
-    } else {
-#pragma omp simd
-        for (int i = 0; i < n_elements; ++i) {
-            int col = i % n_cols;
-            cov[col] += ((mat_l[i] * mat_r[i]));  
-        }
-    }
-
-#pragma omp simd
-    for (int d = 0; d < n_cols; ++d) 
+    for (int d = 0; d < n_cols; ++d)
         cov[d] *= n_samples_recip;
-
     return cov;
 }
 
 float* calculate_var_and_center(float *mat, const float *mean, const int n_samples, const int n_cols, const int par_th){
-    int n_elements = n_samples * n_cols;
     float *var = new float[n_cols];
-    float n_samples_recip = 1.0f / (static_cast<float>(n_samples) - 1.0f);
-    float value;
-
+    // Each (r, d) element is centered exactly once, so the in-place write is
+    // independent across iterations.
+    column_reduce(n_samples, n_cols, par_th, var, 0.0f,
+                  [mat, mean, n_cols](int r, int d) {
+                      const float value = mat[r * n_cols + d] - mean[d];
+                      mat[r * n_cols + d] = value;
+                      return value * value;
+                  }, SumOp());
+    const float n_samples_recip = 1.0f / (static_cast<float>(n_samples) - 1.0f);
 #pragma omp simd
-    for (int d = 0; d < n_cols; ++d) 
-        var[d] = 0;
-
-    int n_threads = calculate_num_threads(n_elements, par_th);
-    if (n_threads > 1){
-        int elements_per_thread = n_elements / n_threads;
-        omp_set_num_threads(n_threads);
-        float *thread_var = new float[n_threads*n_cols];
-#pragma omp simd
-        for (int d = 0; d < n_threads*n_cols; ++d) 
-            thread_var[d] = 0.0f;
-        #pragma omp parallel
-        {
-            int thread_id = omp_get_thread_num();
-            int start_idx = thread_id * elements_per_thread;
-            int end_idx = (thread_id == n_threads - 1) ? n_elements : start_idx + elements_per_thread;
-#pragma omp simd
-            for (int i = start_idx; i < end_idx; ++i) {
-                int col = i % n_cols;
-                value = mat[i] - mean[col];
-                thread_var[thread_id * n_cols + col] += (value * value);
-                mat[i] -= mean[col]; 
-            }
-        }
-#pragma omp simd
-        for (int d = 0; d < n_threads*n_cols; ++d) {
-            int col = d % n_cols;
-            var[col] += thread_var[d];
-        }
-        delete[] thread_var;
-    } else {
-#pragma omp simd
-        for (int i = 0; i < n_elements; ++i) {
-            int col = i % n_cols;
-            value = mat[i] - mean[col];
-            var[col] += (value * value);  
-            mat[i] -= mean[col]; 
-        }
-    }
-
-#pragma omp simd
-    for (int d = 0; d < n_cols; ++d) 
+    for (int d = 0; d < n_cols; ++d)
         var[d] *= n_samples_recip;
-
     return var;
 }
 
 float* calculate_std_and_center(float *mat, const float *mean, const int n_samples, const int n_cols, const int par_th){
-    int n_elements = n_samples * n_cols;
-    float *var = new float[n_cols];
-    float n_samples_recip = 1.0f / (static_cast<float>(n_samples) - 1.0f);
-    float value;
-
-#pragma omp simd
-    for (int d = 0; d < n_cols; ++d) 
-        var[d] = 0;
-
-    int n_threads = calculate_num_threads(n_elements, par_th);
-    if (n_threads > 1){
-        int elements_per_thread = n_elements / n_threads;
-        omp_set_num_threads(n_threads);
-        float *thread_var = new float[n_threads*n_cols];
-#pragma omp simd
-        for (int d = 0; d < n_threads*n_cols; ++d) 
-            thread_var[d] = 0;
-        #pragma omp parallel
-        {
-            int thread_id = omp_get_thread_num();
-            int start_idx = thread_id * elements_per_thread;
-            int end_idx = (thread_id == n_threads - 1) ? n_elements : start_idx + elements_per_thread;
-#pragma omp simd
-            for (int i = start_idx; i < end_idx; ++i) {
-                int col = i % n_cols;
-                value = mat[i] - mean[col];
-                thread_var[thread_id * n_cols + col] += (value * value);
-                mat[i] -= mean[col]; 
-            }
-        }
-#pragma omp simd
-        for (int d = 0; d < n_threads*n_cols; ++d) {
-            int col = d % n_cols;
-            var[col] += thread_var[d];
-        }
-        delete[] thread_var;
-    } else {
-#pragma omp simd
-        for (int i = 0; i < n_elements; ++i) {
-            int col = i % n_cols;
-            value = mat[i] - mean[col];
-            var[col] += (value * value);  
-            mat[i] -= mean[col]; 
-        }
-    }
-
+    float *var = calculate_var_and_center(mat, mean, n_samples, n_cols, par_th);
 #pragma omp simd
     for (int d = 0; d < n_cols; ++d)
-        var[d] = sqrtf(var[d] * n_samples_recip);
-
+        var[d] = sqrtf(var[d]);
     return var;
 }
 
@@ -651,88 +537,16 @@ void set_mat_value(float *mat, const int size, const float value, const int par_
 }
 
 float* calculate_max(const float *mat, const int n_samples, const int n_cols, const int par_th){
-    int n_elements = n_samples * n_cols;
     float *max = new float[n_cols];
-    for (int d = 0; d < n_cols; ++d) 
-        max[d] = -INFINITY;
-    
-    int n_threads = calculate_num_threads(n_elements, par_th);
-    if (n_threads > 1){
-        omp_set_num_threads(n_threads);
-        int elements_per_thread = (n_elements) / n_threads;
-        float *thread_max = new float[n_threads * n_cols];
-        for (int d = 0; d < n_threads * n_cols; ++d) 
-            thread_max[d] = -INFINITY;
-
-        #pragma omp parallel
-        {
-            int thread_id = omp_get_thread_num();
-            int start_idx = thread_id * elements_per_thread;
-            int end_idx = (thread_id == n_threads - 1) ? n_elements : start_idx + elements_per_thread;
-            #pragma omp simd
-            for (int i = start_idx; i < end_idx; ++i) {
-                int col = i % n_cols;
-                thread_max[thread_id * n_cols + col] = mat[i] > thread_max[thread_id * n_cols + col] ? mat[i] : thread_max[thread_id * n_cols + col] ;
-            }
-        }
-
-        #pragma omp simd
-        for (int d = 0; d < n_threads * n_cols; ++d) {
-            int col = d % n_cols;
-            max[col] = max[col] > thread_max[d] ? max[col] : thread_max[d];
-        }
-        delete[] thread_max;
-    } else {
-#pragma omp simd
-        for (int i = 0; i < n_elements; ++i) {
-            int col = i % n_cols;
-            max[col] = max[col] > mat[i] ? max[col] : mat[i];
-        }
-    }
-
+    column_reduce(n_samples, n_cols, par_th, max, -INFINITY,
+                  [mat, n_cols](int r, int d) { return mat[r * n_cols + d]; }, MaxOp());
     return max;
 }
 
 float* calculate_min(const float *mat, const int n_samples, const int n_cols, const int par_th){
-    int n_elements = n_samples * n_cols;
     float *min = new float[n_cols];
-    for (int d = 0; d < n_cols; ++d) 
-        min[d] = INFINITY;
-    
-    int n_threads = calculate_num_threads(n_elements, par_th);
-    if (n_threads > 1){
-        omp_set_num_threads(n_threads);
-        int elements_per_thread = (n_elements) / n_threads;
-        float *thread_min = new float[n_threads * n_cols];
-        for (int d = 0; d < n_threads * n_cols; ++d) 
-            thread_min[d] = INFINITY;
-
-        #pragma omp parallel
-        {
-            int thread_id = omp_get_thread_num();
-            int start_idx = thread_id * elements_per_thread;
-            int end_idx = (thread_id == n_threads - 1) ? n_elements : start_idx + elements_per_thread;
-#pragma omp simd
-            for (int i = start_idx; i < end_idx; ++i) {
-                int col = i % n_cols;
-                thread_min[thread_id * n_cols + col] = mat[i] < thread_min[thread_id * n_cols + col] ? mat[i] : thread_min[thread_id * n_cols + col] ;
-            }
-        }
-
-#pragma omp simd
-        for (int d = 0; d < n_threads * n_cols; ++d) {
-            int col = d % n_cols;
-            min[col] = min[col] < thread_min[d] ? min[col] : thread_min[d];
-        }
-        delete[] thread_min;
-    } else {
-#pragma omp simd
-        for (int i = 0; i < n_elements; ++i) {
-            int col = i % n_cols;
-            min[col] = min[col] < mat[i] ? min[col] : mat[i];
-        }
-    }
-
+    column_reduce(n_samples, n_cols, par_th, min, INFINITY,
+                  [mat, n_cols](int r, int d) { return mat[r * n_cols + d]; }, MinOp());
     return min;
 }
 

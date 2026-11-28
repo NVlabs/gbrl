@@ -42,9 +42,9 @@
 #include "math_ops.h"
 #include "types.h"
 
+
 SplitCandidateGenerator::SplitCandidateGenerator(const int n_samples, const int n_num_features, const int n_cat_features, const int n_bins, const int par_th, const generatorType &generator_type):
     n_samples(n_samples), n_num_features(n_num_features), n_cat_features(n_cat_features), n_bins(n_bins), par_th(par_th), generator_type(generator_type){
-    // printf("allocating enough for %d\n", n_bins*(n_num_features + n_cat_features));
     this->split_candidates = new splitCandidate[n_bins*(n_num_features + n_cat_features)];
     for (int i = 0; i < n_bins*(n_num_features + n_cat_features); ++i)
         this->split_candidates[i].categorical_value = nullptr;
@@ -127,104 +127,128 @@ void SplitCandidateGenerator::quantileSplitCandidates(const float *obs, int* con
     this->n_candidates = _n_candidates;
 }
 
-void SplitCandidateGenerator::processCategoricalCandidates(const char *categorical_obs, const float *grad_norms){
-    std::unordered_map<std::string, categoryInfo> unique_cats;
-    for (int feature_idx = 0; feature_idx < this->n_cat_features; ++feature_idx){
-        for (int sample_idx=0; sample_idx < this->n_samples; ++sample_idx){
-            std::string feature_name = std::string(categorical_obs + (sample_idx * this->n_cat_features + feature_idx)*MAX_CHAR_SIZE, MAX_CHAR_SIZE);
-            std::string cat = feature_name + "_" + std::to_string(feature_idx);
+
+void SplitCandidateGenerator::processCategoricalCandidates(const char *categorical_obs) {
+    std::unordered_map<std::pair<int, std::string>, categoryInfo, PairHash> unique_cats;
+
+    for (int feature_idx = 0; feature_idx < this->n_cat_features; ++feature_idx) {
+        for (int sample_idx = 0; sample_idx < this->n_samples; ++sample_idx) {
             
-            unique_cats[cat].total_grad_norm += grad_norms[sample_idx];
-            unique_cats[cat].cat_count += 1;
-            unique_cats[cat].feature_idx = feature_idx;
-            unique_cats[cat].feature_name = feature_name;
+            const char* start_ptr = categorical_obs + (sample_idx * n_cat_features + feature_idx) * MAX_CHAR_SIZE;
+            size_t safe_len = strnlen(start_ptr, MAX_CHAR_SIZE);
+            std::pair<int, std::string> key = {feature_idx, std::string(start_ptr, safe_len)};
+
+            categoryInfo& info = unique_cats[key];
+            
+            if (info.cat_count == 0) {
+                info.feature_idx = feature_idx;
+                info.feature_name = key.second; 
+            }
+            
+            info.cat_count++;
         }
     }
 
-    std::vector<std::pair<std::string, float>> cat_vec;
-    for (const auto& pair : unique_cats) {
-        const auto& category = pair.first;
-        const auto& info = pair.second;
-        // Now use 'category' and 'info' as needed
-
-        float avg_grad = info.total_grad_norm / info.cat_count;
-        cat_vec.emplace_back(category, avg_grad);
+    std::vector<categoryInfo> cat_vec;
+    cat_vec.reserve(unique_cats.size());
+    
+    for (auto& pair : unique_cats) {
+        cat_vec.push_back(std::move(pair.second));
     }
     
     int n_unique = static_cast<int>(cat_vec.size());
-    if (n_unique > this->n_cat_features*this->n_bins){
-        /// sort according to descending order of grad_norms
-        std::sort(cat_vec.begin(), cat_vec.end(), 
-        [](const std::pair<std::string, float>& a, const std::pair<std::string, float>& b) {
-            return a.second > b.second;
-        });
+    int limit = this->n_cat_features * this->n_bins;
 
-        n_unique = this->n_cat_features*this->n_bins;
+    if (n_unique > limit) {
+        std::sort(cat_vec.begin(), cat_vec.end(), 
+            [](const categoryInfo& a, const categoryInfo& b) {
+                return a.cat_count > b.cat_count; 
+            });
+
+        n_unique = limit;
     }
     
     int _n_candidates = this->n_candidates;
-    for (int i = 0; i < n_unique; ++i){
-        // convert each unique element's string back to char* and copy exactly MAX_CHAR_SIZE of it to the correct position in categorical value
-        categoryInfo cat_info = unique_cats[cat_vec[i].first];
+    
+    for (int i = 0; i < n_unique; ++i) {
+        const categoryInfo& cat_info = cat_vec[i];
+        
         this->split_candidates[_n_candidates].feature_idx = cat_info.feature_idx;
         this->split_candidates[_n_candidates].feature_value = INFINITY;
+        
         this->split_candidates[_n_candidates].categorical_value = new char[MAX_CHAR_SIZE]; 
-        memcpy(this->split_candidates[_n_candidates].categorical_value, cat_info.feature_name.c_str(), sizeof(char)*MAX_CHAR_SIZE);
+        memset(this->split_candidates[_n_candidates].categorical_value, 0, MAX_CHAR_SIZE);
+        strncpy(this->split_candidates[_n_candidates].categorical_value, cat_info.feature_name.c_str(), MAX_CHAR_SIZE - 1);
+        
         _n_candidates++;
     }
+    
     this->n_candidates = _n_candidates;
 }
 
 
+int processCategoricalCandidates_func(
+    const char *categorical_obs, 
+    const int n_samples, 
+    const int n_cat_features, 
+    const int n_bins, 
+    int* feature_inds, 
+    float *feature_values, 
+    char* category_values, 
+    bool* numerics)
+{
+    std::unordered_map<std::pair<int, std::string>, CategoryStats, PairHash> unique_cats;
 
-int processCategoricalCandidates_func(const char *categorical_obs, const float *grad_norms, const int n_samples, const int n_cat_features, const int n_bins, int* feature_inds, float *feature_values, char* category_values, bool* numerics){
-    std::unordered_map<std::string, categoryInfo> unique_cats;
-    for (int feature_idx = 0; feature_idx < n_cat_features; ++feature_idx){
-        for (int sample_idx=0; sample_idx < n_samples; ++sample_idx){
-            std::string feature_name = std::string(categorical_obs + (sample_idx * n_cat_features + feature_idx)*MAX_CHAR_SIZE, MAX_CHAR_SIZE);
-            std::string cat = feature_name + "_" + std::to_string(feature_idx);
+    for (int feature_idx = 0; feature_idx < n_cat_features; ++feature_idx) {
+        for (int sample_idx = 0; sample_idx < n_samples; ++sample_idx) {
             
-            unique_cats[cat].total_grad_norm += grad_norms[sample_idx];
-            unique_cats[cat].cat_count += 1;
-            unique_cats[cat].feature_idx = feature_idx;
-            unique_cats[cat].feature_name = feature_name;
+            const char* start_ptr = categorical_obs + (sample_idx * n_cat_features + feature_idx) * MAX_CHAR_SIZE;
+            size_t safe_len = strnlen(start_ptr, MAX_CHAR_SIZE);
+            std::pair<int, std::string> key = {feature_idx, std::string(start_ptr, safe_len)};
+            
+            CategoryStats& stats = unique_cats[key];
+            if (stats.count == 0) {
+                stats.feature_idx = feature_idx;
+                stats.value = key.second; 
+            }
+            stats.count++;
         }
     }
 
-    std::vector<std::pair<std::string, float>> cat_vec;
-    for (const auto& pair : unique_cats) {
-        const auto& category = pair.first;
-        const auto& info = pair.second;
-        // Now use 'category' and 'info' as needed
-
-        float avg_grad = info.total_grad_norm / info.cat_count;
-        cat_vec.emplace_back(category, avg_grad);
+    std::vector<CategoryStats> cat_vec;
+    cat_vec.reserve(unique_cats.size());
+    
+    for (auto& pair : unique_cats) {
+        cat_vec.push_back(std::move(pair.second));
     }
     
     int n_unique = static_cast<int>(cat_vec.size());
-    if (n_unique > n_cat_features*n_bins){
-        /// sort according to descending order of grad_norms
-        std::sort(cat_vec.begin(), cat_vec.end(), 
-        [](const std::pair<std::string, float>& a, const std::pair<std::string, float>& b) {
-            return a.second > b.second;
-        });
+    int limit = n_cat_features * n_bins;
 
-        n_unique = n_cat_features*n_bins;
+    if (n_unique > limit) {
+        std::sort(cat_vec.begin(), cat_vec.end(), 
+            [](const CategoryStats& a, const CategoryStats& b) {
+                return a.count > b.count; 
+            });
+
+        n_unique = limit;
     }
     
     int n_candidates = 0;
-    for (int i = 0; i < n_unique; ++i){
-        // convert each unique element's string back to char* and copy exactly MAX_CHAR_SIZE of it to the correct position in categorical value
-        categoryInfo cat_info = unique_cats[cat_vec[i].first];
-        // printf("n_candidates %d/%d\n", n_candidates, n_unique);
-        feature_inds[n_candidates] = cat_info.feature_idx;
+    for (int i = 0; i < n_unique; ++i) {
+        feature_inds[n_candidates] = cat_vec[i].feature_idx;
         feature_values[n_candidates] = INFINITY;
         numerics[n_candidates] = false;
-        memcpy(category_values + n_candidates*MAX_CHAR_SIZE, cat_info.feature_name.c_str(), sizeof(char)*MAX_CHAR_SIZE);
+        
+        memset(category_values + n_candidates * MAX_CHAR_SIZE, 0, MAX_CHAR_SIZE);
+        strncpy(category_values + n_candidates * MAX_CHAR_SIZE, cat_vec[i].value.c_str(), MAX_CHAR_SIZE - 1);
+        
         n_candidates++;
     }
+    
     return n_candidates;
 }
+
 
 int SplitCandidateGenerator::computeQuantiles(const float *obs, FloatVector &quantiles, const int *sorted_feature_indices, const int feature_idx, splitCandidate *_split_candidates, int _n_candidates){
     
@@ -314,11 +338,13 @@ float scoreL2(const int *indices, const int n_samples, const float *grads, const
         mean[d] = 0.0f;
     }
 
-    #pragma omp simd
-    for (int i = 0; i < n_samples * n_cols; ++i){
-        int row = i / n_cols;
-        int col = i % n_cols;
-        mean[col] += grads[indices[row]*n_cols + col];
+    // Rows outer, columns inner: each inner iteration owns one column, so the
+    // simd loop has no cross-iteration dependency.
+    for (int row = 0; row < n_samples; ++row){
+        const float *grad_row = grads + indices[row] * n_cols;
+        #pragma omp simd
+        for (int col = 0; col < n_cols; ++col)
+            mean[col] += grad_row[col];
     }
     
 

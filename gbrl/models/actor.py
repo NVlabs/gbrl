@@ -31,7 +31,7 @@ from typing import Dict, Optional, Tuple, Union
 import numpy as np
 import torch as th
 
-from gbrl.common.utils import (NumericalData, clip_grad_norm,
+from gbrl.common.utils import (normalize_objective_gradients, NumericalData, clip_grad_norm,
                                concatenate_arrays, constant_like,
                                ensure_leaf_tensor_or_array, numerical_dtype,
                                setup_optimizer, validate_array)
@@ -73,6 +73,8 @@ class ParametricActor(BaseGBT):
             policy_optimizer (Dict): Dictionary containing policy optimizer
             parameters.
             params (Dict, optional): Additional GBRL parameters.
+                Includes the Split-RL parameters n_objs, lambda_objs,
+                lambda_penalty and validate_obj_labels (see https://nvlabs.github.io/gbrl/split_rl.html).
             bias (np.ndarray, optional): Bias initialization, defaults to zero.
             verbose (int, optional): Verbosity level. Defaults to 0.
             device (str, optional): Compute device ('cpu' or 'cuda'). Defaults
@@ -101,6 +103,7 @@ class ParametricActor(BaseGBT):
     def step(self, observations: Optional[NumericalData] = None,
              policy_grads: Optional[NumericalData] = None,
              policy_grad_clip: Optional[float] = None,
+             obj_labels: Optional[NumericalData] = None,
              ) -> None:
         """
         Performs a single boosting iteration.
@@ -109,7 +112,9 @@ class ParametricActor(BaseGBT):
             observations (NumericalData):
             policy_grad_clip (float, optional): . Defaults to None.
             policy_grads (Optional[NumericalData], optional): manually
-                calculated gradients. Defaults to None.
+                calculated gradients. Defaults to None. Required when n_objs > 1: one block per objective, shape (n_objs, n_samples, policy_dim).
+            obj_labels (Optional[NumericalData]): objective label vector.
+
         """
         if observations is None:
             assert self.input is not None, "Cannot update trees without input."
@@ -128,14 +133,17 @@ class ParametricActor(BaseGBT):
             assert self.params.grad is not None, "params.grad must be set to compute gradients."
             policy_grads = self.params.grad.detach() * n_samples
 
+        policy_grads = normalize_objective_gradients(policy_grads, self.learner.n_objs, n_samples, self.learner.output_dim)
+
         policy_grads = clip_grad_norm(policy_grads, policy_grad_clip)
         validate_array(policy_grads)
 
-        self.learner.step(inputs=observations, grads=policy_grads)
+        self.learner.step(observations, policy_grads, obj_labels)
         self.grads = policy_grads
         self.input = None
 
-    def __call__(self, observations: NumericalData,
+    def __call__(self,
+                 observations: NumericalData,
                  requires_grad: bool = True, start_idx: Optional[int] = None,
                  stop_idx: Optional[int] = None, tensor: bool = True) -> NumericalData:
         """
@@ -233,6 +241,13 @@ class GaussianActor(BaseGBT):
             "Uniform".
             feature_weights - (list[float]): Per-feature multiplication
             weights used when choosing the best split. Weights should be >= 0
+            Split-RL (multi-objective) parameters, see https://nvlabs.github.io/gbrl/split_rl.html:
+            n_objs (int): number of objectives. Defaults to 1.
+            lambda_objs (list[float]): one weight per objective. Defaults to ones.
+            lambda_penalty (float): conflict/label-impurity split penalty.
+                Defaults to 1.0; 0.0 disables it.
+            validate_obj_labels (Optional[bool]): validate objective label
+                values (default: CPU yes, CUDA no).
         bias (np.ndarray, optional): manually set a bias. Defaults to None =
         np.zeros.
         verbose (int, optional): verbosity level. Defaults to 0.
@@ -261,7 +276,7 @@ class GaussianActor(BaseGBT):
         self.learner = GBTLearner(input_dim=input_dim,
                                   output_dim=output_dim,
                                   tree_struct=tree_struct,
-                                  optimizers=[mu_optimizer, std_optimizer],
+                                  optimizers=[mu_optimizer, std_optimizer] if std_optimizer is not None else [mu_optimizer],
                                   params=params,
                                   verbose=verbose,
                                   device=device)
@@ -272,7 +287,8 @@ class GaussianActor(BaseGBT):
              mu_grads: Optional[NumericalData] = None,
              log_std_grads: Optional[NumericalData] = None,
              mu_grad_clip: Optional[float] = None,
-             log_std_grad_clip: Optional[float] = None
+             log_std_grad_clip: Optional[float] = None,
+             obj_labels: Optional[NumericalData] = None,
              ) -> None:
         """
         Performs a single boosting iteration.
@@ -280,20 +296,22 @@ class GaussianActor(BaseGBT):
         Args:
             observations (NumericalData): Input observations.
             mu_grads (Optional[NumericalData], optional):
-                Manually computed mean gradients.
+                Manually computed mean gradients. Required when n_objs > 1
+                (likewise log_std_grads): shape (n_objs, n_samples, mu_dim).
             log_std_grads (Optional[NumericalData], optional):
                 Manually computed log standard deviation gradients.
             mu_grad_clip (Optional[float], optional): Gradient clipping for
                 mean. Defaults to None.
             log_std_grad_clip (Optional[float], optional): Gradient clipping
                 for log standard deviation. Defaults to None.
+            obj_labels (Optional[NumericalData]): objective label vector.
 
         """
         if observations is None:
             assert self.input is not None, "Cannot update trees without input."
             "Make sure model is called with requires_grad=True"
             observations = self.input
-        
+
         # Handle 1D observations
         if observations.ndim == 1:
             n_samples = 1 if self.learner.input_dim > 1 else len(observations)
@@ -306,23 +324,28 @@ class GaussianActor(BaseGBT):
             assert isinstance(self.params[0], th.Tensor), "params[0] must be a Tensor to compute gradients."
             assert self.params[0].grad is not None, "params[0].grad must be set to compute gradients."  # type: ignore
             mu_grads = self.params[0].grad.detach() * n_samples  # type: ignore
-        mu_grads = clip_grad_norm(mu_grads, mu_grad_clip)  # type: ignore
+        mu_dim = self.learner.output_dim if self.fixed_std else self.learner.output_dim // 2
+        mu_grads = normalize_objective_gradients(mu_grads, self.learner.n_objs, n_samples, mu_dim)
+        mu_grads = clip_grad_norm(mu_grads, mu_grad_clip)
 
         if not self.fixed_std:
             if log_std_grads is None:
                 assert self.params is not None, "params must be set to compute gradients."
                 assert isinstance(self.params, (list, tuple)), "params must be a (list or tuple) to compute gradients."
                 assert isinstance(self.params[1], th.Tensor), "params[1] must be a Tensor to compute gradients."
-                assert self.params[1].grad is not None, "params[1].grad must be set to compute gradients."  # type: ignore
+                assert self.params[1].grad is not None, \
+                    "params[1].grad must be set to compute gradients."
                 log_std_grads = self.params[1].grad.detach() * n_samples  # type: ignore
-            log_std_grads = clip_grad_norm(log_std_grads, log_std_grad_clip)  # type: ignore
+            log_std_grads = normalize_objective_gradients(log_std_grads, self.learner.n_objs, n_samples, mu_dim)
+            log_std_grads = clip_grad_norm(log_std_grads, log_std_grad_clip)
+
             theta_grad = concatenate_arrays((mu_grads, log_std_grads))  # type: ignore
         else:
             theta_grad = mu_grads
 
         validate_array(theta_grad)
 
-        self.learner.step(observations, theta_grad)
+        self.learner.step(observations, theta_grad, obj_labels)
         self.grads = mu_grads
         if not self.fixed_std:
             self.grads = (mu_grads, log_std_grads)
@@ -355,7 +378,10 @@ class GaussianActor(BaseGBT):
                                      stop_idx, tensor)
         mean_actions = theta if self.fixed_std else theta[:, :self.policy_dim]
         if not self.fixed_std:
-            mean_actions = ensure_leaf_tensor_or_array(mean_actions, tensor=True, requires_grad=requires_grad, device=self.learner.device)
+            mean_actions = ensure_leaf_tensor_or_array(mean_actions,
+                                                       tensor=True,
+                                                       requires_grad=requires_grad,
+                                                       device=self.learner.device)
         log_std = constant_like(theta, self.log_std_init) if self.fixed_std else theta[:, self.policy_dim:]
         log_std = ensure_leaf_tensor_or_array(log_std, tensor=True, requires_grad=False if
                                               self.fixed_std else
@@ -383,6 +409,7 @@ class GaussianActor(BaseGBT):
                               output_dim=learner.output_dim,  # type: ignore
                               mu_optimizer=learner.optimizers[0],  # type: ignore
                               std_optimizer=std_optimizer,
+                              log_std_init=self.log_std_init,
                               params=learner.params,
                               bias=learner.get_bias(),  # type: ignore
                               verbose=learner.verbose,

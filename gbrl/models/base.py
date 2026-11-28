@@ -26,7 +26,7 @@ This module provides the abstract base class for all GBRL models,
 defining the common interface for gradient boosting tree models.
 """
 from abc import ABC, abstractmethod
-from typing import Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 import numpy as np
 import torch as th
@@ -59,6 +59,7 @@ class BaseGBT(ABC):
         self.grads: Optional[Union[NumericalData, Tuple[Optional[NumericalData], ...]]] = None
         self.params: Optional[Union[NumericalData, Tuple[Optional[NumericalData], ...]]] = None
         self.input = None
+        self.inputs = None
 
     def set_bias(self, *args, **kwargs) -> None:
         """
@@ -260,7 +261,9 @@ class BaseGBT(ABC):
 
         self.learner.save(save_path)
 
-    def export_learner(self, filename: str, modelname: Optional[str] = None) -> None:
+    def export_learner(self, filename: str, modelname: Optional[str] = None,
+                       export_format: str = 'float', export_type: str = 'full',
+                       prefix: str = '') -> None:
         """
         Exports the model as a C header file for embedded deployment.
 
@@ -269,13 +272,155 @@ class BaseGBT(ABC):
                 The .h extension will be added automatically.
             modelname (Optional[str], optional): Name to use for the model in
                 the C code. Defaults to None (empty string).
+            export_format (str, optional): Format for exported values
+                ('float', 'fxp8', etc.). Defaults to 'float'.
+            export_type (str, optional): Export type ('full', 'compact').
+                Defaults to 'full'.
+            prefix (str, optional): Prefix for exported symbols. Defaults to ''.
 
         Raises:
             AssertionError: If learner is not initialized.
         """
         assert self.learner is not None, "learner must be initialized first"
 
-        self.learner.export(filename, modelname)
+        self.learner.export(filename, modelname, export_format, export_type, prefix)
+
+    def get_export_data(self) -> Union[dict, Tuple[dict, ...]]:
+        """Returns the export data for the ensemble, suitable for inference.
+
+        Extracts a simplified representation of the trained ensemble that
+        contains only the data needed for inference: split feature indices,
+        split thresholds, optimizer-scaled leaf values, and bias. This is
+        the same data that :meth:`export_learner` writes to a C header file,
+        but returned as a Python dictionary of NumPy arrays.
+
+        .. note::
+            Only numerical oblivious ensembles with SGD optimizers are supported.
+            Active splits are packed per tree; training padding is omitted.
+
+        Returns:
+            Union[dict, Tuple[dict, ...]]: Dictionary (or tuple of dicts for
+            multi-learner models) with keys:
+
+            - ``n_trees`` (int): Number of trees.
+            - ``n_leaves`` (int): Total leaves across all trees.
+            - ``input_dim`` (int): Number of input features.
+            - ``output_dim`` (int): Output dimensionality.
+            - ``max_depth`` (int): Maximum tree depth.
+            - ``num_features`` (int): Number of numerical features.
+            - ``binary_features`` (int): Total binary split nodes.
+            - ``tree_depths`` (np.ndarray): Active depth per tree ``(n_trees,)``.
+            - ``tree_leaf_counts`` (np.ndarray): Leaf count per tree ``(n_trees,)``.
+            - ``bias`` (np.ndarray): Model bias ``(output_dim,)``.
+            - ``feature_indices`` (np.ndarray): Split feature per node ``(binary_features,)``.
+            - ``feature_values`` (np.ndarray): Split threshold per node ``(binary_features,)``.
+            - ``leaf_values`` (np.ndarray): Scaled leaf values ``(n_leaves, output_dim)``.
+
+        Raises:
+            AssertionError: If learner is not initialized.
+        """
+        assert self.learner is not None, "learner must be initialized first"
+
+        return self.learner.get_export_data()
+
+    def get_tree(self, tree_idx: int) -> Union[dict, Tuple[dict, ...]]:
+        """Extract a single tree from the ensemble.
+
+        Returns a dictionary containing all arrays that define the structure
+        and predictions of one tree. The dict is suitable for serialization
+        (e.g. via MPI, pickle) and can be inserted into another ensemble
+        using :meth:`add_tree`.
+
+        Parameters:
+            tree_idx (int): 0-based index of the tree to extract.
+
+        Returns:
+            Union[dict, Tuple[dict, ...]]: Tree data dictionary. See
+            :meth:`~gbrl.learners.gbt_learner.GBTLearner.get_tree`
+            for the dictionary schema.
+
+        Raises:
+            AssertionError: If learner is not initialized.
+            RuntimeError: If ``tree_idx`` is out of range.
+        """
+        assert self.learner is not None, "learner must be initialized first"
+        return self.learner.get_tree(tree_idx)
+
+    def add_tree(self, tree_dict: Union[dict, Tuple[dict, ...]]) -> None:
+        """Add a tree to the ensemble from a dictionary.
+
+        Appends the tree described by ``tree_dict`` to the end of the
+        ensemble. This is the counterpart to :meth:`get_tree` for
+        distributed ensemble synchronization (e.g. MPI broadcast).
+
+        Parameters:
+            tree_dict (Union[dict, Tuple[dict, ...]]): Dictionary as returned
+                by :meth:`get_tree`. Must be compatible with the ensemble
+                (same ``output_dim``, ``max_depth``, and grow policy).
+
+        Raises:
+            AssertionError: If learner is not initialized.
+            RuntimeError: If the tree data is incompatible or contains invalid
+                depths, active feature indices, leaf counts, or densities.
+
+        .. note::
+            Initialize the destination feature layout with a prediction on
+            representative inputs before inserting trees. Imported trees are
+            validated once before insertion on either backend. These checks
+            add no work to training steps or prediction.
+        """
+        assert self.learner is not None, "learner must be initialized first"
+        self.learner.add_tree(tree_dict)
+
+    def compress(self, trees_to_keep: int, gradient_steps: int, features: NumericalData,
+                 actions: Optional[th.Tensor] = None, log_std: Optional[th.Tensor] = None,
+                 method: str = 'first_k', dist_type: str = 'supervised_learning',
+                 optimizer_kwargs: Optional[dict] = None,
+                 least_squares_W: bool = True, temperature: float = 1.0,
+                 lambda_reg: float = 1.0, **kwargs) -> Union[float, List[float]]:
+        """
+        Compresses the tree ensemble by selecting and retraining a subset of trees.
+
+        Args:
+            trees_to_keep (int): Number of trees to retain in the compressed model.
+            gradient_steps (int): Number of optimization steps during compression.
+            features (NumericalData): Input feature matrix (n_samples, n_features).
+            actions (th.Tensor, optional): Target actions (for policy compression).
+                Required if dist_type is not 'supervised_learning'.
+            log_std (th.Tensor, optional): Log standard deviation (only used for
+                certain policy types).
+            method (str): Tree selection method. Defaults to 'first_k'.
+            dist_type (str): Compression type ('supervised_learning', 'actor', etc.).
+            optimizer_kwargs (dict, optional): Optimizer configuration.
+            least_squares_W (bool): Whether to use least-squares to estimate weights
+                (for supervised compression).
+            temperature (float): Temperature parameter for soft selection.
+            lambda_reg (float): L2 regularization coefficient on weights.
+            **kwargs: Additional keyword arguments passed to the compressor.
+
+        Returns:
+            Union[float, List[float]]: Final loss after compression; one loss
+                per sub-model for multi-learner models.
+
+        Raises:
+            AssertionError: If learner is not initialized.
+        """
+        assert self.learner is not None, "learner must be initialized first"
+
+        return self.learner.compress(
+            trees_to_keep=trees_to_keep,
+            gradient_steps=gradient_steps,
+            features=features,
+            actions=actions,
+            log_std=log_std,
+            method=method,
+            dist_type=dist_type,
+            optimizer_kwargs=optimizer_kwargs,
+            least_squares_W=least_squares_W,
+            temperature=temperature,
+            lambda_reg=lambda_reg,
+            **kwargs
+        )
 
     @classmethod
     def load_learner(cls, load_name: str, device: str) -> "BaseGBT":
@@ -314,6 +459,36 @@ class BaseGBT(ABC):
             )
 
         return self.params.detach().clone() if isinstance(self.params, th.Tensor) else self.params.copy()
+
+    def extract_grads(self) -> Optional[Union[Optional[th.Tensor],
+                                                Tuple[Optional[th.Tensor], ...]]]:
+        """
+        Return detached copies of parameter gradients from the last forward pass.
+
+        Returns:
+            Optional[Union[th.Tensor, Tuple[Optional[th.Tensor], ...]]]:
+                Cloned and detached gradients, or None if no parameters exist or gradients are missing.
+
+        Raises:
+            AssertionError: If `self.params` is not a torch.Tensor or a tuple of torch.Tensors.
+        """
+        if self.params is None:
+            return None
+
+        if isinstance(self.params, tuple):
+            # predict_policy()/predict_values() store (x, None) / (None, x).
+            assert all((p is None or isinstance(p, th.Tensor)) for p in self.params), \
+                "All elements of params tuple must be torch.Tensor or None."
+            return tuple(
+                p.grad.clone().detach() if (p is not None and p.grad is not None) else None  # type: ignore
+                for p in self.params
+            )
+
+        assert isinstance(self.params, th.Tensor), "params must be a torch.Tensor or tuple of torch.Tensors."
+        if self.params.grad is None:
+            return None
+
+        return self.params.grad.clone().detach()
 
     def get_grads(self) -> Optional[Union[NumericalData, Tuple[NumericalData, ...]]]:
         """

@@ -37,6 +37,7 @@
 
 #include "gbrl.h"
 #include "types.h"
+#include "ensemble_io.h"
 #include "dlpack/dlpack.h"
 
 namespace py = pybind11;
@@ -135,7 +136,7 @@ void get_tensor_info(
     
     size_t raw_ptr = tensor_info[0].cast<uintptr_t>();
 
-    if (raw_ptr == 0 || raw_ptr == (size_t)-1) {
+    if (raw_ptr == 0 || raw_ptr == (size_t) - 1) {  // Check for null or invalid pointer values
         std::cerr << "ERROR: Extracted an invalid pointer! Setting ptr to nullptr." << std::endl;
         ptr = nullptr;
     } else {
@@ -274,9 +275,10 @@ py::capsule create_dlpack_tensor(
     // Strides are optional; set to nullptr for default behavior
     managed_tensor->dl_tensor.strides = nullptr;
     managed_tensor->dl_tensor.byte_offset = 0;
-    
+
     // Set the deleter function
     managed_tensor->manager_ctx = nullptr;
+    // Set the deleter function
     managed_tensor->deleter = dlpack_deleter_function;
     
     // Return the PyCapsule containing the DLManagedTensor
@@ -332,6 +334,154 @@ py::object return_tensor_info(
     }
 }
 
+/**
+ * @brief Infer sample and per-type feature counts from observation shapes
+ *
+ * Shared by predict() and predict_densities(). Handles the 1D/2D and
+ * numerical/categorical/mixed combinations, and validates that the resulting
+ * feature counts match the ensemble's input dimension.
+ *
+ * @param obs_ptr Numerical observation pointer (may be null)
+ * @param obs_shape Numerical observation shape
+ * @param cat_obs_ptr Categorical observation pointer (may be null)
+ * @param cat_obs_shape Categorical observation shape
+ * @param input_dim Ensemble input dimensionality
+ * @param n_samples Output number of samples
+ * @param n_num_features Output number of numerical features
+ * @param n_cat_features Output number of categorical features
+ */
+static void infer_input_dims(
+    const float* obs_ptr,
+    const std::vector<size_t>& obs_shape,
+    const char* cat_obs_ptr,
+    const std::vector<size_t>& cat_obs_shape,
+    int input_dim,
+    int &n_samples,
+    int &n_num_features,
+    int &n_cat_features
+) {
+    n_samples = 0;
+    n_num_features = 0;
+    n_cat_features = 0;
+
+    if (obs_ptr != nullptr && cat_obs_ptr != nullptr) {
+        if (obs_shape.size() == 1 && cat_obs_shape.size() == 1) {
+            if (static_cast<int>(obs_shape[0]) + static_cast<int>(cat_obs_shape[0]) == input_dim) {
+                n_samples = 1;
+                n_num_features = static_cast<int>(obs_shape[0]);
+                n_cat_features = static_cast<int>(cat_obs_shape[0]);
+            } else {
+                if (static_cast<int>(obs_shape[0]) != static_cast<int>(cat_obs_shape[0])) {
+                    std::stringstream ss;
+                    ss << "Number of samples is not equal between obs and categorical obs "
+                       << obs_shape[0] << " != " << cat_obs_shape[0];
+                    throw std::runtime_error(ss.str());
+                }
+                n_samples = static_cast<int>(obs_shape[0]);
+                n_num_features = 1;
+                n_cat_features = 1;
+                if (n_num_features + n_cat_features != input_dim) {
+                    std::stringstream ss;
+                    ss << "Total number of features " << n_num_features + n_cat_features
+                       << " != input dim " << input_dim;
+                    throw std::runtime_error(ss.str());
+                }
+            }
+        } else if (obs_shape.size() == 1) {
+            if (static_cast<int>(obs_shape[0]) != static_cast<int>(cat_obs_shape[0])) {
+                std::stringstream ss;
+                ss << "Number of samples is not equal between obs and categorical obs "
+                   << obs_shape[0] << " != " << cat_obs_shape[0];
+                throw std::runtime_error(ss.str());
+            }
+            n_samples = static_cast<int>(obs_shape[0]);
+            n_num_features = 1;
+            n_cat_features = static_cast<int>(cat_obs_shape[1]);
+        } else if (cat_obs_shape.size() == 1) {
+            if (static_cast<int>(obs_shape[0]) != static_cast<int>(cat_obs_shape[0])) {
+                std::stringstream ss;
+                ss << "Number of samples is not equal between obs and categorical obs "
+                   << obs_shape[0] << " != " << cat_obs_shape[0];
+                throw std::runtime_error(ss.str());
+            }
+            n_samples = static_cast<int>(obs_shape[0]);
+            n_num_features = static_cast<int>(obs_shape[1]);
+            n_cat_features = 1;
+        } else {
+            if (static_cast<int>(obs_shape[0]) != static_cast<int>(cat_obs_shape[0])) {
+                std::stringstream ss;
+                ss << "Number of samples is not equal between obs and categorical obs "
+                   << obs_shape[0] << " != " << cat_obs_shape[0];
+                throw std::runtime_error(ss.str());
+            }
+            n_samples = static_cast<int>(obs_shape[0]);
+            n_num_features = static_cast<int>(obs_shape[1]);
+            n_cat_features = static_cast<int>(cat_obs_shape[1]);
+        }
+    } else if (obs_ptr != nullptr) {
+        if (obs_shape.size() == 1) {
+            if (static_cast<int>(obs_shape[0]) == input_dim) {
+                n_samples = 1;
+                n_num_features = static_cast<int>(obs_shape[0]);
+            } else {
+                n_samples = static_cast<int>(obs_shape[0]);
+                n_num_features = 1;
+                if (n_num_features != input_dim) {
+                    std::stringstream ss;
+                    ss << "Total number of features " << n_num_features
+                       << " != input dim " << input_dim;
+                    throw std::runtime_error(ss.str());
+                }
+            }
+        } else {
+            n_samples = static_cast<int>(obs_shape[0]);
+            n_num_features = static_cast<int>(obs_shape[1]);
+            if (n_num_features != input_dim) {
+                std::stringstream ss;
+                ss << "Total number of features " << n_num_features
+                   << " != input dim " << input_dim;
+                throw std::runtime_error(ss.str());
+            }
+        }
+    } else {
+        if (cat_obs_shape.size() == 1) {
+            if (static_cast<int>(cat_obs_shape[0]) == input_dim) {
+                n_samples = 1;
+                n_cat_features = static_cast<int>(cat_obs_shape[0]);
+            } else {
+                n_samples = static_cast<int>(cat_obs_shape[0]);
+                n_cat_features = 1;
+                if (n_cat_features != input_dim) {
+                    std::stringstream ss;
+                    ss << "Total number of features " << n_cat_features
+                       << " != input dim " << input_dim;
+                    throw std::runtime_error(ss.str());
+                }
+            }
+        } else {
+            n_samples = static_cast<int>(cat_obs_shape[0]);
+            n_cat_features = static_cast<int>(cat_obs_shape[1]);
+            if (n_cat_features != input_dim){
+                std::stringstream ss;
+                ss << "Total number of features " << n_cat_features << " != input dim " << input_dim;
+                throw std::runtime_error(ss.str());
+            }
+        }
+    }
+
+    if (n_cat_features + n_num_features != input_dim){
+        std::stringstream ss;
+        ss << "Total number of features " << n_cat_features + n_num_features << " != correct input dim " << input_dim;
+        throw std::runtime_error(ss.str());
+    }
+}
+
+/**
+ * @brief Convert ensemble metadata to a Python dictionary
+ *
+ * @param metadata Pointer to ensembleMetaData (may be nullptr, returns empty dict)
+ * @return Python dict with all hyperparameters and configuration values
+ */
 py::dict metadataToDict(const ensembleMetaData* metadata){
     py::dict d;
     if (metadata != nullptr){
@@ -352,6 +502,8 @@ py::dict metadataToDict(const ensembleMetaData* metadata){
         d["par_th"] = metadata->par_th;
         d["batch_size"] = metadata->batch_size;
         d["grow_policy"] = growPolicyToString(metadata->grow_policy);
+        d["n_objs"] = metadata->n_objs;
+        d["lambda_penalty"] = metadata->lambda_penalty;
         d["iteration"] = metadata->iteration;
         d["n_trees"] = metadata->n_trees;
         d["n_leaves"] = metadata->n_leaves;
@@ -364,6 +516,17 @@ py::dict metadataToDict(const ensembleMetaData* metadata){
     return d;
 }
 
+/**
+ * @brief Convert full ensemble data to a Python dictionary of NumPy arrays
+ * 
+ * Transfers ownership of all dynamically allocated arrays in ensembleData
+ * (and its sub-structs) to NumPy via pybind11 capsules. After calling this
+ * function, the arrays are managed by Python's garbage collector.
+ * 
+ * @param data Pointer to ensembleData (may be nullptr, returns empty dict)
+ * @param metadata Pointer to ensembleMetaData describing array dimensions
+ * @return Python dict with tree structure, leaf values, feature data, and mappings
+ */
 py::dict ensembleDataToDict(const ensembleData* data, const ensembleMetaData* metadata) {
     py::dict d;
     if (data != nullptr) {
@@ -426,7 +589,64 @@ py::dict ensembleDataToDict(const ensembleData* data, const ensembleMetaData* me
     return d;
 }
 
+/**
+ * @brief Convert exportData struct to a Python dictionary of NumPy arrays
+ * 
+ * Transfers ownership of all dynamically allocated arrays in exportData
+ * to NumPy via pybind11 capsules. After calling this function, the arrays
+ * are managed by Python's garbage collector. The caller must still delete
+ * the exportData struct itself (but NOT its array members).
+ * 
+ * @param data Pointer to exportData (may be nullptr, returns empty dict)
+ * @return Python dict with keys: n_trees, n_leaves, input_dim, output_dim,
+ *         max_depth, num_features, binary_features, bias, feature_indices,
+ *         feature_values, leaf_values
+ */
+py::dict ensembleExportDataToDict(const exportData* data) {
+    py::dict d;
+    if (data != nullptr) {
+        // Scalar metadata
+        d["n_trees"] = data->n_trees;
+        d["n_leaves"] = data->n_leaves;
+        d["input_dim"] = data->input_dim;
+        d["output_dim"] = data->output_dim;
+        d["max_depth"] = data->max_depth;
+        d["num_features"] = data->num_features;
+        d["binary_features"] = data->binary_features;
 
+        auto depths_capsule = py::capsule(data->tree_depths, [](void* ptr) { delete[] reinterpret_cast<int*>(ptr); });
+        d["tree_depths"] = py::array_t<int>({data->n_trees}, data->tree_depths, depths_capsule);
+        auto counts_capsule = py::capsule(data->tree_leaf_counts, [](void* ptr) { delete[] reinterpret_cast<int*>(ptr); });
+        d["tree_leaf_counts"] = py::array_t<int>({data->n_trees}, data->tree_leaf_counts, counts_capsule);
+
+        // Array data with ownership transfer via capsules
+        auto bias_capsule = py::capsule(data->bias, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
+        d["bias"] = py::array_t<float>({data->output_dim}, data->bias, bias_capsule);
+
+        auto feature_indices_capsule = py::capsule(data->feature_indices, [](void* ptr) { delete[] reinterpret_cast<int*>(ptr); });
+        d["feature_indices"] = py::array_t<int>({data->binary_features}, data->feature_indices, feature_indices_capsule);
+
+        auto feature_values_capsule = py::capsule(data->feature_values, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
+        d["feature_values"] = py::array_t<float>({data->binary_features}, data->feature_values, feature_values_capsule);
+
+        auto leaf_values_capsule = py::capsule(data->leaf_values, [](void* ptr) { delete[] reinterpret_cast<float*>(ptr); });
+        d["leaf_values"] = py::array_t<float>({data->n_leaves, data->output_dim}, data->leaf_values, leaf_values_capsule);
+    }
+    return d;
+}
+
+
+/**
+ * @brief Convert optimizer configuration to a Python dictionary
+ * 
+ * Extracts all optimizer parameters (algorithm, learning rate, scheduler,
+ * Adam betas, etc.) into a dict. Deletes the optimizerConfig struct
+ * after conversion since it was allocated by getConfig().
+ * 
+ * @param conf Pointer to optimizerConfig (may be nullptr, returns empty dict).
+ *             Deleted after conversion.
+ * @return Python dict with optimizer configuration parameters
+ */
 py::dict optimizerToDict(const optimizerConfig* conf){
     py::dict d;
     if (conf != nullptr){
@@ -446,6 +666,12 @@ py::dict optimizerToDict(const optimizerConfig* conf){
     return d;
 }
 
+/**
+ * @brief Convert all optimizer configurations to a Python list of dicts
+ * 
+ * @param opts Vector of Optimizer pointers to extract configurations from
+ * @return Python list where each element is a dict of optimizer parameters
+ */
 py::list getOptimizerConfigs(const std::vector<Optimizer*>& opts) {
     py::list configs;
     for (auto& opt : opts) {
@@ -453,6 +679,165 @@ py::list getOptimizerConfigs(const std::vector<Optimizer*>& opts) {
         configs.append(optimizerToDict(conf));  // conf is deleted within optimizerConfigToDict
     }
     return configs;
+}
+
+/**
+ * @brief Convert a treeData struct to a Python dictionary of NumPy arrays
+ * 
+ * Transfers ownership of all treeData arrays to NumPy via capsules.
+ * After this call the treeData struct shell can be deleted, but not
+ * the arrays (they are now owned by NumPy).
+ * 
+ * @param tdata Tree data to convert (must not be nullptr)
+ * @return Python dict with scalar metadata and NumPy array values
+ */
+py::dict treeDataToDict(treeData* tdata) {
+    py::dict d;
+    if (tdata == nullptr) return d;
+
+    d["n_leaves"] = tdata->n_leaves;
+    d["tree_depth"] = tdata->tree_depth;
+    d["output_dim"] = tdata->output_dim;
+    d["max_depth"] = tdata->max_depth;
+    d["n_objs"] = tdata->n_objs;
+    d["split_count"] = tdata->split_count;
+    d["is_oblivious"] = tdata->is_oblivious;
+
+    int n_leaves = tdata->n_leaves;
+    int max_depth = tdata->max_depth;
+    int output_dim = tdata->output_dim;
+    int split_count = tdata->split_count;
+    int n_objs = tdata->n_objs;
+    int depth_count = tdata->is_oblivious ? 1 : n_leaves;
+
+    auto depths_cap = py::capsule(tdata->depths, [](void* p){ delete[] reinterpret_cast<int*>(p); });
+    d["depths"] = py::array_t<int>({depth_count}, tdata->depths, depths_cap);
+
+    auto values_cap = py::capsule(tdata->values, [](void* p){ delete[] reinterpret_cast<float*>(p); });
+    d["values"] = py::array_t<float>({n_leaves, output_dim}, tdata->values, values_cap);
+
+    auto ew_cap = py::capsule(tdata->edge_weights, [](void* p){ delete[] reinterpret_cast<float*>(p); });
+    d["edge_weights"] = py::array_t<float>({n_leaves, max_depth}, tdata->edge_weights, ew_cap);
+
+    auto fi_cap = py::capsule(tdata->feature_indices, [](void* p){ delete[] reinterpret_cast<int*>(p); });
+    d["feature_indices"] = py::array_t<int>({split_count, max_depth}, tdata->feature_indices, fi_cap);
+
+    auto fv_cap = py::capsule(tdata->feature_values, [](void* p){ delete[] reinterpret_cast<float*>(p); });
+    d["feature_values"] = py::array_t<float>({split_count, max_depth}, tdata->feature_values, fv_cap);
+
+    auto in_cap = py::capsule(tdata->is_numerics, [](void* p){ delete[] reinterpret_cast<bool*>(p); });
+    d["is_numerics"] = py::array_t<bool>({split_count, max_depth}, tdata->is_numerics, in_cap);
+
+    auto id_cap = py::capsule(tdata->inequality_directions, [](void* p){ delete[] reinterpret_cast<bool*>(p); });
+    d["inequality_directions"] = py::array_t<bool>({n_leaves, max_depth}, tdata->inequality_directions, id_cap);
+
+    auto cv_cap = py::capsule(tdata->categorical_values, [](void* p){ delete[] reinterpret_cast<char*>(p); });
+    d["categorical_values"] = py::array_t<char>({split_count * max_depth * MAX_CHAR_SIZE}, tdata->categorical_values, cv_cap);
+
+    auto dens_cap = py::capsule(tdata->densities, [](void* p){ delete[] reinterpret_cast<float*>(p); });
+    d["densities"] = py::array_t<float>({n_leaves, n_objs}, tdata->densities, dens_cap);
+
+    return d;
+}
+
+/**
+ * @brief Convert a Python dictionary back to a treeData struct
+ * 
+ * Allocates a new treeData and copies all array data from the dict's
+ * NumPy arrays. The caller owns all memory and must free via tree_data_dealloc().
+ * 
+ * @param d Python dict as returned by treeDataToDict or constructed by the user
+ * @return Newly allocated treeData with copies of all arrays
+ */
+template <typename T>
+using TreeArray = py::array_t<T, py::array::c_style | py::array::forcecast>;
+
+/**
+ * @brief Cast d[key] to a C-contiguous array and check its element count
+ *
+ * dictToTreeData memcpy's a fixed number of elements out of each array, so a
+ * short or mis-shaped array would otherwise be read out of bounds.
+ */
+template <typename T>
+static TreeArray<T> tree_dict_array(const py::dict& d, const char* key, py::ssize_t expected) {
+    TreeArray<T> arr = d[key].cast<TreeArray<T>>();
+    if (arr.size() != expected) {
+        std::stringstream ss;
+        ss << "tree dict '" << key << "' has " << arr.size()
+           << " elements, expected " << expected;
+        throw std::runtime_error(ss.str());
+    }
+    return arr;
+}
+
+treeData* dictToTreeData(const py::dict& d) {
+    const int n_leaves = d["n_leaves"].cast<int>();
+    const int tree_depth = d["tree_depth"].cast<int>();
+    const int output_dim = d["output_dim"].cast<int>();
+    const int max_depth = d["max_depth"].cast<int>();
+    const int n_objs = d["n_objs"].cast<int>();
+    const int split_count = d["split_count"].cast<int>();
+    const bool is_oblivious = d["is_oblivious"].cast<bool>();
+
+    if (n_leaves <= 0 || output_dim <= 0 || max_depth < 0 || n_objs <= 0 ||
+        tree_depth < 0 || tree_depth > max_depth) {
+        throw std::runtime_error("tree dict has invalid n_leaves/output_dim/max_depth/n_objs/tree_depth");
+    }
+    // add_tree_data writes split_count rows at the tree (oblivious) or leaf
+    // (greedy) offset, so any other count overruns the ensemble arrays.
+    if (split_count != (is_oblivious ? 1 : n_leaves)) {
+        throw std::runtime_error("tree dict split_count does not match its grow policy");
+    }
+    const int depth_count = is_oblivious ? 1 : n_leaves;
+
+    // Validate every array before allocating anything, so a bad dict cannot leak.
+    auto depths_arr = tree_dict_array<int>(d, "depths", depth_count);
+    auto values_arr = tree_dict_array<float>(d, "values", static_cast<py::ssize_t>(n_leaves) * output_dim);
+    auto ew_arr = tree_dict_array<float>(d, "edge_weights", static_cast<py::ssize_t>(n_leaves) * max_depth);
+    auto fi_arr = tree_dict_array<int>(d, "feature_indices", static_cast<py::ssize_t>(split_count) * max_depth);
+    auto fv_arr = tree_dict_array<float>(d, "feature_values", static_cast<py::ssize_t>(split_count) * max_depth);
+    auto in_arr = tree_dict_array<bool>(d, "is_numerics", static_cast<py::ssize_t>(split_count) * max_depth);
+    auto id_arr = tree_dict_array<bool>(d, "inequality_directions", static_cast<py::ssize_t>(n_leaves) * max_depth);
+    auto cv_arr = tree_dict_array<char>(d, "categorical_values", static_cast<py::ssize_t>(split_count) * max_depth * MAX_CHAR_SIZE);
+    auto dens_arr = tree_dict_array<float>(d, "densities", static_cast<py::ssize_t>(n_leaves) * n_objs);
+
+    treeData *tdata = new treeData;
+    tdata->n_leaves = n_leaves;
+    tdata->tree_depth = tree_depth;
+    tdata->output_dim = output_dim;
+    tdata->max_depth = max_depth;
+    tdata->n_objs = n_objs;
+    tdata->split_count = split_count;
+    tdata->is_oblivious = is_oblivious;
+
+    tdata->depths = new int[depth_count];
+    memcpy(tdata->depths, depths_arr.data(), depth_count * sizeof(int));
+
+    tdata->values = new float[n_leaves * output_dim];
+    memcpy(tdata->values, values_arr.data(), n_leaves * output_dim * sizeof(float));
+
+    tdata->edge_weights = new float[n_leaves * max_depth];
+    memcpy(tdata->edge_weights, ew_arr.data(), n_leaves * max_depth * sizeof(float));
+
+    tdata->feature_indices = new int[split_count * max_depth];
+    memcpy(tdata->feature_indices, fi_arr.data(), split_count * max_depth * sizeof(int));
+
+    tdata->feature_values = new float[split_count * max_depth];
+    memcpy(tdata->feature_values, fv_arr.data(), split_count * max_depth * sizeof(float));
+
+    tdata->is_numerics = new bool[split_count * max_depth];
+    memcpy(tdata->is_numerics, in_arr.data(), split_count * max_depth * sizeof(bool));
+
+    tdata->inequality_directions = new bool[n_leaves * max_depth];
+    memcpy(tdata->inequality_directions, id_arr.data(), n_leaves * max_depth * sizeof(bool));
+
+    tdata->categorical_values = new char[split_count * max_depth * MAX_CHAR_SIZE];
+    memcpy(tdata->categorical_values, cv_arr.data(), split_count * max_depth * MAX_CHAR_SIZE * sizeof(char));
+
+    tdata->densities = new float[n_leaves * n_objs];
+    memcpy(tdata->densities, dens_arr.data(), n_leaves * n_objs * sizeof(float));
+
+    return tdata;
 }
 
 PYBIND11_MODULE(gbrl_cpp, m) {
@@ -464,7 +849,7 @@ PYBIND11_MODULE(gbrl_cpp, m) {
     py::class_<GBRL> gbrl(m, "GBRL",
         "Internal binding type. Unsupported for direct use; construct models "
         "through gbrl.learners.GBTLearner / gbrl.models.GBTModel.");
-    gbrl.def(py::init<int, int, int, int, int, int, int, float, std::string, std::string, bool, int, std::string, int, std::string, std::string, int>(),
+    gbrl.def(py::init<int, int, int, int, int, int, int, float, std::string, std::string, bool, int, std::string, int, int, float, std::string, std::string, int>(),
          py::arg("input_dim")=1, 
          py::arg("output_dim")=1, 
          py::arg("policy_dim")=1, 
@@ -472,13 +857,15 @@ PYBIND11_MODULE(gbrl_cpp, m) {
          py::arg("min_data_in_leaf")=0, 
          py::arg("n_bins")=256, 
          py::arg("par_th")=10, 
-         py::arg("cv_beta")=0.9, 
+         py::arg("cv_beta")=0.9,  
          py::arg("split_score_func")="cosine", 
          py::arg("generator_type")="quantile", 
          py::arg("use_control_variates")=false, 
          py::arg("batch_size")=5000, 
          py::arg("grow_policy")="greedy", 
+         py::arg("n_objs")=1, 
          py::arg("verbose")=0,
+         py::arg("lambda_penalty")=1.0,
          py::arg("device")="cpu",
          py::arg("learner_name")="GBRL",
          py::arg("n_mono_constraints")=0,
@@ -494,14 +881,15 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         self.to_device(stringTodeviceType(str_device)); 
     },  py::arg("device"),
     "Set GBRL device ['cpu', 'cuda']");
-    gbrl.def("step", [](GBRL &self, py::object &obs, py::object &categorical_obs, py::object &grads) {
+    gbrl.def("step", [](GBRL &self, py::object &obs, py::object &categorical_obs, py::object &grads, py::object &obj_labels, int default_obj_idx) {
         const float* obs_ptr = nullptr;
         const char* cat_obs_ptr= nullptr;
         float* grads_ptr = nullptr;
-        std::vector<size_t> obs_shape, cat_obs_shape, grads_shape;
-        std::string obs_device, cat_obs_device, grads_device;
-        int n_samples, n_num_features = 0, n_cat_features = 0, grad_output_dim;
-        int n_obs_samples, n_cat_samples;
+        const float* obj_labels_ptr = nullptr;
+        std::vector<size_t> obs_shape, cat_obs_shape, grads_shape, obj_labels_shape;
+        std::string obs_device, cat_obs_device, grads_device, obj_labels_device;
+        int n_samples, n_num_features = 0, n_cat_features = 0, grad_output_dim, obj_labels_dim;
+        int n_obs_samples, n_cat_samples, n_obj_labels_samples, n_objs;
         
         handle_input_info<float>(grads, grads_ptr, grads_shape, grads_device, "grads", false, "step");
         if (grads_shape.size() == 1){
@@ -512,15 +900,28 @@ PYBIND11_MODULE(gbrl_cpp, m) {
                 n_samples = static_cast<int>(grads_shape[0]);
                 grad_output_dim = 1;
             }
-        } else {
+            n_objs = 1;
+        } else if (grads_shape.size() == 2){
             n_samples = static_cast<int>(grads_shape[0]);
             grad_output_dim = static_cast<int>(grads_shape[1]);
+            n_objs = 1;
+        } else {
+            n_objs = static_cast<int>(grads_shape[0]);
+            n_samples = static_cast<int>(grads_shape[1]);
+            grad_output_dim = static_cast<int>(grads_shape[2]);
         }
+
         if (grad_output_dim != self.metadata->output_dim){
-                std::stringstream ss;
-                ss << "Gradient output dim " << grad_output_dim << " != correct output dim " << self.metadata->output_dim;
-                throw std::runtime_error(ss.str());
-            }
+            std::stringstream ss;
+            ss << "Gradient output dim " << grad_output_dim << " != correct output dim " << self.metadata->output_dim;
+            throw std::runtime_error(ss.str());
+        }
+
+        if (n_objs != self.metadata->n_objs){
+            std::stringstream ss;
+            ss << "Number of objectives " << n_objs << " != correct number of objectives " << self.metadata->n_objs;
+            throw std::runtime_error(ss.str());
+        }
 
         dataHolder<float> grads_handler{grads_ptr, stringTodeviceType(grads_device)};
 
@@ -540,10 +941,10 @@ PYBIND11_MODULE(gbrl_cpp, m) {
             }
         }
 
-
         dataHolder<const float> obs_handler{obs_ptr, stringTodeviceType(obs_device)};
 
         handle_input_info<const char>(categorical_obs, cat_obs_ptr, cat_obs_shape, cat_obs_device, "cat_obs", true, "step", CAT_TYPE);
+
         if (cat_obs_ptr != nullptr){
             if (cat_obs_shape.size() == 1){
                n_cat_features = (n_samples == 1) ? static_cast<int>(cat_obs_shape[0]) : 1;
@@ -567,11 +968,45 @@ PYBIND11_MODULE(gbrl_cpp, m) {
 
         dataHolder<const char> cat_obs_handler{cat_obs_ptr, stringTodeviceType(cat_obs_device)};
 
+        handle_input_info<const float>(obj_labels, obj_labels_ptr, obj_labels_shape, obj_labels_device, "obj_labels", true, "step");
+        if (obj_labels_ptr != nullptr){
+            if (obj_labels_shape.size() == 1){
+                n_obj_labels_samples = static_cast<int>(obj_labels_shape[0]);
+                if (n_obj_labels_samples != n_samples){
+                    std::stringstream ss;
+                    ss << "Number of obj_labels samples " << n_obj_labels_samples << " != number of gradient samples " << n_samples;
+                    throw std::runtime_error(ss.str());
+                }
+            } else{
+                if (obj_labels_shape.size() > 2){
+                    std::stringstream ss;
+                    ss << "obj_labels has invalid shape. Should be a vector";
+                    throw std::runtime_error(ss.str());
+                }
+                n_obj_labels_samples = static_cast<int>(obj_labels_shape[0]);
+                obj_labels_dim = static_cast<int>(obj_labels_shape[1]);
+
+                if (n_obj_labels_samples == 1){
+                    n_obj_labels_samples = obj_labels_dim;
+                }
+
+                if (n_obj_labels_samples != n_samples){
+                    std::stringstream ss;
+                    ss << "Number of obj_labels samples " << n_obj_labels_samples << " != number of gradient samples " << n_samples;
+                    throw std::runtime_error(ss.str());
+                }
+            }
+        }
+
+        dataHolder<const float> obj_labels_handler{obj_labels_ptr, stringTodeviceType(obj_labels_device)};
+
         py::gil_scoped_release release;
-        self.step(&obs_handler, &cat_obs_handler, &grads_handler, n_samples, n_num_features, n_cat_features);
+        self.step(&obs_handler, &cat_obs_handler, &grads_handler, &obj_labels_handler, n_samples, n_num_features, n_cat_features, default_obj_idx);
     },  py::arg("obs"),
         py::arg("categorical_obs"),
         py::arg("grads"),
+        py::arg("obj_labels")=py::none(),
+        py::arg("default_obj_idx")=0,
     "Fit a decision tree with the given observations and gradients");
     gbrl.def("fit", [](GBRL &self, py::object &obs, py::object &categorical_obs, py::object &targets, int iterations, bool shuffle, std::string loss_type) -> float {
         float* obs_ptr = nullptr;
@@ -704,6 +1139,55 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         int output_dim = static_cast<int>(len(bias));
         py::gil_scoped_release release; 
         self.set_bias(&bias_holder, output_dim); 
+    }, "Set GBRL model bias");
+    gbrl.def("set_lambda_objs", [](GBRL &self, py::object &lambdas) {
+        const float *lambdas_ptr = nullptr;
+        std::vector<size_t> lambda_shape;
+        std::string lambda_device;
+        int n_samples, lambda_dim;
+
+        handle_input_info<const float>(lambdas, lambdas_ptr, lambda_shape, lambda_device, "lambdas", false, "set_lambda_objs");
+
+        if (lambda_shape.size() == 1){
+            if (self.metadata->n_objs > 1){
+                n_samples = 1;
+                lambda_dim = static_cast<int>(lambda_shape[0]);
+            } else{
+                n_samples = static_cast<int>(lambda_shape[0]);
+                lambda_dim = 1;
+            }
+
+            if (n_samples > 1){
+                std::stringstream ss;
+                ss << "Set lambdas with multiple samples is not supported!";
+                throw std::runtime_error(ss.str());
+            }
+        } else {
+            n_samples = static_cast<int>(lambda_shape[0]);
+            lambda_dim = static_cast<int>(lambda_shape[1]);
+
+            if (n_samples == self.metadata->n_objs && lambda_dim == 1){
+                // Transpose case
+                n_samples = 1;
+                lambda_dim = static_cast<int>(lambda_shape[0]);
+            }
+        }
+        if (lambda_dim != self.metadata->n_objs){
+            std::stringstream ss;
+            ss << "Targets dimension " << lambda_dim << " != correct number of objectives " << self.metadata->n_objs;
+            throw std::runtime_error(ss.str());
+        }
+        if (n_samples > 1){
+            std::stringstream ss;
+            ss << "Set lambdas with multiple samples is not supported!";
+            throw std::runtime_error(ss.str());
+        }
+    
+
+        dataHolder<const float> lambda_holder{lambdas_ptr, stringTodeviceType(lambda_device)};
+        // lambda_dim, not len(lambdas): len() of a (1, n_objs) row vector is 1.
+        py::gil_scoped_release release;
+        self.set_lambda_objs(&lambda_holder, lambda_dim);
     }, "Set GBRL model bias");
     
     // Set per-feature importance weights
@@ -887,6 +1371,17 @@ PYBIND11_MODULE(gbrl_cpp, m) {
             delete[] reinterpret_cast<float*>(ptr);});
         return py::array(size, feature_weights_ptr, capsule);
     }, "Get GBRL model feature weights");
+    gbrl.def("get_lambda_objs", [](GBRL &self) -> py::object {
+        py::gil_scoped_release release;
+        float* lambda_ptr = self.get_lambda_objs();
+        int size = self.metadata->n_objs;
+        py::gil_scoped_acquire acquire;
+        if (lambda_ptr == nullptr)
+            return py::none();
+        auto capsule = py::capsule(lambda_ptr, [](void* ptr) {
+            delete[] reinterpret_cast<float*>(ptr);});
+        return py::array(size, lambda_ptr, capsule);
+    }, "Get GBRL per-objective lambda weights, or None if unset");
     gbrl.def("get_feature_mapping", [](GBRL &self) -> py::tuple {
         py::gil_scoped_release release;
         int* feature_mapping_ptr = nullptr;
@@ -950,125 +1445,58 @@ PYBIND11_MODULE(gbrl_cpp, m) {
             throw std::runtime_error("Cannot call predict without observations!");
         }
 
-        if (obs_ptr != nullptr && cat_obs_ptr != nullptr) {
-            if (obs_shape.size() == 1 && cat_obs_shape.size() == 1) {
-                if (static_cast<int>(obs_shape[0]) + static_cast<int>(cat_obs_shape[0]) == self.metadata->input_dim) {
-                    n_samples = 1;
-                    n_num_features = static_cast<int>(obs_shape[0]);
-                    n_cat_features = static_cast<int>(cat_obs_shape[0]);
-                } else {
-                    if (static_cast<int>(obs_shape[0]) != static_cast<int>(cat_obs_shape[0])) {
-                        std::stringstream ss;
-                        ss << "Number of samples is not equal between obs and categorical obs " 
-                           << obs_shape[0] << " != " << cat_obs_shape[0];
-                        throw std::runtime_error(ss.str());
-                    }
-                    n_samples = static_cast<int>(obs_shape[0]);
-                    n_num_features = 1;
-                    n_cat_features = 1;
-                    if (n_num_features + n_cat_features != self.metadata->input_dim) {
-                        std::stringstream ss;
-                        ss << "Total number of features " << n_num_features + n_cat_features 
-                           << " != input dim " << self.metadata->input_dim;
-                        throw std::runtime_error(ss.str());
-                    }
-                }
-            } else if (obs_shape.size() == 1) {
-                if (static_cast<int>(obs_shape[0]) != static_cast<int>(cat_obs_shape[0])) {
-                    std::stringstream ss;
-                    ss << "Number of samples is not equal between obs and categorical obs " 
-                       << obs_shape[0] << " != " << cat_obs_shape[0];
-                    throw std::runtime_error(ss.str());
-                }
-                n_samples = static_cast<int>(obs_shape[0]);
-                n_num_features = 1;
-                n_cat_features = static_cast<int>(cat_obs_shape[1]);
-            } else if (cat_obs_shape.size() == 1) {
-                if (static_cast<int>(obs_shape[0]) != static_cast<int>(cat_obs_shape[0])) {
-                    std::stringstream ss;
-                    ss << "Number of samples is not equal between obs and categorical obs " 
-                       << obs_shape[0] << " != " << cat_obs_shape[0];
-                    throw std::runtime_error(ss.str());
-                }
-                n_samples = static_cast<int>(obs_shape[0]);
-                n_num_features = static_cast<int>(obs_shape[1]);
-                n_cat_features = 1;
-            } else {
-                if (static_cast<int>(obs_shape[0]) != static_cast<int>(cat_obs_shape[0])) {
-                    std::stringstream ss;
-                    ss << "Number of samples is not equal between obs and categorical obs " 
-                       << obs_shape[0] << " != " << cat_obs_shape[0];
-                    throw std::runtime_error(ss.str());
-                }
-                n_samples = static_cast<int>(obs_shape[0]);
-                n_num_features = static_cast<int>(obs_shape[1]);
-                n_cat_features = static_cast<int>(cat_obs_shape[1]);
-            }
-        } else if (obs_ptr != nullptr) {
-            if (obs_shape.size() == 1) {
-                if (static_cast<int>(obs_shape[0]) == self.metadata->input_dim) {
-                    n_samples = 1;
-                    n_num_features = static_cast<int>(obs_shape[0]);
-                } else {
-                    n_samples = static_cast<int>(obs_shape[0]);
-                    n_num_features = 1;
-                    if (n_num_features != self.metadata->input_dim) {
-                        std::stringstream ss;
-                        ss << "Total number of features " << n_num_features 
-                           << " != input dim " << self.metadata->input_dim;
-                        throw std::runtime_error(ss.str());
-                    }
-                }
-            } else {
-                n_samples = static_cast<int>(obs_shape[0]);
-                n_num_features = static_cast<int>(obs_shape[1]);
-                if (n_num_features != self.metadata->input_dim) {
-                    std::stringstream ss;
-                    ss << "Total number of features " << n_num_features 
-                       << " != input dim " << self.metadata->input_dim;
-                    throw std::runtime_error(ss.str());
-                }
-            }
-        } else {
-            if (cat_obs_shape.size() == 1) {
-                if (static_cast<int>(cat_obs_shape[0]) == self.metadata->input_dim) {
-                    n_samples = 1;
-                    n_cat_features = static_cast<int>(cat_obs_shape[0]);
-                } else {
-                    n_samples = static_cast<int>(cat_obs_shape[0]);
-                    n_cat_features = 1;
-                    if (n_cat_features != self.metadata->input_dim) {
-                        std::stringstream ss;
-                        ss << "Total number of features " << n_cat_features 
-                           << " != input dim " << self.metadata->input_dim;
-                        throw std::runtime_error(ss.str());
-                    }
-                }
-            } else {
-                n_samples = static_cast<int>(cat_obs_shape[0]);
-                n_cat_features = static_cast<int>(cat_obs_shape[1]);
-                if (n_cat_features != self.metadata->input_dim){
-                    std::stringstream ss;
-                    ss << "Total number of features " << n_cat_features << " != input dim " << self.metadata->input_dim;
-                    throw std::runtime_error(ss.str());
-                }
-            }
-        }
-        
+        infer_input_dims(obs_ptr, obs_shape, cat_obs_ptr, cat_obs_shape, self.metadata->input_dim, n_samples, n_num_features, n_cat_features);
+
         dataHolder<const float> obs_handler{obs_ptr, stringTodeviceType(obs_device)};
         dataHolder<const char> cat_obs_handler{cat_obs_ptr,stringTodeviceType(cat_obs_device)};
 
-        if (n_cat_features + n_num_features != self.metadata->input_dim){
-            std::stringstream ss;
-            ss << "Total number of features " << n_cat_features + n_num_features << " != correct input dim " << self.metadata->input_dim;
-            throw std::runtime_error(ss.str());
-        }
-
-        py::gil_scoped_release release; 
+        py::gil_scoped_release release;
         float* result_ptr = self.predict(&obs_handler, &cat_obs_handler, n_samples, n_num_features, n_cat_features, start_tree_idx, stop_tree_idx);
         py::gil_scoped_acquire acquire;
         return return_tensor_info(n_samples, self.metadata->output_dim, result_ptr, self.device, return_torch);
     }, py::arg("obs"), py::arg("categorical_obs"), py::arg("start_tree_idx")=0, py::arg("stop_tree_idx")=0, py::arg("return_torch")=false, "Predict using the model");
+    gbrl.def("predict_densities", [](GBRL &self, py::object &obs, py::object &categorical_obs, py::object start_tree_obj, py::object stop_tree_obj, bool return_torch) -> py::object {
+        const float* obs_ptr = nullptr;
+        const char* cat_obs_ptr = nullptr;
+        std::vector<size_t> obs_shape, cat_obs_shape;
+        std::string obs_device, cat_obs_device;
+        int n_samples = 0, n_num_features = 0, n_cat_features = 0;
+
+        // Handle start_tree_idx and stop_tree_idx - set to 0 if None
+        int start_tree_idx = start_tree_obj.is_none() ? 0 : start_tree_obj.cast<int>();
+        int stop_tree_idx = stop_tree_obj.is_none() ? 0 : stop_tree_obj.cast<int>();
+
+        if (start_tree_idx < 0 || start_tree_idx > self.metadata->n_trees) {
+            std::stringstream ss;
+            ss << "start_tree_idx is out of bounds! Got " << start_tree_idx
+               << ", but valid range is [0, " << self.metadata->n_trees << "]";
+            throw std::runtime_error(ss.str());
+        }
+        if (stop_tree_idx < 0 || stop_tree_idx > self.metadata->n_trees) {
+            std::stringstream ss;
+            ss << "stop_tree_idx is out of bounds! Got " << stop_tree_idx
+               << ", but valid range is [0, " << self.metadata->n_trees << "]";
+            throw std::runtime_error(ss.str());
+        }
+
+        handle_input_info<const float>(obs, obs_ptr, obs_shape, obs_device, "obs", true, "predict_densities");
+        handle_input_info<const char>(categorical_obs, cat_obs_ptr, cat_obs_shape, cat_obs_device, "cat_obs", true, "predict_densities", CAT_TYPE);
+
+        if (cat_obs_ptr == nullptr && obs_ptr == nullptr) {
+            throw std::runtime_error("Cannot call predict_densities without observations!");
+        }
+
+        infer_input_dims(obs_ptr, obs_shape, cat_obs_ptr, cat_obs_shape, self.metadata->input_dim, n_samples, n_num_features, n_cat_features);
+
+        dataHolder<const float> obs_handler{obs_ptr, stringTodeviceType(obs_device)};
+        dataHolder<const char> cat_obs_handler{cat_obs_ptr, stringTodeviceType(cat_obs_device)};
+
+        py::gil_scoped_release release;
+        float* result_ptr = self.predict_densities(&obs_handler, &cat_obs_handler, n_samples, n_num_features, n_cat_features, start_tree_idx, stop_tree_idx);
+        py::gil_scoped_acquire acquire;
+        return return_tensor_info(n_samples, self.metadata->n_objs, result_ptr, self.device, return_torch);
+    }, py::arg("obs"), py::arg("categorical_obs"), py::arg("start_tree_idx")=0, py::arg("stop_tree_idx")=0, py::arg("return_torch")=false,
+       "Average per-objective leaf densities over the ensemble. Returns (n_samples, n_objs); each row sums to 1.");
         // saveToFile method
     gbrl.def("save", [](GBRL &self, const std::string& filename) -> int {
         py::gil_scoped_release release; 
@@ -1100,6 +1528,49 @@ PYBIND11_MODULE(gbrl_cpp, m) {
         py::gil_scoped_acquire acquire;
         return ensembleDataToDict(edata, self.metadata);
     }, "Return ensemble data");
+    gbrl.def("get_export_data", [](GBRL &self) -> py::dict {
+        py::gil_scoped_release release; 
+        exportData *exp_data = self.get_ensemble_export_data(); 
+        py::gil_scoped_acquire acquire;
+        py::dict result = ensembleExportDataToDict(exp_data);
+        // Arrays are now owned by NumPy capsules; only delete the struct shell
+        delete exp_data;
+        return result;
+    }, "Return export data with optimizer-scaled leaf values for inference");
+    gbrl.def("get_tree", [](GBRL &self, int tree_idx) -> py::dict {
+        py::gil_scoped_release release;
+        treeData *tdata = self.get_tree(tree_idx);
+        py::gil_scoped_acquire acquire;
+        py::dict result = treeDataToDict(tdata);
+        // Arrays are now owned by NumPy capsules; only delete the struct shell
+        delete tdata;
+        return result;
+    }, py::arg("tree_idx"),
+       "Extract a single tree from the ensemble as a dict of NumPy arrays.\n\n"
+       "Parameters\n----------\n"
+       "tree_idx : int\n    0-based index of the tree to extract.\n\n"
+       "Returns\n-------\n"
+       "dict\n    Dictionary with tree structure arrays (feature_indices, feature_values,\n"
+       "    values, edge_weights, etc.) and scalar metadata.");
+    gbrl.def("add_tree", [](GBRL &self, const py::dict& tree_dict) {
+        treeData *tdata = dictToTreeData(tree_dict);
+        try {
+            py::gil_scoped_release release;
+            self.add_tree(tdata);
+        } catch (...) {
+            // add_tree rejects incompatible trees by throwing.
+            tree_data_dealloc(tdata);
+            throw;
+        }
+        tree_data_dealloc(tdata);
+    }, py::arg("tree_dict"),
+       "Add a tree to the ensemble from a dict of NumPy arrays.\n\n"
+       "Parameters\n----------\n"
+       "tree_dict : dict\n    Dictionary as returned by get_tree(), containing tree structure\n"
+       "    arrays and scalar metadata. Arrays are copied into the ensemble.\n\n"
+       "Notes\n-----\n"
+       "This is the counterpart to get_tree() for distributed (e.g. MPI)\n"
+       "ensemble synchronization. Updates n_trees, n_leaves, and iteration.");
     gbrl.def("get_device", [](GBRL &self) ->  std::string {
         py::gil_scoped_release release; 
         return self.get_device(); 

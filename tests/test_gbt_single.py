@@ -1844,5 +1844,87 @@ class TestCudaUnavailableIsNonDestructive(unittest.TestCase):
         self.assertEqual(normalize_device(th.device('cuda')), 'cuda')
 
 
+class TestLambdaObjsRoundTrip(unittest.TestCase):
+    """lambda_objs are serialized, so load() must restore the saved values.
+
+    load() bypasses __init__, so before get_lambda_objs() existed it either
+    left the attribute unset (AttributeError on the next reset()) or fell back
+    to ones, silently discarding custom weights.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        rng = np.random.default_rng(5)
+        cls.X = rng.normal(size=(64, 4)).astype(np.float32)
+        cls.y = (cls.X[:, 0] - cls.X[:, 1]).astype(np.float32)[:, np.newaxis]
+        cls.test_dir = tempfile.mkdtemp()
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.test_dir)
+
+    def _model(self, n_objs, lambdas=None):
+        params = {'n_objs': n_objs, 'split_score_func': 'Cosine',
+                  'generator_type': 'Quantile', 'lambda_penalty': 0.0}
+        if lambdas is not None:
+            params['lambda_objs'] = lambdas
+        return GBTModel(
+            input_dim=4, output_dim=1,
+            tree_struct={'max_depth': 3, 'n_bins': 32, 'min_data_in_leaf': 1,
+                         'par_th': 1, 'grow_policy': 'oblivious'},
+            optimizers={'algo': 'SGD', 'lr': 0.1, 'start_idx': 0, 'stop_idx': 1},
+            params=params, verbose=0, device='cpu')
+
+    def _train_multi_obj(self, model, n_steps=5):
+        """fit() rejects n_objs > 1, so multi-objective models are built with step()."""
+        rng = np.random.default_rng(7)
+        labels = np.zeros(len(self.X), dtype=np.float32)
+        labels[len(self.X) // 2:] = 1.0
+        for _ in range(n_steps):
+            grads = rng.normal(size=(2, len(self.X), 1)).astype(np.float32)
+            model.step(X=self.X, grads=grads, obj_labels=labels)
+
+    def test_fit_rejects_multi_objective(self):
+        model = self._model(2)
+        with self.assertRaises(RuntimeError):
+            model.fit(self.X, self.y, 5)
+        self.assertEqual(model.get_num_trees(), 0)
+
+    def test_custom_lambda_objs_survive_save_load(self):
+        lambdas = [0.25, 0.75]
+        model = self._model(2, lambdas)
+        self._train_multi_obj(model)
+        path = os.path.join(self.test_dir, 'lambda_roundtrip')
+        model.save_learner(path)
+
+        loaded = GBTModel.load_learner(path, device='cpu')
+        np.testing.assert_allclose(
+            np.asarray(loaded.learner.lambda_objs).ravel(), lambdas, rtol=1e-6,
+            err_msg='load() did not restore the saved lambda_objs')
+
+    def test_default_lambda_objs_survive_save_load(self):
+        model = self._model(1)
+        model.fit(self.X, self.y, 5)
+        path = os.path.join(self.test_dir, 'lambda_default')
+        model.save_learner(path)
+
+        loaded = GBTModel.load_learner(path, device='cpu')
+        np.testing.assert_allclose(
+            np.asarray(loaded.learner.lambda_objs).ravel(), [1.0], rtol=1e-6)
+
+    def test_loaded_model_can_reset(self):
+        """reset() reads self.lambda_objs, so load() must have set it."""
+        model = self._model(2, [0.25, 0.75])
+        self._train_multi_obj(model)
+        path = os.path.join(self.test_dir, 'lambda_reset')
+        model.save_learner(path)
+
+        loaded = GBTModel.load_learner(path, device='cpu')
+        loaded.learner.reset()
+        np.testing.assert_allclose(
+            np.asarray(loaded.learner.lambda_objs).ravel(), [0.25, 0.75], rtol=1e-6,
+            err_msg='reset() after load() lost lambda_objs')
+
+
 if __name__ == '__main__':
     unittest.main()
